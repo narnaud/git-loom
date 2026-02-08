@@ -1,15 +1,28 @@
 use git2::{BranchType, Repository, StatusOptions};
 
+/// Info about the upstream tracking branch and the merge-base with HEAD.
+#[derive(Debug)]
+pub struct UpstreamInfo {
+    /// Full name of the upstream ref (e.g. "origin/main").
+    pub label: String,
+    /// Short hash of the merge-base commit.
+    pub base_short_id: String,
+    /// First line of the merge-base commit message.
+    pub base_message: String,
+    /// Date of the merge-base commit (YYYY-MM-DD).
+    pub base_date: String,
+    /// How many commits upstream is ahead of the merge-base (0 = up-to-date).
+    pub commits_ahead: usize,
+}
+
 /// All data needed to render the log: commits between HEAD and the upstream
 /// tracking branch, detected feature branches, and working tree status.
 #[derive(Debug)]
 pub struct RepoInfo {
-    /// Short hash of the upstream tracking branch tip (e.g. "ff1b247").
-    pub upstream_short_id: String,
-    /// Full name of the upstream ref (e.g. "origin/main").
-    pub upstream_label: String,
+    /// Upstream tracking branch info (merge-base, ahead count, etc.).
+    pub upstream: UpstreamInfo,
     /// Non-merge commits in topological order (newest first) between HEAD
-    /// and the upstream tip. Merge commits are filtered out.
+    /// and the merge-base. Merge commits are filtered out.
     pub commits: Vec<CommitInfo>,
     /// Local branches whose tip is in the commit range (excluding the
     /// current integration branch).
@@ -88,25 +101,73 @@ pub fn gather_repo_info(repo: &Repository) -> Result<RepoInfo, git2::Error> {
         .target()
         .ok_or_else(|| git2::Error::from_str("upstream does not point to a commit"))?;
 
-    let commits = walk_commits(repo, head_oid, upstream_oid)?;
-    let branches = find_branches_in_range(repo, &commits, upstream_oid, &branch_name)?;
+    let merge_base_oid = repo.merge_base(head_oid, upstream_oid)?;
+
+    let commits = walk_commits(repo, head_oid, merge_base_oid)?;
+    let branches = find_branches_in_range(repo, &commits, merge_base_oid, &branch_name)?;
     let working_changes = get_working_changes(repo)?;
 
-    let upstream_commit = repo.find_commit(upstream_oid)?;
-    let upstream_short_id = upstream_commit
+    // Count how many commits upstream is ahead of the merge-base
+    let commits_ahead = count_commits(repo, upstream_oid, merge_base_oid)?;
+
+    // Get merge-base commit info
+    let base_commit = repo.find_commit(merge_base_oid)?;
+    let base_short_id = base_commit
         .as_object()
         .short_id()?
         .as_str()
         .unwrap_or("")
         .to_string();
+    let base_message = base_commit.summary().unwrap_or("").to_string();
+    let base_time = base_commit.time();
+    let base_date = format_epoch(base_time.seconds());
 
     Ok(RepoInfo {
-        upstream_short_id,
-        upstream_label: upstream_name,
+        upstream: UpstreamInfo {
+            label: upstream_name,
+            base_short_id,
+            base_message,
+            base_date,
+            commits_ahead,
+        },
         commits,
         branches,
         working_changes,
     })
+}
+
+/// Count the number of commits reachable from `from` but not from `hide`.
+fn count_commits(
+    repo: &Repository,
+    from: git2::Oid,
+    hide: git2::Oid,
+) -> Result<usize, git2::Error> {
+    if from == hide {
+        return Ok(0);
+    }
+    let mut revwalk = repo.revwalk()?;
+    revwalk.push(from)?;
+    revwalk.hide(hide)?;
+    Ok(revwalk.count())
+}
+
+/// Format a Unix epoch timestamp as YYYY-MM-DD.
+fn format_epoch(epoch: i64) -> String {
+    const SECS_PER_DAY: i64 = 86400;
+    let days = epoch / SECS_PER_DAY;
+
+    // Civil date from day count (algorithm from Howard Hinnant)
+    let z = days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u32;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{:04}-{:02}-{:02}", y, m, d)
 }
 
 /// Walk commits from HEAD to the upstream tip in topological order,

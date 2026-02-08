@@ -119,7 +119,8 @@ fn no_commits_ahead_of_upstream() {
 
     assert!(info.commits.is_empty());
     assert!(info.branches.is_empty());
-    assert_eq!(info.upstream_label, "origin/main");
+    assert_eq!(info.upstream.label, "origin/main");
+    assert_eq!(info.upstream.commits_ahead, 0);
 }
 
 #[test]
@@ -330,6 +331,51 @@ fn no_working_changes_when_clean() {
 
     let info = gather_repo_info(&repo).unwrap();
     assert!(info.working_changes.is_empty());
+}
+
+#[test]
+fn upstream_ahead_of_merge_base() {
+    let (repo, _dir) = setup_repo();
+
+    // Make a commit on the integration branch
+    make_commit(&repo, "Local work");
+
+    // Push new commits to origin/main (simulate upstream moving ahead)
+    // We do this by adding commits directly to the remote's main branch
+    let remote_path = _dir.path().join("remote.git");
+    let remote_repo = Repository::open_bare(&remote_path).unwrap();
+    {
+        let sig = sig();
+        let main_oid = remote_repo
+            .find_branch("main", BranchType::Local)
+            .unwrap()
+            .get()
+            .target()
+            .unwrap();
+        let parent = remote_repo.find_commit(main_oid).unwrap();
+        let tree = parent.tree().unwrap();
+        let c1 = remote_repo
+            .commit(Some("refs/heads/main"), &sig, &sig, "Remote 1", &tree, &[&parent])
+            .unwrap();
+        let c1_commit = remote_repo.find_commit(c1).unwrap();
+        remote_repo
+            .commit(Some("refs/heads/main"), &sig, &sig, "Remote 2", &tree, &[&c1_commit])
+            .unwrap();
+    }
+
+    // Fetch to update origin/main in the working repo
+    repo.find_remote("origin")
+        .unwrap()
+        .fetch(&["main"], None, None)
+        .unwrap();
+
+    let info = gather_repo_info(&repo).unwrap();
+
+    // Upstream is 2 commits ahead of the merge-base (which is the original "Initial" commit)
+    assert_eq!(info.upstream.commits_ahead, 2);
+    assert_eq!(info.upstream.base_message, "Initial");
+    assert_eq!(info.commits.len(), 1);
+    assert_eq!(info.commits[0].message, "Local work");
 }
 
 #[test]

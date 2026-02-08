@@ -1,4 +1,4 @@
-use crate::git::{CommitInfo, FileChange, RepoInfo};
+use crate::git::{CommitInfo, FileChange, RepoInfo, UpstreamInfo};
 use std::collections::HashMap;
 
 /// A logical section in the rendered log output. Sections are built from
@@ -13,8 +13,8 @@ enum Section {
     },
     /// Commits on the integration line that don't belong to any feature branch.
     Loose(Vec<CommitInfo>),
-    /// The upstream tracking branch marker at the bottom of the log.
-    Upstream { label: String, short_id: String },
+    /// The upstream tracking branch / common base marker at the bottom of the log.
+    Upstream(UpstreamInfo),
 }
 
 /// Build sections from repo data and render them as a UTF-8 graph string.
@@ -67,10 +67,7 @@ fn build_sections(info: RepoInfo) -> Vec<Section> {
         }
     }
 
-    sections.push(Section::Upstream {
-        label: info.upstream_label,
-        short_id: info.upstream_short_id,
-    });
+    sections.push(Section::Upstream(info.upstream));
 
     sections
 }
@@ -147,8 +144,24 @@ fn render_sections(sections: &[Section]) -> String {
                     out.push_str("│\n");
                 }
             }
-            Section::Upstream { label, short_id } => {
-                out.push_str(&format!("● {} (upstream) {}\n", short_id, label));
+            Section::Upstream(info) => {
+                if info.commits_ahead > 0 {
+                    out.push_str(&format!(
+                        "│●  [{}] \u{23EB} {} new commit{}\n",
+                        info.label,
+                        info.commits_ahead,
+                        if info.commits_ahead == 1 { "" } else { "s" }
+                    ));
+                    out.push_str(&format!(
+                        "├╯ {} (common base) {} {}\n",
+                        info.base_short_id, info.base_date, info.base_message
+                    ));
+                } else {
+                    out.push_str(&format!(
+                        "● {} (upstream) [{}] {}\n",
+                        info.base_short_id, info.label, info.base_message
+                    ));
+                }
             }
         }
     }

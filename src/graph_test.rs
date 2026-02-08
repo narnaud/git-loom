@@ -1,6 +1,6 @@
 use git2::Oid;
 
-use crate::git::{BranchInfo, CommitInfo, FileChange, RepoInfo};
+use crate::git::{BranchInfo, CommitInfo, FileChange, RepoInfo, UpstreamInfo};
 use crate::graph;
 
 /// Helper to create a fake OID from a single byte (padded to 20 bytes).
@@ -21,8 +21,13 @@ fn commit(byte: u8, message: &str, parent: Option<u8>) -> CommitInfo {
 
 fn base_info() -> RepoInfo {
     RepoInfo {
-        upstream_short_id: "aaa0000".to_string(),
-        upstream_label: "origin/main".to_string(),
+        upstream: UpstreamInfo {
+            label: "origin/main".to_string(),
+            base_short_id: "aaa0000".to_string(),
+            base_message: "Initial commit".to_string(),
+            base_date: "2025-07-06".to_string(),
+            commits_ahead: 0,
+        },
         commits: vec![],
         branches: vec![],
         working_changes: vec![],
@@ -38,7 +43,7 @@ fn no_commits_no_changes() {
 ╭─ [unstaged changes]
 │   no changes
 │
-● aaa0000 (upstream) origin/main
+● aaa0000 (upstream) [origin/main] Initial commit
 "
     );
 }
@@ -83,7 +88,7 @@ fn single_branch() {
 │●   0000001 A1
 ├╯
 │
-● aaa0000 (upstream) origin/main
+● aaa0000 (upstream) [origin/main] Initial commit
 "
     );
 }
@@ -194,6 +199,37 @@ fn mixed_loose_and_branch() {
     assert!(
         output.contains("●   0000003 Loose on top\n│\n│╭─ [feature-b]"),
         "expected loose then branch, got:\n{}",
+        output
+    );
+}
+
+#[test]
+fn upstream_ahead_shows_indicator() {
+    let mut info = base_info();
+    info.upstream.commits_ahead = 3;
+
+    let output = graph::render(info);
+    assert!(
+        output.contains("│●  [origin/main] ⏫ 3 new commits\n├╯ aaa0000 (common base) 2025-07-06 Initial commit\n"),
+        "expected upstream-ahead indicator, got:\n{}",
+        output
+    );
+}
+
+#[test]
+fn upstream_ahead_singular() {
+    let mut info = base_info();
+    info.upstream.commits_ahead = 1;
+
+    let output = graph::render(info);
+    assert!(
+        output.contains("⏫ 1 new commit\n"),
+        "expected singular 'commit', got:\n{}",
+        output
+    );
+    assert!(
+        !output.contains("commits\n"),
+        "should not contain plural 'commits', got:\n{}",
         output
     );
 }
