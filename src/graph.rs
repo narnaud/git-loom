@@ -155,3 +155,7 @@ fn render_sections(sections: &[Section]) -> String {
 
     out
 }
+
+#[cfg(test)]
+#[path = "graph_test.rs"]
+mod tests;
