@@ -162,7 +162,7 @@ fn loose_commits_on_integration_line() {
 
     let output = graph::render(info);
     assert!(
-        output.contains("│●   0000002 Fix typo\n│●   0000001 Refactor"),
+        output.contains("●   0000002 Fix typo\n●   0000001 Refactor"),
         "expected loose commits, got:\n{}",
         output
     );
@@ -192,7 +192,7 @@ fn mixed_loose_and_branch() {
     let output = graph::render(info);
     // Loose commit should appear before the branch
     assert!(
-        output.contains("│●   0000003 Loose on top\n│\n│╭─ [feature-b]"),
+        output.contains("●   0000003 Loose on top\n│\n│╭─ [feature-b]"),
         "expected loose then branch, got:\n{}",
         output
     );

@@ -141,7 +141,7 @@ fn render_sections(sections: &[Section]) -> String {
             }
             Section::Loose(commits) => {
                 for commit in commits {
-                    out.push_str(&format!("│●   {} {}\n", commit.short_id, commit.message));
+                    out.push_str(&format!("●   {} {}\n", commit.short_id, commit.message));
                 }
                 if idx < last_idx {
                     out.push_str("│\n");
