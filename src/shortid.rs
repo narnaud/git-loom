@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Types of entities that can receive short IDs.
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
@@ -10,7 +10,7 @@ pub enum Entity {
 }
 
 /// Allocates unique short IDs (2+ characters) to entities, resolving collisions
-/// by extending the prefix until all IDs are unique.
+/// by trying alternative 2-char combinations before falling back to 3+ chars.
 pub struct IdAllocator {
     map: HashMap<Entity, String>,
 }
@@ -19,16 +19,8 @@ impl IdAllocator {
     /// Create a new allocator from a list of entities.
     /// IDs are deterministic: same entities in same order produce same IDs.
     pub fn new(entities: Vec<Entity>) -> Self {
-        let items: Vec<(Entity, String)> = entities
-            .into_iter()
-            .map(|e| {
-                let source = source_string(&e);
-                (e, source)
-            })
-            .collect();
-
         IdAllocator {
-            map: resolve_collisions(items),
+            map: resolve_collisions(entities),
         }
     }
 
@@ -61,79 +53,178 @@ impl IdAllocator {
     }
 }
 
-/// The full string from which short IDs are derived.
-fn source_string(entity: &Entity) -> String {
+/// Generate an ordered list of candidate short IDs for an entity.
+///
+/// For branches and files, candidates are built from word structure:
+/// - Multi-word names (split on `-`, `_`, `/`): pick one character from each
+///   of two words, producing many 2-char combinations (e.g. `feature-alpha`
+///   → `fa`, `fl`, `fp`, `ea`, …). Interleaved 3-char prefixes follow.
+/// - Single-word names: pick character pairs (i, j) where i < j from the word
+///   (e.g. `main` → `ma`, `mi`, `mn`, `ai`, …). 3-char prefixes follow.
+///
+/// For commits, candidates are successive prefixes of the hex hash (2, 3, 4…).
+fn generate_candidates(entity: &Entity) -> Vec<String> {
     match entity {
-        Entity::Unstaged => "zz".to_string(),
-        Entity::Branch(name) => name.clone(),
-        Entity::Commit(oid) => format!("{}", oid),
-        Entity::File(path) => std::path::Path::new(path)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(path)
-            .to_string(),
+        Entity::Unstaged => vec!["zz".to_string()],
+        Entity::Commit(oid) => {
+            let hex = format!("{}", oid);
+            let chars: Vec<char> = hex.chars().collect();
+            (2..=chars.len())
+                .map(|n| chars[..n].iter().collect())
+                .collect()
+        }
+        Entity::Branch(name) => word_candidates(name),
+        Entity::File(path) => {
+            let filename = std::path::Path::new(path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(path);
+            let stem = std::path::Path::new(filename)
+                .file_stem()
+                .and_then(|n| n.to_str())
+                .unwrap_or(filename);
+            word_candidates(stem)
+        }
     }
 }
 
-/// Resolve collisions by extending IDs until all are unique.
-///
-/// Algorithm: start each entity with a 2-char prefix of its source string.
-/// For any group sharing the same ID, extend by one more character and repeat.
-/// When a source is fully exhausted and still collides, append a numeric suffix.
-fn resolve_collisions(items: Vec<(Entity, String)>) -> HashMap<Entity, String> {
-    // Work with (entity, source, current_id)
-    let mut items: Vec<(Entity, String, String)> = items
-        .into_iter()
-        .map(|(e, source)| {
-            let id: String = source.chars().take(2).collect();
-            (e, source, id)
-        })
+/// Build candidate IDs from a name, splitting on `-`, `_`, `/`.
+fn word_candidates(name: &str) -> Vec<String> {
+    let words: Vec<Vec<char>> = name
+        .split(|c: char| c == '-' || c == '_' || c == '/')
+        .filter(|w| !w.is_empty())
+        .map(|w| w.chars().collect())
         .collect();
 
-    let max_rounds = 200;
-    for _ in 0..max_rounds {
-        // Find which IDs are duplicated
-        let mut id_count: HashMap<String, usize> = HashMap::new();
-        for (_, _, id) in &items {
-            *id_count.entry(id.clone()).or_insert(0) += 1;
-        }
+    if words.len() >= 2 {
+        multi_word_candidates(&words)
+    } else {
+        single_word_candidates(name)
+    }
+}
 
-        let has_collision = id_count.values().any(|&c| c > 1);
-        if !has_collision {
-            break;
-        }
+/// Candidates for multi-word names: one char from each of two words,
+/// then interleaved 3+ char prefixes.
+fn multi_word_candidates(words: &[Vec<char>]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut candidates = Vec::new();
 
-        let mut any_extended = false;
-
-        // Extend colliding IDs by one character
-        for (_, source, id) in &mut items {
-            if id_count.get(id.as_str()).copied().unwrap_or(0) > 1 {
-                let new_len = id.chars().count() + 1;
-                if new_len <= source.chars().count() {
-                    *id = source.chars().take(new_len).collect();
-                    any_extended = true;
+    // 2-char candidates from pairs of words
+    for wi in 0..words.len() {
+        for wj in (wi + 1)..words.len() {
+            for pi in 0..words[wi].len() {
+                for pj in 0..words[wj].len() {
+                    let c: String = [words[wi][pi], words[wj][pj]].iter().collect();
+                    if seen.insert(c.clone()) {
+                        candidates.push(c);
+                    }
                 }
             }
         }
+    }
 
-        // If no IDs could be extended (sources exhausted), break to apply
-        // numeric suffixes below.
-        if !any_extended {
-            break;
+    // 3+ char candidates: interleaved prefix
+    let interleaved = interleave_words(words);
+    for n in 3..=interleaved.len() {
+        let c: String = interleaved.chars().take(n).collect();
+        if seen.insert(c.clone()) {
+            candidates.push(c);
         }
     }
 
-    // Final pass: resolve any remaining collisions with numeric suffixes
-    let mut used: HashMap<String, usize> = HashMap::new();
-    for (_, _, id) in &mut items {
-        let count = used.entry(id.clone()).or_insert(0);
-        if *count > 0 {
-            *id = format!("{}{}", id, count);
+    candidates
+}
+
+/// Candidates for single-word names: character pairs (i < j),
+/// then 3+ char prefixes.
+fn single_word_candidates(word: &str) -> Vec<String> {
+    let chars: Vec<char> = word.chars().collect();
+    let mut seen = HashSet::new();
+    let mut candidates = Vec::new();
+
+    // 2-char candidates: pairs of characters (i < j)
+    for i in 0..chars.len() {
+        for j in (i + 1)..chars.len() {
+            let c: String = [chars[i], chars[j]].iter().collect();
+            if seen.insert(c.clone()) {
+                candidates.push(c);
+            }
         }
-        *count += 1;
     }
 
-    items.into_iter().map(|(e, _, id)| (e, id)).collect()
+    // 3+ char prefixes
+    for n in 3..=chars.len() {
+        let c: String = chars[..n].iter().collect();
+        if seen.insert(c.clone()) {
+            candidates.push(c);
+        }
+    }
+
+    // Very short words: add as-is
+    if chars.len() < 2 {
+        let c: String = chars.iter().collect();
+        if seen.insert(c.clone()) {
+            candidates.push(c);
+        }
+    }
+
+    candidates
+}
+
+/// Interleave characters from words round-robin: first char of each word,
+/// then second char of each word, etc.
+fn interleave_words(words: &[Vec<char>]) -> String {
+    let max_len = words.iter().map(|w| w.len()).max().unwrap_or(0);
+    let mut result = String::new();
+    for i in 0..max_len {
+        for word in words {
+            if i < word.len() {
+                result.push(word[i]);
+            }
+        }
+    }
+    result
+}
+
+/// Assign unique IDs using greedy candidate selection.
+///
+/// Each entity is processed in order. The first available (non-taken)
+/// candidate is assigned. This keeps IDs at 2 characters whenever possible,
+/// only falling back to 3+ chars when all 2-char alternatives are exhausted.
+fn resolve_collisions(entities: Vec<Entity>) -> HashMap<Entity, String> {
+    let items: Vec<(Entity, Vec<String>)> = entities
+        .into_iter()
+        .map(|e| {
+            let cands = generate_candidates(&e);
+            (e, cands)
+        })
+        .collect();
+
+    let mut used: HashSet<String> = HashSet::new();
+    let mut result: HashMap<Entity, String> = HashMap::new();
+
+    for (entity, candidates) in items {
+        let id = candidates
+            .iter()
+            .find(|c| !used.contains(*c))
+            .cloned()
+            .unwrap_or_else(|| {
+                // Fallback: numeric suffix on the first candidate
+                let base = candidates.first().map(|s| s.as_str()).unwrap_or("??");
+                let mut n = 1;
+                loop {
+                    let suffixed = format!("{}{}", base, n);
+                    if !used.contains(&suffixed) {
+                        break suffixed;
+                    }
+                    n += 1;
+                }
+            });
+        used.insert(id.clone());
+        result.insert(entity, id);
+    }
+
+    result
 }
 
 #[cfg(test)]

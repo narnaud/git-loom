@@ -10,57 +10,81 @@ couple of characters, enabling future interactive commands such as
 
 ## Entity Types
 
-| Entity | Source string | Default ID | Example |
-|--------|-------------|------------|---------|
+| Entity | Candidate source | Default ID | Example |
+|--------|-----------------|------------|---------|
 | Unstaged changes | `zz` (hardcoded) | `zz` | always `zz` |
-| Branch | Full branch name | First 2 chars of name | `feature-a` → `fe` |
+| Branch | Word-based candidates | First letter of each word | `feature-a` → `fa` |
 | Commit | Full hex hash (40 chars) | First 2 hex chars | `d0472f9…` → `d0` |
-| File | Filename (last path component) | First 2 chars of filename | `src/main.rs` → `ma` |
+| File | Word-based candidates from stem | First letter of each word | `new_file.txt` → `nf` |
 
-Files use the **filename** (not the full path) as source string so that
-the short ID is more likely to remain stable across renames within different
-directories.
+Files use the **file stem** (filename without extension) as source so that
+IDs are based on meaningful parts, not file extensions. The full filename
+(not the full path) is used so that IDs remain stable across renames within
+different directories.
+
+### Candidate generation
+
+For branches and files, the algorithm generates an ordered list of 2-char
+candidate IDs, trying to stay at 2 characters as long as possible:
+
+**Multi-word names** (split on `-`, `_`, `/`): pick one character from each
+of two words. The first candidate is the first letter of each word (the
+"initials"). On collision, alternative character positions are tried:
+
+```
+feature-alpha    → candidates: fa, fl, fp, fh, ea, el, …
+feature-awesome  → candidates: fa, fw, fe, fs, ea, ew, …
+```
+
+**Single-word names**: pick character pairs (i, j) where i < j:
+
+```
+main        → candidates: ma, mi, mn, ai, an, in, …
+master      → candidates: ma, ms, mt, me, mr, as, at, …
+```
+
+**Commits**: successive hex prefixes (2, 3, 4, … chars). These are the only
+entities likely to require 3+ character IDs.
+
+### 3-char fallback
+
+If all 2-char candidates are exhausted (unlikely for branches and files),
+the algorithm falls back to 3+ character prefixes built by interleaving
+characters from each word round-robin.
 
 ## Collision Resolution
 
-IDs start at 2 characters. When two or more entities share the same ID, all
-colliding IDs are extended by one additional character from their source
-string. This process repeats until every ID is unique.
+IDs are assigned greedily in entity order. Each entity receives its
+highest-priority available candidate — the first one not already taken by
+a previous entity.
 
 ```
-feature-a  →  fe  (collision with feature-b)
-feature-b  →  fe  (collision with feature-a)
-             ↓ extend to 3 chars
-feature-a  →  fea
-feature-b  →  fea  (still collides)
-             ↓ extend to 4 chars
-feature-a  →  feat
-feature-b  →  feat  (still collides)
-             ↓ extend to 5 chars
-feature-a  →  featu
-feature-b  →  featu  (still collides)
-             ↓ extend to 6 chars
-feature-a  →  featur
-feature-b  →  featur  (still collides)
-             ↓ extend to 7 chars
-feature-a  →  feature
-feature-b  →  feature  (still collides)
-             ↓ extend to 8 chars
-feature-a  →  feature-
-feature-b  →  feature-  (still collides)
-             ↓ extend to 9 chars
-feature-a  →  feature-a
-feature-b  →  feature-b  ✓ unique
+feature-a        →  fa  ✓ (first candidate, available)
+feature-b        →  fb  ✓ (first candidate, available)
 ```
 
-**Fallback:** if source strings are fully exhausted and collisions remain
-(e.g. two entities with identical source text), a numeric suffix is appended:
-`ab`, `ab1`, `ab2`, etc. The algorithm is bounded to at most 200 extension
-rounds to guarantee termination.
+When initials collide, the second entity picks an alternative 2-char ID:
+
+```
+feature-alpha    →  fa  ✓ (first candidate, available)
+feature-awesome  →  fw  ✓ (fa taken → next candidate "fw")
+```
+
+Single-word collisions work the same way:
+
+```
+main             →  ma  ✓
+master           →  ms  ✓ (ma taken → next candidate "ms")
+maintenance      →  mi  ✓ (ma taken → next candidate "mi")
+```
+
+**Fallback:** if all candidates are exhausted (e.g. two entities with
+identical source text), a numeric suffix is appended: `ab`, `ab1`, `ab2`,
+etc.
 
 Collision resolution operates **globally** across all entity types. A branch
-named `main` and a file named `main.rs` both start as `ma` and will be
-extended until they differ.
+named `main` and a file named `main.rs` both start as `ma`; the second one
+picks an alternative 2-char ID like `mi`.
 
 ## Display Format
 
@@ -84,7 +108,7 @@ The short ID appears before the status character:
 ```
 ╭─ zz [unstaged changes]
 │   ma M src/main.rs
-│   ne A new_file.txt
+│   nf A new_file.txt
 │
 ```
 
@@ -93,7 +117,7 @@ The short ID appears before the status character:
 The short ID appears before the branch name brackets:
 
 ```
-│╭─ fe [feature-a]
+│╭─ fa [feature-a]
 │●   d072f9 Fix bug
 ├╯
 ```
@@ -128,24 +152,22 @@ not an actionable entity.
 ```
 ╭─ zz [unstaged changes]
 │   ma M src/main.rs
-│   ne A new_file.txt
+│   nf A new_file.txt
 │
-│╭─ fe [feature-b]
+│╭─ fb [feature-b]
 │●   d0472f9 Fix bug in feature B
 │●   7a067a9 Start feature B
 ├╯
 │
-│╭─ fea [feature-a]
+│╭─ fa [feature-a]
 │●   2ee61e1 Add feature A
 ├╯
 │
 ● ff1b247 (upstream) [origin/main] Initial commit
 ```
 
-In this example, `feature-b` and `feature-a` collide at 2 characters (`fe`),
-so `feature-a` is extended to `fea` while `feature-b` keeps `fe` (after
-extension to `fea` vs `feb`, they diverge at 3 characters — the first to
-become unique at a given length keeps that length).
+In this example, `feature-a` and `feature-b` resolve immediately to `fa`
+and `fb` (first letter of each word: `f`+`a` vs `f`+`b`).
 
 ## Architecture
 
@@ -205,16 +227,24 @@ Added to the color palette in `graph.rs`. Short IDs are always rendered with
 - **Stable across changes:** file IDs use the filename (not path), so moving
   a file between directories preserves its ID. Branch and commit IDs are
   derived from stable sources (name and hash respectively).
-- **Minimal length:** IDs are as short as possible (starting at 2 characters)
-  while remaining unique within a single status invocation.
+- **Minimal length:** IDs target 2 characters for branches and files,
+  using word structure and greedy candidate selection to avoid unnecessary
+  extension. Only commits (hex hashes) may require 3+ characters.
 
 ## Design Decisions
 
 - **Global collision resolution:** all entity types share one ID namespace.
   This avoids ambiguity when a future command receives an ID without an
   explicit type qualifier.
-- **Filename over full path:** using just the filename gives shorter,
-  more memorable IDs and better stability when files move between directories.
+- **Word-based candidates:** splitting on `-`, `_`, `/` and generating
+  character combinations from different words produces many 2-char options,
+  keeping IDs short even when names share long prefixes.
+- **Greedy assignment:** entities are processed in order, each receiving
+  the first available candidate. This is simple, deterministic, and fast.
+- **File stem over full filename:** using the stem (without extension)
+  means IDs reflect meaningful name parts, not `.rs` or `.txt` suffixes.
+- **Filename over full path:** gives shorter, more memorable IDs and
+  better stability when files move between directories.
 - **No persistence:** the repository state changes constantly; recomputing
   is fast and avoids stale-mapping bugs.
 - **Reusable module:** `shortid.rs` is independent of rendering so that

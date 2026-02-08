@@ -87,7 +87,7 @@ fn working_changes_shown() {
     ];
 
     let output = render_plain(info);
-    assert!(output.starts_with("╭─ zz [unstaged changes]\n│   ma M src/main.rs\n│   ne A new_file.txt\n"));
+    assert!(output.starts_with("╭─ zz [unstaged changes]\n│   ma M src/main.rs\n│   nf A new_file.txt\n"));
 }
 
 #[test]
@@ -107,7 +107,7 @@ fn single_branch() {
 ╭─ zz [unstaged changes]
 │   no changes
 │
-│╭─ fe [feature-a]
+│╭─ fa [feature-a]
 │●   0200002 A2
 │●   0100001 A1
 ├╯
@@ -222,7 +222,7 @@ fn mixed_loose_and_branch() {
     let output = render_plain(info);
     // Loose commit should appear before the branch
     assert!(
-        output.contains("●   0300003 Loose on top\n│\n│╭─ fe [feature-b]"),
+        output.contains("●   0300003 Loose on top\n│\n│╭─ fb [feature-b]"),
         "expected loose then branch, got:\n{}",
         output
     );
