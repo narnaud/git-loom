@@ -3,10 +3,15 @@ mod graph;
 mod status;
 
 use clap::{Parser, Subcommand};
+use colored::control;
 
 #[derive(Parser)]
 #[command(name = "git-loom", about = "Supercharge your Git workflow")]
 struct Cli {
+    /// Disable colored output
+    #[arg(long)]
+    no_color: bool,
+
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -19,6 +24,10 @@ enum Command {
 
 fn main() {
     let cli = Cli::parse();
+
+    if cli.no_color || std::env::var_os("NO_COLOR").is_some() {
+        control::set_override(false);
+    }
 
     let result = match cli.command {
         None | Some(Command::Status) => status::run(),

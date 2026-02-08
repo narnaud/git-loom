@@ -3,6 +3,30 @@ use git2::Oid;
 use crate::git::{BranchInfo, CommitInfo, FileChange, RepoInfo, UpstreamInfo};
 use crate::graph;
 
+/// Strip ANSI escape codes so tests can compare plain text.
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            // Skip until 'm' (end of ANSI escape sequence)
+            for inner in chars.by_ref() {
+                if inner == 'm' {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Render and strip ANSI codes for plain-text comparison.
+fn render_plain(info: RepoInfo) -> String {
+    strip_ansi(&graph::render(info))
+}
+
 /// Helper to create a fake OID from a single byte (padded to 20 bytes).
 fn oid(byte: u8) -> Oid {
     let mut bytes = [0u8; 20];
@@ -36,7 +60,7 @@ fn base_info() -> RepoInfo {
 
 #[test]
 fn no_commits_no_changes() {
-    let output = graph::render(base_info());
+    let output = render_plain(base_info());
     assert_eq!(
         output,
         "\
@@ -62,7 +86,7 @@ fn working_changes_shown() {
         },
     ];
 
-    let output = graph::render(info);
+    let output = render_plain(info);
     assert!(output.starts_with("╭─ [unstaged changes]\n│   M src/main.rs\n│   A new_file.txt\n"));
 }
 
@@ -76,7 +100,7 @@ fn single_branch() {
         tip_oid: oid(2),
     }];
 
-    let output = graph::render(info);
+    let output = render_plain(info);
     assert_eq!(
         output,
         "\
@@ -111,7 +135,7 @@ fn independent_branches() {
         },
     ];
 
-    let output = graph::render(info);
+    let output = render_plain(info);
     // B1's parent is NOT A1, so they should be independent (├╯ then │╭─)
     assert!(
         output.contains("├╯\n│\n│╭─ [feature-a]"),
@@ -143,7 +167,7 @@ fn stacked_branches() {
         },
     ];
 
-    let output = graph::render(info);
+    let output = render_plain(info);
     // B1's parent IS A2 (oid(2)), so they should be stacked (││ then │├─)
     assert!(
         output.contains("││\n│├─ [feature-a]"),
@@ -165,7 +189,7 @@ fn loose_commits_on_integration_line() {
     // Two commits not belonging to any branch
     info.commits = vec![commit(2, "Fix typo", Some(1)), commit(1, "Refactor", None)];
 
-    let output = graph::render(info);
+    let output = render_plain(info);
     assert!(
         output.contains("●   0000002 Fix typo\n●   0000001 Refactor"),
         "expected loose commits, got:\n{}",
@@ -194,7 +218,7 @@ fn mixed_loose_and_branch() {
         tip_oid: oid(2),
     }];
 
-    let output = graph::render(info);
+    let output = render_plain(info);
     // Loose commit should appear before the branch
     assert!(
         output.contains("●   0000003 Loose on top\n│\n│╭─ [feature-b]"),
@@ -208,7 +232,7 @@ fn upstream_ahead_shows_indicator() {
     let mut info = base_info();
     info.upstream.commits_ahead = 3;
 
-    let output = graph::render(info);
+    let output = render_plain(info);
     assert!(
         output.contains("│●  [origin/main] ⏫ 3 new commits\n├╯ aaa0000 (common base) 2025-07-06 Initial commit\n"),
         "expected upstream-ahead indicator, got:\n{}",
@@ -221,7 +245,7 @@ fn upstream_ahead_singular() {
     let mut info = base_info();
     info.upstream.commits_ahead = 1;
 
-    let output = graph::render(info);
+    let output = render_plain(info);
     assert!(
         output.contains("⏫ 1 new commit\n"),
         "expected singular 'commit', got:\n{}",

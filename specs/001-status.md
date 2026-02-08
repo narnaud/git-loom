@@ -127,8 +127,9 @@ integration branch) is excluded from side branches.
 
 ## Design Decisions
 
-- **No colors**: the output is plain text with no ANSI color codes. Color
-  support will be added in a future iteration.
+- **Colored output**: ANSI colors are used via the `colored` crate. Colors
+  are defined as constants at the top of `graph.rs` for easy customization.
+  Colors can be disabled with `--no-color` or the `NO_COLOR` environment variable.
 - **No merge commit handling**: merge commits are displayed like regular
   commits. There is no special visual treatment for merges.
 
