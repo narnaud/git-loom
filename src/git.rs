@@ -15,7 +15,7 @@ pub struct UpstreamInfo {
     pub commits_ahead: usize,
 }
 
-/// All data needed to render the log: commits between HEAD and the upstream
+/// All data needed to render the status: commits between HEAD and the upstream
 /// tracking branch, detected feature branches, and working tree status.
 #[derive(Debug)]
 pub struct RepoInfo {
@@ -60,7 +60,7 @@ pub struct FileChange {
     pub status: char,
 }
 
-/// Collect all data needed for the log display: walk commits from HEAD to the
+/// Collect all data needed for the status display: walk commits from HEAD to the
 /// upstream tracking branch, detect feature branches, and gather working tree status.
 pub fn gather_repo_info(repo: &Repository) -> Result<RepoInfo, git2::Error> {
     let head = repo.head()?;

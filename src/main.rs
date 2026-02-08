@@ -1,6 +1,6 @@
 mod git;
 mod graph;
-mod log;
+mod status;
 
 use clap::{Parser, Subcommand};
 
@@ -13,15 +13,15 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Show the branch-aware commit log
-    Log,
+    /// Show the branch-aware status
+    Status,
 }
 
 fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
-        None | Some(Command::Log) => log::run(),
+        None | Some(Command::Status) => status::run(),
     };
 
     if let Err(e) = result {

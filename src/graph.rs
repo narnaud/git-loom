@@ -1,7 +1,7 @@
 use crate::git::{CommitInfo, FileChange, RepoInfo, UpstreamInfo};
 use std::collections::HashMap;
 
-/// A logical section in the rendered log output. Sections are built from
+/// A logical section in the rendered status output. Sections are built from
 /// RepoInfo and rendered top-to-bottom with UTF-8 box-drawing characters.
 enum Section {
     /// Working tree status (always present, may contain zero changes).
@@ -13,7 +13,7 @@ enum Section {
     },
     /// Commits on the integration line that don't belong to any feature branch.
     Loose(Vec<CommitInfo>),
-    /// The upstream tracking branch / common base marker at the bottom of the log.
+    /// The upstream tracking branch / common base marker at the bottom of the status.
     Upstream(UpstreamInfo),
 }
 

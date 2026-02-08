@@ -1,8 +1,8 @@
-# Spec 001: Log
+# Spec 001: Status
 
 ## Overview
 
-`git loom` (or `git loom log`) displays a branch-aware commit graph in a
+`git loom` (or `git loom status`) displays a branch-aware commit graph in a
 GitButler CLI-inspired style. It shows the commits between the current branch's
 upstream tracking branch and HEAD, grouped by feature branch.
 
@@ -122,8 +122,8 @@ integration branch) is excluded from side branches.
 
 | Command | Behavior |
 |---------|----------|
-| `git-loom` | Shows the log (default command) |
-| `git-loom log` | Shows the log (explicit) |
+| `git-loom` | Shows the status (default command) |
+| `git-loom status` | Shows the status (explicit) |
 
 ## Design Decisions
 
