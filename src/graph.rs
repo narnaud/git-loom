@@ -1,4 +1,5 @@
 use crate::git::{CommitInfo, FileChange, RepoInfo, UpstreamInfo};
+use crate::shortid::{Entity, IdAllocator};
 use colored::{Color, Colorize};
 use std::collections::HashMap;
 
@@ -6,8 +7,6 @@ use std::collections::HashMap;
 
 /// Graph structure: lines, connectors, dots on the integration line.
 const COLOR_GRAPH: Color = Color::BrightBlack;
-/// Commit hashes.
-const COLOR_HASH: Color = Color::Blue;
 /// Branch names in brackets (local and remote).
 const COLOR_BRANCH: Color = Color::Green;
 /// Labels like (upstream) and (common base).
@@ -16,6 +15,8 @@ const COLOR_LABEL: Color = Color::Cyan;
 const COLOR_DIM: Color = Color::AnsiColor(240);
 /// Colors for the commit message text
 const COLOR_MESSAGE: Color = Color::AnsiColor(248);
+/// Short ID prefix (blue + underline, applied in rendering).
+const COLOR_SHORTID: Color = Color::Blue;
 
 /// Rotating colors for commit dots on feature branches.
 /// Each branch gets the next color in this cycle.
@@ -138,10 +139,35 @@ fn render_sections(sections: &[Section]) -> String {
     let last_idx = sections.len() - 1;
     let mut branch_color_idx: usize = 0;
 
+    // Collect all entities for short ID allocation
+    let mut entities = vec![Entity::Unstaged];
+    for section in sections {
+        match section {
+            Section::Branch { name, commits } => {
+                entities.push(Entity::Branch(name.clone()));
+                for commit in commits {
+                    entities.push(Entity::Commit(commit.oid));
+                }
+            }
+            Section::Loose(commits) => {
+                for commit in commits {
+                    entities.push(Entity::Commit(commit.oid));
+                }
+            }
+            Section::WorkingChanges(files) => {
+                for file in files {
+                    entities.push(Entity::File(file.path.clone()));
+                }
+            }
+            Section::Upstream(_) => {}
+        }
+    }
+    let ids = IdAllocator::new(entities);
+
     for (idx, section) in sections.iter().enumerate() {
         match section {
             Section::WorkingChanges(changes) => {
-                render_working_changes(&mut out, changes);
+                render_working_changes(&mut out, changes, &ids);
             }
             Section::Branch { name, commits } => {
                 let dot_color = BRANCH_DOT_COLORS[branch_color_idx % BRANCH_DOT_COLORS.len()];
@@ -158,10 +184,11 @@ fn render_sections(sections: &[Section]) -> String {
                     prev_stacked,
                     next_stacked,
                     idx < last_idx,
+                    &ids,
                 );
             }
             Section::Loose(commits) => {
-                render_loose(&mut out, commits, idx < last_idx);
+                render_loose(&mut out, commits, idx < last_idx, &ids);
             }
             Section::Upstream(info) => {
                 render_upstream(&mut out, info);
@@ -172,10 +199,11 @@ fn render_sections(sections: &[Section]) -> String {
     out
 }
 
-fn render_working_changes(out: &mut String, changes: &[FileChange]) {
+fn render_working_changes(out: &mut String, changes: &[FileChange], ids: &IdAllocator) {
     out.push_str(&format!(
-        "{} {}{}{}\n",
+        "{} {} {}{}{}\n",
         "╭─".color(COLOR_GRAPH),
+        ids.get_unstaged().color(COLOR_SHORTID).underline(),
         "[".color(COLOR_DIM), "unstaged changes".color(COLOR_LABEL), "]".color(COLOR_DIM)
     ));
     if changes.is_empty() {
@@ -187,8 +215,9 @@ fn render_working_changes(out: &mut String, changes: &[FileChange]) {
     } else {
         for change in changes {
             out.push_str(&format!(
-                "{}   {} {}\n",
+                "{}   {} {} {}\n",
                 "│".color(COLOR_GRAPH),
+                ids.get_file(&change.path).color(COLOR_SHORTID).underline(),
                 change.status.to_string().color(COLOR_DIM),
                 change.path.color(COLOR_MESSAGE)
             ));
@@ -197,6 +226,7 @@ fn render_working_changes(out: &mut String, changes: &[FileChange]) {
     out.push_str(&format!("{}\n", "│".color(COLOR_GRAPH)));
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_branch(
     out: &mut String,
     name: &str,
@@ -205,8 +235,16 @@ fn render_branch(
     prev_stacked: bool,
     next_stacked: bool,
     more_sections: bool,
+    ids: &IdAllocator,
 ) {
-    let branch_label = format!("{}{}{}", "[".color(COLOR_DIM), name.color(COLOR_BRANCH).bold(), "]".color(COLOR_DIM));
+    let branch_id = ids.get_branch(name);
+    let branch_label = format!(
+        "{} {}{}{}",
+        branch_id.color(COLOR_SHORTID).underline(),
+        "[".color(COLOR_DIM),
+        name.color(COLOR_BRANCH).bold(),
+        "]".color(COLOR_DIM)
+    );
     if prev_stacked {
         out.push_str(&format!(
             "{} {}\n",
@@ -221,11 +259,14 @@ fn render_branch(
         ));
     }
     for commit in commits {
+        let sid = ids.get_commit(commit.oid);
+        let rest: String = commit.short_id.chars().skip(sid.len()).collect();
         out.push_str(&format!(
-            "{}{}   {} {}\n",
+            "{}{}   {}{} {}\n",
             "│".color(COLOR_GRAPH),
             "●".color(dot_color),
-            commit.short_id.color(COLOR_HASH),
+            sid.color(COLOR_SHORTID).underline(),
+            rest.color(COLOR_DIM),
             commit.message.color(COLOR_MESSAGE)
         ));
     }
@@ -239,12 +280,15 @@ fn render_branch(
     }
 }
 
-fn render_loose(out: &mut String, commits: &[CommitInfo], more_sections: bool) {
+fn render_loose(out: &mut String, commits: &[CommitInfo], more_sections: bool, ids: &IdAllocator) {
     for commit in commits {
+        let sid = ids.get_commit(commit.oid);
+        let rest: String = commit.short_id.chars().skip(sid.len()).collect();
         out.push_str(&format!(
-            "{}   {} {}\n",
+            "{}   {}{} {}\n",
             "●".color(COLOR_GRAPH),
-            commit.short_id.color(COLOR_HASH),
+            sid.color(COLOR_SHORTID).underline(),
+            rest.color(COLOR_DIM),
             commit.message.color(COLOR_MESSAGE)
         ));
     }
@@ -271,7 +315,7 @@ fn render_upstream(out: &mut String, info: &UpstreamInfo) {
         out.push_str(&format!(
             "{} {} {} {} {}\n",
             "├╯".color(COLOR_GRAPH),
-            info.base_short_id.color(COLOR_HASH),
+            info.base_short_id.color(COLOR_DIM),
             "(common base)".color(COLOR_LABEL),
             info.base_date.color(COLOR_DIM),
             info.base_message.color(COLOR_DIM)
@@ -281,7 +325,7 @@ fn render_upstream(out: &mut String, info: &UpstreamInfo) {
         out.push_str(&format!(
             "{} {} {} {} {}\n",
             "●".color(COLOR_GRAPH),
-            info.base_short_id.color(COLOR_HASH),
+            info.base_short_id.color(COLOR_DIM),
             "(upstream)".color(COLOR_LABEL),
             label,
             info.base_message.color(COLOR_DIM)

@@ -1,5 +1,6 @@
 mod git;
 mod graph;
+mod shortid;
 mod status;
 
 use clap::{Parser, Subcommand};

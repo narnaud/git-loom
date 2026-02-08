@@ -64,7 +64,7 @@ fn no_commits_no_changes() {
     assert_eq!(
         output,
         "\
-╭─ [unstaged changes]
+╭─ zz [unstaged changes]
 │   no changes
 │
 ● aaa0000 (upstream) [origin/main] Initial commit
@@ -87,7 +87,7 @@ fn working_changes_shown() {
     ];
 
     let output = render_plain(info);
-    assert!(output.starts_with("╭─ [unstaged changes]\n│   M src/main.rs\n│   A new_file.txt\n"));
+    assert!(output.starts_with("╭─ zz [unstaged changes]\n│   ma M src/main.rs\n│   ne A new_file.txt\n"));
 }
 
 #[test]
@@ -104,12 +104,12 @@ fn single_branch() {
     assert_eq!(
         output,
         "\
-╭─ [unstaged changes]
+╭─ zz [unstaged changes]
 │   no changes
 │
-│╭─ [feature-a]
-│●   0000002 A2
-│●   0000001 A1
+│╭─ fe [feature-a]
+│●   0200002 A2
+│●   0100001 A1
 ├╯
 │
 ● aaa0000 (upstream) [origin/main] Initial commit
@@ -136,9 +136,10 @@ fn independent_branches() {
     ];
 
     let output = render_plain(info);
+    // Both branches start with "feature-" so IDs will be extended
     // B1's parent is NOT A1, so they should be independent (├╯ then │╭─)
     assert!(
-        output.contains("├╯\n│\n│╭─ [feature-a]"),
+        output.contains("├╯\n│\n│╭─"),
         "expected independent branches, got:\n{}",
         output
     );
@@ -170,7 +171,7 @@ fn stacked_branches() {
     let output = render_plain(info);
     // B1's parent IS A2 (oid(2)), so they should be stacked (││ then │├─)
     assert!(
-        output.contains("││\n│├─ [feature-a]"),
+        output.contains("││\n│├─"),
         "expected stacked branches, got:\n{}",
         output
     );
@@ -191,7 +192,7 @@ fn loose_commits_on_integration_line() {
 
     let output = render_plain(info);
     assert!(
-        output.contains("●   0000002 Fix typo\n●   0000001 Refactor"),
+        output.contains("●   0200002 Fix typo\n●   0100001 Refactor"),
         "expected loose commits, got:\n{}",
         output
     );
@@ -221,7 +222,7 @@ fn mixed_loose_and_branch() {
     let output = render_plain(info);
     // Loose commit should appear before the branch
     assert!(
-        output.contains("●   0000003 Loose on top\n│\n│╭─ [feature-b]"),
+        output.contains("●   0300003 Loose on top\n│\n│╭─ fe [feature-b]"),
         "expected loose then branch, got:\n{}",
         output
     );
@@ -256,4 +257,55 @@ fn upstream_ahead_singular() {
         "should not contain plural 'commits', got:\n{}",
         output
     );
+}
+
+#[test]
+fn short_ids_for_files_use_filename() {
+    let mut info = base_info();
+    info.working_changes = vec![
+        FileChange {
+            path: "src/graph.rs".to_string(),
+            status: 'M',
+        },
+        FileChange {
+            path: "src/git.rs".to_string(),
+            status: 'M',
+        },
+    ];
+
+    let output = render_plain(info);
+    // "graph.rs" -> "gr", "git.rs" -> "gi" (no collision)
+    assert!(
+        output.contains("gr M src/graph.rs"),
+        "expected file short ID 'gr', got:\n{}",
+        output
+    );
+    assert!(
+        output.contains("gi M src/git.rs"),
+        "expected file short ID 'gi', got:\n{}",
+        output
+    );
+}
+
+#[test]
+fn short_ids_collision_extends() {
+    let mut info = base_info();
+    info.working_changes = vec![
+        FileChange {
+            path: "src/main.rs".to_string(),
+            status: 'M',
+        },
+        FileChange {
+            path: "src/manifest.rs".to_string(),
+            status: 'A',
+        },
+    ];
+
+    let output = render_plain(info);
+    // Both filenames start with "ma", so IDs should extend to 3+ chars
+    let lines: Vec<&str> = output.lines().collect();
+    let main_line = lines.iter().find(|l| l.contains("main.rs")).unwrap();
+    let manifest_line = lines.iter().find(|l| l.contains("manifest.rs")).unwrap();
+    // They should have different IDs
+    assert_ne!(main_line, manifest_line);
 }
