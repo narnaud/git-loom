@@ -2,6 +2,7 @@ use git2::{BranchType, Repository, StatusOptions};
 
 /// All data needed to render the log: commits between HEAD and the upstream
 /// tracking branch, detected feature branches, and working tree status.
+#[derive(Debug)]
 pub struct RepoInfo {
     /// Short hash of the upstream tracking branch tip (e.g. "ff1b247").
     pub upstream_short_id: String,
@@ -18,6 +19,7 @@ pub struct RepoInfo {
 }
 
 /// A single non-merge commit in the range upstream..HEAD.
+#[derive(Debug)]
 pub struct CommitInfo {
     pub oid: git2::Oid,
     /// Abbreviated hash respecting the repo's core.abbrev setting.
@@ -30,12 +32,14 @@ pub struct CommitInfo {
 }
 
 /// A local branch whose tip falls within the upstream..HEAD range.
+#[derive(Debug)]
 pub struct BranchInfo {
     pub name: String,
     pub tip_oid: git2::Oid,
 }
 
 /// A file with staged or unstaged changes in the working tree.
+#[derive(Debug)]
 pub struct FileChange {
     pub path: String,
     /// One of: 'A' (added), 'M' (modified), 'D' (deleted), 'R' (renamed),
@@ -204,3 +208,7 @@ fn get_working_changes(repo: &Repository) -> Result<Vec<FileChange>, git2::Error
 
     Ok(changes)
 }
+
+#[cfg(test)]
+#[path = "git_test.rs"]
+mod tests;
