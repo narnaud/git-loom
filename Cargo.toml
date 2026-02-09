@@ -2,8 +2,10 @@
 name = "git-loom"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.90"
 
 [dependencies]
+chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
 colored = "3"
 git2 = "0.20"
