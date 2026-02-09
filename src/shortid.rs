@@ -67,7 +67,7 @@ fn generate_candidates(entity: &Entity) -> Vec<String> {
     match entity {
         Entity::Unstaged => vec!["zz".to_string()],
         Entity::Commit(oid) => {
-            let hex = format!("{}", oid);
+            let hex = oid.to_string();
             let chars: Vec<char> = hex.chars().collect();
             (2..=chars.len())
                 .map(|n| chars[..n].iter().collect())
@@ -91,7 +91,7 @@ fn generate_candidates(entity: &Entity) -> Vec<String> {
 /// Build candidate IDs from a name, splitting on `-`, `_`, `/`.
 fn word_candidates(name: &str) -> Vec<String> {
     let words: Vec<Vec<char>> = name
-        .split(|c: char| c == '-' || c == '_' || c == '/')
+        .split(['-', '_', '/'])
         .filter(|w| !w.is_empty())
         .map(|w| w.chars().collect())
         .collect();
@@ -115,7 +115,8 @@ fn multi_word_candidates(words: &[Vec<char>]) -> Vec<String> {
             for pi in 0..words[wi].len() {
                 for pj in 0..words[wj].len() {
                     let c: String = [words[wi][pi], words[wj][pj]].iter().collect();
-                    if seen.insert(c.clone()) {
+                    if !seen.contains(&c) {
+                        seen.insert(c.clone());
                         candidates.push(c);
                     }
                 }
@@ -127,7 +128,8 @@ fn multi_word_candidates(words: &[Vec<char>]) -> Vec<String> {
     let interleaved = interleave_words(words);
     for n in 3..=interleaved.len() {
         let c: String = interleaved.chars().take(n).collect();
-        if seen.insert(c.clone()) {
+        if !seen.contains(&c) {
+            seen.insert(c.clone());
             candidates.push(c);
         }
     }
@@ -146,7 +148,8 @@ fn single_word_candidates(word: &str) -> Vec<String> {
     for i in 0..chars.len() {
         for j in (i + 1)..chars.len() {
             let c: String = [chars[i], chars[j]].iter().collect();
-            if seen.insert(c.clone()) {
+            if !seen.contains(&c) {
+                seen.insert(c.clone());
                 candidates.push(c);
             }
         }
@@ -155,7 +158,8 @@ fn single_word_candidates(word: &str) -> Vec<String> {
     // 3+ char prefixes
     for n in 3..=chars.len() {
         let c: String = chars[..n].iter().collect();
-        if seen.insert(c.clone()) {
+        if !seen.contains(&c) {
+            seen.insert(c.clone());
             candidates.push(c);
         }
     }
@@ -163,7 +167,8 @@ fn single_word_candidates(word: &str) -> Vec<String> {
     // Very short words: add as-is
     if chars.len() < 2 {
         let c: String = chars.iter().collect();
-        if seen.insert(c.clone()) {
+        if !seen.contains(&c) {
+            seen.insert(c.clone());
             candidates.push(c);
         }
     }
@@ -218,6 +223,10 @@ fn resolve_collisions(entities: Vec<Entity>) -> HashMap<Entity, String> {
                         break suffixed;
                     }
                     n += 1;
+                    // Defensive guard against pathological input
+                    if n > 10000 {
+                        break format!("{}_{}", base, n);
+                    }
                 }
             });
         used.insert(id.clone());

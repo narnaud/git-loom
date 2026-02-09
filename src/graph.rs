@@ -2,6 +2,7 @@ use crate::git::{CommitInfo, FileChange, RepoInfo, UpstreamInfo};
 use crate::shortid::{Entity, IdAllocator};
 use colored::{Color, Colorize};
 use std::collections::HashMap;
+use std::fmt::Write;
 
 // ── Color palette (edit these to change the theme) ──────────────────────
 
@@ -200,30 +201,33 @@ fn render_sections(sections: &[Section]) -> String {
 }
 
 fn render_working_changes(out: &mut String, changes: &[FileChange], ids: &IdAllocator) {
-    out.push_str(&format!(
-        "{} {} {}{}{}\n",
+    writeln!(
+        out,
+        "{} {} {}{}{}",
         "╭─".color(COLOR_GRAPH),
         ids.get_unstaged().color(COLOR_SHORTID).underline(),
         "[".color(COLOR_DIM), "unstaged changes".color(COLOR_LABEL), "]".color(COLOR_DIM)
-    ));
+    ).unwrap();
     if changes.is_empty() {
-        out.push_str(&format!(
-            "{}   {}\n",
+        writeln!(
+            out,
+            "{}   {}",
             "│".color(COLOR_GRAPH),
             "no changes".color(COLOR_DIM)
-        ));
+        ).unwrap();
     } else {
         for change in changes {
-            out.push_str(&format!(
-                "{}   {} {} {}\n",
+            writeln!(
+                out,
+                "{}   {} {} {}",
                 "│".color(COLOR_GRAPH),
                 ids.get_file(&change.path).color(COLOR_SHORTID).underline(),
                 change.status.to_string().color(COLOR_DIM),
                 change.path.color(COLOR_MESSAGE)
-            ));
+            ).unwrap();
         }
     }
-    out.push_str(&format!("{}\n", "│".color(COLOR_GRAPH)));
+    writeln!(out, "{}", "│".color(COLOR_GRAPH)).unwrap();
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -238,44 +242,36 @@ fn render_branch(
     ids: &IdAllocator,
 ) {
     let branch_id = ids.get_branch(name);
-    let branch_label = format!(
-        "{} {}{}{}",
+    let connector = if prev_stacked { "│├─" } else { "│╭─" };
+    writeln!(
+        out,
+        "{} {} {}{}{}",
+        connector.color(COLOR_GRAPH),
         branch_id.color(COLOR_SHORTID).underline(),
         "[".color(COLOR_DIM),
         name.color(COLOR_BRANCH).bold(),
         "]".color(COLOR_DIM)
-    );
-    if prev_stacked {
-        out.push_str(&format!(
-            "{} {}\n",
-            "│├─".color(COLOR_GRAPH),
-            branch_label
-        ));
-    } else {
-        out.push_str(&format!(
-            "{} {}\n",
-            "│╭─".color(COLOR_GRAPH),
-            branch_label
-        ));
-    }
+    ).unwrap();
+
     for commit in commits {
         let sid = ids.get_commit(commit.oid);
         let rest: String = commit.short_id.chars().skip(sid.len()).collect();
-        out.push_str(&format!(
-            "{}{}   {}{} {}\n",
+        writeln!(
+            out,
+            "{}{}   {}{} {}",
             "│".color(COLOR_GRAPH),
             "●".color(dot_color),
             sid.color(COLOR_SHORTID).underline(),
             rest.color(COLOR_DIM),
             commit.message.color(COLOR_MESSAGE)
-        ));
+        ).unwrap();
     }
     if next_stacked {
-        out.push_str(&format!("{}\n", "││".color(COLOR_GRAPH)));
+        writeln!(out, "{}", "││".color(COLOR_GRAPH)).unwrap();
     } else {
-        out.push_str(&format!("{}\n", "├╯".color(COLOR_GRAPH)));
+        writeln!(out, "{}", "├╯".color(COLOR_GRAPH)).unwrap();
         if more_sections {
-            out.push_str(&format!("{}\n", "│".color(COLOR_GRAPH)));
+            writeln!(out, "{}", "│".color(COLOR_GRAPH)).unwrap();
         }
     }
 }
@@ -284,52 +280,58 @@ fn render_loose(out: &mut String, commits: &[CommitInfo], more_sections: bool, i
     for commit in commits {
         let sid = ids.get_commit(commit.oid);
         let rest: String = commit.short_id.chars().skip(sid.len()).collect();
-        out.push_str(&format!(
-            "{}   {}{} {}\n",
+        writeln!(
+            out,
+            "{}   {}{} {}",
             "●".color(COLOR_GRAPH),
             sid.color(COLOR_SHORTID).underline(),
             rest.color(COLOR_DIM),
             commit.message.color(COLOR_MESSAGE)
-        ));
+        ).unwrap();
     }
     if more_sections {
-        out.push_str(&format!("{}\n", "│".color(COLOR_GRAPH)));
+        writeln!(out, "{}", "│".color(COLOR_GRAPH)).unwrap();
     }
 }
 
 fn render_upstream(out: &mut String, info: &UpstreamInfo) {
     if info.commits_ahead > 0 {
-        let label = format!("{}{}{}", "[".color(COLOR_DIM), info.label.color(COLOR_BRANCH).bold(), "]".color(COLOR_DIM));
         let count_text = format!(
             "\u{23EB} {} new commit{}",
             info.commits_ahead,
             if info.commits_ahead == 1 { "" } else { "s" }
         ).color(COLOR_MESSAGE);
-        out.push_str(&format!(
-            "{}{}  {} {}\n",
+        writeln!(
+            out,
+            "{}{}  {}{}{} {}",
             "│".color(COLOR_GRAPH),
             "●".color(COLOR_GRAPH),
-            label,
+            "[".color(COLOR_DIM),
+            info.label.color(COLOR_BRANCH).bold(),
+            "]".color(COLOR_DIM),
             count_text
-        ));
-        out.push_str(&format!(
-            "{} {} {} {} {}\n",
+        ).unwrap();
+        writeln!(
+            out,
+            "{} {} {} {} {}",
             "├╯".color(COLOR_GRAPH),
             info.base_short_id.color(COLOR_DIM),
             "(common base)".color(COLOR_LABEL),
             info.base_date.color(COLOR_DIM),
             info.base_message.color(COLOR_DIM)
-        ));
+        ).unwrap();
     } else {
-        let label = format!("{}{}{}", "[".color(COLOR_DIM), info.label.color(COLOR_BRANCH).bold(), "]".color(COLOR_DIM));
-        out.push_str(&format!(
-            "{} {} {} {} {}\n",
+        writeln!(
+            out,
+            "{} {} {} {}{}{} {}",
             "●".color(COLOR_GRAPH),
             info.base_short_id.color(COLOR_DIM),
             "(upstream)".color(COLOR_LABEL),
-            label,
+            "[".color(COLOR_DIM),
+            info.label.color(COLOR_BRANCH).bold(),
+            "]".color(COLOR_DIM),
             info.base_message.color(COLOR_DIM)
-        ));
+        ).unwrap();
     }
 }
 
