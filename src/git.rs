@@ -95,7 +95,10 @@ pub fn gather_repo_info(repo: &Repository) -> Result<RepoInfo, git2::Error> {
         ))
     })?;
 
-    let upstream_name = upstream.name()?.unwrap_or("upstream").to_string();
+    let upstream_name = upstream
+        .name()?
+        .ok_or_else(|| git2::Error::from_str("upstream branch name is not valid UTF-8"))?
+        .to_string();
 
     let upstream_oid = upstream
         .get()
@@ -118,7 +121,7 @@ pub fn gather_repo_info(repo: &Repository) -> Result<RepoInfo, git2::Error> {
         .as_object()
         .short_id()?
         .as_str()
-        .unwrap_or("")
+        .ok_or_else(|| git2::Error::from_str("base commit short_id is not valid UTF-8"))?
         .to_string();
     let base_message = base_commit.summary().unwrap_or("").to_string();
     let base_time = base_commit.time();
@@ -184,7 +187,7 @@ fn walk_commits(
             .as_object()
             .short_id()?
             .as_str()
-            .unwrap_or("")
+            .ok_or_else(|| git2::Error::from_str("short_id is not valid UTF-8"))?
             .to_string();
         let message = commit.summary().unwrap_or("").to_string();
         let parent_oid = commit.parent_id(0).ok();
@@ -207,11 +210,14 @@ fn find_branches_in_range(
     upstream_oid: git2::Oid,
     current_branch: &str,
 ) -> Result<Vec<BranchInfo>, git2::Error> {
-
     let mut branches = Vec::new();
     for branch_result in repo.branches(Some(BranchType::Local))? {
         let (branch, _) = branch_result?;
-        let name = branch.name()?.unwrap_or("").to_string();
+        let Some(name) = branch.name()? else {
+            // Skip branches with non-UTF-8 names
+            continue;
+        };
+        let name = name.to_string();
         // Skip the current (integration) branch itself
         if name == current_branch {
             continue;
@@ -234,7 +240,13 @@ fn get_working_changes(repo: &Repository) -> Result<Vec<FileChange>, git2::Error
     let mut changes = Vec::new();
 
     for entry in statuses.iter() {
-        let path = entry.path().unwrap_or("").to_string();
+        let path = match entry.path() {
+            Some(p) => p.to_string(),
+            None => {
+                // Handle non-UTF-8 paths by using lossy conversion
+                String::from_utf8_lossy(entry.path_bytes()).into_owned()
+            }
+        };
         let status = entry.status();
 
         let status_char = if status.is_index_new() || status.is_wt_new() {
