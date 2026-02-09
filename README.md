@@ -8,12 +8,8 @@
 
 🚧 **Early Development** - git-loom is currently in active development. The core infrastructure is in place, with more features being added.
 
-- [x] Enhanced `status` command with branch-aware output
 - [x] Git repository analysis and graph building
-- [ ] Amend any commit in your branch stack, not just the latest one
-- [ ] Move commits between branches or reorder them within a branch
-- [ ] Quickly create and manage feature branches from the integration branch
-- [ ] Merge/unmerge feature branches into/from the integration branch
+- [x] Enhanced `status` command with branch-aware output
 
 ## What is git-loom?
 
@@ -45,19 +41,17 @@ Add it to your PATH or use `cargo install --path .` to install it globally.
 
 ## Usage
 
-### Status
-
-Show an enhanced, branch-aware status of your repository:
-
-```bash
-git-loom status
-# or simply (if no subcommand is provided, status is the default)
-git-loom
 ```
+Usage: git-loom.exe [OPTIONS] [COMMAND]
 
-### Options
+Commands:
+  status  Show the branch-aware status
+  help    Print this message or the help of the given subcommand(s)
 
-- `--no-color`: Disable colored output
+Options:
+      --no-color  Disable colored output
+  -h, --help      Print help
+```
 
 ## Core Concepts
 
