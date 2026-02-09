@@ -105,7 +105,8 @@ pub fn gather_repo_info(repo: &Repository) -> Result<RepoInfo, git2::Error> {
     let merge_base_oid = repo.merge_base(head_oid, upstream_oid)?;
 
     let commits = walk_commits(repo, head_oid, merge_base_oid)?;
-    let branches = find_branches_in_range(repo, &commits, merge_base_oid, &branch_name)?;
+    let commit_set: std::collections::HashSet<git2::Oid> = commits.iter().map(|c| c.oid).collect();
+    let branches = find_branches_in_range(repo, &commit_set, merge_base_oid, &branch_name)?;
     let working_changes = get_working_changes(repo)?;
 
     // Count how many commits upstream is ahead of the merge-base
@@ -202,11 +203,10 @@ fn walk_commits(
 /// the current (integration) branch.
 fn find_branches_in_range(
     repo: &Repository,
-    commits: &[CommitInfo],
+    commit_set: &std::collections::HashSet<git2::Oid>,
     upstream_oid: git2::Oid,
     current_branch: &str,
 ) -> Result<Vec<BranchInfo>, git2::Error> {
-    let commit_set: std::collections::HashSet<git2::Oid> = commits.iter().map(|c| c.oid).collect();
 
     let mut branches = Vec::new();
     for branch_result in repo.branches(Some(BranchType::Local))? {
@@ -217,8 +217,7 @@ fn find_branches_in_range(
             continue;
         }
         if let Some(tip_oid) = branch.get().target()
-            && tip_oid != upstream_oid
-            && commit_set.contains(&tip_oid)
+            && tip_oid != upstream_oid && commit_set.contains(&tip_oid)
         {
             branches.push(BranchInfo { name, tip_oid });
         }
