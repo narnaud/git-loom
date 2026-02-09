@@ -56,11 +56,11 @@ impl IdAllocator {
 /// Generate an ordered list of candidate short IDs for an entity.
 ///
 /// For branches and files, candidates are built from word structure:
-/// - Multi-word names (split on `-`, `_`, `/`): pick one character from each
-///   of two words, producing many 2-char combinations (e.g. `feature-alpha`
-///   → `fa`, `fl`, `fp`, `ea`, …). Interleaved 3-char prefixes follow.
-/// - Single-word names: pick character pairs (i, j) where i < j from the word
-///   (e.g. `main` → `ma`, `mi`, `mn`, `ai`, …). 3-char prefixes follow.
+/// - Multi-word names (split on `-`, `_`, `/`): first letter of each word
+///   (e.g. `feature-alpha` → `fa`). If collision on first letter, shift to
+///   next available letter in each word (e.g. `feature-a`, `feature-b` → `fa`, `eb`).
+/// - Single-word names: first 2 letters (e.g. `main` → `ma`). If collision on
+///   first letter, shift forward (e.g. `main`, `mainstream` → `ma`, `ai`).
 ///
 /// For commits, candidates are successive prefixes of the hex hash (2, 3, 4…).
 fn generate_candidates(entity: &Entity) -> Vec<String> {
@@ -103,99 +103,84 @@ fn word_candidates(name: &str) -> Vec<String> {
     }
 }
 
-/// Candidates for multi-word names: one char from each of two words,
-/// then interleaved 3+ char prefixes.
+/// Candidates for multi-word names: first letter of first word, first letter of second word.
+/// Then shift indices forward to avoid collisions.
+/// Example: `feature-alpha` → `fa`, then `fe`, `ft`, `fu`, `fr`, `ea`, `la`, etc.
 fn multi_word_candidates(words: &[Vec<char>]) -> Vec<String> {
-    let mut seen = HashSet::new();
     let mut candidates = Vec::new();
 
-    // 2-char candidates from pairs of words
-    for wi in 0..words.len() {
-        for wj in (wi + 1)..words.len() {
-            for pi in 0..words[wi].len() {
-                for pj in 0..words[wj].len() {
-                    let c: String = [words[wi][pi], words[wj][pj]].iter().collect();
-                    if !seen.contains(&c) {
-                        seen.insert(c.clone());
-                        candidates.push(c);
-                    }
-                }
+    // Use first two words (or first word repeated if only one)
+    let word1 = &words[0];
+    let word2 = if words.len() >= 2 { &words[1] } else { &words[0] };
+
+    // Generate all combinations of (char from word1, char from word2)
+    for &ch1 in word1 {
+        for &ch2 in word2 {
+            let candidate: String = [ch1, ch2].iter().collect();
+            if !candidates.contains(&candidate) {
+                candidates.push(candidate);
             }
         }
     }
 
-    // 3+ char candidates: interleaved prefix
-    let interleaved = interleave_words(words);
-    for n in 3..=interleaved.len() {
-        let c: String = interleaved.chars().take(n).collect();
-        if !seen.contains(&c) {
-            seen.insert(c.clone());
-            candidates.push(c);
+    // 3+ char prefixes for fallback
+    for n in 3..=word1.len().max(word2.len()).max(5) {
+        let prefix: String = format!("{}{}",
+            word1.iter().take(n).collect::<String>(),
+            word2.iter().take(n).collect::<String>()
+        ).chars().take(n).collect();
+        if !candidates.contains(&prefix) {
+            candidates.push(prefix);
         }
     }
 
     candidates
 }
 
-/// Candidates for single-word names: character pairs (i < j),
-/// then 3+ char prefixes.
+/// Candidates for single-word names: first 2 letters, then shift forward.
+/// Example: `main` → `ma`, `ai`, `in`, `mn`, `ma` (wraps), then 3-char prefixes.
 fn single_word_candidates(word: &str) -> Vec<String> {
     let chars: Vec<char> = word.chars().collect();
-    let mut seen = HashSet::new();
     let mut candidates = Vec::new();
 
-    // 2-char candidates: pairs of characters (i < j)
+    if chars.is_empty() {
+        return candidates;
+    }
+
+    if chars.len() == 1 {
+        candidates.push(chars[0].to_string());
+        return candidates;
+    }
+
+    // Generate sliding windows of 2 characters
     for i in 0..chars.len() {
         for j in (i + 1)..chars.len() {
-            let c: String = [chars[i], chars[j]].iter().collect();
-            if !seen.contains(&c) {
-                seen.insert(c.clone());
-                candidates.push(c);
+            let candidate: String = [chars[i], chars[j]].iter().collect();
+            if !candidates.contains(&candidate) {
+                candidates.push(candidate);
             }
         }
     }
 
-    // 3+ char prefixes
+    // 3+ char prefixes for fallback
     for n in 3..=chars.len() {
-        let c: String = chars[..n].iter().collect();
-        if !seen.contains(&c) {
-            seen.insert(c.clone());
-            candidates.push(c);
-        }
-    }
-
-    // Very short words: add as-is
-    if chars.len() < 2 {
-        let c: String = chars.iter().collect();
-        if !seen.contains(&c) {
-            seen.insert(c.clone());
-            candidates.push(c);
+        let prefix: String = chars[..n].iter().collect();
+        if !candidates.contains(&prefix) {
+            candidates.push(prefix);
         }
     }
 
     candidates
 }
 
-/// Interleave characters from words round-robin: first char of each word,
-/// then second char of each word, etc.
-fn interleave_words(words: &[Vec<char>]) -> String {
-    let max_len = words.iter().map(|w| w.len()).max().unwrap_or(0);
-    let mut result = String::new();
-    for i in 0..max_len {
-        for word in words {
-            if i < word.len() {
-                result.push(word[i]);
-            }
-        }
-    }
-    result
-}
-
-/// Assign unique IDs using greedy candidate selection.
+/// Assign unique IDs using collision-aware candidate selection.
 ///
-/// Each entity is processed in order. The first available (non-taken)
-/// candidate is assigned. This keeps IDs at 2 characters whenever possible,
-/// only falling back to 3+ chars when all 2-char alternatives are exhausted.
+/// Each entity is processed in order. For each entity, find a candidate that:
+/// 1. Is not already used
+/// 2. Prefers candidates whose first letter is not already used as a first letter
+///
+/// This implements the smart collision avoidance where `feature-a` and `feature-b`
+/// get `fa` and `eb` (skipping 'f' for the second since 'f' is already used).
 fn resolve_collisions(entities: Vec<Entity>) -> HashMap<Entity, String> {
     let items: Vec<(Entity, Vec<String>)> = entities
         .into_iter()
@@ -206,12 +191,24 @@ fn resolve_collisions(entities: Vec<Entity>) -> HashMap<Entity, String> {
         .collect();
 
     let mut used: HashSet<String> = HashSet::new();
+    let mut used_first_letters: HashSet<char> = HashSet::new();
     let mut result: HashMap<Entity, String> = HashMap::new();
 
     for (entity, candidates) in items {
+        // First, try to find a candidate whose first letter is not yet used
         let id = candidates
             .iter()
-            .find(|c| !used.contains(*c))
+            .find(|c| {
+                if let Some(first_char) = c.chars().next() {
+                    !used.contains(*c) && !used_first_letters.contains(&first_char)
+                } else {
+                    !used.contains(*c)
+                }
+            })
+            .or_else(|| {
+                // If all candidates have first letters that are taken, just find any unused candidate
+                candidates.iter().find(|c| !used.contains(*c))
+            })
             .cloned()
             .unwrap_or_else(|| {
                 // Fallback: numeric suffix on the first candidate
@@ -229,6 +226,11 @@ fn resolve_collisions(entities: Vec<Entity>) -> HashMap<Entity, String> {
                     }
                 }
             });
+
+        // Track the first letter of this ID
+        if let Some(first_char) = id.chars().next() {
+            used_first_letters.insert(first_char);
+        }
         used.insert(id.clone());
         result.insert(entity, id);
     }

@@ -27,16 +27,16 @@ different directories.
 For branches and files, the algorithm generates an ordered list of 2-char
 candidate IDs, trying to stay at 2 characters as long as possible:
 
-**Multi-word names** (split on `-`, `_`, `/`): pick one character from each
-of two words. The first candidate is the first letter of each word (the
-"initials"). On collision, alternative character positions are tried:
+**Multi-word names** (split on `-`, `_`, `/`): generate all combinations of
+one character from the first word and one character from the second word.
+The first candidate is the first letter of each word (the "initials"):
 
 ```
-feature-alpha    → candidates: fa, fl, fp, fh, ea, el, …
-feature-awesome  → candidates: fa, fw, fe, fs, ea, ew, …
+feature-alpha    → candidates: fa, fe, ft, fu, fr, ea, ee, …
+feature-awesome  → candidates: fa, fe, fs, fo, fm, ea, ee, …
 ```
 
-**Single-word names**: pick character pairs (i, j) where i < j:
+**Single-word names**: generate all character pairs (i, j) where i < j:
 
 ```
 main        → candidates: ma, mi, mn, ai, an, in, …
@@ -49,42 +49,46 @@ entities likely to require 3+ character IDs.
 ### 3-char fallback
 
 If all 2-char candidates are exhausted (unlikely for branches and files),
-the algorithm falls back to 3+ character prefixes built by interleaving
-characters from each word round-robin.
+the algorithm falls back to 3+ character prefixes.
 
 ## Collision Resolution
 
-IDs are assigned greedily in entity order. Each entity receives its
-highest-priority available candidate — the first one not already taken by
-a previous entity.
+IDs are assigned greedily in entity order using **first-letter collision
+avoidance**. Each entity receives its highest-priority available candidate,
+with preference for candidates whose first letter hasn't been used yet.
+
+**Basic rule:** When a candidate's first letter is already used by a previous
+entity, skip to the next candidate that starts with an unused letter.
 
 ```
-feature-a        →  fa  ✓ (first candidate, available)
-feature-b        →  fb  ✓ (first candidate, available)
+feature-a        →  fa  ✓ (first candidate, 'f' not used)
+feature-b        →  eb  ✓ (skip 'fb' because 'f' used, take 'eb')
 ```
 
-When initials collide, the second entity picks an alternative 2-char ID:
+This keeps IDs visually distinct and easier to type:
 
 ```
-feature-alpha    →  fa  ✓ (first candidate, available)
-feature-awesome  →  fw  ✓ (fa taken → next candidate "fw")
+feature-alpha    →  fa  ✓ (first candidate, 'f' not used)
+feature-awesome  →  ea  ✓ (skip 'fa', 'fe', 'fs'... because 'f' used, take 'ea')
 ```
 
-Single-word collisions work the same way:
+Single-word names work the same way:
 
 ```
-main             →  ma  ✓
-master           →  ms  ✓ (ma taken → next candidate "ms")
-maintenance      →  mi  ✓ (ma taken → next candidate "mi")
+main             →  ma  ✓ ('m' not used)
+mainstream       →  ai  ✓ (skip 'ma', 'ms'... because 'm' used, take 'ai')
+master           →  st  ✓ (skip 'ms', 'mt', 'me', 'mr', 'as', 'at' because 'm' and 'a' used)
 ```
 
-**Fallback:** if all candidates are exhausted (e.g. two entities with
-identical source text), a numeric suffix is appended: `ab`, `ab1`, `ab2`,
-etc.
+**Fallback strategies:**
+1. If all candidates starting with unused letters are taken, fall back to
+   any unused candidate (even if its first letter is used).
+2. If all candidates are exhausted (e.g. two entities with identical source
+   text), append a numeric suffix: `ab`, `ab1`, `ab2`, etc.
 
 Collision resolution operates **globally** across all entity types. A branch
-named `main` and a file named `main.rs` both start as `ma`; the second one
-picks an alternative 2-char ID like `mi`.
+named `main` and a file named `main.rs` both generate `ma` candidates; the
+first gets `ma`, the second gets `ai` (skipping 'm').
 
 ## Display Format
 
@@ -154,20 +158,23 @@ not an actionable entity.
 │   ma M src/main.rs
 │   nf A new_file.txt
 │
-│╭─ fb [feature-b]
-│●   d0472f9 Fix bug in feature B
-│●   7a067a9 Start feature B
-├╯
-│
 │╭─ fa [feature-a]
 │●   2ee61e1 Add feature A
+├╯
+│
+│╭─ eb [feature-b]
+│●   d0472f9 Fix bug in feature B
+│●   7a067a9 Start feature B
 ├╯
 │
 ● ff1b247 (upstream) [origin/main] Initial commit
 ```
 
-In this example, `feature-a` and `feature-b` resolve immediately to `fa`
-and `fb` (first letter of each word: `f`+`a` vs `f`+`b`).
+In this example:
+- `feature-a` gets `fa` (first letters: 'f' + 'a')
+- `feature-b` gets `eb` (skips 'fb' because 'f' is already used, takes 'e' + 'b')
+- `main.rs` gets `ma` (first two letters)
+- `new_file.txt` gets `nf` (first letters of words in stem: 'n' + 'f')
 
 ## Architecture
 
@@ -236,11 +243,16 @@ Added to the color palette in `graph.rs`. Short IDs are always rendered with
 - **Global collision resolution:** all entity types share one ID namespace.
   This avoids ambiguity when a future command receives an ID without an
   explicit type qualifier.
+- **First-letter collision avoidance:** when multiple entities have similar
+  names (like `feature-a` and `feature-b`), prioritizing candidates with
+  unused first letters produces more visually distinct IDs that are easier
+  to distinguish and type. This is more intuitive than sequential fallback.
 - **Word-based candidates:** splitting on `-`, `_`, `/` and generating
   character combinations from different words produces many 2-char options,
   keeping IDs short even when names share long prefixes.
-- **Greedy assignment:** entities are processed in order, each receiving
-  the first available candidate. This is simple, deterministic, and fast.
+- **Greedy assignment with smart ordering:** entities are processed in order,
+  each receiving the first available candidate that prefers unused first
+  letters. This is simple, deterministic, and fast while producing better IDs.
 - **File stem over full filename:** using the stem (without extension)
   means IDs reflect meaningful name parts, not `.rs` or `.txt` suffixes.
 - **Filename over full path:** gives shorter, more memorable IDs and
