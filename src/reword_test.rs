@@ -254,3 +254,34 @@ fn reword_nonexistent_branch_fails() {
     assert!(err_msg.contains("Failed to rename branch"),
             "Error should mention branch rename failure");
 }
+
+#[test]
+fn reword_branch_by_full_name_via_run() {
+    // Test: Use reword::run with a full branch name and -m flag
+    // Expected: Branch is renamed (not commit at branch tip)
+
+    let test_repo = TestRepo::new();
+
+    // Create a branch
+    test_repo.create_branch("feature-original");
+
+    // Change directory to the repo for the run command
+    let original_dir = std::env::current_dir().unwrap();
+    std::env::set_current_dir(test_repo.repo.workdir().unwrap()).unwrap();
+
+    // Rename using full branch name
+    let result = super::run("feature-original".to_string(), Some("feature-renamed".to_string()));
+
+    // Restore directory
+    std::env::set_current_dir(original_dir).unwrap();
+
+    assert!(result.is_ok(), "Failed to rename branch via run: {:?}", result);
+
+    // Verify old branch doesn't exist
+    assert!(test_repo.repo.find_branch("feature-original", git2::BranchType::Local).is_err(),
+            "Old branch should not exist after rename");
+
+    // Verify new branch exists
+    assert!(test_repo.repo.find_branch("feature-renamed", git2::BranchType::Local).is_ok(),
+            "New branch should exist after rename");
+}

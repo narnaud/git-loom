@@ -28,9 +28,9 @@ enum Command {
     Status,
     /// Reword a commit message or rename a branch
     Reword {
-        /// Short ID or commit hash to reword
+        /// Branch name, shortID, or commit hash
         target: String,
-        /// New message (if not provided, opens editor)
+        /// New message or branch name (if not provided, opens editor for commits)
         #[arg(short, long)]
         message: Option<String>,
     },

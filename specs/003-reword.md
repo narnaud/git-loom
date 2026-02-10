@@ -76,39 +76,48 @@ requires the `-m` flag (since branches don't have "messages" to edit).
 ## Target Resolution
 
 The `<target>` is interpreted using the shared `resolve_target()` function from
-the `git` module (see **Spec 002: Short IDs** for full resolution details).
+the `git` module, which uses the following resolution strategy:
 
-This function tries multiple strategies in order:
+**Resolution Order**:
 
-1. **Git native references** - Full/partial hashes, `HEAD`, branches, etc.
-2. **Short IDs** - Searches branches, then commits, then files
+1. **Local branch names** - Exact match for local branch names
+   - Branch names resolve to branches (for renaming with `-m`)
+   - Example: `git-loom reword feature-a -m new-name` renames the branch
+2. **Git references** - Full/partial hashes, `HEAD`, etc.
+   - These resolve to commits
+   - Example: `git-loom reword abc123 -m "New message"` rewords the commit
+3. **Short IDs** - Searches branches, then commits, then files
+   - Branch shortids resolve to branches
+   - Commit shortids resolve to commits
+   - File shortids resolve to files
 
 For the reword command, file targets are rejected with an error message.
 
 **Key behaviors:**
 
-- Git references are faster and work without upstream tracking
+- **Branch names always resolve to branches**, not commits
+- To reword the commit at a branch tip, use its commit hash or commit shortid
+- `git-loom reword feature-a -m new-name` renames the branch (requires -m)
+- `git-loom reword fa -m new-name` also renames if 'fa' is the branch shortid
+- `git-loom reword abc123` rewords a commit (opens editor if no -m)
+- Git references work without upstream tracking
 - Short IDs require upstream tracking (same IDs shown in status)
-- Both syntaxes work interchangeably - use whatever is convenient
 - The resolution logic is **shared** across all commands that accept entity
   identifiers
 
 ## Prerequisites
 
-### For Hash-Based Targets
+### For Commit Rewording
 
 - Any git repository
 - Target commit must exist
-
-### For Short ID Targets
-
-- Must be on a branch with upstream tracking configured
-- See `git-loom status` to view available short IDs
+- For shortIDs: must be on a branch with upstream tracking configured
 
 ### For Branch Renaming
 
 - Target branch must exist
 - Must provide `-m` with new name
+- Can use full branch name or shortid
 
 ## Examples
 
@@ -219,6 +228,22 @@ rather than using libgit2 APIs. This choice prioritizes:
 - **Transparency**: operations match what users would do manually
 
 Using native commands means git-loom is a workflow tool, not a git reimplementation.
+
+**Implementation: Self-as-Sequence-Editor**
+
+To non-interactively mark a specific commit for editing during rebase, git-loom
+uses a clever technique: it sets itself as the `GIT_SEQUENCE_EDITOR`:
+
+1. Start `git rebase -i` with `GIT_SEQUENCE_EDITOR="git-loom internal-sequence-edit <hash>"`
+2. Git calls git-loom to edit the todo file
+3. Git-loom replaces `pick <hash>` with `edit <hash>` and exits
+4. Rebase stops at that commit, ready for amending
+
+This approach:
+- Works reliably across platforms (no shell script files)
+- Avoids parsing rebase todo file formats in the main code path
+- Keeps the sequence editing logic separate and testable
+- Doesn't interfere with user's configured editor (used later during amend)
 
 ### Atomic Operations
 

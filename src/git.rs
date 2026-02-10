@@ -176,32 +176,58 @@ pub fn gather_repo_info(repo: &Repository) -> Result<RepoInfo, git2::Error> {
 
 /// Resolve a target identifier to a commit, branch, or file.
 ///
-/// This function first tries to resolve the target as a git reference (commit hash,
-/// branch name, etc.). If that fails, it falls back to resolving as a shortid.
+/// This function tries multiple resolution strategies in order:
+///
+/// # Resolution Strategy
+///
+/// 1. **Local branch names** - Exact match for local branch names
+///    - Branch names resolve to `Target::Branch(name)`
+///    - Example: "feature-a" → Target::Branch("feature-a")
+/// 2. **Git references** - Any valid git reference (hash, HEAD, etc.)
+///    - All other references resolve to `Target::Commit(hash)`
+///    - Example: "abc123" → Target::Commit(full_hash)
+/// 3. **ShortIDs** - Searches branches, commits, files in order
+///    - Branch shortids resolve to `Target::Branch(name)`
+///    - Commit shortids resolve to `Target::Commit(hash)`
+///    - File shortids resolve to `Target::File(path)`
+///
+/// This prioritization ensures branch names are always treated as branches,
+/// allowing intuitive operations like "git-loom reword feature-a -m new-name".
+/// To reference the commit at a branch tip, use its hash or commit shortid.
 ///
 /// # Arguments
 ///
 /// * `repo` - The git repository
-/// * `target` - The target identifier (git hash, shortid, branch name, etc.)
+/// * `target` - The target identifier (branch name, git hash, shortid, etc.)
 ///
 /// # Returns
 ///
 /// Returns a `Target` enum indicating what the identifier resolved to:
-/// - `Target::Commit(hash)` - A commit hash
-/// - `Target::Branch(name)` - A branch name
-/// - `Target::File(path)` - A file path
+/// - `Target::Branch(name)` - A branch name (from full name or branch shortid)
+/// - `Target::Commit(hash)` - A commit hash (from git ref or commit shortid)
+/// - `Target::File(path)` - A file path (from file shortid only)
 pub fn resolve_target(
     repo: &Repository,
     target: &str,
 ) -> Result<Target, Box<dyn std::error::Error>> {
-    // Try parsing as git hash (full or partial)
+    // First, check if it's a local branch name
+    // This allows intuitive branch operations: "git-loom reword feature-a -m new-name"
+    if let Ok(branch) = repo.find_branch(target, BranchType::Local) {
+        let branch_name = branch
+            .name()?
+            .ok_or("Branch name is not valid UTF-8")?
+            .to_string();
+        return Ok(Target::Branch(branch_name));
+    }
+
+    // Try parsing as git reference (commit hash, HEAD, etc.)
     if let Ok(obj) = repo.revparse_single(target)
         && let Some(commit) = obj.as_commit()
     {
         return Ok(Target::Commit(commit.id().to_string()));
     }
 
-    // Not a valid git hash - try as shortid
+    // Not a valid git reference - try as shortid
     // This requires building the full graph (needs upstream)
     resolve_shortid(repo, target)
 }
