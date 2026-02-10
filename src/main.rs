@@ -4,6 +4,9 @@ mod reword;
 mod shortid;
 mod status;
 
+#[cfg(test)]
+mod test_helpers;
+
 use clap::{Parser, Subcommand};
 use colored::control;
 

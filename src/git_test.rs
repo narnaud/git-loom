@@ -1,121 +1,14 @@
-use std::fs;
-use std::path::Path;
-
-use git2::{BranchType, Repository, Signature};
+use git2::BranchType;
 
 use crate::git::gather_repo_info;
-
-/// Create a signature for test commits.
-fn sig() -> Signature<'static> {
-    Signature::now("Test", "test@test.com").unwrap()
-}
-
-/// Create a commit on the current HEAD (or as initial commit if repo is empty).
-/// Returns the new commit OID.
-fn make_commit(repo: &Repository, message: &str) -> git2::Oid {
-    let sig = sig();
-    let tree_id = {
-        let mut index = repo.index().unwrap();
-        index.write_tree().unwrap()
-    };
-    let tree = repo.find_tree(tree_id).unwrap();
-
-    if let Ok(head) = repo.head() {
-        let parent = repo.find_commit(head.target().unwrap()).unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])
-            .unwrap()
-    } else {
-        repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[])
-            .unwrap()
-    }
-}
-
-/// Create a commit that touches a file (so working tree changes can be tested).
-fn make_commit_with_file(repo: &Repository, message: &str, filename: &str) -> git2::Oid {
-    let path = repo.workdir().unwrap().join(filename);
-    fs::write(&path, message).unwrap();
-
-    let mut index = repo.index().unwrap();
-    index.add_path(Path::new(filename)).unwrap();
-    index.write().unwrap();
-
-    let tree_id = index.write_tree().unwrap();
-    let tree = repo.find_tree(tree_id).unwrap();
-    let sig = sig();
-
-    if let Ok(head) = repo.head() {
-        let parent = repo.find_commit(head.target().unwrap()).unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])
-            .unwrap()
-    } else {
-        repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[])
-            .unwrap()
-    }
-}
-
-/// Create a merge commit combining two parent commits.
-fn make_merge_commit(
-    repo: &Repository,
-    message: &str,
-    parent1_oid: git2::Oid,
-    parent2_oid: git2::Oid,
-) -> git2::Oid {
-    let sig = sig();
-    let p1 = repo.find_commit(parent1_oid).unwrap();
-    let p2 = repo.find_commit(parent2_oid).unwrap();
-    let tree = repo.find_tree(p1.tree_id()).unwrap();
-    repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&p1, &p2])
-        .unwrap()
-}
-
-/// Set up a test repo with a "remote" (bare repo) and a working clone.
-/// The working clone has one initial commit pushed to origin/main, and an
-/// "integration" branch tracking origin/main.
-/// Returns (working repo, path to temp dir).
-fn setup_repo() -> (Repository, tempfile::TempDir) {
-    let dir = tempfile::tempdir().unwrap();
-
-    // Create a bare "remote"
-    let remote_path = dir.path().join("remote.git");
-    let remote_repo = Repository::init_bare(&remote_path).unwrap();
-
-    // Create initial commit in the bare repo so it has a main branch
-    {
-        let sig = sig();
-        let tree_id = {
-            let mut index = remote_repo.index().unwrap();
-            index.write_tree().unwrap()
-        };
-        let tree = remote_repo.find_tree(tree_id).unwrap();
-        remote_repo
-            .commit(Some("refs/heads/main"), &sig, &sig, "Initial", &tree, &[])
-            .unwrap();
-    }
-
-    // Clone it
-    let work_path = dir.path().join("work");
-    let repo = Repository::clone(remote_path.to_str().unwrap(), &work_path).unwrap();
-
-    // Create integration branch pointing at main, tracking origin/main
-    {
-        let head_commit = repo.head().unwrap().peel_to_commit().unwrap();
-        repo.branch("integration", &head_commit, false).unwrap();
-        repo.set_head("refs/heads/integration").unwrap();
-
-        // Set upstream tracking
-        let mut integration = repo.find_branch("integration", BranchType::Local).unwrap();
-        integration.set_upstream(Some("origin/main")).unwrap();
-    }
-
-    (repo, dir)
-}
+use crate::test_helpers::TestRepo;
 
 // ── Tests ──────────────────────────────────────────────────────────────
 
 #[test]
 fn no_commits_ahead_of_upstream() {
-    let (repo, _dir) = setup_repo();
-    let info = gather_repo_info(&repo).unwrap();
+    let test_repo = TestRepo::new_with_remote();
+    let info = gather_repo_info(&test_repo.repo).unwrap();
 
     assert!(info.commits.is_empty());
     assert!(info.branches.is_empty());
@@ -125,13 +18,13 @@ fn no_commits_ahead_of_upstream() {
 
 #[test]
 fn commits_without_branches() {
-    let (repo, _dir) = setup_repo();
+    let test_repo = TestRepo::new_with_remote();
 
-    make_commit(&repo, "First");
-    make_commit(&repo, "Second");
-    make_commit(&repo, "Third");
+    test_repo.commit_empty("First");
+    test_repo.commit_empty("Second");
+    test_repo.commit_empty("Third");
 
-    let info = gather_repo_info(&repo).unwrap();
+    let info = gather_repo_info(&test_repo.repo).unwrap();
 
     assert_eq!(info.commits.len(), 3);
     assert_eq!(info.commits[0].message, "Third");
@@ -143,16 +36,16 @@ fn commits_without_branches() {
 
 #[test]
 fn single_feature_branch() {
-    let (repo, _dir) = setup_repo();
+    let test_repo = TestRepo::new_with_remote();
 
-    make_commit(&repo, "A1");
-    let a2_oid = make_commit(&repo, "A2");
+    test_repo.commit_empty("A1");
+    let a2_oid = test_repo.commit_empty("A2");
 
     // Create feature-a branch at current HEAD
-    let commit = repo.find_commit(a2_oid).unwrap();
-    repo.branch("feature-a", &commit, false).unwrap();
+    let commit = test_repo.repo.find_commit(a2_oid).unwrap();
+    test_repo.repo.branch("feature-a", &commit, false).unwrap();
 
-    let info = gather_repo_info(&repo).unwrap();
+    let info = gather_repo_info(&test_repo.repo).unwrap();
 
     assert_eq!(info.commits.len(), 2);
     assert_eq!(info.branches.len(), 1);
@@ -162,30 +55,30 @@ fn single_feature_branch() {
 
 #[test]
 fn multiple_independent_branches() {
-    let (repo, _dir) = setup_repo();
+    let test_repo = TestRepo::new_with_remote();
 
     // feature-a: A1 on top of upstream
-    make_commit(&repo, "A1");
-    let a1_oid = repo.head().unwrap().target().unwrap();
-    let a1_commit = repo.find_commit(a1_oid).unwrap();
-    repo.branch("feature-a", &a1_commit, false).unwrap();
+    test_repo.commit_empty("A1");
+    let a1_oid = test_repo.repo.head().unwrap().target().unwrap();
+    let a1_commit = test_repo.repo.find_commit(a1_oid).unwrap();
+    test_repo.repo.branch("feature-a", &a1_commit, false).unwrap();
 
     // Merge feature-a into integration (creates a merge commit)
-    let upstream_oid = repo
+    let upstream_oid = test_repo.repo
         .find_branch("origin/main", BranchType::Remote)
         .unwrap()
         .get()
         .target()
         .unwrap();
-    make_merge_commit(&repo, "Merge feature-a", a1_oid, upstream_oid);
+    test_repo.commit_merge("Merge feature-a", a1_oid, upstream_oid);
 
     // feature-b: B1 on top of the merge
-    make_commit(&repo, "B1");
-    let b1_oid = repo.head().unwrap().target().unwrap();
-    let b1_commit = repo.find_commit(b1_oid).unwrap();
-    repo.branch("feature-b", &b1_commit, false).unwrap();
+    test_repo.commit_empty("B1");
+    let b1_oid = test_repo.repo.head().unwrap().target().unwrap();
+    let b1_commit = test_repo.repo.find_commit(b1_oid).unwrap();
+    test_repo.repo.branch("feature-b", &b1_commit, false).unwrap();
 
-    let info = gather_repo_info(&repo).unwrap();
+    let info = gather_repo_info(&test_repo.repo).unwrap();
 
     // Merge commit should be filtered out
     let messages: Vec<&str> = info.commits.iter().map(|c| c.message.as_str()).collect();
@@ -206,21 +99,21 @@ fn multiple_independent_branches() {
 
 #[test]
 fn stacked_branches() {
-    let (repo, _dir) = setup_repo();
+    let test_repo = TestRepo::new_with_remote();
 
     // feature-a: A1, A2
-    make_commit(&repo, "A1");
-    let a2_oid = make_commit(&repo, "A2");
-    let a2_commit = repo.find_commit(a2_oid).unwrap();
-    repo.branch("feature-a", &a2_commit, false).unwrap();
+    test_repo.commit_empty("A1");
+    let a2_oid = test_repo.commit_empty("A2");
+    let a2_commit = test_repo.repo.find_commit(a2_oid).unwrap();
+    test_repo.repo.branch("feature-a", &a2_commit, false).unwrap();
 
     // feature-b: B1, B2 on top of feature-a
-    make_commit(&repo, "B1");
-    let b2_oid = make_commit(&repo, "B2");
-    let b2_commit = repo.find_commit(b2_oid).unwrap();
-    repo.branch("feature-b", &b2_commit, false).unwrap();
+    test_repo.commit_empty("B1");
+    let b2_oid = test_repo.commit_empty("B2");
+    let b2_commit = test_repo.repo.find_commit(b2_oid).unwrap();
+    test_repo.repo.branch("feature-b", &b2_commit, false).unwrap();
 
-    let info = gather_repo_info(&repo).unwrap();
+    let info = gather_repo_info(&test_repo.repo).unwrap();
 
     assert_eq!(info.commits.len(), 4);
     assert_eq!(info.commits[0].message, "B2");
@@ -237,22 +130,22 @@ fn stacked_branches() {
 
 #[test]
 fn merge_commits_are_filtered() {
-    let (repo, _dir) = setup_repo();
+    let test_repo = TestRepo::new_with_remote();
 
-    let c1_oid = make_commit(&repo, "C1");
+    let c1_oid = test_repo.commit_empty("C1");
 
     // Create a side branch from upstream, then merge it
-    let upstream_oid = repo
+    let upstream_oid = test_repo.repo
         .find_branch("origin/main", BranchType::Remote)
         .unwrap()
         .get()
         .target()
         .unwrap();
 
-    make_merge_commit(&repo, "Merge side branch", c1_oid, upstream_oid);
-    make_commit(&repo, "C2");
+    test_repo.commit_merge("Merge side branch", c1_oid, upstream_oid);
+    test_repo.commit_empty("C2");
 
-    let info = gather_repo_info(&repo).unwrap();
+    let info = gather_repo_info(&test_repo.repo).unwrap();
 
     let messages: Vec<&str> = info.commits.iter().map(|c| c.message.as_str()).collect();
     assert_eq!(messages, vec!["C2", "C1"]);
@@ -260,47 +153,38 @@ fn merge_commits_are_filtered() {
 
 #[test]
 fn detached_head_returns_error() {
-    let (repo, _dir) = setup_repo();
+    let test_repo = TestRepo::new_with_remote();
 
-    let head_oid = repo.head().unwrap().target().unwrap();
-    repo.set_head_detached(head_oid).unwrap();
+    let head_oid = test_repo.repo.head().unwrap().target().unwrap();
+    test_repo.repo.set_head_detached(head_oid).unwrap();
 
-    let result = gather_repo_info(&repo);
+    let result = gather_repo_info(&test_repo.repo);
     assert!(result.is_err());
     assert!(result.unwrap_err().message().contains("detached"));
 }
 
 #[test]
 fn no_upstream_returns_error() {
-    let dir = tempfile::tempdir().unwrap();
-    let repo = Repository::init(dir.path()).unwrap();
+    let test_repo = TestRepo::new();
 
-    // Create an initial commit so HEAD exists
-    let sig = sig();
-    let tree_id = repo.index().unwrap().write_tree().unwrap();
-    let tree = repo.find_tree(tree_id).unwrap();
-    repo.commit(Some("HEAD"), &sig, &sig, "Init", &tree, &[])
-        .unwrap();
-
-    let result = gather_repo_info(&repo);
+    let result = gather_repo_info(&test_repo.repo);
     assert!(result.is_err());
     assert!(result.unwrap_err().message().contains("upstream"));
 }
 
 #[test]
 fn working_tree_changes_detected() {
-    let (repo, _dir) = setup_repo();
+    let test_repo = TestRepo::new_with_remote();
 
-    make_commit_with_file(&repo, "base", "tracked.txt");
+    test_repo.commit("base", "tracked.txt");
 
     // Modify a tracked file
-    let workdir = repo.workdir().unwrap();
-    fs::write(workdir.join("tracked.txt"), "modified").unwrap();
+    test_repo.write_file("tracked.txt", "modified");
 
     // Add an untracked file
-    fs::write(workdir.join("untracked.txt"), "new").unwrap();
+    test_repo.write_file("untracked.txt", "new");
 
-    let info = gather_repo_info(&repo).unwrap();
+    let info = gather_repo_info(&test_repo.repo).unwrap();
 
     let paths: Vec<&str> = info
         .working_changes
@@ -327,49 +211,26 @@ fn working_tree_changes_detected() {
 
 #[test]
 fn no_working_changes_when_clean() {
-    let (repo, _dir) = setup_repo();
+    let test_repo = TestRepo::new_with_remote();
 
-    let info = gather_repo_info(&repo).unwrap();
+    let info = gather_repo_info(&test_repo.repo).unwrap();
     assert!(info.working_changes.is_empty());
 }
 
 #[test]
 fn upstream_ahead_of_merge_base() {
-    let (repo, _dir) = setup_repo();
+    let test_repo = TestRepo::new_with_remote();
 
     // Make a commit on the integration branch
-    make_commit(&repo, "Local work");
+    test_repo.commit_empty("Local work");
 
     // Push new commits to origin/main (simulate upstream moving ahead)
-    // We do this by adding commits directly to the remote's main branch
-    let remote_path = _dir.path().join("remote.git");
-    let remote_repo = Repository::open_bare(&remote_path).unwrap();
-    {
-        let sig = sig();
-        let main_oid = remote_repo
-            .find_branch("main", BranchType::Local)
-            .unwrap()
-            .get()
-            .target()
-            .unwrap();
-        let parent = remote_repo.find_commit(main_oid).unwrap();
-        let tree = parent.tree().unwrap();
-        let c1 = remote_repo
-            .commit(Some("refs/heads/main"), &sig, &sig, "Remote 1", &tree, &[&parent])
-            .unwrap();
-        let c1_commit = remote_repo.find_commit(c1).unwrap();
-        remote_repo
-            .commit(Some("refs/heads/main"), &sig, &sig, "Remote 2", &tree, &[&c1_commit])
-            .unwrap();
-    }
+    test_repo.add_remote_commits(&["Remote 1", "Remote 2"]);
 
     // Fetch to update origin/main in the working repo
-    repo.find_remote("origin")
-        .unwrap()
-        .fetch(&["main"], None, None)
-        .unwrap();
+    test_repo.fetch_remote();
 
-    let info = gather_repo_info(&repo).unwrap();
+    let info = gather_repo_info(&test_repo.repo).unwrap();
 
     // Upstream is 2 commits ahead of the merge-base (which is the original "Initial" commit)
     assert_eq!(info.upstream.commits_ahead, 2);
@@ -380,22 +241,22 @@ fn upstream_ahead_of_merge_base() {
 
 #[test]
 fn branch_at_upstream_is_not_detected() {
-    let (repo, _dir) = setup_repo();
+    let test_repo = TestRepo::new_with_remote();
 
     // Create a branch pointing at the upstream commit (not ahead)
-    let upstream_oid = repo
+    let upstream_oid = test_repo.repo
         .find_branch("origin/main", BranchType::Remote)
         .unwrap()
         .get()
         .target()
         .unwrap();
-    let upstream_commit = repo.find_commit(upstream_oid).unwrap();
-    repo.branch("stale-branch", &upstream_commit, false)
+    let upstream_commit = test_repo.repo.find_commit(upstream_oid).unwrap();
+    test_repo.repo.branch("stale-branch", &upstream_commit, false)
         .unwrap();
 
-    make_commit(&repo, "Ahead");
+    test_repo.commit_empty("Ahead");
 
-    let info = gather_repo_info(&repo).unwrap();
+    let info = gather_repo_info(&test_repo.repo).unwrap();
 
     let branch_names: Vec<&str> = info.branches.iter().map(|b| b.name.as_str()).collect();
     assert!(
@@ -407,30 +268,13 @@ fn branch_at_upstream_is_not_detected() {
 
 // ── Tests for target resolution ────────────────────────────────────────
 
-/// Create a simple test repo without upstream (for resolve_target tests).
-fn setup_simple_repo() -> (Repository, tempfile::TempDir) {
-    let dir = tempfile::tempdir().unwrap();
-    let repo = Repository::init(dir.path()).unwrap();
-
-    // Create an initial commit
-    {
-        let sig = sig();
-        let tree_id = repo.index().unwrap().write_tree().unwrap();
-        let tree = repo.find_tree(tree_id).unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
-            .unwrap();
-    }
-
-    (repo, dir)
-}
-
 #[test]
 fn resolve_full_commit_hash() {
-    let (repo, _dir) = setup_simple_repo();
-    make_commit_with_file(&repo, "Second commit", "file.txt");
+    let test_repo = TestRepo::new();
+    test_repo.commit("Second commit", "file.txt");
 
-    let head_oid = repo.head().unwrap().target().unwrap();
-    let result = crate::git::resolve_target(&repo, &head_oid.to_string());
+    let head_oid = test_repo.repo.head().unwrap().target().unwrap();
+    let result = crate::git::resolve_target(&test_repo.repo, &head_oid.to_string());
 
     assert!(result.is_ok());
     match result.unwrap() {
@@ -442,12 +286,12 @@ fn resolve_full_commit_hash() {
 
 #[test]
 fn resolve_partial_commit_hash() {
-    let (repo, _dir) = setup_simple_repo();
-    make_commit_with_file(&repo, "Second commit", "file.txt");
+    let test_repo = TestRepo::new();
+    test_repo.commit("Second commit", "file.txt");
 
-    let head_oid = repo.head().unwrap().target().unwrap();
+    let head_oid = test_repo.repo.head().unwrap().target().unwrap();
     let partial_hash = &head_oid.to_string()[..7];
-    let result = crate::git::resolve_target(&repo, partial_hash);
+    let result = crate::git::resolve_target(&test_repo.repo, partial_hash);
 
     assert!(result.is_ok());
     match result.unwrap() {
@@ -459,9 +303,9 @@ fn resolve_partial_commit_hash() {
 
 #[test]
 fn resolve_invalid_target_fails() {
-    let (repo, _dir) = setup_simple_repo();
+    let test_repo = TestRepo::new();
 
-    let result = crate::git::resolve_target(&repo, "nonexistent");
+    let result = crate::git::resolve_target(&test_repo.repo, "nonexistent");
 
     // Without upstream, shortid resolution should fail because gather_repo_info fails
     assert!(result.is_err());
