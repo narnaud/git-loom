@@ -32,6 +32,28 @@ pub struct RepoInfo {
     pub working_changes: Vec<FileChange>,
 }
 
+impl RepoInfo {
+    /// Build a list of entities for shortid allocation.
+    /// Returns entities in the order: Unstaged, Branches, Commits, Files.
+    pub fn collect_entities(&self) -> Vec<crate::shortid::Entity> {
+        let mut entities = vec![crate::shortid::Entity::Unstaged];
+
+        for branch in &self.branches {
+            entities.push(crate::shortid::Entity::Branch(branch.name.clone()));
+        }
+
+        for commit in &self.commits {
+            entities.push(crate::shortid::Entity::Commit(commit.oid));
+        }
+
+        for file in &self.working_changes {
+            entities.push(crate::shortid::Entity::File(file.path.clone()));
+        }
+
+        entities
+    }
+}
+
 /// A single non-merge commit in the range upstream..HEAD.
 #[derive(Debug)]
 pub struct CommitInfo {

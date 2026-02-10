@@ -1,5 +1,5 @@
 use crate::git::{CommitInfo, FileChange, RepoInfo, UpstreamInfo};
-use crate::shortid::{Entity, IdAllocator};
+use crate::shortid::IdAllocator;
 use colored::{Color, Colorize};
 use std::collections::HashMap;
 use std::fmt::Write;
@@ -52,8 +52,9 @@ enum Section {
 
 /// Build sections from repo data and render them as a UTF-8 graph string.
 pub fn render(info: RepoInfo) -> String {
+    let ids = IdAllocator::new(info.collect_entities());
     let sections = build_sections(info);
-    render_sections(&sections)
+    render_sections(&sections, &ids)
 }
 
 // ── Section building ────────────────────────────────────────────────────
@@ -135,40 +136,15 @@ fn is_stacked_with_next(sections: &[Section], idx: usize) -> bool {
 /// Render sections as a UTF-8 graph. Stacked branches (where the last commit
 /// of a branch is a parent of the first commit of the next) are connected
 /// with `││` and `│├─`, while independent branches get `├╯` then `│╭─`.
-fn render_sections(sections: &[Section]) -> String {
+fn render_sections(sections: &[Section], ids: &IdAllocator) -> String {
     let mut out = String::new();
     let last_idx = sections.len() - 1;
     let mut branch_color_idx: usize = 0;
 
-    // Collect all entities for short ID allocation
-    let mut entities = vec![Entity::Unstaged];
-    for section in sections {
-        match section {
-            Section::Branch { name, commits } => {
-                entities.push(Entity::Branch(name.clone()));
-                for commit in commits {
-                    entities.push(Entity::Commit(commit.oid));
-                }
-            }
-            Section::Loose(commits) => {
-                for commit in commits {
-                    entities.push(Entity::Commit(commit.oid));
-                }
-            }
-            Section::WorkingChanges(files) => {
-                for file in files {
-                    entities.push(Entity::File(file.path.clone()));
-                }
-            }
-            Section::Upstream(_) => {}
-        }
-    }
-    let ids = IdAllocator::new(entities);
-
     for (idx, section) in sections.iter().enumerate() {
         match section {
             Section::WorkingChanges(changes) => {
-                render_working_changes(&mut out, changes, &ids);
+                render_working_changes(&mut out, changes, ids);
             }
             Section::Branch { name, commits } => {
                 let dot_color = BRANCH_DOT_COLORS[branch_color_idx % BRANCH_DOT_COLORS.len()];
@@ -185,11 +161,11 @@ fn render_sections(sections: &[Section]) -> String {
                     prev_stacked,
                     next_stacked,
                     idx < last_idx,
-                    &ids,
+                    ids,
                 );
             }
             Section::Loose(commits) => {
-                render_loose(&mut out, commits, idx < last_idx, &ids);
+                render_loose(&mut out, commits, idx < last_idx, ids);
             }
             Section::Upstream(info) => {
                 render_upstream(&mut out, info);
