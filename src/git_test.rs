@@ -404,3 +404,72 @@ fn branch_at_upstream_is_not_detected() {
         branch_names
     );
 }
+
+// ── Tests for target resolution ────────────────────────────────────────
+
+/// Create a simple test repo without upstream (for resolve_target tests).
+fn setup_simple_repo() -> (Repository, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = Repository::init(dir.path()).unwrap();
+
+    // Create an initial commit
+    {
+        let sig = sig();
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
+            .unwrap();
+    }
+
+    (repo, dir)
+}
+
+#[test]
+fn resolve_full_commit_hash() {
+    let (repo, _dir) = setup_simple_repo();
+    make_commit_with_file(&repo, "Second commit", "file.txt");
+
+    let head_oid = repo.head().unwrap().target().unwrap();
+    let result = crate::git::resolve_target(&repo, &head_oid.to_string());
+
+    assert!(result.is_ok());
+    match result.unwrap() {
+        crate::git::Target::Commit(hash) => assert_eq!(hash, head_oid.to_string()),
+        crate::git::Target::Branch(_) => panic!("Expected Commit, got Branch"),
+        crate::git::Target::File(_) => panic!("Expected Commit, got File"),
+    }
+}
+
+#[test]
+fn resolve_partial_commit_hash() {
+    let (repo, _dir) = setup_simple_repo();
+    make_commit_with_file(&repo, "Second commit", "file.txt");
+
+    let head_oid = repo.head().unwrap().target().unwrap();
+    let partial_hash = &head_oid.to_string()[..7];
+    let result = crate::git::resolve_target(&repo, partial_hash);
+
+    assert!(result.is_ok());
+    match result.unwrap() {
+        crate::git::Target::Commit(hash) => assert_eq!(hash, head_oid.to_string()),
+        crate::git::Target::Branch(_) => panic!("Expected Commit, got Branch"),
+        crate::git::Target::File(_) => panic!("Expected Commit, got File"),
+    }
+}
+
+#[test]
+fn resolve_invalid_target_fails() {
+    let (repo, _dir) = setup_simple_repo();
+
+    let result = crate::git::resolve_target(&repo, "nonexistent");
+
+    // Without upstream, shortid resolution should fail because gather_repo_info fails
+    assert!(result.is_err());
+    let err_msg = result.unwrap_err().to_string();
+    // Error should mention either "upstream" or "shortid"
+    assert!(
+        err_msg.contains("upstream") || err_msg.contains("shortid"),
+        "Expected error about upstream or shortid, got: {}",
+        err_msg
+    );
+}

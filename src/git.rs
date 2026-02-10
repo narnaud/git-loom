@@ -1,6 +1,17 @@
 use chrono::{DateTime, Utc};
 use git2::{BranchType, Repository, StatusOptions};
 
+/// What a target identifier resolved to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Target {
+    /// A commit (full or partial hash).
+    Commit(String),
+    /// A branch name.
+    Branch(String),
+    /// A file path.
+    File(String),
+}
+
 /// Info about the upstream tracking branch and the merge-base with HEAD.
 #[derive(Debug)]
 pub struct UpstreamInfo {
@@ -161,6 +172,78 @@ pub fn gather_repo_info(repo: &Repository) -> Result<RepoInfo, git2::Error> {
         branches,
         working_changes,
     })
+}
+
+/// Resolve a target identifier to a commit, branch, or file.
+///
+/// This function first tries to resolve the target as a git reference (commit hash,
+/// branch name, etc.). If that fails, it falls back to resolving as a shortid.
+///
+/// # Arguments
+///
+/// * `repo` - The git repository
+/// * `target` - The target identifier (git hash, shortid, branch name, etc.)
+///
+/// # Returns
+///
+/// Returns a `Target` enum indicating what the identifier resolved to:
+/// - `Target::Commit(hash)` - A commit hash
+/// - `Target::Branch(name)` - A branch name
+/// - `Target::File(path)` - A file path
+pub fn resolve_target(
+    repo: &Repository,
+    target: &str,
+) -> Result<Target, Box<dyn std::error::Error>> {
+    // Try parsing as git hash (full or partial)
+    if let Ok(obj) = repo.revparse_single(target)
+        && let Some(commit) = obj.as_commit()
+    {
+        return Ok(Target::Commit(commit.id().to_string()));
+    }
+
+    // Not a valid git hash - try as shortid
+    // This requires building the full graph (needs upstream)
+    resolve_shortid(repo, target)
+}
+
+/// Resolve a shortid to a commit, branch, or file by rebuilding the graph.
+fn resolve_shortid(
+    repo: &Repository,
+    shortid: &str,
+) -> Result<Target, Box<dyn std::error::Error>> {
+    // Gather repo info (this checks for upstream and builds the graph)
+    let info = gather_repo_info(repo)?;
+
+    // Build entities using the shared method
+    let entities = info.collect_entities();
+    let allocator = crate::shortid::IdAllocator::new(entities);
+
+    // Search for matching shortid in branches
+    for branch in &info.branches {
+        if allocator.get_branch(&branch.name) == shortid {
+            return Ok(Target::Branch(branch.name.clone()));
+        }
+    }
+
+    // Search for matching shortid in commits
+    for commit in &info.commits {
+        if allocator.get_commit(commit.oid) == shortid {
+            return Ok(Target::Commit(commit.oid.to_string()));
+        }
+    }
+
+    // Search for matching shortid in files
+    for file in &info.working_changes {
+        if allocator.get_file(&file.path) == shortid {
+            return Ok(Target::File(file.path.clone()));
+        }
+    }
+
+    Err(format!(
+        "No commit, branch, or file with shortid '{}'. Run 'git-loom status' to see available IDs.",
+        shortid
+    )
+    .into())
 }
 
 /// Count the number of commits reachable from `from` but not from `hide`.

@@ -238,6 +238,98 @@ Added to the color palette in `graph.rs`. Short IDs are always rendered with
   using word structure and greedy candidate selection to avoid unnecessary
   extension. Only commits (hex hashes) may require 3+ characters.
 
+## Resolving Short IDs
+
+Short IDs are designed for display **and** for user input. Commands that accept
+entity identifiers (like `git-loom reword`) can resolve both git references and
+short IDs using shared resolution logic.
+
+### Resolution API
+
+The resolution system lives in the `git` module (`git.rs`), making it available
+to all commands. It provides a universal way to map user input to entities.
+
+**Public types:**
+
+```rust
+pub enum Target {
+    Commit(String),  // Full commit hash
+    Branch(String),  // Branch name
+    File(String),    // File path
+}
+
+pub fn resolve_target(
+    repo: &Repository,
+    target: &str,
+) -> Result<Target, Box<dyn std::error::Error>>;
+```
+
+### Resolution Strategy
+
+The `resolve_target` function tries multiple strategies in order:
+
+**1. Git native references (tried first)**
+
+Uses `repo.revparse_single()` to check if the target is a valid git object:
+
+- Full commit hashes: `abc123def456...`
+- Partial hashes: `abc123` (minimum 4 characters)
+- Symbolic refs: `HEAD`, `HEAD~2`, `main`, `origin/main`
+- Any valid git revision syntax
+
+If resolved, returns `Target::Commit(hash)` with the full commit hash.
+
+**2. Short ID lookup (tried second)**
+
+If git resolution fails, treat the input as a short ID:
+
+- Calls `gather_repo_info()` to build the full graph (requires upstream)
+- Uses `collect_entities()` to gather all entities in display order
+- Creates an `IdAllocator` with the same algorithm as status rendering
+- Searches for a matching short ID in this order:
+  1. **Branches** - if match found, returns `Target::Branch(name)`
+  2. **Commits** - if match found, returns `Target::Commit(hash)`
+  3. **Files** - if match found, returns `Target::File(path)`
+
+If no match is found, returns an error suggesting the user run
+`git-loom status` to see available IDs.
+
+### Why This Order?
+
+Git references are checked first because:
+
+- **Speed**: `revparse_single` is instant; short ID resolution requires
+  building the entire commit graph
+- **Universality**: works in any repository state, not just when upstream
+  is configured
+- **Compatibility**: supports any git syntax users already know
+
+Short IDs are a convenience layer on top of standard git operations, not a
+replacement.
+
+### Consistency Guarantees
+
+The resolution system ensures that **what you see is what you type**:
+
+- Both `git-loom status` and `resolve_target` use `collect_entities()` with
+  the same entity order
+- Both use the same `IdAllocator` collision resolution algorithm
+- A short ID visible in status output will always resolve to the same entity
+
+This consistency is maintained by:
+
+1. Sharing the `collect_entities()` method on `RepoInfo`
+2. Using identical entity ordering (Unstaged, Branches, Commits, Files)
+3. Recomputing IDs on every invocation (no stale caches)
+
+### Prerequisites for Short ID Resolution
+
+- Current branch must have upstream tracking configured
+- Repository must be in a state where `gather_repo_info()` succeeds
+- Target must match a short ID shown in `git-loom status`
+
+Git reference resolution has no prerequisites (works in any repository).
+
 ## Design Decisions
 
 - **Global collision resolution:** all entity types share one ID namespace.
