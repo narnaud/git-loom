@@ -70,9 +70,10 @@ fn reword_commit(
         rebase_cmd.arg(format!("{}^", commit_hash));
     }
 
-    let status = rebase_cmd.status()?;
-    if !status.success() {
-        return Err("Git rebase failed to start".into());
+    let output = rebase_cmd.output()?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Git rebase failed to start:\n{}", stderr).into());
     }
 
     // Step 2: Amend the commit message
@@ -85,30 +86,41 @@ fn reword_commit(
         amend_cmd.args(["-m", &msg]);
     }
 
-    let status = amend_cmd.status()?;
-    if !status.success() {
+    let output = amend_cmd.output()?;
+    if !output.status.success() {
         // Abort the rebase on failure
         let _ = Command::new("git")
             .current_dir(workdir)
             .args(["rebase", "--abort"])
-            .status();
-        return Err("Git commit --amend failed".into());
+            .output();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Git commit --amend failed:\n{}", stderr).into());
     }
 
     // Step 3: Continue the rebase
-    let status = Command::new("git")
+    let output = Command::new("git")
         .current_dir(workdir)
         .args(["rebase", "--continue"])
-        .status()?;
+        .output()?;
 
-    if !status.success() {
+    if !output.status.success() {
         // Abort the rebase on failure for consistency
         let _ = Command::new("git")
             .current_dir(workdir)
             .args(["rebase", "--abort"])
-            .status();
-        return Err("Git rebase --continue failed. Rebase aborted.".into());
+            .output();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Git rebase --continue failed. Rebase aborted:\n{}", stderr).into());
     }
+
+    // Get the new commit hash after rebase
+    let new_commit = repo.head()?.peel_to_commit()?;
+    let new_hash = new_commit.id().to_string();
+
+    // Show success message with old and new hashes
+    let old_short = &commit_hash[..7.min(commit_hash.len())];
+    let new_short = &new_hash[..7];
+    println!("Updated commit message for {} (now {})", old_short, new_short);
 
     Ok(())
 }
