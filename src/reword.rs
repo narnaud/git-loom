@@ -42,26 +42,13 @@ fn reword_commit(
     // Step 1: Start interactive rebase
     let short_hash = &commit_hash[..7.min(commit_hash.len())];
 
-    // Sequence editor that changes 'pick' to 'edit' for our target commit
-    let sequence_editor = if cfg!(windows) {
-        // On Windows, create a temporary PowerShell script file
-        // This avoids issues with argument passing and shell escaping
-        // Use a unique filename to avoid conflicts when multiple operations run concurrently
-        let temp_dir = std::env::temp_dir();
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let script_path = temp_dir.join(format!("git-loom-reword-{}.ps1", timestamp));
-        let script_content = format!(
-            "param($file)\n(Get-Content $file) -replace '^pick {}', 'edit {}' | Set-Content $file\n",
-            short_hash, short_hash
-        );
-        std::fs::write(&script_path, script_content)?;
-        format!("powershell -ExecutionPolicy Bypass -File \"{}\"", script_path.display())
-    } else {
-        format!("sed -i 's/^pick {}/edit {}/'", short_hash, short_hash)
-    };
+    // Use git-loom itself as the sequence editor to replace 'pick' with 'edit'
+    let self_exe = loom_exe_path()?;
+    let sequence_editor = format!(
+        "\"{}\" internal-sequence-edit {}",
+        self_exe.display(),
+        short_hash
+    );
 
     let mut rebase_cmd = Command::new("git");
     rebase_cmd
@@ -148,6 +135,32 @@ fn reword_branch(
 
     println!("Renamed branch '{}' to '{}'", old_name, new_name);
     Ok(())
+}
+
+/// Resolve the path to the git-loom binary.
+///
+/// During `cargo test`, `current_exe()` returns the test harness binary in
+/// `target/<profile>/deps/`. The actual git-loom binary lives one level up
+/// in `target/<profile>/`. This function detects that case and returns the
+/// correct path.
+fn loom_exe_path() -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
+    let exe = std::env::current_exe()?;
+    if let Some(parent) = exe.parent()
+        && parent.file_name().and_then(|n| n.to_str()) == Some("deps")
+    {
+        let bin_name = if cfg!(windows) {
+            "git-loom.exe"
+        } else {
+            "git-loom"
+        };
+        if let Some(profile_dir) = parent.parent() {
+            let actual = profile_dir.join(bin_name);
+            if actual.exists() {
+                return Ok(actual);
+            }
+        }
+    }
+    Ok(exe)
 }
 
 #[cfg(test)]
