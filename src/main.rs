@@ -1,5 +1,6 @@
 mod git;
 mod graph;
+mod reword;
 mod shortid;
 mod status;
 
@@ -21,6 +22,14 @@ struct Cli {
 enum Command {
     /// Show the branch-aware status
     Status,
+    /// Reword a commit message or rename a branch
+    Reword {
+        /// Short ID or commit hash to reword
+        target: String,
+        /// New message (if not provided, opens editor)
+        #[arg(short, long)]
+        message: Option<String>,
+    },
 }
 
 fn main() {
@@ -32,6 +41,7 @@ fn main() {
 
     let result = match cli.command {
         None | Some(Command::Status) => status::run(),
+        Some(Command::Reword { target, message }) => reword::run(target, message),
     };
 
     if let Err(e) = result {
