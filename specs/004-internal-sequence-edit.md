@@ -35,7 +35,7 @@ Self-invocation eliminates all of these by keeping the logic in Rust.
 ## CLI
 
 ```bash
-git-loom internal-sequence-edit <short_hash> <todo_file>
+git-loom internal-sequence-edit <todo_file> --actions-json <json>
 ```
 
 This subcommand is **hidden** from `--help` output. It is not intended for
@@ -43,14 +43,13 @@ direct user invocation — git calls it automatically as the sequence editor.
 
 **Arguments:**
 
-- `<short_hash>`: The 7-character (or shorter) commit hash prefix to mark for
-  editing
-- `<todo_file>`: Path to the rebase todo file provided by git
+- `<todo_file>`: Path to the rebase todo file provided by git (positional argument)
+- `--actions-json <json>`: JSON-encoded list of rebase actions to apply
 
 **Exit codes:**
 
-- `0`: Success (hash found and replaced, or hash not found with warning)
-- `1`: I/O error reading or writing the todo file
+- `0`: Success (actions applied, or hashes not found with warning)
+- `1`: Error reading/writing the todo file or parsing JSON
 
 ## What Happens
 
@@ -62,20 +61,21 @@ pick def5678 Second commit
 pick 9876543 Third commit
 ```
 
-git-loom sets `GIT_SEQUENCE_EDITOR` to invoke itself:
+git-loom sets `GIT_SEQUENCE_EDITOR` to invoke itself with JSON-encoded actions:
 
 ```
-"<path-to-git-loom>" internal-sequence-edit abc1234
+"<path-to-git-loom>" internal-sequence-edit --actions-json '[{"Edit":{"short_hash":"abc1234"}}]'
 ```
 
-Git calls this command with the todo file path appended as the final argument.
-The handler:
+Git calls this command and automatically appends the todo file path as the final
+argument. The handler:
 
-1. Reads the todo file
-2. Finds the first line starting with `pick <short_hash>`
-3. Replaces `pick` with `edit` on that line
-4. Writes the modified file back
-5. If no matching line is found, emits a warning to stderr (non-fatal)
+1. Parses the JSON to extract rebase actions
+2. Reads the todo file
+3. For each action, uses regex-based parsing to identify matching lines
+4. Applies the specified modifications (e.g., replace `pick` with `edit`)
+5. Writes the modified file back
+6. If hashes are not found, emits warnings to stderr (non-fatal)
 
 After the edit, the todo file becomes:
 
@@ -91,25 +91,29 @@ continue the rebase.
 ## Integration with Reword
 
 The `reword` command (see **Spec 003**) constructs the sequence editor string
-in `reword_commit()`:
+using JSON-serialized actions:
 
 ```
 reword_commit()
     ↓
-loom_exe_path() → resolved binary path
+Build RebaseAction::Edit { short_hash }
     ↓
-format!("\"{}\" internal-sequence-edit {}", exe, short_hash)
+serde_json::to_string(&actions) → JSON
+    ↓
+format!("\"{}\" internal-sequence-edit --actions-json {}", exe, escaped_json)
     ↓
 passed as GIT_SEQUENCE_EDITOR to git rebase --interactive
     ↓
-git invokes: git-loom internal-sequence-edit <hash> <todo_file>
+git invokes: git-loom internal-sequence-edit --actions-json '[...]' <todo_file>
     ↓
-handle_sequence_edit() reads/rewrites the todo file
+serde_json::from_str() parses actions
+    ↓
+apply_actions_to_todo() reads/rewrites the todo file using structured parsing
 ```
 
-Future commands that need to manipulate the rebase todo (commit reordering,
-commit splitting, etc.) can reuse the same subcommand pattern, either directly
-or by extending it with additional actions.
+This JSON-based approach makes it easy to add future actions (Drop, Reorder,
+Squash, Fixup) without modifying the CLI interface. New operations simply add
+variants to the `RebaseAction` enum.
 
 ## Binary Path Resolution
 
@@ -130,6 +134,43 @@ up to date.
 
 ## Design Decisions
 
+### JSON-Encoded Actions for Extensibility
+
+Actions are passed as JSON rather than individual CLI flags (e.g., `--edit hash1
+--edit hash2`). This design choice provides:
+
+**Extensibility:**
+- Easy to add new action types (Drop, Reorder, Squash, Fixup)
+- Complex actions can include multiple parameters without CLI flag proliferation
+- Future operations like "move commit X after Y" work naturally
+
+**Type Safety:**
+- Serde handles serialization/deserialization with compile-time validation
+- The `RebaseAction` enum documents all possible operations
+- Invalid JSON fails fast with clear error messages
+
+**Simplicity:**
+- One `--actions-json` parameter instead of many action-specific flags
+- Internal API is cleaner: functions take `Vec<RebaseAction>`
+- Testing is easier: construct actions as Rust values, not CLI strings
+
+**Example:**
+```json
+[
+  {"Edit": {"short_hash": "abc1234"}},
+  {"Edit": {"short_hash": "def5678"}}
+]
+```
+
+Future actions might look like:
+```json
+[
+  {"Drop": {"short_hash": "abc1234"}},
+  {"Reorder": {"from_index": 2, "to_index": 5}},
+  {"Squash": {"target": "abc1234", "into": "def5678"}}
+]
+```
+
 ### Hidden Subcommand over Environment Variable
 
 An alternative would be a standalone helper binary or a mode triggered by an
@@ -148,15 +189,26 @@ git may format the todo differently than expected. The rebase will proceed, and
 the caller (`reword_commit`) will detect that the commit wasn't stopped at and
 report the failure at a higher level.
 
-### First Match Only
+### Multiple Actions Support
 
-Only the first `pick <hash>` line is replaced. This is intentional:
+The JSON format naturally supports multiple actions in a single invocation:
 
-- A commit hash appears at most once in a rebase todo
-- Stopping early avoids accidental edits if a hash prefix collides with
-  content in comment lines
-- Future multi-commit operations can extend the subcommand with additional
-  arguments rather than changing this behavior
+- Multiple `Edit` actions can mark several commits for editing
+- Each commit hash appears at most once in a rebase todo
+- Actions are processed in a single pass through the file
+- Hash prefix matching stops at the first match per action
+
+This design allows operations like:
+```bash
+# Mark multiple commits for editing in one rebase
+git-loom reword abc123 def456 ghi789
+```
+
+Future commands can combine different action types:
+```bash
+# Hypothetical: edit one commit, drop another, reorder a third
+git-loom amend-batch --edit abc123 --drop def456 --move ghi789:after:abc123
+```
 
 ### Automatic Abort on Rebase Failure
 

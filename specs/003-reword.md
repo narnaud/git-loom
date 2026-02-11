@@ -38,7 +38,7 @@ git-loom reword <target> [-m <message>]
 **Behavior:**
 
 - With `-m`: applies the change non-interactively
-- Without `-m`: opens the git editor for commits; errors for branches
+- Without `-m`: opens the git editor for commits; prompts interactively for branch names
 
 ## What Happens
 
@@ -70,8 +70,9 @@ ensuring hooks, configuration, and edge cases are handled correctly.
 
 ### When Target is a Branch
 
-The branch is renamed using `git branch -m`. This is a simple operation that
-requires the `-m` flag (since branches don't have "messages" to edit).
+The branch is renamed using `git branch -m`. When the `-m` flag is not provided,
+an interactive prompt asks for the new branch name, showing the current name as
+a placeholder for convenience.
 
 ## Target Resolution
 
@@ -116,7 +117,7 @@ For the reword command, file targets are rejected with an error message.
 ### For Branch Renaming
 
 - Target branch must exist
-- Must provide `-m` with new name
+- Can provide `-m` with new name, or use interactive prompt
 - Can use full branch name or shortid
 
 ## Examples
@@ -155,14 +156,23 @@ git-loom reword abc1234 -m "Initial commit with project structure"
 # Works on first commit despite having no parent
 ```
 
-### Rename branch
+### Rename branch interactively
 
 ```bash
 git-loom status
 # Shows: │╭─ fa [feature-a]
 
-git-loom reword fa -m feature-authentication
+git-loom reword fa
+# Prompts: ? New branch name › feature-a
+# User types: feature-authentication
 # Renames feature-a → feature-authentication
+```
+
+### Rename branch non-interactively
+
+```bash
+git-loom reword fa -m feature-authentication
+# Directly renames feature-a → feature-authentication without prompting
 ```
 
 ## Architecture
@@ -188,6 +198,7 @@ match Target:
 - **`git::resolve_target()`** - Shared resolution logic (see Spec 002)
 - **`git::gather_repo_info()`** - Used internally by resolve_target for short IDs
 - **`shortid::IdAllocator`** - Used internally by resolve_target for consistent IDs
+- **`cliclack`** - Interactive prompts for branch renaming without `-m` flag
 - **Native git commands** - All mutation operations (rebase, amend, branch rename)
 
 The reword module contains only the domain-specific logic for commit message
@@ -256,16 +267,24 @@ abort logic—the infrastructure handles cleanup automatically. This matches use
 expectations and prevents leaving the repository in a mid-rebase state that
 requires manual recovery.
 
-### Branch Renaming Requires -m
+### Branch Renaming: Interactive vs Non-Interactive
 
-While commit rewording can open an editor (showing the current message), branch
-renaming requires the `-m` flag. Why?
+Branch renaming supports both interactive and non-interactive workflows:
 
-- Branches have names, not multi-line messages
-- Opening an editor with just "feature-a" isn't useful
-- The operation is clearer when explicit: "rename X to Y"
+**Interactive (no `-m` flag):**
+- Uses `cliclack` for a polished command-line prompt
+- Shows the current branch name as a placeholder
+- Allows users to see and edit the name inline
+- Consistent with modern CLI tool UX expectations
 
-This asymmetry reflects the nature of the entities being modified.
+**Non-interactive (with `-m` flag):**
+- Ideal for scripts and automation
+- Direct: "rename X to Y" with no prompting
+- Backward compatible with existing workflows
+
+Unlike commit rewording (which opens a full editor), branch renaming uses a
+single-line prompt because branch names are simple strings, not multi-line
+messages. This makes the interactive experience quick and focused.
 
 ### Short ID Consistency
 
