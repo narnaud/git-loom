@@ -1,6 +1,6 @@
 use git2::Repository;
-use std::process::Command;
 
+use crate::git_commands::git_branch;
 use crate::git_commands::git_commit;
 use crate::git_commands::git_rebase::{self, Rebase, RebaseAction, RebaseTarget};
 
@@ -70,7 +70,7 @@ fn reword_commit(
 
     // Show success message with old and new hashes
     let old_short = &commit_hash[..7.min(commit_hash.len())];
-    let new_short = &new_hash[..7];
+    let new_short = &new_hash[..7.min(new_hash.len())];
     println!(
         "Updated commit message for {} (now {})",
         old_short, new_short
@@ -89,15 +89,7 @@ fn reword_branch(
         .workdir()
         .ok_or("Cannot rename branch in bare repository")?;
 
-    let output = Command::new("git")
-        .current_dir(workdir)
-        .args(["branch", "-m", old_name, new_name])
-        .output()?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Failed to rename branch: {}", stderr).into());
-    }
+    git_branch::rename(workdir, old_name, new_name)?;
 
     println!("Renamed branch '{}' to '{}'", old_name, new_name);
     Ok(())
