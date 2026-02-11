@@ -245,12 +245,16 @@ This approach:
 - Keeps the sequence editing logic separate and testable
 - Doesn't interfere with user's configured editor (used later during amend)
 
-### Atomic Operations
+### Automatic Abort on Failure
 
-If any step fails (rebase start, amend, continue), the operation aborts cleanly,
-rolling back to the original state. This matches user expectations: either the
-operation succeeds completely or nothing changes. Leaving a repository mid-rebase
-requires manual recovery that most users aren't equipped to handle.
+The rebase infrastructure (`git_commands::git_rebase`) provides automatic abort
+on failure at every step.
+
+This ensures atomic operations: either the reword succeeds completely or the
+repository is left in its original state. Callers don't need to implement
+abort logic—the infrastructure handles cleanup automatically. This matches user
+expectations and prevents leaving the repository in a mid-rebase state that
+requires manual recovery.
 
 ### Branch Renaming Requires -m
 

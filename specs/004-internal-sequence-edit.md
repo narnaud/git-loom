@@ -157,3 +157,20 @@ Only the first `pick <hash>` line is replaced. This is intentional:
   content in comment lines
 - Future multi-commit operations can extend the subcommand with additional
   arguments rather than changing this behavior
+
+### Automatic Abort on Rebase Failure
+
+The `git_commands::git_rebase` module provides automatic abort behavior to
+ensure atomic operations:
+
+- **`Rebase::run()`**: If the rebase fails to start (bad target, conflicts,
+  etc.), automatically calls `git rebase --abort` before returning the error
+- **`continue_rebase()`**: If continuation fails, automatically aborts the
+  rebase before returning the error
+
+This design choice means:
+
+- Callers don't need to implement abort logic in every error path
+- The repository is never left in a mid-rebase state requiring manual recovery
+- Error handling is simplified: just use `?` and let the infrastructure clean up
+- Future rebase-based commands get this safety automatically
