@@ -54,6 +54,7 @@ impl<'a> Rebase<'a> {
         for action in &self.actions {
             match action {
                 RebaseAction::Edit { short_hash } => {
+                    validate_hex(short_hash)?;
                     editor_parts.push("--edit".to_string());
                     editor_parts.push(short_hash.clone());
                 }
@@ -169,5 +170,17 @@ pub fn apply_actions_to_todo(
     }
 
     std::fs::write(todo_file, output)?;
+    Ok(())
+}
+
+/// Validate that a string contains only hexadecimal characters.
+fn validate_hex(s: &str) -> Result<(), Box<dyn std::error::Error>> {
+    if s.is_empty() || !s.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(format!(
+            "Invalid commit hash: '{}' (expected hex characters only)",
+            s
+        )
+        .into());
+    }
     Ok(())
 }
