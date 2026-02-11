@@ -1,6 +1,9 @@
 use git2::Repository;
 use std::process::Command;
 
+use crate::git_commands::git_commit;
+use crate::git_commands::git_rebase::{self, Rebase, RebaseAction, RebaseTarget};
+
 /// Reword a commit message or rename a branch.
 pub fn run(target: String, message: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
     let cwd = std::env::current_dir()?;
@@ -31,87 +34,35 @@ fn reword_commit(
     commit_hash: &str,
     message: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let workdir = repo
-        .workdir()
-        .ok_or("Cannot reword in bare repository")?;
+    let workdir = repo.workdir().ok_or("Cannot reword in bare repository")?;
 
     // Check if this is a root commit (has no parent)
     let commit = repo.revparse_single(commit_hash)?.peel_to_commit()?;
     let is_root = commit.parent_count() == 0;
 
-    // Step 1: Start interactive rebase
     let short_hash = &commit_hash[..7.min(commit_hash.len())];
 
-    // Use git-loom itself as the sequence editor to replace 'pick' with 'edit'
-    let self_exe = loom_exe_path()?;
-    let sequence_editor = format!(
-        "\"{}\" internal-sequence-edit {}",
-        self_exe.display(),
-        short_hash
-    );
-
-    let mut rebase_cmd = Command::new("git");
-    rebase_cmd
-        .current_dir(workdir)
-        .args([
-            "rebase",
-            "--interactive",
-            "--autostash",
-            "--keep-empty",
-            "--no-autosquash",
-            "--rebase-merges",
-        ])
-        .env("GIT_SEQUENCE_EDITOR", sequence_editor);
-
-    // For root commits, use --root; otherwise rebase to parent
-    if is_root {
-        rebase_cmd.arg("--root");
+    let target = if is_root {
+        RebaseTarget::Root
     } else {
-        rebase_cmd.arg(format!("{}^", commit_hash));
-    }
+        RebaseTarget::Commit(commit_hash.to_string())
+    };
 
-    let output = rebase_cmd.output()?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Git rebase failed to start:\n{}", stderr).into());
-    }
+    // Step 1: Start interactive rebase
+    Rebase::new(workdir, target)
+        .action(RebaseAction::Edit {
+            short_hash: short_hash.to_string(),
+        })
+        .run()?;
 
     // Step 2: Amend the commit message
-    let mut amend_cmd = Command::new("git");
-    amend_cmd
-        .current_dir(workdir)
-        .args(["commit", "--allow-empty", "--amend", "--only"]);
-
-    if let Some(msg) = message {
-        amend_cmd.args(["-m", &msg]);
-    }
-
-    let output = amend_cmd.output()?;
-    if !output.status.success() {
-        // Abort the rebase on failure
-        let _ = Command::new("git")
-            .current_dir(workdir)
-            .args(["rebase", "--abort"])
-            .output();
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Git commit --amend failed:\n{}", stderr).into());
+    if let Err(e) = git_commit::amend(workdir, message.as_deref()) {
+        let _ = git_rebase::abort(workdir);
+        return Err(e);
     }
 
     // Step 3: Continue the rebase
-    let output = Command::new("git")
-        .current_dir(workdir)
-        .args(["rebase", "--continue"])
-        .output()?;
-
-    if !output.status.success() {
-        // Abort the rebase on failure for consistency
-        let _ = Command::new("git")
-            .current_dir(workdir)
-            .args(["rebase", "--abort"])
-            .output();
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Git rebase --continue failed. Rebase aborted:\n{}", stderr).into());
-    }
+    git_rebase::continue_rebase(workdir)?;
 
     // Get the new commit hash after rebase
     let new_commit = repo.head()?.peel_to_commit()?;
@@ -120,7 +71,10 @@ fn reword_commit(
     // Show success message with old and new hashes
     let old_short = &commit_hash[..7.min(commit_hash.len())];
     let new_short = &new_hash[..7];
-    println!("Updated commit message for {} (now {})", old_short, new_short);
+    println!(
+        "Updated commit message for {} (now {})",
+        old_short, new_short
+    );
 
     Ok(())
 }
@@ -147,32 +101,6 @@ fn reword_branch(
 
     println!("Renamed branch '{}' to '{}'", old_name, new_name);
     Ok(())
-}
-
-/// Resolve the path to the git-loom binary.
-///
-/// During `cargo test`, `current_exe()` returns the test harness binary in
-/// `target/<profile>/deps/`. The actual git-loom binary lives one level up
-/// in `target/<profile>/`. This function detects that case and returns the
-/// correct path.
-fn loom_exe_path() -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
-    let exe = std::env::current_exe()?;
-    if let Some(parent) = exe.parent()
-        && parent.file_name().and_then(|n| n.to_str()) == Some("deps")
-    {
-        let bin_name = if cfg!(windows) {
-            "git-loom.exe"
-        } else {
-            "git-loom"
-        };
-        if let Some(profile_dir) = parent.parent() {
-            let actual = profile_dir.join(bin_name);
-            if actual.exists() {
-                return Ok(actual);
-            }
-        }
-    }
-    Ok(exe)
 }
 
 #[cfg(test)]

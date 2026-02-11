@@ -1,4 +1,5 @@
 mod git;
+mod git_commands;
 mod graph;
 mod reword;
 mod shortid;
@@ -9,7 +10,6 @@ mod test_helpers;
 
 use clap::{Parser, Subcommand};
 use colored::control;
-use std::io::Write;
 
 #[derive(Parser)]
 #[command(name = "git-loom", about = "Supercharge your Git workflow")]
@@ -34,11 +34,12 @@ enum Command {
         #[arg(short, long)]
         message: Option<String>,
     },
-    /// Internal: used as GIT_SEQUENCE_EDITOR to mark a commit for editing
+    /// Internal: used as GIT_SEQUENCE_EDITOR to apply rebase actions
     #[command(hide = true)]
     InternalSequenceEdit {
-        /// Short hash of the commit to mark as 'edit'
-        short_hash: String,
+        /// Short hashes of commits to mark as 'edit'
+        #[arg(long = "edit")]
+        edit_hashes: Vec<String>,
         /// Path to the git rebase todo file
         todo_file: String,
     },
@@ -55,9 +56,9 @@ fn main() {
         None | Some(Command::Status) => status::run(),
         Some(Command::Reword { target, message }) => reword::run(target, message),
         Some(Command::InternalSequenceEdit {
-            short_hash,
+            edit_hashes,
             todo_file,
-        }) => handle_sequence_edit(&short_hash, &todo_file),
+        }) => handle_sequence_edit(&edit_hashes, &todo_file),
     };
 
     if let Err(e) = result {
@@ -67,31 +68,15 @@ fn main() {
 }
 
 fn handle_sequence_edit(
-    short_hash: &str,
+    edit_hashes: &[String],
     todo_file: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let content = std::fs::read_to_string(todo_file)?;
-    let mut found = false;
-    let mut output = String::with_capacity(content.len());
+    let actions: Vec<git_commands::git_rebase::RebaseAction> = edit_hashes
+        .iter()
+        .map(|h| git_commands::git_rebase::RebaseAction::Edit {
+            short_hash: h.clone(),
+        })
+        .collect();
 
-    for line in content.lines() {
-        if !found && line.starts_with(&format!("pick {}", short_hash)) {
-            output.push_str(&format!("edit {}", &line["pick".len()..]));
-            found = true;
-        } else {
-            output.push_str(line);
-        }
-        output.push('\n');
-    }
-
-    if !found {
-        writeln!(
-            std::io::stderr(),
-            "warning: commit {} not found in rebase todo",
-            short_hash
-        )?;
-    }
-
-    std::fs::write(todo_file, output)?;
-    Ok(())
+    git_commands::git_rebase::apply_actions_to_todo(&actions, todo_file)
 }
