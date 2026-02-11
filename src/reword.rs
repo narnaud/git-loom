@@ -14,7 +14,15 @@ pub fn run(target: String, message: Option<String>) -> Result<(), Box<dyn std::e
     match resolved {
         crate::git::Target::Commit(hash) => reword_commit(&repo, &hash, message),
         crate::git::Target::Branch(name) => {
-            let new_name = message.ok_or("Branch renaming requires -m flag with new name")?;
+            let new_name = match message {
+                Some(msg) => msg,
+                None => {
+                    // Prompt for new branch name with current name as placeholder
+                    cliclack::input("New branch name")
+                        .placeholder(&name)
+                        .interact()?
+                }
+            };
             reword_branch(&repo, &name, &new_name)
         }
         crate::git::Target::File(_) => {
