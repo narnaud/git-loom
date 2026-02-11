@@ -2,6 +2,8 @@ use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 
+use shell_escape::escape;
+
 use super::loom_exe_path;
 
 /// An action to apply during an interactive rebase.
@@ -45,7 +47,9 @@ impl<'a> Rebase<'a> {
         let self_exe = loom_exe_path()?;
 
         // Build the sequence editor command with action flags
-        let mut editor_parts = vec![format!("\"{}\"", self_exe.display())];
+        // Convert backslashes to forward slashes for Git compatibility on Windows
+        let exe_str = self_exe.display().to_string().replace('\\', "/");
+        let mut editor_parts = vec![escape(exe_str.into()).into_owned()];
         editor_parts.push("internal-sequence-edit".to_string());
         for action in &self.actions {
             match action {

@@ -9,6 +9,7 @@ chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
 colored = "3"
 git2 = "0.20"
+shell-escape = "0.1"
 
 [dev-dependencies]
 tempfile = "3"
