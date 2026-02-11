@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
@@ -129,16 +130,19 @@ pub fn apply_actions_to_todo(
         }
     }
 
-    let mut found_count = 0;
+    let mut found: HashSet<&str> = HashSet::new();
 
     for line in content.lines() {
         let mut matched = false;
-        for hash in &edit_hashes {
-            if line.starts_with(&format!("pick {}", hash)) {
-                output.push_str(&format!("edit {}", &line["pick".len()..]));
-                matched = true;
-                found_count += 1;
-                break;
+        let parts: Vec<&str> = line.splitn(3, ' ').collect();
+        if parts.len() >= 2 && parts[0] == "pick" {
+            for hash in &edit_hashes {
+                if parts[1].starts_with(*hash) {
+                    output.push_str(&format!("edit {}", &line["pick".len()..]));
+                    matched = true;
+                    found.insert(hash);
+                    break;
+                }
             }
         }
         if !matched {
@@ -147,26 +151,17 @@ pub fn apply_actions_to_todo(
         output.push('\n');
     }
 
-    if found_count < edit_hashes.len() {
-        let missing: Vec<_> = edit_hashes
-            .iter()
-            .filter(|h| {
-                !content
-                    .lines()
-                    .any(|l| l.starts_with(&format!("edit {}", h)))
-            })
-            .collect();
-        if !missing.is_empty() {
-            writeln!(
-                std::io::stderr(),
-                "warning: commit(s) {} not found in rebase todo",
-                missing
-                    .iter()
-                    .map(|h| h.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )?;
-        }
+    let missing: Vec<_> = edit_hashes.iter().filter(|h| !found.contains(*h)).collect();
+    if !missing.is_empty() {
+        writeln!(
+            std::io::stderr(),
+            "warning: commit(s) {} not found in rebase todo",
+            missing
+                .iter()
+                .map(|h| h.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )?;
     }
 
     std::fs::write(todo_file, output)?;
