@@ -37,9 +37,9 @@ enum Command {
     /// Internal: used as GIT_SEQUENCE_EDITOR to apply rebase actions
     #[command(hide = true)]
     InternalSequenceEdit {
-        /// Short hashes of commits to mark as 'edit'
-        #[arg(long = "edit")]
-        edit_hashes: Vec<String>,
+        /// JSON-encoded list of rebase actions
+        #[arg(long = "actions-json")]
+        actions_json: String,
         /// Path to the git rebase todo file
         todo_file: String,
     },
@@ -56,9 +56,9 @@ fn main() {
         None | Some(Command::Status) => status::run(),
         Some(Command::Reword { target, message }) => reword::run(target, message),
         Some(Command::InternalSequenceEdit {
-            edit_hashes,
+            actions_json,
             todo_file,
-        }) => handle_sequence_edit(&edit_hashes, &todo_file),
+        }) => handle_sequence_edit(&actions_json, &todo_file),
     };
 
     if let Err(e) = result {
@@ -68,15 +68,10 @@ fn main() {
 }
 
 fn handle_sequence_edit(
-    edit_hashes: &[String],
+    actions_json: &str,
     todo_file: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let actions: Vec<git_commands::git_rebase::RebaseAction> = edit_hashes
-        .iter()
-        .map(|h| git_commands::git_rebase::RebaseAction::Edit {
-            short_hash: h.clone(),
-        })
-        .collect();
+    let actions: Vec<git_commands::git_rebase::RebaseAction> = serde_json::from_str(actions_json)?;
 
     git_commands::git_rebase::apply_actions_to_todo(&actions, todo_file)
 }

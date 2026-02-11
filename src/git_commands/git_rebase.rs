@@ -3,17 +3,20 @@ use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 
+use serde::{Deserialize, Serialize};
 use shell_escape::escape;
 
 use super::loom_exe_path;
 
 /// An action to apply during an interactive rebase.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RebaseAction {
     /// Mark a commit for editing.
     Edit { short_hash: String },
 }
 
 /// The target of a rebase operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RebaseTarget {
     /// Rebase onto a specific commit (uses `<hash>^` as the base).
     Commit(String),
@@ -47,22 +50,27 @@ impl<'a> Rebase<'a> {
     pub fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         let self_exe = loom_exe_path()?;
 
-        // Build the sequence editor command with action flags
-        // Convert backslashes to forward slashes for Git compatibility on Windows
-        let exe_str = self_exe.display().to_string().replace('\\', "/");
-        let mut editor_parts = vec![escape(exe_str.into()).into_owned()];
-        editor_parts.push("internal-sequence-edit".to_string());
+        // Validate all hashes before building the command
         for action in &self.actions {
             match action {
                 RebaseAction::Edit { short_hash } => {
                     validate_hex(short_hash)?;
-                    editor_parts.push("--edit".to_string());
-                    editor_parts.push(short_hash.clone());
                 }
             }
         }
 
-        let sequence_editor = editor_parts.join(" ");
+        // Serialize actions to JSON
+        let actions_json = serde_json::to_string(&self.actions)?;
+
+        // Build the sequence editor command with JSON-encoded actions
+        // Convert backslashes to forward slashes for Git compatibility on Windows
+        // Note: Git will automatically append the todo file path as the last argument
+        let exe_str = self_exe.display().to_string().replace('\\', "/");
+        let sequence_editor = format!(
+            "{} internal-sequence-edit --actions-json {}",
+            escape(exe_str.into()),
+            escape(actions_json.into())
+        );
 
         let mut cmd = Command::new("git");
         cmd.current_dir(self.workdir)
