@@ -20,7 +20,11 @@ fn reword_commit_with_message() {
     let c3_oid = test_repo.commit("Third commit", "file3.txt");
 
     // Reword the first (oldest) commit
-    let result = super::reword_commit(&test_repo.repo, &c1_oid.to_string(), Some("Updated first commit".to_string()));
+    let result = super::reword_commit(
+        &test_repo.repo,
+        &c1_oid.to_string(),
+        Some("Updated first commit".to_string()),
+    );
 
     if result.is_err() {
         eprintln!("Note: This test may fail on Windows due to PowerShell sequence editor issues");
@@ -38,8 +42,16 @@ fn reword_commit_with_message() {
     assert_eq!(test_repo.get_message(0), "Third commit");
 
     // Verify hashes changed due to rewrite
-    assert_ne!(test_repo.get_oid(2), c1_oid, "First commit hash should have changed");
-    assert_ne!(test_repo.get_oid(0), c3_oid, "Third commit hash should have changed");
+    assert_ne!(
+        test_repo.get_oid(2),
+        c1_oid,
+        "First commit hash should have changed"
+    );
+    assert_ne!(
+        test_repo.get_oid(0),
+        c3_oid,
+        "Third commit hash should have changed"
+    );
 
     // Verify HEAD is still on the same branch
     assert!(test_repo.is_on_branch());
@@ -83,7 +95,11 @@ fn reword_root_commit() {
     assert_eq!(root_commit.parent_count(), 0, "Should be a root commit");
 
     // Reword the root commit
-    let result = super::reword_commit(&test_repo.repo, &root_oid.to_string(), Some("Updated initial commit".to_string()));
+    let result = super::reword_commit(
+        &test_repo.repo,
+        &root_oid.to_string(),
+        Some("Updated initial commit".to_string()),
+    );
 
     if result.is_err() {
         eprintln!("Note: This test may fail on Windows due to PowerShell sequence editor issues");
@@ -93,10 +109,18 @@ fn reword_root_commit() {
 
     // Verify the commit message changed
     assert_eq!(test_repo.get_message(0), "Updated initial commit");
-    assert_eq!(test_repo.get_commit(0).parent_count(), 0, "Should still be a root commit");
+    assert_eq!(
+        test_repo.get_commit(0).parent_count(),
+        0,
+        "Should still be a root commit"
+    );
 
     // Hash should have changed
-    assert_ne!(test_repo.get_oid(0), root_oid, "Root commit hash should have changed");
+    assert_ne!(
+        test_repo.get_oid(0),
+        root_oid,
+        "Root commit hash should have changed"
+    );
 }
 
 #[test]
@@ -114,17 +138,29 @@ fn reword_root_commit_with_descendants() {
     test_repo.commit("Third commit", "file3.txt");
 
     // Reword the root commit
-    let result = super::reword_commit(&test_repo.repo, &root_oid.to_string(), Some("Updated root".to_string()));
+    let result = super::reword_commit(
+        &test_repo.repo,
+        &root_oid.to_string(),
+        Some("Updated root".to_string()),
+    );
 
     if result.is_err() {
         eprintln!("Note: This test may fail on Windows due to PowerShell sequence editor issues");
         eprintln!("Error: {:?}", result);
     }
-    assert!(result.is_ok(), "Failed to reword root commit with descendants: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "Failed to reword root commit with descendants: {:?}",
+        result
+    );
 
     // Verify all commits were rewritten
     assert_eq!(test_repo.get_message(2), "Updated root");
-    assert_eq!(test_repo.get_commit(2).parent_count(), 0, "Should still be a root commit");
+    assert_eq!(
+        test_repo.get_commit(2).parent_count(),
+        0,
+        "Should still be a root commit"
+    );
 
     // Other commits should retain their messages
     assert_eq!(test_repo.get_message(1), "Second commit");
@@ -146,16 +182,28 @@ fn reword_commit_with_working_tree_changes() {
     test_repo.write_file("file2.txt", "modified content");
 
     // Reword should handle working tree changes (via --autostash)
-    let result = super::reword_commit(&test_repo.repo, &c1_oid.to_string(), Some("Updated first".to_string()));
+    let result = super::reword_commit(
+        &test_repo.repo,
+        &c1_oid.to_string(),
+        Some("Updated first".to_string()),
+    );
 
     if result.is_err() {
         eprintln!("Note: This test may fail on Windows due to PowerShell sequence editor issues");
         eprintln!("Error: {:?}", result);
     }
-    assert!(result.is_ok(), "Failed to reword with working tree changes: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "Failed to reword with working tree changes: {:?}",
+        result
+    );
 
     // Verify the working tree change is still there
-    assert_eq!(test_repo.read_file("file2.txt"), "modified content", "Working tree changes should be preserved");
+    assert_eq!(
+        test_repo.read_file("file2.txt"),
+        "modified content",
+        "Working tree changes should be preserved"
+    );
 }
 
 #[test]
@@ -174,13 +222,24 @@ fn reword_branch_by_name() {
     assert!(result.is_ok(), "Failed to rename branch: {:?}", result);
 
     // Verify old branch doesn't exist
-    assert!(test_repo.repo.find_branch("feature-old", git2::BranchType::Local).is_err(),
-            "Old branch should not exist after rename");
+    assert!(
+        test_repo
+            .repo
+            .find_branch("feature-old", git2::BranchType::Local)
+            .is_err(),
+        "Old branch should not exist after rename"
+    );
 
     // Verify new branch exists and points to same commit
-    let new_branch = test_repo.repo.find_branch("feature-new", git2::BranchType::Local).unwrap();
-    assert_eq!(new_branch.get().target().unwrap(), test_repo.get_oid(0),
-               "New branch should point to same commit");
+    let new_branch = test_repo
+        .repo
+        .find_branch("feature-new", git2::BranchType::Local)
+        .unwrap();
+    assert_eq!(
+        new_branch.get().target().unwrap(),
+        test_repo.get_oid(0),
+        "New branch should point to same commit"
+    );
 }
 
 #[test]
@@ -194,12 +253,19 @@ fn reword_current_branch() {
     let current_branch_name = test_repo.current_branch_name();
 
     let result = super::reword_branch(&test_repo.repo, &current_branch_name, "renamed-main");
-    assert!(result.is_ok(), "Failed to rename current branch: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "Failed to rename current branch: {:?}",
+        result
+    );
 
     // Verify HEAD is still on the renamed branch
     assert!(test_repo.is_on_branch(), "HEAD should still be on a branch");
-    assert_eq!(test_repo.current_branch_name(), "renamed-main",
-               "HEAD should track renamed branch");
+    assert_eq!(
+        test_repo.current_branch_name(),
+        "renamed-main",
+        "HEAD should track renamed branch"
+    );
 }
 
 #[test]
@@ -214,13 +280,21 @@ fn reword_commit_with_partial_hash() {
 
     // Use partial hash (first 7 characters)
     let partial_hash = &c1_oid.to_string()[..7];
-    let result = super::reword_commit(&test_repo.repo, partial_hash, Some("Updated via partial hash".to_string()));
+    let result = super::reword_commit(
+        &test_repo.repo,
+        partial_hash,
+        Some("Updated via partial hash".to_string()),
+    );
 
     if result.is_err() {
         eprintln!("Note: This test may fail on Windows due to PowerShell sequence editor issues");
         eprintln!("Error: {:?}", result);
     }
-    assert!(result.is_ok(), "Failed to reword commit with partial hash: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "Failed to reword commit with partial hash: {:?}",
+        result
+    );
 
     // Verify the commit message changed
     assert_eq!(test_repo.get_message(1), "Updated via partial hash");
@@ -234,7 +308,11 @@ fn reword_nonexistent_commit_fails() {
     let test_repo = TestRepo::new();
 
     // Try to reword a commit that doesn't exist
-    let result = super::reword_commit(&test_repo.repo, "0000000000000000000000000000000000000000", Some("New message".to_string()));
+    let result = super::reword_commit(
+        &test_repo.repo,
+        "0000000000000000000000000000000000000000",
+        Some("New message".to_string()),
+    );
 
     assert!(result.is_err(), "Should fail on nonexistent commit");
 }
@@ -251,8 +329,10 @@ fn reword_nonexistent_branch_fails() {
 
     assert!(result.is_err(), "Should fail on nonexistent branch");
     let err_msg = result.unwrap_err().to_string();
-    assert!(err_msg.contains("Failed to rename branch"),
-            "Error should mention branch rename failure");
+    assert!(
+        err_msg.contains("Failed to rename branch"),
+        "Error should mention branch rename failure"
+    );
 }
 
 #[test]
@@ -270,18 +350,35 @@ fn reword_branch_by_full_name_via_run() {
     std::env::set_current_dir(test_repo.repo.workdir().unwrap()).unwrap();
 
     // Rename using full branch name
-    let result = super::run("feature-original".to_string(), Some("feature-renamed".to_string()));
+    let result = super::run(
+        "feature-original".to_string(),
+        Some("feature-renamed".to_string()),
+    );
 
     // Restore directory
     std::env::set_current_dir(original_dir).unwrap();
 
-    assert!(result.is_ok(), "Failed to rename branch via run: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "Failed to rename branch via run: {:?}",
+        result
+    );
 
     // Verify old branch doesn't exist
-    assert!(test_repo.repo.find_branch("feature-original", git2::BranchType::Local).is_err(),
-            "Old branch should not exist after rename");
+    assert!(
+        test_repo
+            .repo
+            .find_branch("feature-original", git2::BranchType::Local)
+            .is_err(),
+        "Old branch should not exist after rename"
+    );
 
     // Verify new branch exists
-    assert!(test_repo.repo.find_branch("feature-renamed", git2::BranchType::Local).is_ok(),
-            "New branch should exist after rename");
+    assert!(
+        test_repo
+            .repo
+            .find_branch("feature-renamed", git2::BranchType::Local)
+            .is_ok(),
+        "New branch should exist after rename"
+    );
 }

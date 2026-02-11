@@ -182,15 +182,19 @@ fn render_working_changes(out: &mut String, changes: &[FileChange], ids: &IdAllo
         "{} {} {}{}{}",
         "╭─".color(COLOR_GRAPH),
         ids.get_unstaged().color(COLOR_SHORTID).underline(),
-        "[".color(COLOR_DIM), "unstaged changes".color(COLOR_LABEL), "]".color(COLOR_DIM)
-    ).unwrap();
+        "[".color(COLOR_DIM),
+        "unstaged changes".color(COLOR_LABEL),
+        "]".color(COLOR_DIM)
+    )
+    .unwrap();
     if changes.is_empty() {
         writeln!(
             out,
             "{}   {}",
             "│".color(COLOR_GRAPH),
             "no changes".color(COLOR_DIM)
-        ).unwrap();
+        )
+        .unwrap();
     } else {
         for change in changes {
             writeln!(
@@ -200,7 +204,8 @@ fn render_working_changes(out: &mut String, changes: &[FileChange], ids: &IdAllo
                 ids.get_file(&change.path).color(COLOR_SHORTID).underline(),
                 change.status.to_string().color(COLOR_DIM),
                 change.path.color(COLOR_MESSAGE)
-            ).unwrap();
+            )
+            .unwrap();
         }
     }
     writeln!(out, "{}", "│".color(COLOR_GRAPH)).unwrap();
@@ -218,7 +223,11 @@ fn render_branch(
     ids: &IdAllocator,
 ) {
     let branch_id = ids.get_branch(name);
-    let connector = if prev_stacked { "│├─" } else { "│╭─" };
+    let connector = if prev_stacked {
+        "│├─"
+    } else {
+        "│╭─"
+    };
     writeln!(
         out,
         "{} {} {}{}{}",
@@ -227,7 +236,8 @@ fn render_branch(
         "[".color(COLOR_DIM),
         name.color(COLOR_BRANCH).bold(),
         "]".color(COLOR_DIM)
-    ).unwrap();
+    )
+    .unwrap();
 
     for commit in commits {
         let sid = ids.get_commit(commit.oid);
@@ -240,7 +250,8 @@ fn render_branch(
             sid.color(COLOR_SHORTID).underline(),
             rest.color(COLOR_DIM),
             commit.message.color(COLOR_MESSAGE)
-        ).unwrap();
+        )
+        .unwrap();
     }
     if next_stacked {
         writeln!(out, "{}", "││".color(COLOR_GRAPH)).unwrap();
@@ -263,7 +274,8 @@ fn render_loose(out: &mut String, commits: &[CommitInfo], more_sections: bool, i
             sid.color(COLOR_SHORTID).underline(),
             rest.color(COLOR_DIM),
             commit.message.color(COLOR_MESSAGE)
-        ).unwrap();
+        )
+        .unwrap();
     }
     if more_sections {
         writeln!(out, "{}", "│".color(COLOR_GRAPH)).unwrap();
@@ -276,7 +288,8 @@ fn render_upstream(out: &mut String, info: &UpstreamInfo) {
             "\u{23EB} {} new commit{}",
             info.commits_ahead,
             if info.commits_ahead == 1 { "" } else { "s" }
-        ).color(COLOR_MESSAGE);
+        )
+        .color(COLOR_MESSAGE);
         writeln!(
             out,
             "{}{}  {}{}{} {}",
@@ -286,7 +299,8 @@ fn render_upstream(out: &mut String, info: &UpstreamInfo) {
             info.label.color(COLOR_BRANCH).bold(),
             "]".color(COLOR_DIM),
             count_text
-        ).unwrap();
+        )
+        .unwrap();
         writeln!(
             out,
             "{} {} {} {} {}",
@@ -295,7 +309,8 @@ fn render_upstream(out: &mut String, info: &UpstreamInfo) {
             "(common base)".color(COLOR_LABEL),
             info.base_date.color(COLOR_DIM),
             info.base_message.color(COLOR_DIM)
-        ).unwrap();
+        )
+        .unwrap();
     } else {
         writeln!(
             out,
@@ -307,7 +322,8 @@ fn render_upstream(out: &mut String, info: &UpstreamInfo) {
             info.label.color(COLOR_BRANCH).bold(),
             "]".color(COLOR_DIM),
             info.base_message.color(COLOR_DIM)
-        ).unwrap();
+        )
+        .unwrap();
     }
 }
 

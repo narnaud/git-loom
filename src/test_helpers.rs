@@ -2,7 +2,6 @@
 ///
 /// Provides a clean API for creating and manipulating test repositories,
 /// reducing boilerplate in test code.
-
 use git2::{BranchType, Repository, Signature};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -247,12 +246,7 @@ impl TestRepo {
     /// Get the current branch name (shorthand).
     #[allow(dead_code)]
     pub fn current_branch_name(&self) -> String {
-        self.repo
-            .head()
-            .unwrap()
-            .shorthand()
-            .unwrap()
-            .to_string()
+        self.repo.head().unwrap().shorthand().unwrap().to_string()
     }
 
     /// Set up a fake editor that replaces commit messages.
@@ -426,7 +420,11 @@ mod tests {
         assert_eq!(repo.get_message(1), "Second");
 
         // Verify branch was created
-        assert!(repo.repo.find_branch("feature", git2::BranchType::Local).is_ok());
+        assert!(
+            repo.repo
+                .find_branch("feature", git2::BranchType::Local)
+                .is_ok()
+        );
     }
 
     #[test]

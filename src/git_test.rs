@@ -61,10 +61,14 @@ fn multiple_independent_branches() {
     test_repo.commit_empty("A1");
     let a1_oid = test_repo.repo.head().unwrap().target().unwrap();
     let a1_commit = test_repo.repo.find_commit(a1_oid).unwrap();
-    test_repo.repo.branch("feature-a", &a1_commit, false).unwrap();
+    test_repo
+        .repo
+        .branch("feature-a", &a1_commit, false)
+        .unwrap();
 
     // Merge feature-a into integration (creates a merge commit)
-    let upstream_oid = test_repo.repo
+    let upstream_oid = test_repo
+        .repo
         .find_branch("origin/main", BranchType::Remote)
         .unwrap()
         .get()
@@ -76,7 +80,10 @@ fn multiple_independent_branches() {
     test_repo.commit_empty("B1");
     let b1_oid = test_repo.repo.head().unwrap().target().unwrap();
     let b1_commit = test_repo.repo.find_commit(b1_oid).unwrap();
-    test_repo.repo.branch("feature-b", &b1_commit, false).unwrap();
+    test_repo
+        .repo
+        .branch("feature-b", &b1_commit, false)
+        .unwrap();
 
     let info = gather_repo_info(&test_repo.repo).unwrap();
 
@@ -105,13 +112,19 @@ fn stacked_branches() {
     test_repo.commit_empty("A1");
     let a2_oid = test_repo.commit_empty("A2");
     let a2_commit = test_repo.repo.find_commit(a2_oid).unwrap();
-    test_repo.repo.branch("feature-a", &a2_commit, false).unwrap();
+    test_repo
+        .repo
+        .branch("feature-a", &a2_commit, false)
+        .unwrap();
 
     // feature-b: B1, B2 on top of feature-a
     test_repo.commit_empty("B1");
     let b2_oid = test_repo.commit_empty("B2");
     let b2_commit = test_repo.repo.find_commit(b2_oid).unwrap();
-    test_repo.repo.branch("feature-b", &b2_commit, false).unwrap();
+    test_repo
+        .repo
+        .branch("feature-b", &b2_commit, false)
+        .unwrap();
 
     let info = gather_repo_info(&test_repo.repo).unwrap();
 
@@ -135,7 +148,8 @@ fn merge_commits_are_filtered() {
     let c1_oid = test_repo.commit_empty("C1");
 
     // Create a side branch from upstream, then merge it
-    let upstream_oid = test_repo.repo
+    let upstream_oid = test_repo
+        .repo
         .find_branch("origin/main", BranchType::Remote)
         .unwrap()
         .get()
@@ -244,14 +258,17 @@ fn branch_at_upstream_is_not_detected() {
     let test_repo = TestRepo::new_with_remote();
 
     // Create a branch pointing at the upstream commit (not ahead)
-    let upstream_oid = test_repo.repo
+    let upstream_oid = test_repo
+        .repo
         .find_branch("origin/main", BranchType::Remote)
         .unwrap()
         .get()
         .target()
         .unwrap();
     let upstream_commit = test_repo.repo.find_commit(upstream_oid).unwrap();
-    test_repo.repo.branch("stale-branch", &upstream_commit, false)
+    test_repo
+        .repo
+        .branch("stale-branch", &upstream_commit, false)
         .unwrap();
 
     test_repo.commit_empty("Ahead");

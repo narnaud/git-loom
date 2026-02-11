@@ -87,7 +87,10 @@ fn working_changes_shown() {
     ];
 
     let output = render_plain(info);
-    assert!(output.starts_with("╭─ zz [unstaged changes]\n│   ma M src/main.rs\n│   nf A new_file.txt\n"));
+    assert!(
+        output
+            .starts_with("╭─ zz [unstaged changes]\n│   ma M src/main.rs\n│   nf A new_file.txt\n")
+    );
 }
 
 #[test]

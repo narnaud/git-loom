@@ -233,10 +233,7 @@ pub fn resolve_target(
 }
 
 /// Resolve a shortid to a commit, branch, or file by rebuilding the graph.
-fn resolve_shortid(
-    repo: &Repository,
-    shortid: &str,
-) -> Result<Target, Box<dyn std::error::Error>> {
+fn resolve_shortid(repo: &Repository, shortid: &str) -> Result<Target, Box<dyn std::error::Error>> {
     // Gather repo info (this checks for upstream and builds the graph)
     let info = gather_repo_info(repo)?;
 
@@ -354,7 +351,8 @@ fn find_branches_in_range(
             continue;
         }
         if let Some(tip_oid) = branch.get().target()
-            && tip_oid != upstream_oid && commit_set.contains(&tip_oid)
+            && tip_oid != upstream_oid
+            && commit_set.contains(&tip_oid)
         {
             branches.push(BranchInfo { name, tip_oid });
         }

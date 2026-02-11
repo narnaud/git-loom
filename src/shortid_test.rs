@@ -77,7 +77,12 @@ fn same_first_word_different_second_word_stays_two_chars() {
     let id_alpha = alloc.get_branch("feature-alpha");
     let id_awesome = alloc.get_branch("feature-awesome");
     assert_eq!(id_alpha, "fa");
-    assert_eq!(id_awesome.len(), 2, "expected 2-char ID, got '{}'", id_awesome);
+    assert_eq!(
+        id_awesome.len(),
+        2,
+        "expected 2-char ID, got '{}'",
+        id_awesome
+    );
     assert_ne!(id_alpha, id_awesome);
 }
 
@@ -183,9 +188,7 @@ fn underscore_separator_works() {
 
 #[test]
 fn file_with_underscores_uses_word_initials() {
-    let alloc = IdAllocator::new(vec![
-        Entity::File("new_file.txt".to_string()),
-    ]);
+    let alloc = IdAllocator::new(vec![Entity::File("new_file.txt".to_string())]);
     // stem "new_file" → words ["new","file"] → "nf"
     assert_eq!(alloc.get_file("new_file.txt"), "nf");
 }

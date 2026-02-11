@@ -111,7 +111,11 @@ fn multi_word_candidates(words: &[Vec<char>]) -> Vec<String> {
 
     // Use first two words (or first word repeated if only one)
     let word1 = &words[0];
-    let word2 = if words.len() >= 2 { &words[1] } else { &words[0] };
+    let word2 = if words.len() >= 2 {
+        &words[1]
+    } else {
+        &words[0]
+    };
 
     // Generate all combinations of (char from word1, char from word2)
     for &ch1 in word1 {
@@ -125,10 +129,14 @@ fn multi_word_candidates(words: &[Vec<char>]) -> Vec<String> {
 
     // 3+ char prefixes for fallback
     for n in 3..=word1.len().max(word2.len()).max(5) {
-        let prefix: String = format!("{}{}",
+        let prefix: String = format!(
+            "{}{}",
             word1.iter().take(n).collect::<String>(),
             word2.iter().take(n).collect::<String>()
-        ).chars().take(n).collect();
+        )
+        .chars()
+        .take(n)
+        .collect();
         if !candidates.contains(&prefix) {
             candidates.push(prefix);
         }
