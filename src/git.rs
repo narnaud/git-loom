@@ -17,6 +17,8 @@ pub enum Target {
 pub struct UpstreamInfo {
     /// Full name of the upstream ref (e.g. "origin/main").
     pub label: String,
+    /// OID of the merge-base commit.
+    pub base_oid: git2::Oid,
     /// Short hash of the merge-base commit.
     pub base_short_id: String,
     /// First line of the merge-base commit message.
@@ -163,6 +165,7 @@ pub fn gather_repo_info(repo: &Repository) -> Result<RepoInfo, git2::Error> {
     Ok(RepoInfo {
         upstream: UpstreamInfo {
             label: upstream_name,
+            base_oid: merge_base_oid,
             base_short_id,
             base_message,
             base_date,

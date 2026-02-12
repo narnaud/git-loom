@@ -47,6 +47,7 @@ fn base_info() -> RepoInfo {
     RepoInfo {
         upstream: UpstreamInfo {
             label: "origin/main".to_string(),
+            base_oid: oid(0xaa),
             base_short_id: "aaa0000".to_string(),
             base_message: "Initial commit".to_string(),
             base_date: "2025-07-06".to_string(),
@@ -258,6 +259,56 @@ fn upstream_ahead_singular() {
     assert!(
         !output.contains("commits\n"),
         "should not contain plural 'commits', got:\n{}",
+        output
+    );
+}
+
+#[test]
+fn merge_based_integration_branch() {
+    // Simulates a merge-based integration branch where feature-1 is merged
+    // via --no-ff. The revwalk produces commits from both sides of the merge,
+    // but only the feature-1 ancestors should be assigned to the branch.
+    //
+    // History (merge commit already filtered by walk_commits):
+    //   feature-1: F4 -> F3 -> F2 -> F1 -> upstream
+    //   integration first-parent: I3 -> I2 -> I1 -> upstream
+    //
+    // Topo order after skipping the merge: F4, F3, F2, F1, I3, I2, I1
+    let mut info = base_info();
+    info.commits = vec![
+        commit(0x14, "Feature 1 improvement", Some(0x13)),
+        commit(0x13, "fixup Feature 1", Some(0x12)),
+        commit(0x12, "Bugfix 1", Some(0x11)),
+        commit(0x11, "Feature 1", Some(0xaa)), // parent is upstream base
+        commit(0x23, "Feature 3 depends on Feature 2", Some(0x22)),
+        commit(0x22, "fixup Feature 2", Some(0x21)),
+        commit(0x21, "Feature 2", Some(0xaa)), // parent is upstream base
+    ];
+    info.branches = vec![BranchInfo {
+        name: "feature-1".to_string(),
+        tip_oid: oid(0x14),
+    }];
+
+    let output = render_plain(info);
+
+    // feature-1 should have exactly 4 commits
+    let branch_section_start = output.find("│╭─").expect("no branch header found");
+    let branch_section_end = output[branch_section_start..]
+        .find("├╯")
+        .expect("no branch close found")
+        + branch_section_start;
+    let branch_section = &output[branch_section_start..branch_section_end];
+    let branch_dots = branch_section.matches("│●").count();
+    assert_eq!(
+        branch_dots, 4,
+        "feature-1 should have exactly 4 commits, got {} in:\n{}",
+        branch_dots, output
+    );
+
+    // Integration-line commits should be loose (plain ● without │ prefix)
+    assert!(
+        output.contains("●   2300023 Feature 3 depends on Feature 2"),
+        "expected loose integration commit, got:\n{}",
         output
     );
 }

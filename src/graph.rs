@@ -1,7 +1,7 @@
 use crate::git::{CommitInfo, FileChange, RepoInfo, UpstreamInfo};
 use crate::shortid::IdAllocator;
 use colored::{Color, Colorize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 // ── Color palette (edit these to change the theme) ──────────────────────
@@ -63,45 +63,77 @@ pub fn render(info: RepoInfo) -> String {
 /// commits, and the upstream marker. Commits are assigned to a branch when
 /// they follow a branch tip in topological order.
 fn build_sections(info: RepoInfo) -> Vec<Section> {
-    let mut branch_tips: HashMap<git2::Oid, String> = HashMap::new();
+    // Build a set of branch tip OIDs for quick lookup.
+    let branch_tip_set: HashSet<git2::Oid> = info.branches.iter().map(|b| b.tip_oid).collect();
+
+    // Build a parent lookup from the commit list so we can walk ancestry chains.
+    let parent_map: HashMap<git2::Oid, Option<git2::Oid>> =
+        info.commits.iter().map(|c| (c.oid, c.parent_oid)).collect();
+
+    // For each branch, compute the set of commits belonging to it.
+    // Walk from the branch tip along parent links, stopping at:
+    //   - A commit not in our range (outside upstream..HEAD)
+    //   - Another branch's tip (stacked-branch boundary)
+    let mut commit_to_branch: HashMap<git2::Oid, String> = HashMap::new();
     for b in &info.branches {
-        branch_tips.insert(b.tip_oid, b.name.clone());
+        let mut current = Some(b.tip_oid);
+        let mut is_tip = true;
+        while let Some(oid) = current {
+            if !parent_map.contains_key(&oid) {
+                break; // outside our commit range
+            }
+            // Stop at another branch's tip (but not at our own tip)
+            if !is_tip && branch_tip_set.contains(&oid) {
+                break;
+            }
+            is_tip = false;
+            commit_to_branch.insert(oid, b.name.clone());
+            current = parent_map.get(&oid).and_then(|p| *p);
+        }
     }
 
     let mut sections: Vec<Section> = Vec::new();
 
     sections.push(Section::WorkingChanges(info.working_changes));
 
-    // Walk commits top-to-bottom. When we hit a branch tip, collect
-    // commits into that branch section until the next branch tip.
-    // Commits not belonging to any branch go into "loose" sections.
+    // Separate commits into loose and branch groups, preserving topo order within each.
+    let mut loose_commits: Vec<CommitInfo> = Vec::new();
+    let mut branch_sections: Vec<Section> = Vec::new();
+
     let mut commits = info.commits.into_iter().peekable();
     while let Some(commit) = commits.next() {
-        if let Some(branch_name) = branch_tips.get(&commit.oid) {
+        if let Some(branch_name) = commit_to_branch.get(&commit.oid) {
             let name = branch_name.clone();
             let mut branch_commits = vec![commit];
 
+            // Collect subsequent commits that belong to the same branch.
             while let Some(next) = commits.peek() {
-                if branch_tips.contains_key(&next.oid) {
+                if commit_to_branch.get(&next.oid) == Some(&name) {
+                    branch_commits.push(commits.next().unwrap());
+                } else {
                     break;
                 }
-                branch_commits.push(commits.next().unwrap());
             }
-            sections.push(Section::Branch {
+            branch_sections.push(Section::Branch {
                 name,
                 commits: branch_commits,
             });
         } else {
-            let mut loose = vec![commit];
+            loose_commits.push(commit);
             while let Some(next) = commits.peek() {
-                if branch_tips.contains_key(&next.oid) {
+                if commit_to_branch.contains_key(&next.oid) {
                     break;
                 }
-                loose.push(commits.next().unwrap());
+                loose_commits.push(commits.next().unwrap());
             }
-            sections.push(Section::Loose(loose));
         }
     }
+
+    // Loose commits first, then feature branches.
+    if !loose_commits.is_empty() {
+        sections.push(Section::Loose(loose_commits));
+    }
+    sections.extend(branch_sections);
 
     sections.push(Section::Upstream(info.upstream));
 
