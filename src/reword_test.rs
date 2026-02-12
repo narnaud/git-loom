@@ -223,20 +223,17 @@ fn reword_branch_by_name() {
 
     // Verify old branch doesn't exist
     assert!(
-        test_repo
-            .repo
-            .find_branch("feature-old", git2::BranchType::Local)
-            .is_err(),
+        !test_repo.branch_exists("feature-old"),
         "Old branch should not exist after rename"
     );
 
     // Verify new branch exists and points to same commit
-    let new_branch = test_repo
-        .repo
-        .find_branch("feature-new", git2::BranchType::Local)
-        .unwrap();
+    assert!(
+        test_repo.branch_exists("feature-new"),
+        "New branch should exist after rename"
+    );
     assert_eq!(
-        new_branch.get().target().unwrap(),
+        test_repo.get_branch_target("feature-new"),
         test_repo.get_oid(0),
         "New branch should point to same commit"
     );
@@ -347,7 +344,7 @@ fn reword_branch_by_full_name_via_run() {
 
     // Change directory to the repo for the run command
     let original_dir = std::env::current_dir().unwrap();
-    std::env::set_current_dir(test_repo.repo.workdir().unwrap()).unwrap();
+    std::env::set_current_dir(test_repo.workdir()).unwrap();
 
     // Rename using full branch name
     let result = super::run(
@@ -366,19 +363,13 @@ fn reword_branch_by_full_name_via_run() {
 
     // Verify old branch doesn't exist
     assert!(
-        test_repo
-            .repo
-            .find_branch("feature-original", git2::BranchType::Local)
-            .is_err(),
+        !test_repo.branch_exists("feature-original"),
         "Old branch should not exist after rename"
     );
 
     // Verify new branch exists
     assert!(
-        test_repo
-            .repo
-            .find_branch("feature-renamed", git2::BranchType::Local)
-            .is_ok(),
+        test_repo.branch_exists("feature-renamed"),
         "New branch should exist after rename"
     );
 }

@@ -249,6 +249,74 @@ impl TestRepo {
         self.repo.head().unwrap().shorthand().unwrap().to_string()
     }
 
+    /// Check if a branch exists.
+    pub fn branch_exists(&self, name: &str) -> bool {
+        self.repo.find_branch(name, BranchType::Local).is_ok()
+    }
+
+    /// Get the current HEAD commit OID.
+    pub fn head_oid(&self) -> git2::Oid {
+        self.repo.head().unwrap().target().unwrap()
+    }
+
+    /// Find a commit by OID.
+    pub fn find_commit(&self, oid: git2::Oid) -> git2::Commit<'_> {
+        self.repo.find_commit(oid).unwrap()
+    }
+
+    /// Create a branch at a specific commit.
+    ///
+    /// # Arguments
+    /// * `name` - The branch name
+    /// * `oid` - The commit OID where the branch should point
+    pub fn create_branch_at_commit(&self, name: &str, oid: git2::Oid) -> git2::Branch<'_> {
+        let commit = self.find_commit(oid);
+        self.repo.branch(name, &commit, false).unwrap()
+    }
+
+    /// Get the target OID of a remote branch.
+    ///
+    /// # Arguments
+    /// * `name` - The remote branch name (e.g., "origin/main")
+    ///
+    /// # Returns
+    /// The OID that the remote branch points to
+    pub fn find_remote_branch_target(&self, name: &str) -> git2::Oid {
+        self.repo
+            .find_branch(name, BranchType::Remote)
+            .unwrap()
+            .get()
+            .target()
+            .unwrap()
+    }
+
+    /// Get the target OID of a branch.
+    ///
+    /// # Arguments
+    /// * `name` - The branch name
+    ///
+    /// # Returns
+    /// The OID that the branch points to
+    ///
+    /// # Panics
+    /// Panics if the branch doesn't exist
+    pub fn get_branch_target(&self, name: &str) -> git2::Oid {
+        self.repo
+            .find_branch(name, BranchType::Local)
+            .unwrap()
+            .get()
+            .target()
+            .unwrap()
+    }
+
+    /// Set HEAD to a detached state at a specific commit.
+    ///
+    /// # Arguments
+    /// * `oid` - The commit OID to detach HEAD to
+    pub fn set_detached_head(&self, oid: git2::Oid) {
+        self.repo.set_head_detached(oid).unwrap();
+    }
+
     /// Set up a fake editor that replaces commit messages.
     ///
     /// # Arguments

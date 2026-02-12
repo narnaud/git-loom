@@ -37,7 +37,7 @@ pub fn run(target: String, message: Option<String>) -> Result<(), Box<dyn std::e
 /// 1. git rebase --interactive --autostash --keep-empty --no-autosquash --rebase-merges [--root | <hash>^]
 /// 2. git commit --allow-empty --amend --only [-m "message"]
 /// 3. git rebase --continue
-fn reword_commit(
+pub fn reword_commit(
     repo: &Repository,
     commit_hash: &str,
     message: Option<String>,
@@ -88,7 +88,7 @@ fn reword_commit(
 }
 
 /// Rename a branch using git branch -m.
-fn reword_branch(
+pub fn reword_branch(
     repo: &Repository,
     old_name: &str,
     new_name: &str,

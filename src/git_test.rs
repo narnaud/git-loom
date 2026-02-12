@@ -1,5 +1,3 @@
-use git2::BranchType;
-
 use crate::git::gather_repo_info;
 use crate::test_helpers::TestRepo;
 
@@ -42,8 +40,7 @@ fn single_feature_branch() {
     let a2_oid = test_repo.commit_empty("A2");
 
     // Create feature-a branch at current HEAD
-    let commit = test_repo.repo.find_commit(a2_oid).unwrap();
-    test_repo.repo.branch("feature-a", &commit, false).unwrap();
+    test_repo.create_branch_at_commit("feature-a", a2_oid);
 
     let info = gather_repo_info(&test_repo.repo).unwrap();
 
@@ -59,31 +56,17 @@ fn multiple_independent_branches() {
 
     // feature-a: A1 on top of upstream
     test_repo.commit_empty("A1");
-    let a1_oid = test_repo.repo.head().unwrap().target().unwrap();
-    let a1_commit = test_repo.repo.find_commit(a1_oid).unwrap();
-    test_repo
-        .repo
-        .branch("feature-a", &a1_commit, false)
-        .unwrap();
+    let a1_oid = test_repo.head_oid();
+    test_repo.create_branch_at_commit("feature-a", a1_oid);
 
     // Merge feature-a into integration (creates a merge commit)
-    let upstream_oid = test_repo
-        .repo
-        .find_branch("origin/main", BranchType::Remote)
-        .unwrap()
-        .get()
-        .target()
-        .unwrap();
+    let upstream_oid = test_repo.find_remote_branch_target("origin/main");
     test_repo.commit_merge("Merge feature-a", a1_oid, upstream_oid);
 
     // feature-b: B1 on top of the merge
     test_repo.commit_empty("B1");
-    let b1_oid = test_repo.repo.head().unwrap().target().unwrap();
-    let b1_commit = test_repo.repo.find_commit(b1_oid).unwrap();
-    test_repo
-        .repo
-        .branch("feature-b", &b1_commit, false)
-        .unwrap();
+    let b1_oid = test_repo.head_oid();
+    test_repo.create_branch_at_commit("feature-b", b1_oid);
 
     let info = gather_repo_info(&test_repo.repo).unwrap();
 
@@ -111,20 +94,12 @@ fn stacked_branches() {
     // feature-a: A1, A2
     test_repo.commit_empty("A1");
     let a2_oid = test_repo.commit_empty("A2");
-    let a2_commit = test_repo.repo.find_commit(a2_oid).unwrap();
-    test_repo
-        .repo
-        .branch("feature-a", &a2_commit, false)
-        .unwrap();
+    test_repo.create_branch_at_commit("feature-a", a2_oid);
 
     // feature-b: B1, B2 on top of feature-a
     test_repo.commit_empty("B1");
     let b2_oid = test_repo.commit_empty("B2");
-    let b2_commit = test_repo.repo.find_commit(b2_oid).unwrap();
-    test_repo
-        .repo
-        .branch("feature-b", &b2_commit, false)
-        .unwrap();
+    test_repo.create_branch_at_commit("feature-b", b2_oid);
 
     let info = gather_repo_info(&test_repo.repo).unwrap();
 
@@ -148,13 +123,7 @@ fn merge_commits_are_filtered() {
     let c1_oid = test_repo.commit_empty("C1");
 
     // Create a side branch from upstream, then merge it
-    let upstream_oid = test_repo
-        .repo
-        .find_branch("origin/main", BranchType::Remote)
-        .unwrap()
-        .get()
-        .target()
-        .unwrap();
+    let upstream_oid = test_repo.find_remote_branch_target("origin/main");
 
     test_repo.commit_merge("Merge side branch", c1_oid, upstream_oid);
     test_repo.commit_empty("C2");
@@ -169,8 +138,8 @@ fn merge_commits_are_filtered() {
 fn detached_head_returns_error() {
     let test_repo = TestRepo::new_with_remote();
 
-    let head_oid = test_repo.repo.head().unwrap().target().unwrap();
-    test_repo.repo.set_head_detached(head_oid).unwrap();
+    let head_oid = test_repo.head_oid();
+    test_repo.set_detached_head(head_oid);
 
     let result = gather_repo_info(&test_repo.repo);
     assert!(result.is_err());
@@ -258,18 +227,8 @@ fn branch_at_upstream_is_not_detected() {
     let test_repo = TestRepo::new_with_remote();
 
     // Create a branch pointing at the upstream commit (not ahead)
-    let upstream_oid = test_repo
-        .repo
-        .find_branch("origin/main", BranchType::Remote)
-        .unwrap()
-        .get()
-        .target()
-        .unwrap();
-    let upstream_commit = test_repo.repo.find_commit(upstream_oid).unwrap();
-    test_repo
-        .repo
-        .branch("stale-branch", &upstream_commit, false)
-        .unwrap();
+    let upstream_oid = test_repo.find_remote_branch_target("origin/main");
+    test_repo.create_branch_at_commit("stale-branch", upstream_oid);
 
     test_repo.commit_empty("Ahead");
 
@@ -290,7 +249,7 @@ fn resolve_full_commit_hash() {
     let test_repo = TestRepo::new();
     test_repo.commit("Second commit", "file.txt");
 
-    let head_oid = test_repo.repo.head().unwrap().target().unwrap();
+    let head_oid = test_repo.head_oid();
     let result = crate::git::resolve_target(&test_repo.repo, &head_oid.to_string());
 
     assert!(result.is_ok());
@@ -306,7 +265,7 @@ fn resolve_partial_commit_hash() {
     let test_repo = TestRepo::new();
     test_repo.commit("Second commit", "file.txt");
 
-    let head_oid = test_repo.repo.head().unwrap().target().unwrap();
+    let head_oid = test_repo.head_oid();
     let partial_hash = &head_oid.to_string()[..7];
     let result = crate::git::resolve_target(&test_repo.repo, partial_hash);
 
