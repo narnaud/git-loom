@@ -1,3 +1,4 @@
+mod branch;
 mod git;
 mod git_commands;
 mod graph;
@@ -58,6 +59,11 @@ fn main() {
 
     if cli.no_color || std::env::var_os("NO_COLOR").is_some() {
         control::set_override(false);
+    }
+
+    if let Err(e) = git_commands::check_git_version() {
+        eprintln!("error: {:#}", e);
+        std::process::exit(1);
     }
 
     let result = match cli.command {
