@@ -49,6 +49,40 @@ Stacked branches (feature-b on top of feature-a):
 ● 2bda89d (upstream) [origin/main] Initial commit
 ```
 
+Co-located branches (multiple branches pointing to the same commit):
+
+```
+│╭─ [feature-a-v2]
+│├─ [feature-a]
+│●   2ee61e1 Add feature A
+├╯
+│
+● ff1b247 (upstream) [origin/main] Initial commit
+```
+
+When several branches share the same tip commit, they are displayed as
+multiple header lines above the same set of commits. The newest branch
+(alphabetically last) appears on top with `│╭─`, and additional branches
+use `│├─`.
+
+Branches at the upstream base (no commits in range):
+
+```
+│╭─ [feature-a]
+│●   2ee61e1 Add feature A
+├╯
+│
+│╭─ [feature-stale]
+├╯
+│
+● ff1b247 (upstream) [origin/main] Initial commit
+```
+
+Local branches whose tip is the merge-base commit are shown as empty
+branch sections (header and close, no commits) above the upstream marker.
+Branches that track the same upstream remote as the integration branch
+(e.g. `main` tracking `origin/main`) are excluded.
+
 Loose commits (on the integration line, no feature branch):
 
 ```
@@ -76,10 +110,14 @@ Upstream ahead (upstream has new commits beyond the common base):
    modifications, new files, or deletions. Introduced with `╭─ [unstaged changes]`.
    Each file is listed with its status character (`M`, `A`, `D`, `R`, `?`).
 
-2. **Feature branches**: each local branch whose tip is reachable from HEAD but
-   not from the upstream tip is rendered as a side branch. The branch name
+2. **Feature branches**: each local branch whose tip is reachable from HEAD
+   (or at the merge-base) is rendered as a side branch. The branch name
    appears on its own line in brackets (`│╭─ [branch-name]`), followed by
-   its commits (`│●`), and closed with `├╯`.
+   its commits (`│●`), and closed with `├╯`. When multiple branches share
+   the same tip commit (co-located), they are shown as multiple header lines
+   above the same commits, with the newest on top. Branches at the
+   merge-base with no commits in range are shown as empty sections (header
+   and close only).
 
 3. **Loose commits**: commits not belonging to any detected feature branch are
    shown on the main integration line (`●`).
@@ -95,8 +133,8 @@ Upstream ahead (upstream has new commits beyond the common base):
 
 | Symbol | Meaning |
 |--------|---------|
-| `╭─`   | Start of a section (unstaged changes or first branch in a stack) |
-| `├─`   | Start of a subsequent branch within a stack |
+| `╭─`   | Start of a section (unstaged changes or first branch in a stack/group) |
+| `├─`   | Start of a subsequent branch within a stack or co-located group |
 | `│`    | Continuation of the integration line (dotted) |
 | `││`   | Continuation between stacked branches |
 | `●`    | A commit |
@@ -114,9 +152,11 @@ repository's `core.abbrev` setting and ensures uniqueness.
 ## Branch Detection
 
 Feature branches are detected automatically: all local branches whose tip
-commit is in the range `upstream..HEAD` (exclusive of the upstream commit,
-inclusive of HEAD) are considered feature branches. The current branch (the
-integration branch) is excluded from side branches.
+commit is in the range `upstream..HEAD` (inclusive of HEAD) or at the
+merge-base commit are considered feature branches. The current branch (the
+integration branch) is excluded from side branches. Branches that track
+the same upstream remote as the integration branch (e.g. `main` tracking
+`origin/main`) are also excluded.
 
 ## CLI
 

@@ -47,7 +47,6 @@ fn base_info() -> RepoInfo {
     RepoInfo {
         upstream: UpstreamInfo {
             label: "origin/main".to_string(),
-            base_oid: oid(0xaa),
             base_short_id: "aaa0000".to_string(),
             base_message: "Initial commit".to_string(),
             base_date: "2025-07-06".to_string(),
@@ -309,6 +308,79 @@ fn merge_based_integration_branch() {
     assert!(
         output.contains("●   2300023 Feature 3 depends on Feature 2"),
         "expected loose integration commit, got:\n{}",
+        output
+    );
+}
+
+#[test]
+fn co_located_branches_show_all_names() {
+    let mut info = base_info();
+    // Two branches pointing to the same tip commit
+    info.commits = vec![commit(2, "A2", Some(1)), commit(1, "A1", None)];
+    info.branches = vec![
+        BranchInfo {
+            name: "feature-a".to_string(),
+            tip_oid: oid(2),
+        },
+        BranchInfo {
+            name: "feature-a-v2".to_string(),
+            tip_oid: oid(2),
+        },
+    ];
+
+    let output = render_plain(info);
+    // Both branch names should appear as headers
+    assert!(
+        output.contains("[feature-a]"),
+        "expected [feature-a] header, got:\n{}",
+        output
+    );
+    assert!(
+        output.contains("[feature-a-v2]"),
+        "expected [feature-a-v2] header, got:\n{}",
+        output
+    );
+    // Newest (alphabetically last) on top with ╭─, oldest uses ├─
+    let v2_pos = output.find("[feature-a-v2]").unwrap();
+    let a_pos = output.find("[feature-a]").unwrap();
+    assert!(
+        v2_pos < a_pos,
+        "expected feature-a-v2 on top of feature-a, got:\n{}",
+        output
+    );
+    assert!(
+        output.contains("│╭─") && output.contains("│├─"),
+        "expected ╭─ then ├─ for co-located branches, got:\n{}",
+        output
+    );
+    // Only one set of commits (not duplicated)
+    assert_eq!(
+        output.matches("│●").count(),
+        2,
+        "expected 2 commit dots (not duplicated), got:\n{}",
+        output
+    );
+}
+
+#[test]
+fn branch_at_upstream_shown_as_section() {
+    let mut info = base_info();
+    // A branch whose tip is the merge-base (upstream) commit
+    info.branches = vec![BranchInfo {
+        name: "feature-4".to_string(),
+        tip_oid: oid(0xaa), // same as upstream base_oid
+    }];
+
+    let output = render_plain(info);
+    // Should appear as a branch section header, not on the upstream line
+    assert!(
+        output.contains("│╭─") && output.contains("[feature-4]"),
+        "expected branch section for feature-4, got:\n{}",
+        output
+    );
+    assert!(
+        output.contains("├╯"),
+        "expected branch close, got:\n{}",
         output
     );
 }

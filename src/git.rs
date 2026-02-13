@@ -17,8 +17,6 @@ pub enum Target {
 pub struct UpstreamInfo {
     /// Full name of the upstream ref (e.g. "origin/main").
     pub label: String,
-    /// OID of the merge-base commit.
-    pub base_oid: git2::Oid,
     /// Short hash of the merge-base commit.
     pub base_short_id: String,
     /// First line of the merge-base commit message.
@@ -144,7 +142,13 @@ pub fn gather_repo_info(repo: &Repository) -> Result<RepoInfo, git2::Error> {
 
     let commits = walk_commits(repo, head_oid, merge_base_oid)?;
     let commit_set: std::collections::HashSet<git2::Oid> = commits.iter().map(|c| c.oid).collect();
-    let branches = find_branches_in_range(repo, &commit_set, merge_base_oid, &branch_name)?;
+    let branches = find_branches_in_range(
+        repo,
+        &commit_set,
+        merge_base_oid,
+        &branch_name,
+        &upstream_name,
+    )?;
     let working_changes = get_working_changes(repo)?;
 
     // Count how many commits upstream is ahead of the merge-base
@@ -165,7 +169,6 @@ pub fn gather_repo_info(repo: &Repository) -> Result<RepoInfo, git2::Error> {
     Ok(RepoInfo {
         upstream: UpstreamInfo {
             label: upstream_name,
-            base_oid: merge_base_oid,
             base_short_id,
             base_message,
             base_date,
@@ -333,13 +336,15 @@ fn walk_commits(
     Ok(commits)
 }
 
-/// Find all local branches whose tip is in the commit range, excluding
-/// the current (integration) branch.
+/// Find all local branches whose tip is in the commit range or at the
+/// merge-base, excluding the current (integration) branch and branches
+/// that track the same upstream remote.
 fn find_branches_in_range(
     repo: &Repository,
     commit_set: &std::collections::HashSet<git2::Oid>,
-    upstream_oid: git2::Oid,
+    merge_base_oid: git2::Oid,
     current_branch: &str,
+    upstream_name: &str,
 ) -> Result<Vec<BranchInfo>, git2::Error> {
     let mut branches = Vec::new();
     for branch_result in repo.branches(Some(BranchType::Local))? {
@@ -353,9 +358,15 @@ fn find_branches_in_range(
         if name == current_branch {
             continue;
         }
+        // Skip branches that track the same upstream (e.g. main tracking origin/main)
+        if let Ok(up) = branch.upstream()
+            && let Ok(Some(up_name)) = up.name()
+            && up_name == upstream_name
+        {
+            continue;
+        }
         if let Some(tip_oid) = branch.get().target()
-            && tip_oid != upstream_oid
-            && commit_set.contains(&tip_oid)
+            && (commit_set.contains(&tip_oid) || tip_oid == merge_base_oid)
         {
             branches.push(BranchInfo { name, tip_oid });
         }

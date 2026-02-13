@@ -37,9 +37,10 @@ const BRANCH_DOT_COLORS: &[Color] = &[
 enum Section {
     /// Working tree status (always present, may contain zero changes).
     WorkingChanges(Vec<FileChange>),
-    /// A feature branch: its name and the commits it owns.
+    /// A feature branch: its name(s) and the commits it owns.
+    /// Multiple names occur when several branches point to the same tip commit.
     Branch {
-        name: String,
+        names: Vec<String>,
         commits: Vec<CommitInfo>,
     },
     /// Commits on the integration line that don't belong to any feature branch.
@@ -66,16 +67,32 @@ fn build_sections(info: RepoInfo) -> Vec<Section> {
     // Build a set of branch tip OIDs for quick lookup.
     let branch_tip_set: HashSet<git2::Oid> = info.branches.iter().map(|b| b.tip_oid).collect();
 
+    // Group branches by tip OID to handle co-located branches (multiple
+    // branch names pointing to the same commit).
+    let mut tip_to_names: HashMap<git2::Oid, Vec<String>> = HashMap::new();
+    for b in &info.branches {
+        tip_to_names
+            .entry(b.tip_oid)
+            .or_default()
+            .push(b.name.clone());
+    }
+
     // Build a parent lookup from the commit list so we can walk ancestry chains.
     let parent_map: HashMap<git2::Oid, Option<git2::Oid>> =
         info.commits.iter().map(|c| (c.oid, c.parent_oid)).collect();
 
-    // For each branch, compute the set of commits belonging to it.
+    // For each unique branch tip, compute the set of commits belonging to it.
     // Walk from the branch tip along parent links, stopping at:
     //   - A commit not in our range (outside upstream..HEAD)
     //   - Another branch's tip (stacked-branch boundary)
+    // Use the first name in the group as the canonical name for commit assignment.
     let mut commit_to_branch: HashMap<git2::Oid, String> = HashMap::new();
+    let mut seen_tips: HashSet<git2::Oid> = HashSet::new();
     for b in &info.branches {
+        if !seen_tips.insert(b.tip_oid) {
+            continue; // Already processed commits for this tip
+        }
+        let canonical_name = tip_to_names[&b.tip_oid][0].clone();
         let mut current = Some(b.tip_oid);
         let mut is_tip = true;
         while let Some(oid) = current {
@@ -87,9 +104,18 @@ fn build_sections(info: RepoInfo) -> Vec<Section> {
                 break;
             }
             is_tip = false;
-            commit_to_branch.insert(oid, b.name.clone());
+            commit_to_branch.insert(oid, canonical_name.clone());
             current = parent_map.get(&oid).and_then(|p| *p);
         }
+    }
+
+    // Map canonical name → all names for that branch group.
+    // Reverse so the newest (alphabetically last) branch appears on top.
+    let mut canonical_to_names: HashMap<String, Vec<String>> = HashMap::new();
+    for names in tip_to_names.values() {
+        let mut reversed = names.clone();
+        reversed.reverse();
+        canonical_to_names.insert(names[0].clone(), reversed);
     }
 
     let mut sections: Vec<Section> = Vec::new();
@@ -104,6 +130,10 @@ fn build_sections(info: RepoInfo) -> Vec<Section> {
     while let Some(commit) = commits.next() {
         if let Some(branch_name) = commit_to_branch.get(&commit.oid) {
             let name = branch_name.clone();
+            let names = canonical_to_names
+                .get(&name)
+                .cloned()
+                .unwrap_or_else(|| vec![name.clone()]);
             let mut branch_commits = vec![commit];
 
             // Collect subsequent commits that belong to the same branch.
@@ -115,7 +145,7 @@ fn build_sections(info: RepoInfo) -> Vec<Section> {
                 }
             }
             branch_sections.push(Section::Branch {
-                name,
+                names,
                 commits: branch_commits,
             });
         } else {
@@ -126,6 +156,18 @@ fn build_sections(info: RepoInfo) -> Vec<Section> {
                 }
                 loose_commits.push(commits.next().unwrap());
             }
+        }
+    }
+
+    // Add empty sections for branches at the merge-base (no commits in range).
+    let represented: HashSet<&String> = commit_to_branch.values().collect();
+    for names in canonical_to_names.values() {
+        // canonical key is the pre-reversal first name; check if any name is represented
+        if !names.iter().any(|n| represented.contains(n)) {
+            branch_sections.push(Section::Branch {
+                names: names.clone(),
+                commits: vec![],
+            });
         }
     }
 
@@ -178,7 +220,7 @@ fn render_sections(sections: &[Section], ids: &IdAllocator) -> String {
             Section::WorkingChanges(changes) => {
                 render_working_changes(&mut out, changes, ids);
             }
-            Section::Branch { name, commits } => {
+            Section::Branch { names, commits } => {
                 let dot_color = BRANCH_DOT_COLORS[branch_color_idx % BRANCH_DOT_COLORS.len()];
                 branch_color_idx += 1;
 
@@ -187,7 +229,7 @@ fn render_sections(sections: &[Section], ids: &IdAllocator) -> String {
 
                 render_branch(
                     &mut out,
-                    name,
+                    names,
                     commits,
                     dot_color,
                     prev_stacked,
@@ -246,7 +288,7 @@ fn render_working_changes(out: &mut String, changes: &[FileChange], ids: &IdAllo
 #[allow(clippy::too_many_arguments)]
 fn render_branch(
     out: &mut String,
-    name: &str,
+    names: &[String],
     commits: &[CommitInfo],
     dot_color: Color,
     prev_stacked: bool,
@@ -254,22 +296,24 @@ fn render_branch(
     more_sections: bool,
     ids: &IdAllocator,
 ) {
-    let branch_id = ids.get_branch(name);
-    let connector = if prev_stacked {
-        "│├─"
-    } else {
-        "│╭─"
-    };
-    writeln!(
-        out,
-        "{} {} {}{}{}",
-        connector.color(COLOR_GRAPH),
-        branch_id.color(COLOR_SHORTID).underline(),
-        "[".color(COLOR_DIM),
-        name.color(COLOR_BRANCH).bold(),
-        "]".color(COLOR_DIM)
-    )
-    .unwrap();
+    for (i, name) in names.iter().enumerate() {
+        let branch_id = ids.get_branch(name);
+        let connector = if i == 0 && !prev_stacked {
+            "│╭─"
+        } else {
+            "│├─"
+        };
+        writeln!(
+            out,
+            "{} {} {}{}{}",
+            connector.color(COLOR_GRAPH),
+            branch_id.color(COLOR_SHORTID).underline(),
+            "[".color(COLOR_DIM),
+            name.color(COLOR_BRANCH).bold(),
+            "]".color(COLOR_DIM)
+        )
+        .unwrap();
+    }
 
     for commit in commits {
         let sid = ids.get_commit(commit.oid);

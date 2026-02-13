@@ -223,7 +223,7 @@ fn upstream_ahead_of_merge_base() {
 }
 
 #[test]
-fn branch_at_upstream_is_not_detected() {
+fn branch_at_upstream_is_detected() {
     let test_repo = TestRepo::new_with_remote();
 
     // Create a branch pointing at the upstream commit (not ahead)
@@ -236,8 +236,8 @@ fn branch_at_upstream_is_not_detected() {
 
     let branch_names: Vec<&str> = info.branches.iter().map(|b| b.name.as_str()).collect();
     assert!(
-        !branch_names.contains(&"stale-branch"),
-        "branch at upstream should not be detected, got: {:?}",
+        branch_names.contains(&"stale-branch"),
+        "branch at upstream should be detected, got: {:?}",
         branch_names
     );
 }
