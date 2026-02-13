@@ -26,6 +26,14 @@ struct Cli {
 enum Command {
     /// Show the branch-aware status
     Status,
+    /// Create a new feature branch
+    Branch {
+        /// Branch name (if not provided, will prompt interactively)
+        name: Option<String>,
+        /// Target commit, branch, or shortID (defaults to upstream base)
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+    },
     /// Reword a commit message or rename a branch
     Reword {
         /// Branch name, shortID, or commit hash
@@ -54,6 +62,7 @@ fn main() {
 
     let result = match cli.command {
         None | Some(Command::Status) => status::run(),
+        Some(Command::Branch { name, target }) => branch::run(name, target),
         Some(Command::Reword { target, message }) => reword::run(target, message),
         Some(Command::InternalSequenceEdit {
             actions_json,

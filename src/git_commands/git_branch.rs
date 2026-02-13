@@ -1,6 +1,33 @@
 use std::path::Path;
+use std::process::Command;
 
 use super::run_git;
+
+/// Validate a branch name using `git check-ref-format`.
+pub fn validate_name(name: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::new("git")
+        .args(["check-ref-format", "--branch", name])
+        .output()?;
+
+    if !output.status.success() {
+        return Err(format!("'{}' is not a valid branch name", name).into());
+    }
+    Ok(())
+}
+
+/// Create a branch at a specific commit.
+///
+/// Wraps `git branch <name> <commit_hash>`.
+pub fn create(
+    workdir: &Path,
+    name: &str,
+    commit_hash: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    run_git(workdir, &["branch", name, commit_hash])
+        .map_err(|e| format!("Failed to create branch: {}", e))?;
+
+    Ok(())
+}
 
 /// Rename a branch using git branch -m.
 ///

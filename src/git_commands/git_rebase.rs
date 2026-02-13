@@ -81,6 +81,7 @@ impl<'a> Rebase<'a> {
                 "--keep-empty",
                 "--no-autosquash",
                 "--rebase-merges",
+                "--update-refs",
             ])
             .env("GIT_SEQUENCE_EDITOR", sequence_editor);
 
