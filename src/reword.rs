@@ -1,7 +1,6 @@
 use git2::Repository;
 
-use crate::git_commands::git_branch;
-use crate::git_commands::git_commit;
+use crate::git_commands::{self, git_branch, git_commit};
 use crate::git_commands::git_rebase::{self, Rebase, RebaseAction, RebaseTarget};
 
 /// Reword a commit message or rename a branch.
@@ -23,6 +22,8 @@ pub fn run(target: String, message: Option<String>) -> Result<(), Box<dyn std::e
                         .interact()?
                 }
             };
+            let new_name = new_name.trim().to_string();
+            git_branch::validate_name(&new_name)?;
             reword_branch(&repo, &name, &new_name)
         }
         crate::git::Target::File(_) => {
@@ -48,7 +49,7 @@ pub fn reword_commit(
     let commit = repo.revparse_single(commit_hash)?.peel_to_commit()?;
     let is_root = commit.parent_count() == 0;
 
-    let short_hash = &commit_hash[..7.min(commit_hash.len())];
+    let short_hash = git_commands::short_hash(commit_hash);
 
     let target = if is_root {
         RebaseTarget::Root
@@ -76,12 +77,10 @@ pub fn reword_commit(
     let new_commit = repo.head()?.peel_to_commit()?;
     let new_hash = new_commit.id().to_string();
 
-    // Show success message with old and new hashes
-    let old_short = &commit_hash[..7.min(commit_hash.len())];
-    let new_short = &new_hash[..7.min(new_hash.len())];
     println!(
         "Updated commit message for {} (now {})",
-        old_short, new_short
+        git_commands::short_hash(commit_hash),
+        git_commands::short_hash(&new_hash)
     );
 
     Ok(())

@@ -343,7 +343,7 @@ fn reword_branch_by_full_name_via_run() {
     test_repo.create_branch("feature-original");
 
     // Change directory to the repo for the run command
-    let original_dir = std::env::current_dir().unwrap();
+    let project_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     std::env::set_current_dir(test_repo.workdir()).unwrap();
 
     // Rename using full branch name
@@ -353,7 +353,7 @@ fn reword_branch_by_full_name_via_run() {
     );
 
     // Restore directory
-    std::env::set_current_dir(original_dir).unwrap();
+    std::env::set_current_dir(&project_dir).unwrap();
 
     assert!(
         result.is_ok(),
