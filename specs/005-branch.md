@@ -58,6 +58,59 @@ When a branch is created, git-loom's status view assigns commit ownership:
 - Creating a branch between existing commits splits ownership accordingly
 - Branches at the merge-base with no owned commits appear as empty sections
 
+### Weaving
+
+When a branch is created at a commit that is strictly between the merge-base
+and HEAD, git-loom automatically **weaves** it into the integration branch.
+This restructures the linear history into a merge topology where the branch's
+commits appear as a side branch joined by a merge commit.
+
+**Before** (linear):
+```
+origin/main → A1 → A2 → A3 → HEAD
+```
+
+**After** `git-loom branch feature-a -t A2`:
+```
+origin/main → A1 → A2 (feature-a)
+            ↘              ↘
+             A3' --------→ merge (HEAD)
+```
+
+**When weaving triggers:**
+
+Weaving occurs only when the branch target is on the **first-parent line** from
+HEAD to the merge-base (i.e., a loose commit on the integration line). These
+cases are no-ops:
+
+- **Branch at HEAD**: No commits to split off, topology stays linear.
+- **Branch at merge-base**: Branch has no owned commits in the range, no topology
+  change needed.
+- **Branch inside an existing side branch**: The commit is already part of a
+  merge topology (reachable through a merge second-parent), so no restructuring
+  is needed. The branch ref is created and ownership is split, but the topology
+  stays unchanged.
+
+**How it works:**
+
+1. The branch ref is created at the target commit (as before).
+2. `git rebase --onto <merge-base> <target> --update-refs` replays the commits
+   after the branch point onto the merge-base, creating a parallel line.
+3. `git merge <branch> --no-edit` joins the branch back into the integration
+   branch with a merge commit.
+
+**Prerequisites:**
+
+- The working tree must be clean (no staged or unstaged changes). If the tree
+  is dirty, an error is returned: *"Working tree must be clean to weave branch.
+  Please commit or stash your changes."*
+
+**Conflicts:**
+
+If the rebase or merge encounters conflicts, the operation stops and the user
+must resolve them manually using standard git tools (`git rebase --continue`,
+`git merge --continue`, etc.).
+
 ### Rebase Survival
 
 Branches created by git-loom survive integration rebases thanks to git's
@@ -165,14 +218,24 @@ match target:
         File(_) → error
     ↓
 git_branch::create(workdir, name, hash)
+    ↓
+should_weave? (branch not at HEAD and not at merge-base)
+    ↓ yes
+check_clean_working_tree()
+    ↓
+git_rebase::rebase_onto(workdir, merge_base, branch_commit)
+    ↓
+git_merge::merge(workdir, branch_name)
 ```
 
 **Key integration points:**
 
 - **`git::resolve_target()`** - Shared resolution logic (see Spec 002)
-- **`git::gather_repo_info()`** - Used for default merge-base target
+- **`git::gather_repo_info()`** - Used for default merge-base target and weave check
 - **`git_branch::validate_name()`** - Git-native name validation
 - **`git_branch::create()`** - Wraps `git branch <name> <hash>`
+- **`git_rebase::rebase_onto()`** - Wraps `git rebase --onto` for weaving
+- **`git_merge::merge()`** - Wraps `git merge --no-edit` for weaving
 - **`cliclack`** - Interactive prompt for branch name when not provided
 
 ### Module: `git_commands/git_branch.rs`
@@ -183,18 +246,26 @@ Low-level git operations:
 - **`create(workdir, name, hash)`** - Calls `git branch <name> <hash>`
 - **`rename(workdir, old, new)`** - Calls `git branch -m <old> <new>`
 
+### Module: `git_commands/git_merge.rs`
+
+- **`merge(workdir, branch)`** - Calls `git merge <branch> --no-edit`
+
+### Module: `git_commands/git_rebase.rs`
+
+- **`rebase_onto(workdir, newbase, upstream)`** - Calls `git rebase --onto <newbase> <upstream> --update-refs`
+
 ## Design Decisions
 
-### Simple `git branch` Over Rebase
+### Weave on Creation
 
-Branch creation uses `git branch <name> <hash>` rather than an interactive
-rebase approach. This was chosen because:
+When a branch is created between existing commits, git-loom automatically
+restructures the topology into a merge-based layout. This was chosen because:
 
-- **Simplicity**: One git command vs. complex rebase orchestration
-- **Safety**: No risk of rebase conflicts or mid-rebase failures
-- **Speed**: Instantaneous ref creation vs. commit replay
-- **Rebase survival**: Guaranteed by `--update-refs` on subsequent rebases,
-  not by the creation mechanism
+- **Immediate topology**: The merge topology is established right away, so
+  `git-loom status` shows the correct branch sections immediately
+- **Consistency**: All feature branches in the integration branch appear as
+  merge-based side branches, matching the target mental model
+- **`--update-refs`**: Keeps all branch refs in sync during the rebase step
 
 ### Default Target: Merge-Base
 
