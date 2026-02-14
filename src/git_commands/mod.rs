@@ -32,12 +32,8 @@ pub fn check_git_version() -> Result<(), Box<dyn std::error::Error>> {
     let version_str = String::from_utf8_lossy(&output.stdout);
 
     // Parse "git version X.Y.Z..." → (X, Y)
-    let (major, minor) = parse_git_version(&version_str).ok_or_else(|| {
-        format!(
-            "Could not parse Git version from: {}",
-            version_str.trim()
-        )
-    })?;
+    let (major, minor) = parse_git_version(&version_str)
+        .ok_or_else(|| format!("Could not parse Git version from: {}", version_str.trim()))?;
 
     if (major, minor) < MIN_GIT_VERSION {
         return Err(format!(

@@ -1,7 +1,7 @@
 use git2::Repository;
 
-use crate::git_commands::{self, git_branch, git_commit};
 use crate::git_commands::git_rebase::{self, Rebase, RebaseAction, RebaseTarget};
+use crate::git_commands::{self, git_branch, git_commit};
 
 /// Reword a commit message or rename a branch.
 pub fn run(target: String, message: Option<String>) -> Result<(), Box<dyn std::error::Error>> {

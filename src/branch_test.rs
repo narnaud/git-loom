@@ -104,7 +104,11 @@ fn branch_shows_in_status() {
         branch_names
     );
 
-    let feature_a = info.branches.iter().find(|b| b.name == "feature-a").unwrap();
+    let feature_a = info
+        .branches
+        .iter()
+        .find(|b| b.name == "feature-a")
+        .unwrap();
     assert_eq!(feature_a.tip_oid, a1_oid);
 }
 
@@ -155,10 +159,7 @@ fn run_with_name_and_target() {
     let project_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     std::env::set_current_dir(test_repo.workdir()).unwrap();
 
-    let result = super::run(
-        Some("feature-a".to_string()),
-        Some(a1_oid.to_string()),
-    );
+    let result = super::run(Some("feature-a".to_string()), Some(a1_oid.to_string()));
 
     std::env::set_current_dir(&project_dir).unwrap();
 
@@ -175,10 +176,7 @@ fn run_duplicate_name_rejected_early() {
     let project_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     std::env::set_current_dir(test_repo.workdir()).unwrap();
 
-    let result = super::run(
-        Some("feature-a".to_string()),
-        Some(a1_oid.to_string()),
-    );
+    let result = super::run(Some("feature-a".to_string()), Some(a1_oid.to_string()));
 
     std::env::set_current_dir(&project_dir).unwrap();
 
@@ -223,10 +221,7 @@ fn branch_weave_creates_merge_topology() {
     let project_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     std::env::set_current_dir(test_repo.workdir()).unwrap();
 
-    let result = super::run(
-        Some("feature-a".to_string()),
-        Some(a2_oid.to_string()),
-    );
+    let result = super::run(Some("feature-a".to_string()), Some(a2_oid.to_string()));
 
     std::env::set_current_dir(&project_dir).unwrap();
 
@@ -263,10 +258,7 @@ fn branch_at_head_no_weave() {
     let project_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     std::env::set_current_dir(test_repo.workdir()).unwrap();
 
-    let result = super::run(
-        Some("feature-a".to_string()),
-        Some(head_before.to_string()),
-    );
+    let result = super::run(Some("feature-a".to_string()), Some(head_before.to_string()));
 
     std::env::set_current_dir(&project_dir).unwrap();
 
@@ -293,10 +285,7 @@ fn branch_at_merge_base_no_weave() {
     let project_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     std::env::set_current_dir(test_repo.workdir()).unwrap();
 
-    let result = super::run(
-        Some("feature-a".to_string()),
-        Some(base_oid.to_string()),
-    );
+    let result = super::run(Some("feature-a".to_string()), Some(base_oid.to_string()));
 
     std::env::set_current_dir(&project_dir).unwrap();
 
@@ -341,17 +330,22 @@ fn branch_inside_existing_branch_no_weave() {
     // Reset integration to merge-base, add a commit on integration line, then merge feature-a
     let base_oid = test_repo.find_remote_branch_target("origin/main");
     test_repo.repo.set_head_detached(base_oid).unwrap();
-    test_repo.repo.checkout_head(Some(
-        git2::build::CheckoutBuilder::new().force(),
-    )).unwrap();
+    test_repo
+        .repo
+        .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
     // Re-attach to integration
     test_repo.repo.set_head("refs/heads/integration").unwrap();
-    test_repo.repo.checkout_head(Some(
-        git2::build::CheckoutBuilder::new().force(),
-    )).unwrap();
+    test_repo
+        .repo
+        .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
     // Reset integration to merge-base
     let base_commit = test_repo.repo.find_commit(base_oid).unwrap();
-    test_repo.repo.reset(base_commit.as_object(), git2::ResetType::Hard, None).unwrap();
+    test_repo
+        .repo
+        .reset(base_commit.as_object(), git2::ResetType::Hard, None)
+        .unwrap();
 
     // Add a commit on the integration line
     test_repo.commit("B1", "b1.txt");
@@ -364,10 +358,7 @@ fn branch_inside_existing_branch_no_weave() {
     let project_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     std::env::set_current_dir(test_repo.workdir()).unwrap();
 
-    let result = super::run(
-        Some("feature-b".to_string()),
-        Some(a1_oid.to_string()),
-    );
+    let result = super::run(Some("feature-b".to_string()), Some(a1_oid.to_string()));
 
     std::env::set_current_dir(&project_dir).unwrap();
 

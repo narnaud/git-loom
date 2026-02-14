@@ -13,10 +13,7 @@ use crate::git_commands::{self, git_branch, git_merge, git_rebase};
 /// When the branch is created at a commit that is neither HEAD nor the merge-base,
 /// the topology is restructured: commits after the branch point are rebased onto
 /// the merge-base, and a merge commit joins them with the branch.
-pub fn run(
-    name: Option<String>,
-    target: Option<String>,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(name: Option<String>, target: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
     let cwd = std::env::current_dir()?;
     let repo = Repository::discover(cwd)?;
 

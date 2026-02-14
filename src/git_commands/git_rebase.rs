@@ -124,7 +124,10 @@ pub fn rebase_onto(
     newbase: &str,
     upstream: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    super::run_git(workdir, &["rebase", "--onto", newbase, upstream, "--update-refs"])
+    super::run_git(
+        workdir,
+        &["rebase", "--onto", newbase, upstream, "--update-refs"],
+    )
 }
 
 /// Abort an in-progress rebase.
