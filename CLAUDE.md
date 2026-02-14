@@ -25,10 +25,11 @@ git-loom is a Git CLI tool written in Rust (edition 2024) that supercharges the 
 - `src/status.rs` — Branch-aware commit graph display.
 - `src/shortid.rs` — Compact human-friendly identifiers for branches, commits, and files.
 - `src/reword.rs` — Commit message editing / branch renaming via short IDs.
+- `src/branch.rs` — Branch creation and weaving into integration branches.
 - `src/graph.rs` — Graph rendering logic for the status output.
 - `src/git.rs` — Git abstraction layer (uses `git2` crate).
 - `src/git_commands/` — Lower-level Git operations split by domain:
-  - `git_branch.rs`, `git_commit.rs`, `git_rebase.rs`
+  - `git_branch.rs`, `git_commit.rs`, `git_merge.rs`, `git_rebase.rs`
 - `src/test_helpers.rs` — Shared test utilities (temp repos, etc.).
 - Tests live alongside their modules as `*_test.rs` sibling files.
 
@@ -42,6 +43,7 @@ The `specs/` directory contains detailed design documents that describe each fea
 | `specs/002-shortid.md` | Short ID generation and collision resolution |
 | `specs/003-reword.md` | Commit reword / branch rename via short IDs |
 | `specs/004-internal-sequence-edit.md` | Self-invocation as `GIT_SEQUENCE_EDITOR` for portable rebase |
+| `specs/005-branch.md` | Branch creation and weaving into integration branches |
 
 ## Build & Run Commands
 
@@ -52,3 +54,10 @@ The `specs/` directory contains detailed design documents that describe each fea
 - **Lint:** `cargo clippy`
 - **Format:** `cargo fmt`
 - **Check (fast compile check):** `cargo check`
+
+## Non-Negotiable: After Every Code Change
+
+After editing any code, you **must** run the following before considering the task done:
+
+1. `cargo fmt` — format all code
+2. `cargo test` — all tests must pass
