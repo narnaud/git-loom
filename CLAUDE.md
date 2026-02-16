@@ -26,6 +26,7 @@ git-loom is a Git CLI tool written in Rust (edition 2024) that supercharges the 
 - `src/shortid.rs` — Compact human-friendly identifiers for branches, commits, and files.
 - `src/reword.rs` — Commit message editing / branch renaming via short IDs.
 - `src/branch.rs` — Branch creation and weaving into integration branches.
+- `src/fold.rs` — Fold: amend files into commits, fixup commits, move commits between branches.
 - `src/graph.rs` — Graph rendering logic for the status output.
 - `src/git.rs` — Git abstraction layer (uses `git2` crate).
 - `src/git_commands/` — Lower-level Git operations split by domain:
@@ -44,6 +45,7 @@ The `specs/` directory contains detailed design documents that describe each fea
 | `specs/003-reword.md` | Commit reword / branch rename via short IDs |
 | `specs/004-internal-sequence-edit.md` | Self-invocation as `GIT_SEQUENCE_EDITOR` for portable rebase |
 | `specs/005-branch.md` | Branch creation and weaving into integration branches |
+| `specs/007-fold.md` | Fold: amend files, fixup commits, move commits between branches |
 
 ## Build & Run Commands
 
