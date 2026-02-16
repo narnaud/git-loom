@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
@@ -13,6 +12,16 @@ use super::loom_exe_path;
 pub enum RebaseAction {
     /// Mark a commit for editing.
     Edit { short_hash: String },
+    /// Move source commit right after target and mark it as fixup.
+    Fixup {
+        source_hash: String,
+        target_hash: String,
+    },
+    /// Move a commit to just before a label (i.e., to the tip of a branch section).
+    Move {
+        commit_hash: String,
+        before_label: String,
+    },
 }
 
 /// The target of a rebase operation.
@@ -55,6 +64,16 @@ impl<'a> Rebase<'a> {
             match action {
                 RebaseAction::Edit { short_hash } => {
                     validate_hex(short_hash)?;
+                }
+                RebaseAction::Fixup {
+                    source_hash,
+                    target_hash,
+                } => {
+                    validate_hex(source_hash)?;
+                    validate_hex(target_hash)?;
+                }
+                RebaseAction::Move { commit_hash, .. } => {
+                    validate_hex(commit_hash)?;
                 }
             }
         }
@@ -137,58 +156,134 @@ pub fn abort(workdir: &Path) -> Result<(), Box<dyn std::error::Error>> {
 
 /// Apply rebase actions to a todo file (used as GIT_SEQUENCE_EDITOR).
 ///
-/// For each `Edit` action, replaces the corresponding `pick <hash>` line
-/// with `edit <hash>`.
+/// Supports multiple action types:
+/// - `Edit`: replaces `pick <hash>` with `edit <hash>`
+/// - `Fixup`: moves source commit after target and marks it as `fixup`
+/// - `Move`: moves a commit line to just before a `label` directive
 pub fn apply_actions_to_todo(
     actions: &[RebaseAction],
     todo_file: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let content = std::fs::read_to_string(todo_file)?;
-    let mut output = String::with_capacity(content.len());
+    let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
 
-    // Collect hashes that need editing
-    let mut edit_hashes: Vec<&str> = Vec::new();
     for action in actions {
         match action {
-            RebaseAction::Edit { short_hash } => edit_hashes.push(short_hash),
-        }
-    }
-
-    let mut found: HashSet<&str> = HashSet::new();
-
-    for line in content.lines() {
-        let mut matched = false;
-        let parts: Vec<&str> = line.splitn(3, ' ').collect();
-        if parts.len() >= 2 && parts[0] == "pick" {
-            for hash in &edit_hashes {
-                if parts[1].starts_with(*hash) {
-                    output.push_str(&format!("edit {}", &line["pick".len()..]));
-                    matched = true;
-                    found.insert(hash);
-                    break;
-                }
+            RebaseAction::Edit { short_hash } => {
+                apply_edit(&mut lines, short_hash)?;
+            }
+            RebaseAction::Fixup {
+                source_hash,
+                target_hash,
+            } => {
+                apply_fixup(&mut lines, source_hash, target_hash)?;
+            }
+            RebaseAction::Move {
+                commit_hash,
+                before_label,
+            } => {
+                apply_move(&mut lines, commit_hash, before_label)?;
             }
         }
-        if !matched {
-            output.push_str(line);
-        }
-        output.push('\n');
     }
 
-    let missing: Vec<_> = edit_hashes.iter().filter(|h| !found.contains(*h)).collect();
-    if !missing.is_empty() {
+    let mut output = lines.join("\n");
+    output.push('\n');
+    std::fs::write(todo_file, output)?;
+    Ok(())
+}
+
+/// Replace `pick <hash>` with `edit <hash>`.
+fn apply_edit(lines: &mut [String], short_hash: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let mut found = false;
+    for line in lines.iter_mut() {
+        let parts: Vec<&str> = line.splitn(3, ' ').collect();
+        if parts.len() >= 2 && parts[0] == "pick" && parts[1].starts_with(short_hash) {
+            *line = format!("edit{}", &line["pick".len()..]);
+            found = true;
+            break;
+        }
+    }
+    if !found {
         writeln!(
             std::io::stderr(),
-            "warning: commit(s) {} not found in rebase todo",
-            missing
-                .iter()
-                .map(|h| h.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
+            "warning: commit {} not found in rebase todo",
+            short_hash
         )?;
     }
+    Ok(())
+}
 
-    std::fs::write(todo_file, output)?;
+/// Move the source commit line right after the target commit line and mark it as `fixup`.
+fn apply_fixup(
+    lines: &mut Vec<String>,
+    source_hash: &str,
+    target_hash: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Find and remove the source line
+    let source_idx = lines.iter().position(|line| {
+        let parts: Vec<&str> = line.splitn(3, ' ').collect();
+        parts.len() >= 2 && parts[0] == "pick" && parts[1].starts_with(source_hash)
+    });
+    let source_idx = source_idx
+        .ok_or_else(|| format!("Source commit {} not found in rebase todo", source_hash))?;
+    let source_line = lines.remove(source_idx);
+
+    // Change pick to fixup
+    let fixup_line = format!("fixup{}", &source_line["pick".len()..]);
+
+    // Find the target line and insert after it
+    let target_idx = lines.iter().position(|line| {
+        let parts: Vec<&str> = line.splitn(3, ' ').collect();
+        parts.len() >= 2 && parts[0] == "pick" && parts[1].starts_with(target_hash)
+    });
+    let target_idx = target_idx
+        .ok_or_else(|| format!("Target commit {} not found in rebase todo", target_hash))?;
+
+    lines.insert(target_idx + 1, fixup_line);
+    Ok(())
+}
+
+/// Move a commit line to the tip of a branch's section in the rebase todo.
+///
+/// With `--rebase-merges --update-refs`, the todo has `update-ref refs/heads/<branch>`
+/// directives that control where branch refs end up after rebase. We insert the commit
+/// just before the `update-ref` line so the branch ref will point to the moved commit.
+/// Falls back to inserting before `label <branch>` if no `update-ref` is found.
+fn apply_move(
+    lines: &mut Vec<String>,
+    commit_hash: &str,
+    before_label: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Find and remove the commit line
+    let commit_idx = lines.iter().position(|line| {
+        let parts: Vec<&str> = line.splitn(3, ' ').collect();
+        parts.len() >= 2 && parts[0] == "pick" && parts[1].starts_with(commit_hash)
+    });
+    let commit_idx =
+        commit_idx.ok_or_else(|| format!("Commit {} not found in rebase todo", commit_hash))?;
+    let commit_line = lines.remove(commit_idx);
+
+    // Try to find `update-ref refs/heads/<branch>` first (preferred anchor)
+    let update_ref_target = format!("update-ref refs/heads/{}", before_label);
+    let insert_idx = lines
+        .iter()
+        .position(|line| line.trim() == update_ref_target)
+        .or_else(|| {
+            // Fall back to `label <branch>`
+            let label_target = format!("label {}", before_label);
+            lines.iter().position(|line| line.trim() == label_target)
+        });
+
+    let insert_idx = insert_idx.ok_or_else(|| {
+        format!(
+            "Branch '{}' not found in rebase todo. \
+             The target branch may not be woven into the integration branch.",
+            before_label
+        )
+    })?;
+
+    lines.insert(insert_idx, commit_line);
     Ok(())
 }
 

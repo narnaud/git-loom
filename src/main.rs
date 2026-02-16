@@ -1,4 +1,5 @@
 mod branch;
+mod fold;
 mod git;
 mod git_commands;
 mod graph;
@@ -43,6 +44,12 @@ enum Command {
         #[arg(short, long)]
         message: Option<String>,
     },
+    /// Fold source(s) into a target (amend files, fixup commits, move commits)
+    Fold {
+        /// Source(s) and target: files, commits, or branches (last arg is the target)
+        #[arg(required = true, num_args = 2..)]
+        args: Vec<String>,
+    },
     /// Internal: used as GIT_SEQUENCE_EDITOR to apply rebase actions
     #[command(hide = true)]
     InternalSequenceEdit {
@@ -70,6 +77,7 @@ fn main() {
         None | Some(Command::Status) => status::run(),
         Some(Command::Branch { name, target }) => branch::run(name, target),
         Some(Command::Reword { target, message }) => reword::run(target, message),
+        Some(Command::Fold { args }) => fold::run(args),
         Some(Command::InternalSequenceEdit {
             actions_json,
             todo_file,
