@@ -9,6 +9,7 @@ mod init;
 mod reword;
 mod shortid;
 mod status;
+mod update;
 
 #[cfg(test)]
 mod test_helpers;
@@ -76,6 +77,8 @@ enum Command {
         #[arg(required = true, num_args = 2..)]
         args: Vec<String>,
     },
+    /// Pull-rebase the integration branch and update submodules
+    Update,
     /// Internal: used as GIT_SEQUENCE_EDITOR to apply rebase actions
     #[command(hide = true)]
     InternalSequenceEdit {
@@ -114,6 +117,7 @@ fn main() {
             files,
         }) => commit::run(branch, message, files),
         Some(Command::Drop { target }) => drop::run(target),
+        Some(Command::Update) => update::run(),
         Some(Command::Fold { args }) => fold::run(args),
         Some(Command::InternalSequenceEdit {
             actions_json,
