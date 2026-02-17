@@ -22,6 +22,10 @@ pub enum RebaseAction {
         commit_hash: String,
         before_label: String,
     },
+    /// Remove a commit from history entirely.
+    Drop { short_hash: String },
+    /// Remove an entire woven branch section and its merge line from history.
+    DropBranch { branch_name: String },
 }
 
 /// The target of a rebase operation.
@@ -74,6 +78,12 @@ impl<'a> Rebase<'a> {
                 }
                 RebaseAction::Move { commit_hash, .. } => {
                     validate_hex(commit_hash)?;
+                }
+                RebaseAction::Drop { short_hash } => {
+                    validate_hex(short_hash)?;
+                }
+                RebaseAction::DropBranch { .. } => {
+                    // Branch names don't need hex validation
                 }
             }
         }
@@ -184,6 +194,12 @@ pub fn apply_actions_to_todo(
             } => {
                 apply_move(&mut lines, commit_hash, before_label)?;
             }
+            RebaseAction::Drop { short_hash } => {
+                apply_drop(&mut lines, short_hash)?;
+            }
+            RebaseAction::DropBranch { branch_name } => {
+                apply_drop_branch(&mut lines, branch_name)?;
+            }
         }
     }
 
@@ -287,6 +303,127 @@ fn apply_move(
     Ok(())
 }
 
+/// Remove a `pick <hash>` line entirely from the todo.
+fn apply_drop(lines: &mut Vec<String>, short_hash: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let idx = lines.iter().position(|line| {
+        let parts: Vec<&str> = line.splitn(3, ' ').collect();
+        parts.len() >= 2 && parts[0] == "pick" && parts[1].starts_with(short_hash)
+    });
+    match idx {
+        Some(i) => {
+            lines.remove(i);
+        }
+        None => {
+            writeln!(
+                std::io::stderr(),
+                "warning: commit {} not found in rebase todo",
+                short_hash
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// Remove an entire woven branch section and its merge line from the rebase todo.
+///
+/// With `--rebase-merges --update-refs`, a woven branch section looks like:
+/// ```text
+/// reset onto
+/// pick <hash> commit message
+/// pick <hash> another commit
+/// label <branch>
+/// update-ref refs/heads/<branch>
+/// ...
+/// merge -C <hash> <branch>
+/// ```
+///
+/// This function removes:
+/// 1. The `reset` line that opens the branch section
+/// 2. All `pick` lines in the section
+/// 3. The `label <branch>` line
+/// 4. The `update-ref refs/heads/<branch>` line
+/// 5. The `merge ... <branch>` line
+fn apply_drop_branch(
+    lines: &mut Vec<String>,
+    branch_name: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let label_target = format!("label {}", branch_name);
+
+    // Find the label line for this branch
+    let label_idx = lines.iter().position(|l| l.trim() == label_target);
+    let label_idx = match label_idx {
+        Some(i) => i,
+        None => {
+            writeln!(
+                std::io::stderr(),
+                "warning: branch '{}' label not found in rebase todo; \
+                 branch may not be woven",
+                branch_name
+            )?;
+            return Ok(());
+        }
+    };
+
+    // Walk backwards from label_idx to find the `reset` line that opens this section.
+    let section_start = {
+        let mut i = label_idx;
+        loop {
+            if i == 0 {
+                break 0;
+            }
+            i -= 1;
+            if lines[i].trim().starts_with("reset ") {
+                break i;
+            }
+            // Guard: stop if we hit another label line
+            if lines[i].trim().starts_with("label ") {
+                break i + 1;
+            }
+        }
+    };
+
+    // Check if the line after the label is an update-ref for this branch
+    let update_ref_target = format!("update-ref refs/heads/{}", branch_name);
+    let section_end = if lines
+        .get(label_idx + 1)
+        .is_some_and(|l| l.trim() == update_ref_target)
+    {
+        label_idx + 1 // inclusive: remove up to and including the update-ref
+    } else {
+        label_idx // inclusive: remove up to and including the label
+    };
+
+    // Collect indices to remove: branch section + merge line
+    let mut to_remove: Vec<usize> = (section_start..=section_end).collect();
+
+    // Find the `merge ... <branch_name>` line.
+    // Format: `merge [-C|-c] <hash> <label> [# comment]`
+    // The label is the 4th whitespace-delimited token.
+    let merge_idx = lines.iter().position(|l| {
+        let parts: Vec<&str> = l.split_whitespace().collect();
+        parts.len() >= 4 && parts[0] == "merge" && parts[3] == branch_name
+    });
+    match merge_idx {
+        Some(i) => to_remove.push(i),
+        None => {
+            writeln!(
+                std::io::stderr(),
+                "warning: merge line for branch '{}' not found in rebase todo",
+                branch_name
+            )?;
+        }
+    }
+
+    // Remove in descending order so indices stay valid
+    to_remove.sort_unstable();
+    to_remove.dedup();
+    for i in to_remove.into_iter().rev() {
+        lines.remove(i);
+    }
+
+    Ok(())
+}
+
 /// Validate that a string contains only hexadecimal characters.
 fn validate_hex(s: &str) -> Result<(), Box<dyn std::error::Error>> {
     if s.is_empty() || !s.chars().all(|c| c.is_ascii_hexdigit()) {
@@ -297,4 +434,107 @@ fn validate_hex(s: &str) -> Result<(), Box<dyn std::error::Error>> {
         .into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn apply_drop_removes_pick_line() {
+        let mut lines = vec![
+            "pick abc1234 First".to_string(),
+            "pick def5678 Second".to_string(),
+            "pick 9876543 Third".to_string(),
+        ];
+        apply_drop(&mut lines, "def5678").unwrap();
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].contains("First"));
+        assert!(lines[1].contains("Third"));
+    }
+
+    #[test]
+    fn apply_drop_branch_removes_section_and_merge() {
+        let mut lines = vec![
+            "label onto".to_string(),
+            "".to_string(),
+            "reset onto".to_string(),
+            "pick abc1234 A1".to_string(),
+            "pick def5678 A2".to_string(),
+            "label feature-a".to_string(),
+            "update-ref refs/heads/feature-a".to_string(),
+            "".to_string(),
+            "reset onto".to_string(),
+            "pick 1111111 Int".to_string(),
+            "merge -C 9999999 feature-a # Merge branch 'feature-a'".to_string(),
+            "update-ref refs/heads/integration".to_string(),
+        ];
+
+        apply_drop_branch(&mut lines, "feature-a").unwrap();
+
+        let remaining: Vec<&str> = lines.iter().map(|l| l.as_str()).collect();
+        // Branch section (reset, picks, label, update-ref) and merge line should be gone
+        assert!(
+            !remaining.iter().any(|l| l.contains("A1")),
+            "A1 should be removed"
+        );
+        assert!(
+            !remaining.iter().any(|l| l.contains("A2")),
+            "A2 should be removed"
+        );
+        assert!(
+            !remaining.iter().any(|l| l.contains("label feature-a")),
+            "label should be removed"
+        );
+        assert!(
+            !remaining
+                .iter()
+                .any(|l| l.contains("update-ref refs/heads/feature-a")),
+            "update-ref should be removed"
+        );
+        assert!(
+            !remaining
+                .iter()
+                .any(|l| l.contains("merge") && l.contains("feature-a")),
+            "merge line should be removed"
+        );
+        // These should remain
+        assert!(
+            remaining.contains(&"label onto"),
+            "label onto should remain"
+        );
+        assert!(
+            remaining.iter().any(|l| l.contains("Int")),
+            "Int should remain"
+        );
+        assert!(
+            remaining
+                .iter()
+                .any(|l| l.contains("update-ref refs/heads/integration")),
+            "integration update-ref should remain"
+        );
+    }
+
+    #[test]
+    fn apply_drop_branch_with_no_blank_lines() {
+        // Test without blank lines between sections
+        let mut lines = vec![
+            "label onto".to_string(),
+            "reset onto".to_string(),
+            "pick abc A1".to_string(),
+            "label feature-a".to_string(),
+            "update-ref refs/heads/feature-a".to_string(),
+            "reset onto".to_string(),
+            "pick def Int".to_string(),
+            "merge -C xxx feature-a".to_string(),
+            "update-ref refs/heads/integration".to_string(),
+        ];
+
+        apply_drop_branch(&mut lines, "feature-a").unwrap();
+
+        let remaining: Vec<&str> = lines.iter().map(|l| l.as_str()).collect();
+        assert!(!remaining.iter().any(|l| l.contains("A1")));
+        assert!(remaining.iter().any(|l| l.contains("Int")));
+        assert_eq!(remaining.len(), 4); // label onto, reset onto, pick Int, update-ref integration
+    }
 }

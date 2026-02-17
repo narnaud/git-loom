@@ -29,6 +29,16 @@ pub fn create(
     Ok(())
 }
 
+/// Delete a local branch (force, to handle branches whose commits were dropped).
+///
+/// Wraps `git branch -D <name>`.
+pub fn delete(workdir: &Path, name: &str) -> Result<(), Box<dyn std::error::Error>> {
+    run_git(workdir, &["branch", "-D", name])
+        .map_err(|e| format!("Failed to delete branch '{}': {}", name, e))?;
+
+    Ok(())
+}
+
 /// Rename a branch using git branch -m.
 ///
 /// Wraps `git branch -m <old_name> <new_name>`.

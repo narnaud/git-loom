@@ -1,5 +1,6 @@
 mod branch;
 mod commit;
+mod drop;
 mod fold;
 mod git;
 mod git_commands;
@@ -56,6 +57,11 @@ enum Command {
         /// Files to stage (short IDs, filenames, or 'zz' for all)
         files: Vec<String>,
     },
+    /// Drop a commit or a branch from history
+    Drop {
+        /// Commit hash, branch name, or short ID to drop
+        target: String,
+    },
     /// Fold source(s) into a target (amend files, fixup commits, move commits)
     Fold {
         /// Source(s) and target: files, commits, or branches (last arg is the target)
@@ -94,6 +100,7 @@ fn main() {
             message,
             files,
         }) => commit::run(branch, message, files),
+        Some(Command::Drop { target }) => drop::run(target),
         Some(Command::Fold { args }) => fold::run(args),
         Some(Command::InternalSequenceEdit {
             actions_json,

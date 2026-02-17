@@ -116,7 +116,7 @@ fn should_weave(
 ///
 /// Walks the first-parent chain (skipping merge second-parents) and returns
 /// true if `target` is found before reaching `stop`.
-fn is_on_first_parent_line(
+pub fn is_on_first_parent_line(
     repo: &Repository,
     from: git2::Oid,
     stop: git2::Oid,
