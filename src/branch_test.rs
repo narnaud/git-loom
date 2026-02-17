@@ -51,19 +51,7 @@ fn branch_at_branch_tip() {
     test_repo.create_branch_at_commit("feature-a", a1_oid);
     test_repo.commit_empty("A2");
 
-    // Resolve feature-a to its tip commit and create new branch there
-    let resolved = git::resolve_target(&test_repo.repo, "feature-a").unwrap();
-    let hash = match resolved {
-        git::Target::Branch(name) => {
-            let branch = test_repo
-                .repo
-                .find_branch(&name, git2::BranchType::Local)
-                .unwrap();
-            branch.get().target().unwrap().to_string()
-        }
-        _ => panic!("expected branch target"),
-    };
-
+    let hash = test_repo.get_branch_target("feature-a").to_string();
     git_branch::create(test_repo.workdir().as_path(), "feature-b", &hash).unwrap();
 
     assert!(test_repo.branch_exists("feature-b"));
@@ -155,13 +143,8 @@ fn run_with_name_and_target() {
     let a1_oid = test_repo.commit("A1", "a1.txt");
     test_repo.commit("A2", "a2.txt");
 
-    // Use std::env to set the working directory for the run() function
-    let project_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    std::env::set_current_dir(test_repo.workdir()).unwrap();
-
-    let result = super::run(Some("feature-a".to_string()), Some(a1_oid.to_string()));
-
-    std::env::set_current_dir(&project_dir).unwrap();
+    let result =
+        test_repo.in_dir(|| super::run(Some("feature-a".to_string()), Some(a1_oid.to_string())));
 
     assert!(result.is_ok(), "branch::run failed: {:?}", result.err());
     assert!(test_repo.branch_exists("feature-a"));
@@ -173,12 +156,8 @@ fn run_duplicate_name_rejected_early() {
     let a1_oid = test_repo.commit_empty("A1");
     test_repo.create_branch_at_commit("feature-a", a1_oid);
 
-    let project_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    std::env::set_current_dir(test_repo.workdir()).unwrap();
-
-    let result = super::run(Some("feature-a".to_string()), Some(a1_oid.to_string()));
-
-    std::env::set_current_dir(&project_dir).unwrap();
+    let result =
+        test_repo.in_dir(|| super::run(Some("feature-a".to_string()), Some(a1_oid.to_string())));
 
     assert!(result.is_err());
     assert!(
@@ -194,12 +173,7 @@ fn run_default_target_is_merge_base() {
 
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
-    let project_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    std::env::set_current_dir(test_repo.workdir()).unwrap();
-
-    let result = super::run(Some("feature-a".to_string()), None);
-
-    std::env::set_current_dir(&project_dir).unwrap();
+    let result = test_repo.in_dir(|| super::run(Some("feature-a".to_string()), None));
 
     assert!(result.is_ok(), "branch::run failed: {:?}", result.err());
     assert_eq!(test_repo.get_branch_target("feature-a"), base_oid);
@@ -218,12 +192,8 @@ fn branch_weave_creates_merge_topology() {
     let a2_oid = test_repo.head_oid();
     test_repo.commit("A3", "a3.txt");
 
-    let project_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    std::env::set_current_dir(test_repo.workdir()).unwrap();
-
-    let result = super::run(Some("feature-a".to_string()), Some(a2_oid.to_string()));
-
-    std::env::set_current_dir(&project_dir).unwrap();
+    let result =
+        test_repo.in_dir(|| super::run(Some("feature-a".to_string()), Some(a2_oid.to_string())));
 
     assert!(result.is_ok(), "branch::run failed: {:?}", result.err());
     assert!(test_repo.branch_exists("feature-a"));
@@ -255,12 +225,8 @@ fn branch_at_head_no_weave() {
     test_repo.commit("A2", "a2.txt");
     let head_before = test_repo.head_oid();
 
-    let project_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    std::env::set_current_dir(test_repo.workdir()).unwrap();
-
-    let result = super::run(Some("feature-a".to_string()), Some(head_before.to_string()));
-
-    std::env::set_current_dir(&project_dir).unwrap();
+    let result = test_repo
+        .in_dir(|| super::run(Some("feature-a".to_string()), Some(head_before.to_string())));
 
     assert!(result.is_ok(), "branch::run failed: {:?}", result.err());
 
@@ -282,12 +248,8 @@ fn branch_at_merge_base_no_weave() {
     let head_before = test_repo.head_oid();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
-    let project_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    std::env::set_current_dir(test_repo.workdir()).unwrap();
-
-    let result = super::run(Some("feature-a".to_string()), Some(base_oid.to_string()));
-
-    std::env::set_current_dir(&project_dir).unwrap();
+    let result =
+        test_repo.in_dir(|| super::run(Some("feature-a".to_string()), Some(base_oid.to_string())));
 
     assert!(result.is_ok(), "branch::run failed: {:?}", result.err());
 
@@ -329,23 +291,7 @@ fn branch_inside_existing_branch_no_weave() {
 
     // Reset integration to merge-base, add a commit on integration line, then merge feature-a
     let base_oid = test_repo.find_remote_branch_target("origin/main");
-    test_repo.repo.set_head_detached(base_oid).unwrap();
-    test_repo
-        .repo
-        .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-        .unwrap();
-    // Re-attach to integration
-    test_repo.repo.set_head("refs/heads/integration").unwrap();
-    test_repo
-        .repo
-        .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-        .unwrap();
-    // Reset integration to merge-base
-    let base_commit = test_repo.repo.find_commit(base_oid).unwrap();
-    test_repo
-        .repo
-        .reset(base_commit.as_object(), git2::ResetType::Hard, None)
-        .unwrap();
+    test_repo.reset_hard(base_oid);
 
     // Add a commit on the integration line
     test_repo.commit("B1", "b1.txt");
@@ -355,12 +301,8 @@ fn branch_inside_existing_branch_no_weave() {
     let head_before = test_repo.head_oid();
 
     // Now create feature-b at A1, which is inside the feature-a side branch
-    let project_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    std::env::set_current_dir(test_repo.workdir()).unwrap();
-
-    let result = super::run(Some("feature-b".to_string()), Some(a1_oid.to_string()));
-
-    std::env::set_current_dir(&project_dir).unwrap();
+    let result =
+        test_repo.in_dir(|| super::run(Some("feature-b".to_string()), Some(a1_oid.to_string())));
 
     assert!(result.is_ok(), "branch::run failed: {:?}", result.err());
     assert!(test_repo.branch_exists("feature-b"));

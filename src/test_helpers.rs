@@ -226,6 +226,51 @@ impl TestRepo {
         self.repo.workdir().unwrap().to_path_buf()
     }
 
+    /// Run a closure with the current directory set to the repo's working directory.
+    ///
+    /// Saves the project directory, switches to the repo workdir, runs the closure,
+    /// then restores the original directory. Use this when calling `run()` functions
+    /// that depend on `std::env::current_dir()`.
+    pub fn in_dir<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce() -> R,
+    {
+        let restore = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        std::env::set_current_dir(self.workdir()).unwrap();
+        let result = f();
+        std::env::set_current_dir(restore).unwrap();
+        result
+    }
+
+    /// Switch HEAD to a branch and update the working directory.
+    pub fn switch_branch(&self, name: &str) {
+        self.repo.set_head(&format!("refs/heads/{}", name)).unwrap();
+        self.repo
+            .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+    }
+
+    /// Hard-reset the current branch to a specific commit.
+    pub fn reset_hard(&self, oid: git2::Oid) {
+        let commit = self.find_commit(oid);
+        self.repo
+            .reset(commit.as_object(), git2::ResetType::Hard, None)
+            .unwrap();
+    }
+
+    /// Force-update the working directory to match HEAD.
+    pub fn force_checkout(&self) {
+        self.repo
+            .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+    }
+
+    /// Create a branch at HEAD that tracks a remote upstream.
+    pub fn create_branch_tracking(&self, name: &str, upstream: &str) {
+        let mut branch = self.create_branch(name);
+        branch.set_upstream(Some(upstream)).unwrap();
+    }
+
     /// Write content to a file in the working directory (without committing).
     pub fn write_file(&self, filename: &str, content: &str) {
         let path = self.workdir().join(filename);

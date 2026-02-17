@@ -35,32 +35,15 @@ fn setup_with_two_branches() -> TestRepo {
 
     // Create feature-a at merge-base with one commit
     git_branch::create(workdir.as_path(), "feature-a", &base_oid.to_string()).unwrap();
-    // Switch to feature-a, make a commit, switch back
-    test_repo.repo.set_head("refs/heads/feature-a").unwrap();
-    test_repo
-        .repo
-        .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-        .unwrap();
+    test_repo.switch_branch("feature-a");
     test_repo.commit("A1", "a1.txt");
-    test_repo.repo.set_head("refs/heads/integration").unwrap();
-    test_repo
-        .repo
-        .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-        .unwrap();
+    test_repo.switch_branch("integration");
 
     // Create feature-b at merge-base with one commit
     git_branch::create(workdir.as_path(), "feature-b", &base_oid.to_string()).unwrap();
-    test_repo.repo.set_head("refs/heads/feature-b").unwrap();
-    test_repo
-        .repo
-        .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-        .unwrap();
+    test_repo.switch_branch("feature-b");
     test_repo.commit("B1", "b1.txt");
-    test_repo.repo.set_head("refs/heads/integration").unwrap();
-    test_repo
-        .repo
-        .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-        .unwrap();
+    test_repo.switch_branch("integration");
 
     // Weave both branches into integration
     git_merge::merge(workdir.as_path(), "feature-a").unwrap();
@@ -78,16 +61,13 @@ fn commit_stages_specific_file() {
     test_repo.write_file("new.txt", "content");
     test_repo.write_file("other.txt", "other");
 
-    let project_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    std::env::set_current_dir(test_repo.workdir()).unwrap();
-
-    let result = super::run(
-        Some("feature-a".to_string()),
-        Some("Add new file".to_string()),
-        vec!["new.txt".to_string()],
-    );
-
-    std::env::set_current_dir(&project_dir).unwrap();
+    let result = test_repo.in_dir(|| {
+        super::run(
+            Some("feature-a".to_string()),
+            Some("Add new file".to_string()),
+            vec!["new.txt".to_string()],
+        )
+    });
 
     assert!(result.is_ok(), "commit failed: {:?}", result);
 
@@ -104,16 +84,13 @@ fn commit_stages_zz_all_changes() {
     test_repo.write_file("file1.txt", "content1");
     test_repo.write_file("file2.txt", "content2");
 
-    let project_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    std::env::set_current_dir(test_repo.workdir()).unwrap();
-
-    let result = super::run(
-        Some("feature-a".to_string()),
-        Some("Add files".to_string()),
-        vec!["zz".to_string()],
-    );
-
-    std::env::set_current_dir(&project_dir).unwrap();
+    let result = test_repo.in_dir(|| {
+        super::run(
+            Some("feature-a".to_string()),
+            Some("Add files".to_string()),
+            vec!["zz".to_string()],
+        )
+    });
 
     assert!(result.is_ok(), "commit failed: {:?}", result);
 
@@ -132,16 +109,13 @@ fn commit_uses_already_staged() {
     crate::git_commands::git_commit::stage_files(test_repo.workdir().as_path(), &["staged.txt"])
         .unwrap();
 
-    let project_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    std::env::set_current_dir(test_repo.workdir()).unwrap();
-
-    let result = super::run(
-        Some("feature-a".to_string()),
-        Some("Use staged".to_string()),
-        vec![], // no file args = use index as-is
-    );
-
-    std::env::set_current_dir(&project_dir).unwrap();
+    let result = test_repo.in_dir(|| {
+        super::run(
+            Some("feature-a".to_string()),
+            Some("Use staged".to_string()),
+            vec![], // no file args = use index as-is
+        )
+    });
 
     assert!(result.is_ok(), "commit failed: {:?}", result);
 
@@ -154,17 +128,14 @@ fn commit_uses_already_staged() {
 fn commit_empty_index_fails() {
     let test_repo = setup_with_woven_branch();
 
-    let project_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    std::env::set_current_dir(test_repo.workdir()).unwrap();
-
     // No files staged, no file args
-    let result = super::run(
-        Some("feature-a".to_string()),
-        Some("Message".to_string()),
-        vec![],
-    );
-
-    std::env::set_current_dir(&project_dir).unwrap();
+    let result = test_repo.in_dir(|| {
+        super::run(
+            Some("feature-a".to_string()),
+            Some("Message".to_string()),
+            vec![],
+        )
+    });
 
     assert!(result.is_err());
     assert!(
@@ -184,25 +155,17 @@ fn commit_to_non_woven_branch_fails() {
 
     // Create a branch that tracks the same upstream as integration.
     // find_branches_in_range excludes such branches, so it won't be "woven".
-    let head_commit = test_repo.head_commit();
-    let mut branch = test_repo
-        .repo
-        .branch("not-woven", &head_commit, false)
-        .unwrap();
-    branch.set_upstream(Some("origin/main")).unwrap();
+    test_repo.create_branch_tracking("not-woven", "origin/main");
 
     test_repo.write_file("file.txt", "content");
 
-    let project_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    std::env::set_current_dir(test_repo.workdir()).unwrap();
-
-    let result = super::run(
-        Some("not-woven".to_string()),
-        Some("Message".to_string()),
-        vec!["file.txt".to_string()],
-    );
-
-    std::env::set_current_dir(&project_dir).unwrap();
+    let result = test_repo.in_dir(|| {
+        super::run(
+            Some("not-woven".to_string()),
+            Some("Message".to_string()),
+            vec!["file.txt".to_string()],
+        )
+    });
 
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("not woven"));
@@ -214,16 +177,13 @@ fn commit_to_new_branch_creates_and_weaves() {
 
     test_repo.write_file("new.txt", "content");
 
-    let project_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    std::env::set_current_dir(test_repo.workdir()).unwrap();
-
-    let result = super::run(
-        Some("feature-new".to_string()),
-        Some("Add file".to_string()),
-        vec!["new.txt".to_string()],
-    );
-
-    std::env::set_current_dir(&project_dir).unwrap();
+    let result = test_repo.in_dir(|| {
+        super::run(
+            Some("feature-new".to_string()),
+            Some("Add file".to_string()),
+            vec!["new.txt".to_string()],
+        )
+    });
 
     assert!(result.is_ok(), "commit failed: {:?}", result);
     assert!(test_repo.branch_exists("feature-new"));
@@ -254,16 +214,13 @@ fn commit_to_empty_branch_creates_merge_topology() {
 
     test_repo.write_file("new.txt", "content");
 
-    let project_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    std::env::set_current_dir(test_repo.workdir()).unwrap();
-
-    let result = super::run(
-        Some("feature-a".to_string()),
-        Some("New commit".to_string()),
-        vec!["new.txt".to_string()],
-    );
-
-    std::env::set_current_dir(&project_dir).unwrap();
+    let result = test_repo.in_dir(|| {
+        super::run(
+            Some("feature-a".to_string()),
+            Some("New commit".to_string()),
+            vec!["new.txt".to_string()],
+        )
+    });
 
     assert!(result.is_ok(), "commit failed: {:?}", result);
 
@@ -293,16 +250,13 @@ fn commit_moves_to_correct_branch_in_topology() {
 
     test_repo.write_file("new.txt", "content");
 
-    let project_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    std::env::set_current_dir(test_repo.workdir()).unwrap();
-
-    let result = super::run(
-        Some("feature-a".to_string()),
-        Some("New on A".to_string()),
-        vec!["new.txt".to_string()],
-    );
-
-    std::env::set_current_dir(&project_dir).unwrap();
+    let result = test_repo.in_dir(|| {
+        super::run(
+            Some("feature-a".to_string()),
+            Some("New on A".to_string()),
+            vec!["new.txt".to_string()],
+        )
+    });
 
     assert!(result.is_ok(), "commit failed: {:?}", result);
 
@@ -330,16 +284,13 @@ fn commit_not_on_integration_branch_fails() {
     test_repo.commit("A1", "a1.txt");
     test_repo.write_file("new.txt", "content");
 
-    let project_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    std::env::set_current_dir(test_repo.workdir()).unwrap();
-
-    let result = super::run(
-        Some("feature-a".to_string()),
-        Some("Message".to_string()),
-        vec!["new.txt".to_string()],
-    );
-
-    std::env::set_current_dir(&project_dir).unwrap();
+    let result = test_repo.in_dir(|| {
+        super::run(
+            Some("feature-a".to_string()),
+            Some("Message".to_string()),
+            vec!["new.txt".to_string()],
+        )
+    });
 
     assert!(result.is_err());
     assert!(
@@ -356,16 +307,13 @@ fn commit_not_on_integration_branch_fails() {
 fn commit_nonexistent_file_fails() {
     let test_repo = setup_with_woven_branch();
 
-    let project_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    std::env::set_current_dir(test_repo.workdir()).unwrap();
-
-    let result = super::run(
-        Some("feature-a".to_string()),
-        Some("Message".to_string()),
-        vec!["nonexistent.txt".to_string()],
-    );
-
-    std::env::set_current_dir(&project_dir).unwrap();
+    let result = test_repo.in_dir(|| {
+        super::run(
+            Some("feature-a".to_string()),
+            Some("Message".to_string()),
+            vec!["nonexistent.txt".to_string()],
+        )
+    });
 
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("not found"));

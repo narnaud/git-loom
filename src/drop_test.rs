@@ -25,21 +25,13 @@ fn setup_woven_branch(num_commits: usize) -> TestRepo {
     git_branch::create(workdir.as_path(), "feature-a", &base_oid.to_string()).unwrap();
 
     // Switch to feature-a and add commits
-    test_repo.repo.set_head("refs/heads/feature-a").unwrap();
-    test_repo
-        .repo
-        .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-        .unwrap();
+    test_repo.switch_branch("feature-a");
     for i in 1..=num_commits {
         test_repo.commit(&format!("A{}", i), &format!("a{}.txt", i));
     }
 
     // Switch back to integration
-    test_repo.repo.set_head("refs/heads/integration").unwrap();
-    test_repo
-        .repo
-        .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-        .unwrap();
+    test_repo.switch_branch("integration");
 
     // Add a commit on integration BEFORE merging to prevent fast-forward
     test_repo.commit("Int", "int.txt");
@@ -168,28 +160,16 @@ fn drop_non_woven_branch_removes_commits_and_ref() {
 
     // Create feature-a at merge-base and add commits
     git_branch::create(workdir.as_path(), "feature-a", &base_oid.to_string()).unwrap();
-    test_repo.repo.set_head("refs/heads/feature-a").unwrap();
-    test_repo
-        .repo
-        .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-        .unwrap();
+    test_repo.switch_branch("feature-a");
     test_repo.commit("A1", "a1.txt");
     test_repo.commit("A2", "a2.txt");
 
     // Switch back to integration and fast-forward merge feature-a
-    // (no --no-ff, so this is a fast-forward: integration now points to A2)
-    test_repo.repo.set_head("refs/heads/integration").unwrap();
-    test_repo
-        .repo
-        .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-        .unwrap();
+    test_repo.switch_branch("integration");
     git_merge::merge(workdir.as_path(), "feature-a").unwrap();
 
     // Force checkout to sync working tree after merge
-    test_repo
-        .repo
-        .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-        .unwrap();
+    test_repo.force_checkout();
 
     // Add a commit on integration after the merge so feature-a tip != HEAD
     test_repo.commit("Int", "int.txt");
@@ -215,12 +195,8 @@ fn drop_file_target_fails() {
     let test_repo = TestRepo::new_with_remote();
     test_repo.commit("C1", "c1.txt");
 
-    let project_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    std::env::set_current_dir(test_repo.workdir()).unwrap();
-
     // "nonexistent" doesn't resolve to anything
-    let result = super::run("nonexistent".to_string());
-    std::env::set_current_dir(&project_dir).unwrap();
+    let result = test_repo.in_dir(|| super::run("nonexistent".to_string()));
 
     assert!(result.is_err());
 }
@@ -233,32 +209,16 @@ fn drop_woven_branch_with_two_branches_preserves_other() {
 
     // Create feature-a with commits
     git_branch::create(workdir.as_path(), "feature-a", &base_oid.to_string()).unwrap();
-    test_repo.repo.set_head("refs/heads/feature-a").unwrap();
-    test_repo
-        .repo
-        .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-        .unwrap();
+    test_repo.switch_branch("feature-a");
     test_repo.commit("A1", "a1.txt");
     test_repo.commit("A2", "a2.txt");
-    test_repo.repo.set_head("refs/heads/integration").unwrap();
-    test_repo
-        .repo
-        .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-        .unwrap();
+    test_repo.switch_branch("integration");
 
     // Create feature-b with commits
     git_branch::create(workdir.as_path(), "feature-b", &base_oid.to_string()).unwrap();
-    test_repo.repo.set_head("refs/heads/feature-b").unwrap();
-    test_repo
-        .repo
-        .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-        .unwrap();
+    test_repo.switch_branch("feature-b");
     test_repo.commit("B1", "b1.txt");
-    test_repo.repo.set_head("refs/heads/integration").unwrap();
-    test_repo
-        .repo
-        .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-        .unwrap();
+    test_repo.switch_branch("integration");
 
     // Add integration commit to prevent fast-forward, then weave both
     test_repo.commit("Int", "int.txt");
@@ -290,12 +250,7 @@ fn run_drop_commit_by_hash() {
     let drop_oid = test_repo.commit("Drop me", "drop.txt");
     test_repo.commit("Keep2", "keep2.txt");
 
-    let project_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    std::env::set_current_dir(test_repo.workdir()).unwrap();
-
-    let result = super::run(drop_oid.to_string());
-
-    std::env::set_current_dir(&project_dir).unwrap();
+    let result = test_repo.in_dir(|| super::run(drop_oid.to_string()));
 
     assert!(result.is_ok(), "run failed: {:?}", result);
     assert_eq!(test_repo.get_message(0), "Keep2");
@@ -306,12 +261,7 @@ fn run_drop_commit_by_hash() {
 fn run_drop_branch_by_name() {
     let test_repo = setup_woven_branch(2);
 
-    let project_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    std::env::set_current_dir(test_repo.workdir()).unwrap();
-
-    let result = super::run("feature-a".to_string());
-
-    std::env::set_current_dir(&project_dir).unwrap();
+    let result = test_repo.in_dir(|| super::run("feature-a".to_string()));
 
     assert!(result.is_ok(), "run failed: {:?}", result);
     assert!(!test_repo.branch_exists("feature-a"));
