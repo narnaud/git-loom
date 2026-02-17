@@ -56,3 +56,27 @@ pub fn stage_files(workdir: &Path, files: &[&str]) -> Result<(), Box<dyn std::er
 pub fn commit(workdir: &Path, message: &str) -> Result<(), Box<dyn std::error::Error>> {
     super::run_git(workdir, &["commit", "-m", message])
 }
+
+/// Stage all changes (staged, unstaged, and untracked).
+///
+/// Wraps `git add -A`.
+pub fn stage_all(workdir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    super::run_git(workdir, &["add", "-A"])
+}
+
+/// Create a commit by opening the user's editor for the message.
+///
+/// Wraps `git commit` (no -m flag). Inherits stdin/stdout so the editor
+/// can interact with the terminal.
+pub fn commit_with_editor(workdir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let status = Command::new("git")
+        .current_dir(workdir)
+        .arg("commit")
+        .status()?;
+
+    if !status.success() {
+        return Err("Git commit failed (editor aborted or empty message).".into());
+    }
+
+    Ok(())
+}

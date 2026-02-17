@@ -277,17 +277,35 @@ fn fold_commit_to_branch(
     commit_hash: &str,
     branch_name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    check_clean_working_tree(repo)?;
+    move_commit_to_branch(repo, commit_hash, branch_name)?;
+
+    println!(
+        "Moved {} to branch '{}'",
+        git_commands::short_hash(commit_hash),
+        branch_name
+    );
+
+    Ok(())
+}
+
+/// Move a commit to the tip of a branch using interactive rebase.
+///
+/// The caller is responsible for ensuring the working tree is in an appropriate
+/// state. The rebase uses `--autostash` to handle any remaining uncommitted changes.
+///
+/// Used by both fold (commit+branch) and commit commands.
+pub fn move_commit_to_branch(
+    repo: &Repository,
+    commit_hash: &str,
+    branch_name: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let workdir = repo.workdir().ok_or("Cannot fold in bare repository")?;
 
-    // Validate clean working tree
-    check_clean_working_tree(repo)?;
-
-    // Find the merge-base to determine rebase target
     let info = git::gather_repo_info(repo)?;
     let merge_base = repo.revparse_single(&info.upstream.base_short_id)?;
     let merge_base_oid = merge_base.id();
 
-    // Check if the merge-base is a root commit (no parent)
     let merge_base_commit = repo.find_commit(merge_base_oid)?;
     let target = if merge_base_commit.parent_count() == 0 {
         RebaseTarget::Root
@@ -304,17 +322,11 @@ fn fold_commit_to_branch(
         })
         .run()?;
 
-    println!(
-        "Moved {} to branch '{}'",
-        git_commands::short_hash(commit_hash),
-        branch_name
-    );
-
     Ok(())
 }
 
 /// Check that the working tree is clean (no staged or unstaged changes).
-fn check_clean_working_tree(repo: &Repository) -> Result<(), Box<dyn std::error::Error>> {
+pub fn check_clean_working_tree(repo: &Repository) -> Result<(), Box<dyn std::error::Error>> {
     let mut opts = StatusOptions::new();
     opts.include_untracked(true).recurse_untracked_dirs(true);
 

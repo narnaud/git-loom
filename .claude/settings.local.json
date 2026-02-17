@@ -15,7 +15,9 @@
       "WebFetch(domain:api.github.com)",
       "Bash(cargo check:*)",
       "Bash(git branch:*)",
-      "Bash(git --version:*)"
+      "Bash(git --version:*)",
+      "Bash(cargo doc:*)",
+      "WebFetch(domain:docs.rs)"
     ]
   }
 }

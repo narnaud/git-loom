@@ -1,4 +1,5 @@
 mod branch;
+mod commit;
 mod fold;
 mod git;
 mod git_commands;
@@ -44,6 +45,17 @@ enum Command {
         #[arg(short, long)]
         message: Option<String>,
     },
+    /// Create a commit on a feature branch without leaving integration
+    Commit {
+        /// Target feature branch (name or short ID)
+        #[arg(short = 'b', long = "branch")]
+        branch: Option<String>,
+        /// Commit message (if not provided, opens editor)
+        #[arg(short, long)]
+        message: Option<String>,
+        /// Files to stage (short IDs, filenames, or 'zz' for all)
+        files: Vec<String>,
+    },
     /// Fold source(s) into a target (amend files, fixup commits, move commits)
     Fold {
         /// Source(s) and target: files, commits, or branches (last arg is the target)
@@ -77,6 +89,11 @@ fn main() {
         None | Some(Command::Status) => status::run(),
         Some(Command::Branch { name, target }) => branch::run(name, target),
         Some(Command::Reword { target, message }) => reword::run(target, message),
+        Some(Command::Commit {
+            branch,
+            message,
+            files,
+        }) => commit::run(branch, message, files),
         Some(Command::Fold { args }) => fold::run(args),
         Some(Command::InternalSequenceEdit {
             actions_json,
