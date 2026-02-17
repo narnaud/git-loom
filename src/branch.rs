@@ -1,4 +1,4 @@
-use git2::{Repository, StatusOptions};
+use git2::Repository;
 
 use crate::git;
 use crate::git_commands::{self, git_branch, git_merge, git_rebase};
@@ -58,7 +58,7 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<(), Box<dyn s
     // Check if weaving is needed
     if let Some(weave_info) = should_weave(&repo, &commit_hash)? {
         // Check for clean working tree before weaving
-        check_clean_working_tree(&repo)?;
+        git::check_clean_working_tree(&repo)?;
 
         // Rebase commits after the branch point onto the merge-base
         git_rebase::rebase_onto(workdir, &weave_info.merge_base_hash, &commit_hash)?;
@@ -95,7 +95,7 @@ fn should_weave(
     let head_oid = repo.head()?.target().ok_or("HEAD has no target")?;
     let branch_oid = git2::Oid::from_str(commit_hash)?;
 
-    let merge_base_oid = repo.revparse_single(&info.upstream.base_short_id)?.id();
+    let merge_base_oid = info.upstream.merge_base_oid;
     let merge_base_hash = merge_base_oid.to_string();
 
     if branch_oid == head_oid || branch_oid == merge_base_oid {
@@ -140,22 +140,6 @@ pub fn is_on_first_parent_line(
     }
 }
 
-/// Check that the working tree is clean (no staged or unstaged changes).
-fn check_clean_working_tree(repo: &Repository) -> Result<(), Box<dyn std::error::Error>> {
-    let mut opts = StatusOptions::new();
-    opts.include_untracked(true).recurse_untracked_dirs(true);
-
-    let statuses = repo.statuses(Some(&mut opts))?;
-    if !statuses.is_empty() {
-        return Err(
-            "Working tree must be clean to weave branch. Please commit or stash your changes."
-                .into(),
-        );
-    }
-
-    Ok(())
-}
-
 /// Resolve an optional target to a full commit hash.
 /// If no target, defaults to the merge-base (upstream base).
 fn resolve_commit(
@@ -166,8 +150,7 @@ fn resolve_commit(
         None => {
             // Default: merge-base commit
             let info = git::gather_repo_info(repo)?;
-            let base = repo.revparse_single(&info.upstream.base_short_id)?;
-            Ok(base.id().to_string())
+            Ok(info.upstream.merge_base_oid.to_string())
         }
         Some(t) => {
             let resolved = git::resolve_target(repo, t)?;

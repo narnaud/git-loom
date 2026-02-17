@@ -5,6 +5,7 @@ use std::process::Command;
 ///
 /// Wraps `git commit --allow-empty --amend --only [-m msg]`.
 /// Uses `--only` so that staged changes are not accidentally included.
+/// When `message` is `None`, inherits stdio so git can open the user's editor.
 pub fn amend(workdir: &Path, message: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
     let mut cmd = Command::new("git");
     cmd.current_dir(workdir)
@@ -12,12 +13,17 @@ pub fn amend(workdir: &Path, message: Option<&str>) -> Result<(), Box<dyn std::e
 
     if let Some(msg) = message {
         cmd.args(["-m", msg]);
-    }
-
-    let output = cmd.output()?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Git commit --amend failed:\n{}", stderr).into());
+        let output = cmd.output()?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Git commit --amend failed:\n{}", stderr).into());
+        }
+    } else {
+        // No message provided — open editor with inherited stdio
+        let status = cmd.status()?;
+        if !status.success() {
+            return Err("Git commit --amend failed (editor aborted or empty message).".into());
+        }
     }
 
     Ok(())

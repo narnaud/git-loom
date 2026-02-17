@@ -19,7 +19,7 @@ pub fn run_git(workdir: &Path, args: &[&str]) -> Result<(), Box<dyn std::error::
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("git {} failed:\n{}", args.first().unwrap_or(&""), stderr).into());
+        return Err(format!("git {} failed:\n{}", args.join(" "), stderr).into());
     }
 
     Ok(())

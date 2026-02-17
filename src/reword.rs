@@ -1,5 +1,6 @@
 use git2::Repository;
 
+use crate::git::{self, Target};
 use crate::git_commands::git_rebase::{self, Rebase, RebaseAction, RebaseTarget};
 use crate::git_commands::{self, git_branch, git_commit};
 
@@ -8,11 +9,11 @@ pub fn run(target: String, message: Option<String>) -> Result<(), Box<dyn std::e
     let cwd = std::env::current_dir()?;
     let repo = Repository::discover(cwd)?;
 
-    let resolved = crate::git::resolve_target(&repo, &target)?;
+    let resolved = git::resolve_target(&repo, &target)?;
 
     match resolved {
-        crate::git::Target::Commit(hash) => reword_commit(&repo, &hash, message),
-        crate::git::Target::Branch(name) => {
+        Target::Commit(hash) => reword_commit(&repo, &hash, message),
+        Target::Branch(name) => {
             let new_name = match message {
                 Some(msg) => msg,
                 None => {
@@ -26,9 +27,7 @@ pub fn run(target: String, message: Option<String>) -> Result<(), Box<dyn std::e
             git_branch::validate_name(&new_name)?;
             reword_branch(&repo, &name, &new_name)
         }
-        crate::git::Target::File(_) => {
-            Err("Cannot reword a file. Use 'git add' to stage file changes.".into())
-        }
+        Target::File(_) => Err("Cannot reword a file. Use 'git add' to stage file changes.".into()),
     }
 }
 

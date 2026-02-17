@@ -17,6 +17,8 @@ pub enum Target {
 pub struct UpstreamInfo {
     /// Full name of the upstream ref (e.g. "origin/main").
     pub label: String,
+    /// Full OID of the merge-base commit.
+    pub merge_base_oid: git2::Oid,
     /// Short hash of the merge-base commit.
     pub base_short_id: String,
     /// First line of the merge-base commit message.
@@ -113,18 +115,19 @@ pub fn gather_repo_info(repo: &Repository) -> Result<RepoInfo, git2::Error> {
 
     let local_branch = repo
         .find_branch(&branch_name, BranchType::Local)
-        .map_err(|_| {
+        .map_err(|e| {
             git2::Error::from_str(&format!(
-                "branch '{}' not found — are you on a branch?",
-                branch_name
+                "branch '{}' not found — are you on a branch? ({})",
+                branch_name, e
             ))
         })?;
 
-    let upstream = local_branch.upstream().map_err(|_| {
+    let upstream = local_branch.upstream().map_err(|e| {
         git2::Error::from_str(&format!(
             "branch '{}' has no upstream tracking branch.\n\
-             Set one with: git branch --set-upstream-to=origin/main {}",
-            branch_name, branch_name
+             Set one with: git branch --set-upstream-to=origin/main {}\n\
+             Cause: {}",
+            branch_name, branch_name, e
         ))
     })?;
 
@@ -169,6 +172,7 @@ pub fn gather_repo_info(repo: &Repository) -> Result<RepoInfo, git2::Error> {
     Ok(RepoInfo {
         upstream: UpstreamInfo {
             label: upstream_name,
+            merge_base_oid,
             base_short_id,
             base_message,
             base_date,
@@ -226,9 +230,9 @@ pub fn resolve_target(
         return Ok(Target::Branch(branch_name));
     }
 
-    // Try parsing as git reference (commit hash, HEAD, etc.)
+    // Try parsing as git reference (commit hash, HEAD, tag, etc.)
     if let Ok(obj) = repo.revparse_single(target)
-        && let Some(commit) = obj.as_commit()
+        && let Ok(commit) = obj.peel_to_commit()
     {
         return Ok(Target::Commit(commit.id().to_string()));
     }
@@ -287,7 +291,12 @@ fn count_commits(
     let mut revwalk = repo.revwalk()?;
     revwalk.push(from)?;
     revwalk.hide(hide)?;
-    Ok(revwalk.count())
+    let mut count = 0usize;
+    for oid_result in revwalk {
+        oid_result?;
+        count += 1;
+    }
+    Ok(count)
 }
 
 /// Format a Unix epoch timestamp as YYYY-MM-DD.
@@ -297,16 +306,16 @@ fn format_epoch(epoch: i64) -> String {
         .unwrap_or_else(|| "????-??-??".to_string())
 }
 
-/// Walk commits from HEAD to the upstream tip in topological order,
+/// Walk commits from HEAD to the merge-base in topological order,
 /// skipping merge commits.
 fn walk_commits(
     repo: &Repository,
     head_oid: git2::Oid,
-    upstream_oid: git2::Oid,
+    stop_oid: git2::Oid,
 ) -> Result<Vec<CommitInfo>, git2::Error> {
     let mut revwalk = repo.revwalk()?;
     revwalk.push(head_oid)?;
-    revwalk.hide(upstream_oid)?;
+    revwalk.hide(stop_oid)?;
     revwalk.set_sorting(git2::Sort::TOPOLOGICAL)?;
 
     let mut commits = Vec::new();
@@ -392,7 +401,9 @@ fn get_working_changes(repo: &Repository) -> Result<Vec<FileChange>, git2::Error
         };
         let status = entry.status();
 
-        let status_char = if status.is_index_new() || status.is_wt_new() {
+        let status_char = if status.is_wt_new() {
+            '?'
+        } else if status.is_index_new() {
             'A'
         } else if status.is_index_modified() || status.is_wt_modified() {
             'M'
@@ -411,6 +422,19 @@ fn get_working_changes(repo: &Repository) -> Result<Vec<FileChange>, git2::Error
     }
 
     Ok(changes)
+}
+
+/// Check that the working tree is clean (no staged or unstaged changes).
+pub fn check_clean_working_tree(repo: &Repository) -> Result<(), Box<dyn std::error::Error>> {
+    let mut opts = StatusOptions::new();
+    opts.include_untracked(true).recurse_untracked_dirs(true);
+
+    let statuses = repo.statuses(Some(&mut opts))?;
+    if !statuses.is_empty() {
+        return Err("Working tree must be clean. Please commit or stash your changes.".into());
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

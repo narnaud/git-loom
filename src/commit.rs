@@ -4,6 +4,19 @@ use crate::fold;
 use crate::git::{self, Target};
 use crate::git_commands::{self, git_branch, git_commit, git_merge};
 
+/// Verify that we're on an integration branch (has upstream tracking).
+fn verify_on_integration_branch(repo: &Repository) -> Result<(), Box<dyn std::error::Error>> {
+    git::gather_repo_info(repo).map_err(|e| {
+        format!(
+            "Must be on an integration branch to use commit. \
+             Use `git commit` directly on feature branches.\n\
+             Cause: {}",
+            e
+        )
+    })?;
+    Ok(())
+}
+
 /// Create a commit on a feature branch without leaving the integration branch.
 ///
 /// Stages files, creates the commit at HEAD, then uses fold's Move rebase action
@@ -60,15 +73,6 @@ pub fn run(
         branch_name
     );
 
-    Ok(())
-}
-
-/// Verify that we're on an integration branch (has upstream tracking).
-fn verify_on_integration_branch(repo: &Repository) -> Result<(), Box<dyn std::error::Error>> {
-    git::gather_repo_info(repo).map_err(|_| {
-        "Must be on an integration branch to use commit. \
-         Use `git commit` directly on feature branches."
-    })?;
     Ok(())
 }
 
@@ -258,10 +262,9 @@ fn is_branch_at_merge_base(
     branch_name: &str,
 ) -> Result<bool, Box<dyn std::error::Error>> {
     let info = git::gather_repo_info(repo)?;
-    let merge_base = repo.revparse_single(&info.upstream.base_short_id)?;
     let branch = repo.find_branch(branch_name, git2::BranchType::Local)?;
     let branch_oid = branch.get().target().ok_or("Branch has no target")?;
-    Ok(branch_oid == merge_base.id())
+    Ok(branch_oid == info.upstream.merge_base_oid)
 }
 
 /// Weave a newly-committed HEAD into a branch that previously had no commits.
@@ -274,21 +277,24 @@ fn weave_head_commit_to_branch(
     branch_name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Stash any remaining working tree changes (mimics rebase --autostash)
-    let stashed = git_commands::run_git(workdir, &["stash"]).is_ok();
+    let stashed = git_commands::run_git(workdir, &["stash", "--include-untracked"]).is_ok();
 
     // Point the branch to HEAD (the new commit)
-    git_commands::run_git(workdir, &["branch", "-f", branch_name, "HEAD"])?;
-    // Move integration back to before the new commit
-    git_commands::run_git(workdir, &["reset", "--hard", "HEAD~1"])?;
-    // Merge the branch to create proper merge topology
-    git_merge::merge_no_ff(workdir, branch_name)?;
+    let result = (|| -> Result<(), Box<dyn std::error::Error>> {
+        git_commands::run_git(workdir, &["branch", "-f", branch_name, "HEAD"])?;
+        // Move integration back to before the new commit
+        git_commands::run_git(workdir, &["reset", "--hard", "HEAD~1"])?;
+        // Merge the branch to create proper merge topology
+        git_merge::merge_no_ff(workdir, branch_name)?;
+        Ok(())
+    })();
 
-    // Restore stashed changes
+    // Always restore stashed changes, even on error
     if stashed {
         let _ = git_commands::run_git(workdir, &["stash", "pop"]);
     }
 
-    Ok(())
+    result
 }
 
 /// Create a new branch at the merge-base.
@@ -301,8 +307,7 @@ fn create_branch_at_merge_base(
     name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let info = git::gather_repo_info(repo)?;
-    let merge_base = repo.revparse_single(&info.upstream.base_short_id)?;
-    let merge_base_hash = merge_base.id().to_string();
+    let merge_base_hash = info.upstream.merge_base_oid.to_string();
 
     git_branch::create(workdir, name, &merge_base_hash)?;
 

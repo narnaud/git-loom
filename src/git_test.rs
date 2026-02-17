@@ -189,7 +189,7 @@ fn working_tree_changes_detected() {
         .iter()
         .find(|c| c.path == "untracked.txt")
         .unwrap();
-    assert_eq!(untracked.status, 'A');
+    assert_eq!(untracked.status, '?');
 }
 
 #[test]

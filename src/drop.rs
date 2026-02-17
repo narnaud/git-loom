@@ -3,7 +3,6 @@ use std::collections::{HashMap, HashSet};
 use git2::Repository;
 
 use crate::branch::is_on_first_parent_line;
-use crate::fold::check_clean_working_tree;
 use crate::git::{self, Target};
 use crate::git_commands::git_rebase::{Rebase, RebaseAction, RebaseTarget};
 use crate::git_commands::{self, git_branch};
@@ -35,15 +34,14 @@ pub fn run(target: String) -> Result<(), Box<dyn std::error::Error>> {
 fn drop_commit(repo: &Repository, commit_hash: &str) -> Result<(), Box<dyn std::error::Error>> {
     let workdir = repo.workdir().ok_or("Cannot drop in bare repository")?;
 
-    check_clean_working_tree(repo)?;
+    git::check_clean_working_tree(repo)?;
 
     let commit_oid = git2::Oid::from_str(commit_hash)?;
 
     // Check if this commit is the only commit on a branch.
     // If so, delegate to drop_branch for clean section removal.
     if let Ok(info) = git::gather_repo_info(repo) {
-        let merge_base = repo.revparse_single(&info.upstream.base_short_id)?;
-        let merge_base_oid = merge_base.id();
+        let merge_base_oid = info.upstream.merge_base_oid;
 
         if let Some(branch_name) = find_branch_owning_commit_from_info(&info, commit_oid)
             && let Some(branch_info) = info.branches.iter().find(|b| b.name == branch_name)
@@ -97,8 +95,7 @@ fn drop_branch(repo: &Repository, branch_name: &str) -> Result<(), Box<dyn std::
         })?;
 
     let head_oid = repo.head()?.target().ok_or("HEAD has no target")?;
-    let merge_base = repo.revparse_single(&info.upstream.base_short_id)?;
-    let merge_base_oid = merge_base.id();
+    let merge_base_oid = info.upstream.merge_base_oid;
 
     // Check if branch is at the merge-base with no owned commits
     if branch_info.tip_oid == merge_base_oid {
@@ -107,7 +104,7 @@ fn drop_branch(repo: &Repository, branch_name: &str) -> Result<(), Box<dyn std::
         return Ok(());
     }
 
-    check_clean_working_tree(repo)?;
+    git::check_clean_working_tree(repo)?;
 
     // Determine if the branch is woven (tip NOT on first-parent line)
     let is_woven = branch_info.tip_oid != head_oid

@@ -51,6 +51,7 @@ fn base_info() -> RepoInfo {
             base_message: "Initial commit".to_string(),
             base_date: "2025-07-06".to_string(),
             commits_ahead: 0,
+            merge_base_oid: oid(0xAA),
         },
         commits: vec![],
         branches: vec![],

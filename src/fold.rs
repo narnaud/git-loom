@@ -242,7 +242,7 @@ fn fold_commit_into_commit(
     }
 
     // Validate clean working tree
-    check_clean_working_tree(repo)?;
+    git::check_clean_working_tree(repo)?;
 
     // Check if the target is a root commit (no parent)
     let target_commit = repo.find_commit(target_oid)?;
@@ -277,7 +277,7 @@ fn fold_commit_to_branch(
     commit_hash: &str,
     branch_name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    check_clean_working_tree(repo)?;
+    git::check_clean_working_tree(repo)?;
     move_commit_to_branch(repo, commit_hash, branch_name)?;
 
     println!(
@@ -303,8 +303,7 @@ pub fn move_commit_to_branch(
     let workdir = repo.workdir().ok_or("Cannot fold in bare repository")?;
 
     let info = git::gather_repo_info(repo)?;
-    let merge_base = repo.revparse_single(&info.upstream.base_short_id)?;
-    let merge_base_oid = merge_base.id();
+    let merge_base_oid = info.upstream.merge_base_oid;
 
     let merge_base_commit = repo.find_commit(merge_base_oid)?;
     let target = if merge_base_commit.parent_count() == 0 {
@@ -321,21 +320,6 @@ pub fn move_commit_to_branch(
             before_label: branch_name.to_string(),
         })
         .run()?;
-
-    Ok(())
-}
-
-/// Check that the working tree is clean (no staged or unstaged changes).
-pub fn check_clean_working_tree(repo: &Repository) -> Result<(), Box<dyn std::error::Error>> {
-    let mut opts = StatusOptions::new();
-    opts.include_untracked(true).recurse_untracked_dirs(true);
-
-    let statuses = repo.statuses(Some(&mut opts))?;
-    if !statuses.is_empty() {
-        return Err(
-            "Working tree must be clean to fold. Please commit or stash your changes.".into(),
-        );
-    }
 
     Ok(())
 }

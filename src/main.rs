@@ -12,6 +12,8 @@ mod status;
 #[cfg(test)]
 mod test_helpers;
 
+use std::io::IsTerminal;
+
 use clap::{Parser, Subcommand};
 use colored::control;
 
@@ -82,7 +84,11 @@ enum Command {
 fn main() {
     let cli = Cli::parse();
 
-    if cli.no_color || std::env::var_os("NO_COLOR").is_some() {
+    if cli.no_color
+        || std::env::var_os("NO_COLOR").is_some()
+        || std::env::var_os("TERM").is_some_and(|v| v == "dumb")
+        || !std::io::stdout().is_terminal()
+    {
         control::set_override(false);
     }
 
@@ -118,7 +124,14 @@ fn handle_sequence_edit(
     actions_json: &str,
     todo_file: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let actions: Vec<git_commands::git_rebase::RebaseAction> = serde_json::from_str(actions_json)?;
+    let actions: Vec<git_commands::git_rebase::RebaseAction> = serde_json::from_str(actions_json)
+        .map_err(|e| {
+        format!(
+            "Failed to parse --actions-json: {}. Value was: {}",
+            e,
+            &actions_json[..actions_json.len().min(200)]
+        )
+    })?;
 
     git_commands::git_rebase::apply_actions_to_todo(&actions, todo_file)
 }

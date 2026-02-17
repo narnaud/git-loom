@@ -7,7 +7,8 @@ use super::run_git;
 pub fn validate_name(name: &str) -> Result<(), Box<dyn std::error::Error>> {
     let output = Command::new("git")
         .args(["check-ref-format", "--branch", name])
-        .output()?;
+        .output()
+        .map_err(|e| format!("Failed to run git check-ref-format: {}", e))?;
 
     if !output.status.success() {
         return Err(format!("'{}' is not a valid branch name", name).into());

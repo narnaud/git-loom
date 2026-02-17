@@ -3,7 +3,7 @@ use std::path::Path;
 use std::process::Command;
 
 use serde::{Deserialize, Serialize};
-use shell_escape::escape;
+use shell_escape::unix::escape as unix_escape;
 
 use super::loom_exe_path;
 
@@ -95,10 +95,15 @@ impl<'a> Rebase<'a> {
         // Convert backslashes to forward slashes for Git compatibility on Windows
         // Note: Git will automatically append the todo file path as the last argument
         let exe_str = self_exe.display().to_string().replace('\\', "/");
+
+        // Use platform-appropriate shell escaping.
+        // On Windows, Git for Windows uses MSYS2/bash to execute GIT_SEQUENCE_EDITOR,
+        // so we still use Unix-style escaping there. The windows_escape variant is
+        // reserved for contexts where cmd.exe or PowerShell are the shell.
         let sequence_editor = format!(
             "{} internal-sequence-edit --actions-json {}",
-            escape(exe_str.into()),
-            escape(actions_json.into())
+            unix_escape(exe_str.into()),
+            unix_escape(actions_json.into())
         );
 
         let mut cmd = Command::new("git");
@@ -211,23 +216,14 @@ pub fn apply_actions_to_todo(
 
 /// Replace `pick <hash>` with `edit <hash>`.
 fn apply_edit(lines: &mut [String], short_hash: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let mut found = false;
     for line in lines.iter_mut() {
         let parts: Vec<&str> = line.splitn(3, ' ').collect();
         if parts.len() >= 2 && parts[0] == "pick" && parts[1].starts_with(short_hash) {
             *line = format!("edit{}", &line["pick".len()..]);
-            found = true;
-            break;
+            return Ok(());
         }
     }
-    if !found {
-        writeln!(
-            std::io::stderr(),
-            "warning: commit {} not found in rebase todo",
-            short_hash
-        )?;
-    }
-    Ok(())
+    Err(format!("Commit {} not found in rebase todo", short_hash).into())
 }
 
 /// Move the source commit line right after the target commit line and mark it as `fixup`.
@@ -312,16 +308,10 @@ fn apply_drop(lines: &mut Vec<String>, short_hash: &str) -> Result<(), Box<dyn s
     match idx {
         Some(i) => {
             lines.remove(i);
+            Ok(())
         }
-        None => {
-            writeln!(
-                std::io::stderr(),
-                "warning: commit {} not found in rebase todo",
-                short_hash
-            )?;
-        }
+        None => Err(format!("Commit {} not found in rebase todo", short_hash).into()),
     }
-    Ok(())
 }
 
 /// Remove an entire woven branch section and its merge line from the rebase todo.
@@ -365,21 +355,29 @@ fn apply_drop_branch(
     };
 
     // Walk backwards from label_idx to find the `reset` line that opens this section.
+    // Stop at `reset` lines only. If we encounter another structural marker
+    // (label, update-ref, merge) before finding a `reset`, stop there to avoid
+    // including lines from a preceding section.
     let section_start = {
         let mut i = label_idx;
-        loop {
-            if i == 0 {
-                break 0;
-            }
+        let mut found_reset = None;
+        while i > 0 {
             i -= 1;
-            if lines[i].trim().starts_with("reset ") {
-                break i;
+            let trimmed = lines[i].trim();
+            if trimmed.starts_with("reset ") {
+                found_reset = Some(i);
+                break;
             }
-            // Guard: stop if we hit another label line
-            if lines[i].trim().starts_with("label ") {
-                break i + 1;
+            // Stop at any structural marker that belongs to a different section
+            if trimmed.starts_with("label ")
+                || trimmed.starts_with("update-ref ")
+                || trimmed.starts_with("merge ")
+            {
+                break;
             }
         }
+        // If no reset found, start after the last structural marker we stopped at
+        found_reset.unwrap_or(i + 1)
     };
 
     // Check if the line after the label is an update-ref for this branch
