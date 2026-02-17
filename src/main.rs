@@ -5,6 +5,7 @@ mod fold;
 mod git;
 mod git_commands;
 mod graph;
+mod init;
 mod reword;
 mod shortid;
 mod status;
@@ -32,6 +33,11 @@ struct Cli {
 enum Command {
     /// Show the branch-aware status
     Status,
+    /// Initialize a new integration branch tracking a remote
+    Init {
+        /// Branch name (defaults to "loom")
+        name: Option<String>,
+    },
     /// Create a new feature branch
     Branch {
         /// Branch name (if not provided, will prompt interactively)
@@ -99,6 +105,7 @@ fn main() {
 
     let result = match cli.command {
         None | Some(Command::Status) => status::run(),
+        Some(Command::Init { name }) => init::run(name),
         Some(Command::Branch { name, target }) => branch::run(name, target),
         Some(Command::Reword { target, message }) => reword::run(target, message),
         Some(Command::Commit {

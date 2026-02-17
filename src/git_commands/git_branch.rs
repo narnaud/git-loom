@@ -40,6 +40,20 @@ pub fn delete(workdir: &Path, name: &str) -> Result<(), Box<dyn std::error::Erro
     Ok(())
 }
 
+/// Create a new branch at a remote tracking ref and switch to it.
+///
+/// Wraps `git switch -c <name> --track <upstream>`.
+pub fn switch_create_tracking(
+    workdir: &Path,
+    name: &str,
+    upstream: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    run_git(workdir, &["switch", "-c", name, "--track", upstream])
+        .map_err(|e| format!("Failed to create tracking branch: {}", e))?;
+
+    Ok(())
+}
+
 /// Rename a branch using git branch -m.
 ///
 /// Wraps `git branch -m <old_name> <new_name>`.
