@@ -2,9 +2,10 @@
 
 ## Overview
 
-`git loom update` pulls the latest upstream changes into the current integration
-branch using rebase, then updates submodules if any are configured. On merge
-conflict, the error is reported so the user can resolve it manually.
+`git loom update` fetches the latest upstream changes (including tags and pruning
+deleted remote branches) then rebases the current integration branch onto the
+upstream. Submodules are updated if any are configured. On merge conflict, the
+error is reported so the user can resolve it manually.
 
 ## Why Update?
 
@@ -12,9 +13,11 @@ After initializing an integration branch with `git loom init`, the upstream
 remote will continue to receive new commits. The update command brings those
 changes into the local integration branch in a single step:
 
-- **Fetch + rebase** in one command (`git pull --rebase --autostash`)
+- **Fetch** with `--tags --force --prune` to pull all refs, force-update moved
+  tags, and remove stale remote-tracking branches
+- **Rebase** with `--autostash` onto the upstream tracking branch
 - **Submodule sync** automatically when the project uses submodules
-- **Visual feedback** via a spinner during potentially slow network operations
+- **Visual feedback** via spinners during potentially slow network operations
 
 ## CLI
 
@@ -27,7 +30,8 @@ git-loom update
 **Behavior:**
 
 - Validates the current branch is an integration branch (has upstream tracking)
-- Runs `git pull --rebase --autostash`
+- Runs `git fetch --tags --force --prune`
+- Runs `git rebase --autostash <upstream>`
 - If `.gitmodules` exists, runs `git submodule update --init --recursive`
 - On conflict, reports the error and lets the user resolve manually
 
@@ -38,11 +42,17 @@ git-loom update
    - HEAD must be on a branch (not detached)
    - The current branch must have an upstream tracking ref
    - Must not be a bare repository
-3. **Pull with rebase**: `git pull --rebase --autostash`
-   - `--rebase` replays local commits on top of upstream changes
+3. **Fetch**: `git fetch --tags --force --prune`
+   - `--tags` fetches all tags from the remote
+   - `--force` updates local tags even when the remote tag has been moved
+     (e.g., release tags that are force-pushed)
+   - `--prune` removes local remote-tracking refs for branches that have been
+     deleted on the remote, keeping the local state clean
+4. **Rebase**: `git rebase --autostash <upstream>`
+   - Replays local commits on top of the fetched upstream changes
    - `--autostash` stashes dirty working tree changes before rebase and
      restores them after
-4. **Submodule update** (conditional): If `.gitmodules` exists in the working
+5. **Submodule update** (conditional): If `.gitmodules` exists in the working
    directory, run `git submodule update --init --recursive`
 
 ## Conflict Handling
@@ -69,7 +79,7 @@ git rebase --abort
 - Must be in a git repository with a working tree (not bare)
 - Current branch must have an upstream tracking ref (use `git-loom init` first)
 - Git 2.38 or later (checked globally at startup)
-- Network access to the remote (for `git pull`)
+- Network access to the remote (for `git fetch`)
 
 ## Examples
 
@@ -77,16 +87,20 @@ git rebase --abort
 
 ```bash
 git-loom update
-# > Pulling latest changes...
-# > Pulled latest changes
+# > Fetching latest changes...
+# > Fetched latest changes
+# > Rebasing onto upstream...
+# > Rebased onto upstream
 ```
 
 ### Update with local commits (rebased on top)
 
 ```bash
 git-loom update
-# > Pulling latest changes...
-# > Pulled latest changes
+# > Fetching latest changes...
+# > Fetched latest changes
+# > Rebasing onto upstream...
+# > Rebased onto upstream
 ```
 
 Local commits are replayed on top of the fetched upstream changes.
@@ -95,8 +109,10 @@ Local commits are replayed on top of the fetched upstream changes.
 
 ```bash
 git-loom update
-# > Pulling latest changes...
-# > Pulled latest changes
+# > Fetching latest changes...
+# > Fetched latest changes
+# > Rebasing onto upstream...
+# > Rebased onto upstream
 ```
 
 Uncommitted changes are automatically stashed before the rebase and restored
@@ -106,8 +122,10 @@ after.
 
 ```bash
 git-loom update
-# > Pulling latest changes...
-# > Pulled latest changes
+# > Fetching latest changes...
+# > Fetched latest changes
+# > Rebasing onto upstream...
+# > Rebased onto upstream
 # > Updating submodules...
 # > Updated submodules
 ```
@@ -116,17 +134,21 @@ git-loom update
 
 ```bash
 git-loom update
-# > Pulling latest changes...
-# > Pulled latest changes
+# > Fetching latest changes...
+# > Fetched latest changes
+# > Rebasing onto upstream...
+# > Rebased onto upstream
 ```
 
 ### Error: merge conflict
 
 ```bash
 git-loom update
-# > Pulling latest changes...
-# x Pull failed
-# error: git pull --rebase --autostash failed:
+# > Fetching latest changes...
+# > Fetched latest changes
+# > Rebasing onto upstream...
+# x Rebase failed
+# error: git rebase --autostash origin/main failed:
 # CONFLICT (content): Merge conflict in file.txt
 # ...
 ```
@@ -167,10 +189,16 @@ validate HEAD is on a branch
 validate branch has upstream tracking ref
     |
     v
+capture upstream ref name (e.g., "origin/main")
+    |
+    v
 get workdir (reject bare repos)
     |
     v
-[spinner] git pull --rebase --autostash
+[spinner] git fetch --tags --force --prune
+    |
+    v
+[spinner] git rebase --autostash <upstream>
     |
     v
 if .gitmodules exists:
@@ -188,10 +216,32 @@ done
 
 ## Design Decisions
 
+### Explicit Fetch + Rebase Over `git pull`
+
+The update command uses an explicit `git fetch` followed by `git rebase` rather
+than `git pull --rebase`. This separation allows the fetch step to include
+`--tags --force --prune` flags that `git pull` does not support in a single
+invocation. The two-step approach is functionally equivalent to `git pull
+--rebase` but with richer fetch behavior.
+
+### `--tags --force` for Tag Synchronization
+
+Tags are fetched with `--force` so that tags which have been moved on the remote
+(e.g., release tags that get re-pointed after a hotfix) are updated locally.
+Without `--force`, git would skip tags whose names already exist locally, leaving
+stale tag refs.
+
+### `--prune` for Clean Remote-Tracking State
+
+The `--prune` flag removes local remote-tracking refs (e.g., `origin/feature-x`)
+for branches that have been deleted on the remote. This keeps the local
+repository's remote-tracking state clean and avoids confusion when listing
+branches.
+
 ### Plain `--rebase` (not `--rebase=merges`)
 
-The update uses a plain `--rebase` rather than `--rebase=merges`. This keeps
-the pull operation simple and predictable.
+The update uses a plain rebase rather than `--rebase=merges`. This keeps
+the rebase operation simple and predictable.
 
 ### `--autostash` Over Clean Tree Requirement
 

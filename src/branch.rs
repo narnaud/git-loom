@@ -61,7 +61,7 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<(), Box<dyn s
         git_rebase::rebase_onto(workdir, &weave_info.merge_base_hash, &commit_hash)?;
 
         // Merge the branch back in to create the merge topology
-        git_merge::merge(workdir, &name)?;
+        git_merge::merge_no_ff(workdir, &name)?;
 
         println!("Woven '{}' into integration branch", name);
     }

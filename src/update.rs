@@ -2,9 +2,10 @@ use git2::{BranchType, Repository};
 
 use crate::git_commands;
 
-/// Update the integration branch by pulling with rebase from upstream.
+/// Update the integration branch by fetching and rebasing from upstream.
 ///
-/// Performs a `git pull --rebase --autostash` on the current integration branch,
+/// Performs `git fetch --tags --force --prune` followed by
+/// `git rebase --autostash <upstream>` on the current integration branch,
 /// then updates submodules if any are configured. On merge conflict, the error
 /// is reported so the user can resolve it manually.
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -23,7 +24,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         .to_string();
 
     let local_branch = repo.find_branch(&branch_name, BranchType::Local)?;
-    local_branch.upstream().map_err(|e| {
+    let upstream = local_branch.upstream().map_err(|e| {
         format!(
             "Branch '{}' has no upstream tracking branch.\n\
              Run 'git-loom init' to set up an integration branch.\n\
@@ -31,21 +32,41 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             branch_name, e
         )
     })?;
+    let upstream_name = upstream
+        .name()?
+        .ok_or("Upstream branch name is not valid UTF-8")?
+        .to_string();
 
     let workdir = repo.workdir().ok_or("Cannot update in a bare repository")?;
 
-    // Pull with rebase and autostash
+    // Fetch with tags, force-update, and prune deleted remote branches
     let spinner = cliclack::spinner();
-    spinner.start("Pulling latest changes...");
+    spinner.start("Fetching latest changes...");
 
-    let result = git_commands::run_git(workdir, &["pull", "--rebase", "--autostash"]);
+    let result = git_commands::run_git(workdir, &["fetch", "--tags", "--force", "--prune"]);
 
     match result {
         Ok(()) => {
-            spinner.stop("Pulled latest changes");
+            spinner.stop("Fetched latest changes");
         }
         Err(e) => {
-            spinner.error("Pull failed");
+            spinner.error("Fetch failed");
+            return Err(e);
+        }
+    }
+
+    // Rebase onto upstream with autostash
+    let spinner = cliclack::spinner();
+    spinner.start("Rebasing onto upstream...");
+
+    let result = git_commands::run_git(workdir, &["rebase", "--autostash", &upstream_name]);
+
+    match result {
+        Ok(()) => {
+            spinner.stop("Rebased onto upstream");
+        }
+        Err(e) => {
+            spinner.error("Rebase failed");
             return Err(e);
         }
     }
