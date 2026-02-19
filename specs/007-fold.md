@@ -73,11 +73,10 @@ to include the current working tree changes for the specified files.
    temporary commit into the target. This avoids stash/unstash complexity
    during interactive rebase and reuses the fixup infrastructure.
 
-**Prerequisites:**
+**Dirty working tree:**
 
-- For non-HEAD targets: working tree must have no other uncommitted changes
-  beyond the files being folded. Error: `"Working tree has other uncommitted
-  changes. Please commit or stash them before folding into a non-HEAD commit."`
+- For non-HEAD targets: uncommitted changes are automatically stashed before
+  the rebase and restored after (`--autostash`).
 
 **What changes:**
 
@@ -95,9 +94,8 @@ The target commit keeps its original message.
 1. Resolve source as a commit, resolve target as a commit.
 2. Validate that the source is a descendant of the target (source is newer).
    Error if not: `"Source commit must be newer than target commit."`
-3. Working tree must be clean. Error: `"Working tree must be clean to fold
-   commits. Please commit or stash your changes."`
-4. Use interactive rebase to reorder and fixup:
+3. Use interactive rebase to reorder and fixup (uncommitted changes are
+   autostashed):
    - Start `git rebase -i <target>^` with a sequence editor that:
      - Moves the source commit line to immediately after the target commit line
      - Changes the source commit's action from `pick` to `fixup`
@@ -129,14 +127,13 @@ branch refs correct automatically.
 **Steps:**
 
 1. Resolve source as a commit, resolve target as a branch.
-2. Working tree must be clean. Error: `"Working tree must be clean to move
-   a commit. Please commit or stash your changes."`
-3. Use interactive rebase with a sequence editor that:
+2. Use interactive rebase with a sequence editor that (uncommitted changes are
+   autostashed):
    - Removes the source commit line from its current position
    - Inserts it at the tip of the target branch's section (just before the
      target branch's merge commit, or after the last commit of the target
      branch)
-4. `--update-refs` ensures both the source and target branch refs update
+3. `--update-refs` ensures both the source and target branch refs update
    to reflect the new topology.
 
 **Conflict handling:**
@@ -179,7 +176,6 @@ argument is target).
 - Git 2.38 or later (for `--update-refs` during rebases)
 - Must be in a git repository with a working tree
 - For short ID arguments: must have upstream tracking configured
-- Clean working tree required for commit+commit and commit+branch operations
 
 ## Examples
 
@@ -356,9 +352,10 @@ is updated to point to the moved commit after the rebase completes. Inserting
 before the `label` alone would leave the `update-ref` pointing to the
 previous tip, so the branch ref would not move.
 
-### Clean Working Tree Requirements
+### Autostash Over Clean Working Tree Requirements
 
-Commit+commit and commit+branch require a clean working tree because they
-use interactive rebase under the hood. File+commit allows a dirty tree only
-when targeting HEAD (since `git commit --amend` handles it natively), but
-requires cleanliness for non-HEAD targets (which need rebase).
+All rebase-based operations (commit+commit, commit+branch, and non-HEAD
+file+commit) use `--autostash` to transparently stash and restore uncommitted
+changes. This reduces friction — users don't need to manually stash before
+folding. File+commit targeting HEAD uses `git commit --amend` directly, which
+handles dirty trees natively.

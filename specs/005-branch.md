@@ -99,11 +99,11 @@ cases are no-ops:
 3. `git merge <branch> --no-edit` joins the branch back into the integration
    branch with a merge commit.
 
-**Prerequisites:**
+**Dirty working tree:**
 
-- The working tree must be clean (no staged or unstaged changes). If the tree
-  is dirty, an error is returned: *"Working tree must be clean to weave branch.
-  Please commit or stash your changes."*
+- If the working tree has uncommitted changes, they are automatically stashed
+  before the rebase and restored after (`--autostash`). The user does not need
+  to manually stash or commit before weaving.
 
 **Conflicts:**
 

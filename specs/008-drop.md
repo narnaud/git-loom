@@ -57,12 +57,10 @@ topology.
 **Steps:**
 
 1. Resolve target as a commit.
-2. Working tree must be clean. Error: `"Working tree must be clean to fold.
-   Please commit or stash your changes."`
-3. Check if the commit is the sole commit on a branch (via branch ownership
+2. Check if the commit is the sole commit on a branch (via branch ownership
    and owned-commit count). If so, delegate to branch drop.
-4. Otherwise, use interactive rebase with a sequence editor that removes the
-   `pick <hash>` line from the todo.
+3. Otherwise, use interactive rebase (with `--autostash`) with a sequence
+   editor that removes the `pick <hash>` line from the todo.
 
 **What changes:**
 
@@ -101,14 +99,14 @@ merge commit and lives on a side branch.
 2. Verify the branch is in the integration range (between merge-base and HEAD).
    Error: `"Branch '<name>' is not in the integration range. Use 'git branch -d
    <name>' to delete it directly."`
-3. Working tree must be clean.
-4. Use interactive rebase with the `DropBranch` action, which removes:
+3. Use interactive rebase (with `--autostash`) with the `DropBranch` action,
+   which removes:
    - The `reset` line that opens the branch section
    - All `pick` lines in the section (the branch's commits)
    - The `label <branch>` line
    - The `update-ref refs/heads/<branch>` line
    - The `merge ... <branch>` line (the merge commit)
-5. Delete the branch ref with `git branch -D`.
+4. Delete the branch ref with `git branch -D`.
 
 #### Non-woven branch (on the first-parent line)
 
@@ -155,7 +153,6 @@ discard file changes."`
 
 - Git 2.38 or later (for `--update-refs` during rebases)
 - Must be in a git repository with a working tree (not bare)
-- Clean working tree required (except for dropping branches at merge-base)
 - For branch drops: the branch must be in the integration range
 - For short ID arguments: must have upstream tracking configured
 
@@ -307,12 +304,12 @@ merge-base and HEAD) is rejected with a helpful error suggesting
   do nothing, which is confusing
 - The error message guides users to the right tool
 
-### Clean Working Tree Requirement
+### Autostash Over Clean Working Tree Requirement
 
-A clean working tree is required for all cases except dropping a branch at
-the merge-base (which only deletes the ref, no rebase needed). This matches
-the behavior of other rebase-based commands (fold, reword) and prevents
-potential data loss from uncommitted changes during rebase.
+All rebase-based drop operations use `--autostash` to transparently stash and
+restore uncommitted changes. This reduces friction — users don't need to
+manually stash before dropping. Dropping a branch at the merge-base (which
+only deletes the ref, no rebase needed) works regardless of working tree state.
 
 ### Rebase from Merge-Base
 
