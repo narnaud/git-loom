@@ -37,7 +37,7 @@ fn setup_woven_branch(num_commits: usize) -> TestRepo {
     test_repo.commit("Int", "int.txt");
 
     // Merge feature-a (creates a real merge commit since integration diverged)
-    git_merge::merge(workdir.as_path(), "feature-a").unwrap();
+    git_merge::merge_no_ff(workdir.as_path(), "feature-a").unwrap();
 
     test_repo
 }
@@ -173,7 +173,7 @@ fn drop_non_woven_branch_removes_commits_and_ref() {
 
     // Switch back to integration and fast-forward merge feature-a
     test_repo.switch_branch("integration");
-    git_merge::merge(workdir.as_path(), "feature-a").unwrap();
+    git_merge::merge_no_ff(workdir.as_path(), "feature-a").unwrap();
 
     // Force checkout to sync working tree after merge
     test_repo.force_checkout();
@@ -229,8 +229,8 @@ fn drop_woven_branch_with_two_branches_preserves_other() {
 
     // Add integration commit to prevent fast-forward, then weave both
     test_repo.commit("Int", "int.txt");
-    git_merge::merge(workdir.as_path(), "feature-a").unwrap();
-    git_merge::merge(workdir.as_path(), "feature-b").unwrap();
+    git_merge::merge_no_ff(workdir.as_path(), "feature-a").unwrap();
+    git_merge::merge_no_ff(workdir.as_path(), "feature-b").unwrap();
 
     // Drop feature-a
     let result = super::drop_branch(&test_repo.repo, "feature-a");

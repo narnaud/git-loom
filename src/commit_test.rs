@@ -46,8 +46,8 @@ fn setup_with_two_branches() -> TestRepo {
     test_repo.switch_branch("integration");
 
     // Weave both branches into integration
-    git_merge::merge(workdir.as_path(), "feature-a").unwrap();
-    git_merge::merge(workdir.as_path(), "feature-b").unwrap();
+    git_merge::merge_no_ff(workdir.as_path(), "feature-a").unwrap();
+    git_merge::merge_no_ff(workdir.as_path(), "feature-b").unwrap();
 
     test_repo
 }

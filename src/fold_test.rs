@@ -262,7 +262,7 @@ fn fold_commit_to_branch() {
         &a1_oid.to_string(),
     )
     .unwrap();
-    git_merge::merge(workdir.as_path(), "feature-a").unwrap();
+    git_merge::merge_no_ff(workdir.as_path(), "feature-a").unwrap();
 
     // Now add a loose commit on the integration line
     test_repo.commit("C1", "c1.txt");
@@ -303,7 +303,7 @@ fn fold_commit_to_branch_dirty_autostashed() {
         &a1_oid.to_string(),
     )
     .unwrap();
-    git_merge::merge(workdir.as_path(), "feature-a").unwrap();
+    git_merge::merge_no_ff(workdir.as_path(), "feature-a").unwrap();
 
     let loose_oid = test_repo.commit("Loose", "loose.txt");
 

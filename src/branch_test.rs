@@ -297,7 +297,7 @@ fn branch_inside_existing_branch_no_weave() {
     test_repo.commit("B1", "b1.txt");
 
     // Merge feature-a into integration
-    git_merge::merge(test_repo.workdir().as_path(), "feature-a").unwrap();
+    git_merge::merge_no_ff(test_repo.workdir().as_path(), "feature-a").unwrap();
     let head_before = test_repo.head_oid();
 
     // Now create feature-b at A1, which is inside the feature-a side branch
