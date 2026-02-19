@@ -274,8 +274,11 @@ The `internal-sequence-edit` command (Spec 004) supports new actions for fold:
 - **`Fixup { source_hash, target_hash }`**: move source commit line after
   target and change its action to `fixup`
 - **`Move { commit_hash, before_label }`**: remove a commit line and insert
-  it just before the `update-ref refs/heads/<branch>` directive (or `label`
-  as fallback) in the rebase todo
+  it at the tip of the target branch's section in the rebase todo. The action
+  extracts the block of `update-ref` and `label` directives at the section
+  boundary, then re-inserts them so the target branch's `label` and
+  `update-ref` come after the commit, while co-located branches' `update-ref`
+  lines stay before it
 
 These extend the existing `Edit` action used by reword.
 
@@ -343,14 +346,18 @@ the rebase at the target commit and amending in-place because:
   for commit+commit; non-HEAD file fold is just a special case
 - **Simpler**: single rebase operation instead of a three-step edit/amend/continue
 
-### Move Uses `update-ref` Anchor
+### Move Handles Co-Located Branches
 
-The commit+branch move inserts the commit line just before the
-`update-ref refs/heads/<branch>` directive in the rebase todo (falling back
-to `label <branch>` if no `update-ref` exists). This ensures the branch ref
-is updated to point to the moved commit after the rebase completes. Inserting
-before the `label` alone would leave the `update-ref` pointing to the
-previous tip, so the branch ref would not move.
+The commit+branch move extracts the entire block of `update-ref` and `label`
+directives at the target branch's section boundary, categorizes them, and
+re-inserts them in a specific order: co-located branches' `update-ref` lines
+first, then the moved commit, then the target branch's `label` and
+`update-ref`. This ensures:
+
+- The target branch ref advances to include the moved commit
+- Co-located branches (sharing the same tip) don't accidentally advance past
+  the commit they should still point to
+- Blank lines between directives (as git produces) are handled correctly
 
 ### Autostash Over Clean Working Tree Requirements
 

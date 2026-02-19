@@ -90,6 +90,13 @@ When the target branch doesn't exist:
 4. The branch is woven into the integration branch before the rebase step,
    so `--update-refs` tracks it.
 
+**Parallel topology for empty branches:** When the target is a new (empty)
+branch and other woven branches already exist, the new branch is rebased onto
+the merge-base so it forks from there — not from the integration tip (which
+may be a merge commit from previously woven branches). This ensures parallel
+branch topology: each branch section forks independently from the merge-base
+rather than stacking on top of existing merges.
+
 ### Commit at HEAD
 
 The staged changes are committed directly at HEAD on the integration branch.
@@ -241,9 +248,15 @@ resolve_message(message)
     ↓
 git_commit::commit(workdir, message)   // commit at HEAD
     ↓
-fold::move_commit_to_branch(repo, HEAD, branch)
-    // Reuses fold's Commit+Branch Move rebase action
-    // Single interactive rebase with --update-refs
+if branch_is_empty:
+    weave_head_commit_to_branch(workdir, branch, merge_base, integration)
+        // Point branch at HEAD, reset integration back
+        // Rebase branch onto merge-base (parallel topology)
+        // Checkout integration, merge --no-ff
+else:
+    fold::move_commit_to_branch(repo, HEAD, branch)
+        // Reuses fold's Commit+Branch Move rebase action
+        // Single interactive rebase with --update-refs
 ```
 
 **Key integration points:**

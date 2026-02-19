@@ -79,15 +79,22 @@ Used by the `fold` command to amend files into an earlier commit.
 
 ### `Move`
 
-Moves a commit to the tip of a branch section. The insertion point is
-determined by looking for `update-ref refs/heads/<branch>` first, falling back
-to `label <branch>` if no `update-ref` is found.
+Moves a commit to the tip of a branch section. With `--rebase-merges
+--update-refs`, each branch section ends with a block of `update-ref` and
+`label` directives (possibly separated by blank lines). The `Move` action
+extracts this entire block, categorizes the lines, and re-inserts them in the
+correct order so that:
+
+- The target branch's `label` and `update-ref` come **after** the inserted
+  commit (so the merge includes the commit and the branch pointer advances).
+- Co-located branches' `update-ref` lines stay **before** the inserted commit
+  (so they don't accidentally advance past it).
 
 ```json
 {"Move": {"commit_hash": "abc1234", "before_label": "feature-a"}}
 ```
 
-Used by the `fold` command to move a commit between branches.
+Used by the `fold` and `commit` commands to move a commit between branches.
 
 ### `Drop`
 
@@ -128,6 +135,42 @@ is skipped (non-fatal). If the merge line is not found, a warning is emitted but
 the section is still removed.
 
 Used by the `drop` command to remove entire woven branches.
+
+### `ReassignBranch`
+
+Reassigns a woven branch section to a co-located branch. When dropping a woven
+branch that shares its tip with another branch, the section's `label` and
+`merge` lines are renamed to the surviving branch instead of being removed.
+The dropped branch's `update-ref` line is removed while the surviving branch's
+`update-ref` is preserved.
+
+Transforms:
+```text
+reset onto
+pick <hash> commit message
+label <drop-branch>
+update-ref refs/heads/<drop-branch>
+update-ref refs/heads/<keep-branch>
+...
+merge -C <hash> <drop-branch>
+```
+
+Into:
+```text
+reset onto
+pick <hash> commit message
+label <keep-branch>
+update-ref refs/heads/<keep-branch>
+...
+merge -C <hash> <keep-branch>
+```
+
+```json
+{"ReassignBranch": {"drop_branch": "feature-a", "keep_branch": "feature-b"}}
+```
+
+Used by the `drop` command when dropping a woven branch that has co-located
+siblings.
 
 ## What Happens
 
@@ -216,8 +259,10 @@ Multiple git-loom commands use the rebase infrastructure:
 - **`reword`** (Spec 003): Uses `Edit` to stop at a commit for message editing
 - **`fold`** (Spec 007): Uses `Edit` to stop for amending, `Fixup` to fold
   commits, and `Move` to transfer commits between branches
-- **`drop`** (Spec 008): Uses `Drop` to remove individual commits and
-  `DropBranch` to remove entire woven branch sections
+- **`drop`** (Spec 008): Uses `Drop` to remove individual commits,
+  `DropBranch` to remove entire woven branch sections, and
+  `ReassignBranch` to hand off co-located woven branch sections
+- **`commit`** (Spec 006): Uses `Move` to relocate commits to target branches
 
 ## Binary Path Resolution
 
@@ -264,7 +309,8 @@ Actions are passed as JSON rather than individual CLI flags (e.g., `--edit hash1
   {"Edit": {"short_hash": "abc1234"}},
   {"Drop": {"short_hash": "def5678"}},
   {"Move": {"commit_hash": "111aaaa", "before_label": "feature-b"}},
-  {"DropBranch": {"branch_name": "feature-a"}}
+  {"DropBranch": {"branch_name": "feature-a"}},
+  {"ReassignBranch": {"drop_branch": "feature-b", "keep_branch": "feature-c"}}
 ]
 ```
 
@@ -273,7 +319,7 @@ Actions are passed as JSON rather than individual CLI flags (e.g., `--edit hash1
 Before building the rebase command, all commit hashes in actions are validated
 to contain only hexadecimal characters. This prevents malformed input from
 reaching git and provides clear error messages early. Branch names
-(`DropBranch`) are not subject to hex validation.
+(`DropBranch`, `ReassignBranch`) are not subject to hex validation.
 
 ### Hidden Subcommand over Environment Variable
 

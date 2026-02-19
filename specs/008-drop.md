@@ -79,7 +79,7 @@ topology.
 The entire branch is removed: all commits owned by the branch are dropped,
 the merge topology is unwoven, and the branch ref is deleted.
 
-Three sub-cases are handled:
+Five sub-cases are handled:
 
 #### Branch at merge-base (no commits)
 
@@ -122,13 +122,54 @@ line without merge topology.
 3. Use interactive rebase with individual `Drop` actions for each owned commit.
 4. Delete the branch ref.
 
-**What changes (both woven and non-woven):**
+#### Co-located woven branch (shares tip with another branch)
+
+Two or more branches are "co-located" when they point to the same tip commit.
+When dropping a co-located woven branch, the commits must be preserved for
+the surviving sibling branch.
+
+**Steps:**
+
+1. Same validation as woven branch.
+2. Detect that another branch shares the same tip.
+3. Use interactive rebase with the `ReassignBranch` action, which:
+   - Renames `label <drop-branch>` to `label <keep-branch>`
+   - Removes `update-ref refs/heads/<drop-branch>`
+   - Renames `merge ... <drop-branch>` to `merge ... <keep-branch>`
+4. Delete the branch ref with `git branch -D`.
+
+The surviving branch inherits the section and merge topology. If multiple
+co-located branches exist, the first one found (by branch order) becomes
+the new section owner.
+
+#### Co-located non-woven branch (shares tip, on first-parent line)
+
+When dropping a co-located non-woven branch, the commits are shared with
+the sibling branch. `find_owned_commits()` correctly returns zero owned
+commits (because the sibling's tip is hidden in the revwalk), so no rebase
+is needed.
+
+**Steps:**
+
+1. Same validation as non-woven branch.
+2. `find_owned_commits()` returns an empty set (sibling branch hides the
+   shared commits).
+3. Skip the rebase entirely.
+4. Delete the branch ref with `git branch -D`.
+
+**What changes (woven and non-woven, non-co-located):**
 
 - All branch commits are removed from history
 - Merge commit is removed (woven case)
 - Branch ref is deleted
 - Remaining commits get new hashes
 - Other branch refs are updated via `--update-refs`
+
+**What changes (co-located):**
+
+- Branch ref is deleted
+- Merge topology is reassigned to sibling branch (woven case)
+- No commits are removed (sibling branch still needs them)
 
 **What stays the same:**
 
@@ -196,6 +237,20 @@ git-loom drop fa
 # Same as above, using the short ID for feature-a
 ```
 
+### Drop a co-located branch (preserves sibling)
+
+```bash
+git-loom status
+# Shows:
+# │╭─ fa, fb [feature-a, feature-b]
+# ││●  a1  ...  Shared commit
+# │╰─── merge
+
+git-loom drop feature-a
+# Removes feature-a ref, reassigns section to feature-b
+# Commits and merge topology are preserved for feature-b
+```
+
 ### Drop the last commit on a branch (auto-deletes branch)
 
 ```bash
@@ -229,7 +284,9 @@ match Target:
     Branch(name) → drop_branch(repo, name)
         ↓
         at merge-base → just delete ref
+        co-located woven → Rebase with ReassignBranch action + delete ref
         woven → Rebase with DropBranch action + delete ref
+        co-located non-woven → just delete ref (no rebase, 0 owned commits)
         non-woven → Rebase with multiple Drop actions + delete ref
     File(_) → error
 ```
@@ -238,8 +295,10 @@ match Target:
 
 - **`git::resolve_target()`** — Shared resolution logic (Spec 002)
 - **`git::gather_repo_info()`** — Branch discovery and ownership analysis
+- **`git::require_workdir()`** — Working directory validation
+- **`git::head_oid()`** — HEAD resolution
+- **`git::rebase_target_for_commit()`** — Rebase target determination
 - **`branch::is_on_first_parent_line()`** — Woven vs non-woven detection
-- **`fold::check_clean_working_tree()`** — Shared clean-tree validation
 - **`git_rebase` module** — Interactive rebase for commit/branch removal
 - **`git_branch::delete()`** — Branch ref deletion
 - **Self-as-sequence-editor** (Spec 004) — Non-interactive rebase control
@@ -254,18 +313,25 @@ The walk stops at another branch's tip or the edge of the commit range.
 ### Owned Commits
 
 `find_owned_commits()` uses a git revwalk from the branch tip to the
-merge-base, hiding other branch tips that are ancestors. This produces the
-set of commits uniquely owned by the branch, excluding merge commits.
+merge-base, hiding other branch tips that are ancestors **or co-located**
+(sharing the same tip). The function takes the dropping branch's name so
+it can correctly identify co-located siblings — branches with the same
+`tip_oid` but a different name are hidden in the revwalk. This produces the
+set of commits uniquely owned by the branch, excluding merge commits. For
+co-located branches, this set is empty (all commits are shared).
 
 ### Sequence Editor Extensions
 
-The `internal-sequence-edit` command (Spec 004) supports two new actions:
+The `internal-sequence-edit` command (Spec 004) supports three actions for drop:
 
 - **`Drop { short_hash }`**: removes the `pick <hash>` line from the rebase
   todo, causing git to skip that commit
 - **`DropBranch { branch_name }`**: removes the entire branch section (reset,
   picks, label, update-ref) and the corresponding merge line from the rebase
   todo
+- **`ReassignBranch { drop_branch, keep_branch }`**: renames the section's
+  label and merge line from the dropped branch to the surviving co-located
+  branch, removes the dropped branch's `update-ref`, and preserves all commits
 
 ## Design Decisions
 
@@ -310,6 +376,19 @@ All rebase-based drop operations use `--autostash` to transparently stash and
 restore uncommitted changes. This reduces friction — users don't need to
 manually stash before dropping. Dropping a branch at the merge-base (which
 only deletes the ref, no rebase needed) works regardless of working tree state.
+
+### Co-Located Branches Preserve Shared Commits
+
+When dropping a branch that shares its tip with another branch (co-located),
+the commits are preserved for the surviving branch. This was chosen because:
+
+- The commits are shared — removing them would break the sibling branch
+- For the non-woven case, `find_owned_commits()` naturally returns zero
+  commits when the sibling's tip is hidden, so no rebase is needed
+- For the woven case, `ReassignBranch` renames the section to the sibling
+  instead of removing it, keeping the merge topology intact
+- The surviving branch transparently inherits the section — no manual
+  intervention required
 
 ### Rebase from Merge-Base
 
