@@ -1,13 +1,12 @@
 use git2::Repository;
 
 use crate::git::{self, Target};
-use crate::git_commands::git_rebase::{self, Rebase, RebaseAction, RebaseTarget};
+use crate::git_commands::git_rebase::{self, Rebase, RebaseAction};
 use crate::git_commands::{self, git_branch, git_commit};
 
 /// Reword a commit message or rename a branch.
 pub fn run(target: String, message: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
-    let cwd = std::env::current_dir()?;
-    let repo = Repository::discover(cwd)?;
+    let repo = git::open_repo()?;
 
     let resolved = git::resolve_target(&repo, &target)?;
 
@@ -42,19 +41,12 @@ pub fn reword_commit(
     commit_hash: &str,
     message: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let workdir = repo.workdir().ok_or("Cannot reword in bare repository")?;
+    let workdir = git::require_workdir(repo, "reword")?;
 
-    // Check if this is a root commit (has no parent)
-    let commit = repo.revparse_single(commit_hash)?.peel_to_commit()?;
-    let is_root = commit.parent_count() == 0;
-
+    let commit_oid = repo.revparse_single(commit_hash)?.peel_to_commit()?.id();
     let short_hash = git_commands::short_hash(commit_hash);
 
-    let target = if is_root {
-        RebaseTarget::Root
-    } else {
-        RebaseTarget::Commit(commit_hash.to_string())
-    };
+    let target = git::rebase_target_for_commit(repo, commit_oid)?;
 
     // Step 1: Start interactive rebase
     Rebase::new(workdir, target)
@@ -91,9 +83,7 @@ pub fn reword_branch(
     old_name: &str,
     new_name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let workdir = repo
-        .workdir()
-        .ok_or("Cannot rename branch in bare repository")?;
+    let workdir = git::require_workdir(repo, "rename branch")?;
 
     git_branch::rename(workdir, old_name, new_name)?;
 

@@ -26,12 +26,8 @@ pub fn run(
     message: Option<String>,
     files: Vec<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let cwd = std::env::current_dir()?;
-    let repo = Repository::discover(cwd)?;
-    let workdir = repo
-        .workdir()
-        .ok_or("Cannot commit in bare repository")?
-        .to_path_buf();
+    let repo = git::open_repo()?;
+    let workdir = git::require_workdir(&repo, "commit")?.to_path_buf();
 
     // Prerequisite: must be on an integration branch
     verify_on_integration_branch(&repo)?;
@@ -58,8 +54,7 @@ pub fn run(
     }
 
     // Step 5: Move commit to branch
-    let head_oid = repo.head()?.target().ok_or("HEAD has no target")?;
-    let head_hash = head_oid.to_string();
+    let head_hash = git::head_oid(&repo)?.to_string();
 
     if branch_is_empty {
         weave_head_commit_to_branch(&workdir, &branch_name)?;
@@ -115,13 +110,13 @@ fn resolve_file_arg(
 ) -> Result<String, Box<dyn std::error::Error>> {
     match git::resolve_target(repo, arg) {
         Ok(Target::File(path)) => Ok(path),
-        Ok(_) => Err(format!("'{}' is not a file.", arg).into()),
+        Ok(_) => Err(format!("'{}' is not a file", arg).into()),
         Err(_) => {
             let full_path = workdir.join(arg);
             if full_path.exists() {
                 Ok(arg.to_string())
             } else {
-                Err(format!("File '{}' not found.", arg).into())
+                Err(format!("File '{}' not found", arg).into())
             }
         }
     }
@@ -140,7 +135,7 @@ fn verify_has_staged_changes(repo: &Repository) -> Result<(), Box<dyn std::error
     });
 
     if !has_staged {
-        return Err("Nothing to commit.".into());
+        return Err("Nothing to commit".into());
     }
 
     Ok(())
@@ -180,13 +175,13 @@ fn resolve_explicit_branch(
                 .into())
             }
         }
-        Ok(Target::Commit(_)) => Err("Commit target must be a branch.".into()),
-        Ok(Target::File(_)) => Err("File target must be a branch.".into()),
+        Ok(Target::Commit(_)) => Err("Commit target must be a branch".into()),
+        Ok(Target::File(_)) => Err("File target must be a branch".into()),
         Err(_) => {
             // Treat as new branch name
             let name = branch.trim().to_string();
             if name.is_empty() {
-                return Err("Branch name cannot be empty.".into());
+                return Err("Branch name cannot be empty".into());
             }
             git_branch::validate_name(&name)?;
 
@@ -198,9 +193,7 @@ fn resolve_explicit_branch(
                 .into());
             }
 
-            let workdir = repo
-                .workdir()
-                .ok_or("Cannot create branch in bare repository")?;
+            let workdir = git::require_workdir(repo, "create branch")?;
             create_branch_at_merge_base(repo, workdir, &name)?;
             Ok(name)
         }
@@ -245,13 +238,9 @@ fn prompt_new_branch(repo: &Repository) -> Result<String, Box<dyn std::error::Er
     let name = name.trim().to_string();
     git_branch::validate_name(&name)?;
 
-    if repo.find_branch(&name, git2::BranchType::Local).is_ok() {
-        return Err(format!("Branch '{}' already exists.", name).into());
-    }
+    git::ensure_branch_not_exists(repo, &name)?;
 
-    let workdir = repo
-        .workdir()
-        .ok_or("Cannot create branch in bare repository")?;
+    let workdir = git::require_workdir(repo, "create branch")?;
     create_branch_at_merge_base(repo, workdir, &name)?;
     Ok(name)
 }

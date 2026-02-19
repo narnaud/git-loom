@@ -17,7 +17,8 @@
       "Bash(git branch:*)",
       "Bash(git --version:*)",
       "Bash(cargo doc:*)",
-      "WebFetch(domain:docs.rs)"
+      "WebFetch(domain:docs.rs)",
+      "Bash(grep:*)"
     ]
   }
 }

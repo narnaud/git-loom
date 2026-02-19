@@ -1,5 +1,6 @@
 use git2::{BranchType, Repository};
 
+use crate::git;
 use crate::git_commands::git_branch;
 
 /// Initialize a new integration branch tracking a remote upstream.
@@ -8,8 +9,7 @@ use crate::git_commands::git_branch;
 /// The remote is auto-detected from the current branch's upstream tracking ref.
 /// If no upstream is found, the user is prompted to choose one.
 pub fn run(name: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
-    let cwd = std::env::current_dir()?;
-    let repo = Repository::discover(cwd)?;
+    let repo = git::open_repo()?;
 
     let name = name.unwrap_or_else(|| "loom".to_string());
     let name = name.trim().to_string();
@@ -19,15 +19,11 @@ pub fn run(name: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
 
     git_branch::validate_name(&name)?;
 
-    if repo.find_branch(&name, BranchType::Local).is_ok() {
-        return Err(format!("Branch '{}' already exists", name).into());
-    }
+    git::ensure_branch_not_exists(&repo, &name)?;
 
     let upstream = detect_upstream(&repo)?;
 
-    let workdir = repo
-        .workdir()
-        .ok_or("Cannot create branch in bare repository")?;
+    let workdir = git::require_workdir(&repo, "create branch")?;
 
     git_branch::switch_create_tracking(workdir, &name, &upstream)?;
 

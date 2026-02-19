@@ -1,5 +1,6 @@
-use git2::{BranchType, Repository};
+use git2::BranchType;
 
+use crate::git;
 use crate::git_commands;
 
 /// Update the integration branch by fetching and rebasing from upstream.
@@ -9,8 +10,7 @@ use crate::git_commands;
 /// then updates submodules if any are configured. On merge conflict, the error
 /// is reported so the user can resolve it manually.
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let cwd = std::env::current_dir()?;
-    let repo = Repository::discover(cwd)?;
+    let repo = git::open_repo()?;
 
     // Validate that we're on a branch with an upstream tracking ref
     let head = repo.head()?;
@@ -37,7 +37,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("Upstream branch name is not valid UTF-8")?
         .to_string();
 
-    let workdir = repo.workdir().ok_or("Cannot update in a bare repository")?;
+    let workdir = git::require_workdir(&repo, "update")?;
 
     // Fetch with tags, force-update, and prune deleted remote branches
     let spinner = cliclack::spinner();

@@ -4,7 +4,7 @@ use git2::Repository;
 
 use crate::branch::is_on_first_parent_line;
 use crate::git::{self, Target};
-use crate::git_commands::git_rebase::{Rebase, RebaseAction, RebaseTarget};
+use crate::git_commands::git_rebase::{Rebase, RebaseAction};
 use crate::git_commands::{self, git_branch};
 
 /// Drop a commit or a branch from history.
@@ -13,8 +13,7 @@ use crate::git_commands::{self, git_branch};
 /// - Commit → remove the commit via interactive rebase
 /// - Branch → remove all branch commits, unweave merge topology, delete the ref
 pub fn run(target: String) -> Result<(), Box<dyn std::error::Error>> {
-    let cwd = std::env::current_dir()?;
-    let repo = Repository::discover(cwd)?;
+    let repo = git::open_repo()?;
 
     let resolved = git::resolve_target(&repo, &target)?;
 
@@ -32,7 +31,7 @@ pub fn run(target: String) -> Result<(), Box<dyn std::error::Error>> {
 /// If the commit is the only commit on a branch, delegates to `drop_branch`
 /// to properly remove the entire branch section and merge topology.
 fn drop_commit(repo: &Repository, commit_hash: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let workdir = repo.workdir().ok_or("Cannot drop in bare repository")?;
+    let workdir = git::require_workdir(repo, "drop")?;
 
     let commit_oid = git2::Oid::from_str(commit_hash)?;
 
@@ -54,13 +53,7 @@ fn drop_commit(repo: &Repository, commit_hash: &str) -> Result<(), Box<dyn std::
     }
 
     // Normal commit drop
-    let commit = repo.find_commit(commit_oid)?;
-    let rebase_target = if commit.parent_count() == 0 {
-        RebaseTarget::Root
-    } else {
-        RebaseTarget::Commit(commit_hash.to_string())
-    };
-
+    let rebase_target = git::rebase_target_for_commit(repo, commit_oid)?;
     let short_hash = git_commands::short_hash(commit_hash);
 
     Rebase::new(workdir, rebase_target)
@@ -75,7 +68,7 @@ fn drop_commit(repo: &Repository, commit_hash: &str) -> Result<(), Box<dyn std::
 
 /// Drop a branch: remove all its commits, unweave merge topology, delete the ref.
 fn drop_branch(repo: &Repository, branch_name: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let workdir = repo.workdir().ok_or("Cannot drop in bare repository")?;
+    let workdir = git::require_workdir(repo, "drop")?;
 
     let info = git::gather_repo_info(repo)?;
 
@@ -92,7 +85,7 @@ fn drop_branch(repo: &Repository, branch_name: &str) -> Result<(), Box<dyn std::
             )
         })?;
 
-    let head_oid = repo.head()?.target().ok_or("HEAD has no target")?;
+    let head_oid = git::head_oid(repo)?;
     let merge_base_oid = info.upstream.merge_base_oid;
 
     // Check if branch is at the merge-base with no owned commits
@@ -106,12 +99,7 @@ fn drop_branch(repo: &Repository, branch_name: &str) -> Result<(), Box<dyn std::
     let is_woven = branch_info.tip_oid != head_oid
         && !is_on_first_parent_line(repo, head_oid, merge_base_oid, branch_info.tip_oid)?;
 
-    let merge_base_commit = repo.find_commit(merge_base_oid)?;
-    let rebase_target = if merge_base_commit.parent_count() == 0 {
-        RebaseTarget::Root
-    } else {
-        RebaseTarget::Commit(merge_base_oid.to_string())
-    };
+    let rebase_target = git::rebase_target_for_commit(repo, merge_base_oid)?;
 
     if is_woven {
         // Woven branch: use DropBranch action to remove the entire section + merge

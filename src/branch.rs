@@ -14,8 +14,7 @@ use crate::git_commands::{self, git_branch, git_merge, git_rebase};
 /// the topology is restructured: commits after the branch point are rebased onto
 /// the merge-base, and a merge commit joins them with the branch.
 pub fn run(name: Option<String>, target: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
-    let cwd = std::env::current_dir()?;
-    let repo = Repository::discover(cwd)?;
+    let repo = git::open_repo()?;
 
     let name = match name {
         Some(n) => n,
@@ -37,15 +36,11 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<(), Box<dyn s
 
     git_branch::validate_name(&name)?;
 
-    if repo.find_branch(&name, git2::BranchType::Local).is_ok() {
-        return Err(format!("Branch '{}' already exists", name).into());
-    }
+    git::ensure_branch_not_exists(&repo, &name)?;
 
     let commit_hash = resolve_commit(&repo, target.as_deref())?;
 
-    let workdir = repo
-        .workdir()
-        .ok_or("Cannot create branch in bare repository")?;
+    let workdir = git::require_workdir(&repo, "create branch")?;
 
     git_branch::create(workdir, &name, &commit_hash)?;
 
@@ -89,7 +84,7 @@ fn should_weave(
         Err(_) => return Ok(None), // No upstream info available, skip weave
     };
 
-    let head_oid = repo.head()?.target().ok_or("HEAD has no target")?;
+    let head_oid = git::head_oid(repo)?;
     let branch_oid = git2::Oid::from_str(commit_hash)?;
 
     let merge_base_oid = info.upstream.merge_base_oid;

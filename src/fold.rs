@@ -17,8 +17,7 @@ pub fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             .into());
     }
 
-    let cwd = std::env::current_dir()?;
-    let repo = Repository::discover(cwd)?;
+    let repo = git::open_repo()?;
 
     // Last argument is the target, everything else is a source
     let (source_args, target_arg) = args.split_at(args.len() - 1);
@@ -65,7 +64,7 @@ fn classify(sources: &[Target], target: &Target) -> Result<FoldOp, Box<dyn std::
     let has_commits = sources.iter().any(|s| matches!(s, Target::Commit(_)));
 
     if has_files && has_commits {
-        return Err("Cannot mix file and commit sources.".into());
+        return Err("Cannot mix file and commit sources".into());
     }
 
     if has_files {
@@ -91,7 +90,7 @@ fn classify(sources: &[Target], target: &Target) -> Result<FoldOp, Box<dyn std::
     } else {
         // Commit(s) + target
         if sources.len() > 1 {
-            return Err("Only one commit source is allowed.".into());
+            return Err("Only one commit source is allowed".into());
         }
 
         let source_hash = match &sources[0] {
@@ -150,16 +149,16 @@ fn fold_files_into_commit(
     files: &[String],
     commit_hash: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let workdir = repo.workdir().ok_or("Cannot fold in bare repository")?;
+    let workdir = git::require_workdir(repo, "fold")?;
 
     // Validate all files have changes
     for file in files {
         if !file_has_changes(repo, file)? {
-            return Err(format!("File '{}' has no changes to fold.", file).into());
+            return Err(format!("File '{}' has no changes to fold", file).into());
         }
     }
 
-    let head_oid = repo.head()?.target().ok_or("HEAD has no target")?;
+    let head_oid = git::head_oid(repo)?;
     let target_oid = git2::Oid::from_str(commit_hash)?;
     let is_head = head_oid == target_oid;
 
@@ -175,7 +174,7 @@ fn fold_files_into_commit(
         git_commit::commit(workdir, "fold: temp fixup")?;
 
         // The temp commit is now at HEAD — fixup it into the target
-        let temp_oid = repo.head()?.target().ok_or("HEAD has no target")?;
+        let temp_oid = git::head_oid(repo)?;
         let temp_hash = temp_oid.to_string();
         let temp_short = git_commands::short_hash(&temp_hash);
         let target_short = git_commands::short_hash(commit_hash);
@@ -203,27 +202,21 @@ fn fold_commit_into_commit(
     source_hash: &str,
     target_hash: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let workdir = repo.workdir().ok_or("Cannot fold in bare repository")?;
+    let workdir = git::require_workdir(repo, "fold")?;
 
     // Validate source is a descendant of target (source is newer)
     let source_oid = git2::Oid::from_str(source_hash)?;
     let target_oid = git2::Oid::from_str(target_hash)?;
 
     if source_oid == target_oid {
-        return Err("Source and target are the same commit.".into());
+        return Err("Source and target are the same commit".into());
     }
 
     if !repo.graph_descendant_of(source_oid, target_oid)? {
-        return Err("Source commit must be newer than target commit.".into());
+        return Err("Source commit must be newer than target commit".into());
     }
 
-    // Check if the target is a root commit (no parent)
-    let target_commit = repo.find_commit(target_oid)?;
-    let rebase_target = if target_commit.parent_count() == 0 {
-        RebaseTarget::Root
-    } else {
-        RebaseTarget::Commit(target_hash.to_string())
-    };
+    let rebase_target = git::rebase_target_for_commit(repo, target_oid)?;
 
     let source_short = git_commands::short_hash(source_hash);
     let target_short = git_commands::short_hash(target_hash);
@@ -272,17 +265,12 @@ pub fn move_commit_to_branch(
     commit_hash: &str,
     branch_name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let workdir = repo.workdir().ok_or("Cannot fold in bare repository")?;
+    let workdir = git::require_workdir(repo, "fold")?;
 
     let info = git::gather_repo_info(repo)?;
     let merge_base_oid = info.upstream.merge_base_oid;
 
-    let merge_base_commit = repo.find_commit(merge_base_oid)?;
-    let target = if merge_base_commit.parent_count() == 0 {
-        RebaseTarget::Root
-    } else {
-        RebaseTarget::Commit(merge_base_oid.to_string())
-    };
+    let target = git::rebase_target_for_commit(repo, merge_base_oid)?;
 
     let commit_short = git_commands::short_hash(commit_hash);
 
