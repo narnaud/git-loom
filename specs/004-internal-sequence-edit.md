@@ -35,7 +35,7 @@ Self-invocation eliminates all of these by keeping the logic in Rust.
 ## CLI
 
 ```bash
-git-loom internal-sequence-edit <todo_file> --actions-json <json>
+git-loom internal-sequence-edit --actions-json <json> <todo_file>
 ```
 
 This subcommand is **hidden** from `--help` output. It is not intended for
@@ -43,13 +43,91 @@ direct user invocation — git calls it automatically as the sequence editor.
 
 **Arguments:**
 
-- `<todo_file>`: Path to the rebase todo file provided by git (positional argument)
 - `--actions-json <json>`: JSON-encoded list of rebase actions to apply
+- `<todo_file>`: Path to the rebase todo file provided by git (positional,
+  appended by git after the `GIT_SEQUENCE_EDITOR` command)
 
 **Exit codes:**
 
-- `0`: Success (actions applied, or hashes not found with warning)
-- `1`: Error reading/writing the todo file or parsing JSON
+- `0`: Success (actions applied)
+- `1`: Error reading/writing the todo file, parsing JSON, or hash not found
+
+## Rebase Actions
+
+The `RebaseAction` enum defines all supported todo file transformations:
+
+### `Edit`
+
+Replaces `pick <hash>` with `edit <hash>` to stop the rebase at that commit.
+
+```json
+{"Edit": {"short_hash": "abc1234"}}
+```
+
+Used by the `reword` command to stop at a commit for message editing.
+
+### `Fixup`
+
+Moves a source commit immediately after a target commit and changes it from
+`pick` to `fixup`, effectively folding the source into the target.
+
+```json
+{"Fixup": {"source_hash": "abc1234", "target_hash": "def5678"}}
+```
+
+Used by the `fold` command to amend files into an earlier commit.
+
+### `Move`
+
+Moves a commit to the tip of a branch section. The insertion point is
+determined by looking for `update-ref refs/heads/<branch>` first, falling back
+to `label <branch>` if no `update-ref` is found.
+
+```json
+{"Move": {"commit_hash": "abc1234", "before_label": "feature-a"}}
+```
+
+Used by the `fold` command to move a commit between branches.
+
+### `Drop`
+
+Removes a `pick <hash>` line entirely from the todo, dropping the commit from
+history.
+
+```json
+{"Drop": {"short_hash": "abc1234"}}
+```
+
+Used by the `drop` command to remove individual commits.
+
+### `DropBranch`
+
+Removes an entire woven branch section and its merge line from the todo. With
+`--rebase-merges --update-refs`, a woven branch section looks like:
+
+```text
+reset onto
+pick <hash> commit message
+pick <hash> another commit
+label <branch>
+update-ref refs/heads/<branch>
+...
+merge -C <hash> <branch>
+```
+
+This action removes: the `reset` line that opens the section, all `pick` lines
+in the section, the `label <branch>` line, the `update-ref refs/heads/<branch>`
+line, and the `merge ... <branch>` line.
+
+```json
+{"DropBranch": {"branch_name": "feature-a"}}
+```
+
+If the branch label is not found, a warning is emitted to stderr and the action
+is skipped (non-fatal). If the merge line is not found, a warning is emitted but
+the section is still removed.
+
+Used by the `drop` command to remove entire woven branches.
 
 ## What Happens
 
@@ -72,48 +150,74 @@ argument. The handler:
 
 1. Parses the JSON to extract rebase actions
 2. Reads the todo file
-3. For each action, uses regex-based parsing to identify matching lines
-4. Applies the specified modifications (e.g., replace `pick` with `edit`)
-5. Writes the modified file back
-6. If hashes are not found, emits warnings to stderr (non-fatal)
+3. Validates that all commit hashes contain only hexadecimal characters
+4. For each action, uses string splitting (`splitn`) to identify matching lines
+   by hash prefix
+5. Applies the specified modifications
+6. Writes the modified file back
 
-After the edit, the todo file becomes:
+If a hash is not found, the action returns an error (except `DropBranch`, which
+warns and continues).
 
-```
-edit abc1234 First commit
-pick def5678 Second commit
-pick 9876543 Third commit
-```
+## Rebase Builder
 
-Git then stops at that commit, allowing git-loom to amend the message and
-continue the rebase.
+The `Rebase` struct provides a builder for running interactive rebases with
+custom actions:
 
-## Integration with Reword
-
-The `reword` command (see **Spec 003**) constructs the sequence editor string
-using JSON-serialized actions:
-
-```
-reword_commit()
-    ↓
-Build RebaseAction::Edit { short_hash }
-    ↓
-serde_json::to_string(&actions) → JSON
-    ↓
-format!("\"{}\" internal-sequence-edit --actions-json {}", exe, escaped_json)
-    ↓
-passed as GIT_SEQUENCE_EDITOR to git rebase --interactive
-    ↓
-git invokes: git-loom internal-sequence-edit --actions-json '[...]' <todo_file>
-    ↓
-serde_json::from_str() parses actions
-    ↓
-apply_actions_to_todo() reads/rewrites the todo file using structured parsing
+```rust
+Rebase::new(workdir, RebaseTarget::Commit(hash))
+    .action(RebaseAction::Edit { short_hash: "abc1234".into() })
+    .action(RebaseAction::Drop { short_hash: "def5678".into() })
+    .run()?;
 ```
 
-This JSON-based approach makes it easy to add future actions (Drop, Reorder,
-Squash, Fixup) without modifying the CLI interface. New operations simply add
-variants to the `RebaseAction` enum.
+`Rebase::run()` performs the following:
+
+1. Resolves the git-loom binary path via `loom_exe_path()`
+2. Validates all commit hashes (hex-only check)
+3. Serializes actions to JSON
+4. Builds the `GIT_SEQUENCE_EDITOR` string using Unix shell escaping (Git for
+   Windows uses MSYS2/bash, so Unix escaping is correct on all platforms)
+5. Runs `git rebase` with these flags:
+   - `--interactive` — enables the sequence editor
+   - `--autostash` — stashes dirty working tree changes
+   - `--keep-empty` — preserves empty commits
+   - `--no-autosquash` — disables fixup!/squash! auto-reordering
+   - `--rebase-merges` — preserves merge topology
+   - `--update-refs` — keeps branch refs in the rebased range up to date
+
+### Rebase Targets
+
+The `RebaseTarget` enum controls the rebase range:
+
+- `Commit(hash)` — rebases from `<hash>^` (the parent of the commit)
+- `Root` — rebases the entire history with `--root`
+
+## Other Rebase Operations
+
+### `rebase_onto(workdir, newbase, upstream)`
+
+Runs `git rebase --onto <newbase> <upstream> --autostash --update-refs`. Used
+to transplant a range of commits onto a new base.
+
+### `continue_rebase(workdir)`
+
+Runs `git rebase --continue`. If continuation fails, automatically aborts the
+rebase before returning the error.
+
+### `abort(workdir)`
+
+Runs `git rebase --abort` to clean up a failed or in-progress rebase.
+
+## Integration with Commands
+
+Multiple git-loom commands use the rebase infrastructure:
+
+- **`reword`** (Spec 003): Uses `Edit` to stop at a commit for message editing
+- **`fold`** (Spec 007): Uses `Edit` to stop for amending, `Fixup` to fold
+  commits, and `Move` to transfer commits between branches
+- **`drop`** (Spec 008): Uses `Drop` to remove individual commits and
+  `DropBranch` to remove entire woven branch sections
 
 ## Binary Path Resolution
 
@@ -125,7 +229,7 @@ The `loom_exe_path()` helper detects this situation:
 
 1. Get the current executable path
 2. If the parent directory is named `deps`, look one level up for the actual
-   `git-loom` binary
+   `git-loom` binary (or `git-loom.exe` on Windows)
 3. If found, return that path; otherwise fall back to `current_exe()`
 
 This means `cargo build && cargo test` is required when running tests after
@@ -140,9 +244,9 @@ Actions are passed as JSON rather than individual CLI flags (e.g., `--edit hash1
 --edit hash2`). This design choice provides:
 
 **Extensibility:**
-- Easy to add new action types (Drop, Reorder, Squash, Fixup)
+- Easy to add new action types
 - Complex actions can include multiple parameters without CLI flag proliferation
-- Future operations like "move commit X after Y" work naturally
+- Operations like "move commit X to branch Y" work naturally
 
 **Type Safety:**
 - Serde handles serialization/deserialization with compile-time validation
@@ -154,22 +258,22 @@ Actions are passed as JSON rather than individual CLI flags (e.g., `--edit hash1
 - Internal API is cleaner: functions take `Vec<RebaseAction>`
 - Testing is easier: construct actions as Rust values, not CLI strings
 
-**Example:**
+**Example (multiple action types in one rebase):**
 ```json
 [
   {"Edit": {"short_hash": "abc1234"}},
-  {"Edit": {"short_hash": "def5678"}}
+  {"Drop": {"short_hash": "def5678"}},
+  {"Move": {"commit_hash": "111aaaa", "before_label": "feature-b"}},
+  {"DropBranch": {"branch_name": "feature-a"}}
 ]
 ```
 
-Future actions might look like:
-```json
-[
-  {"Drop": {"short_hash": "abc1234"}},
-  {"Reorder": {"from_index": 2, "to_index": 5}},
-  {"Squash": {"target": "abc1234", "into": "def5678"}}
-]
-```
+### Hex Validation
+
+Before building the rebase command, all commit hashes in actions are validated
+to contain only hexadecimal characters. This prevents malformed input from
+reaching git and provides clear error messages early. Branch names
+(`DropBranch`) are not subject to hex validation.
 
 ### Hidden Subcommand over Environment Variable
 
@@ -181,34 +285,25 @@ environment variable. A hidden clap subcommand was chosen because:
 - **Type-safe arguments** validated by clap's derive parser
 - **Standard dispatch** through the existing `main()` match
 
-### Warning Instead of Error on Missing Hash
+### Error vs Warning on Missing Hash
 
-If the target hash isn't found in the todo file, the handler warns on stderr
-but exits successfully. This avoids aborting the rebase for edge cases where
-git may format the todo differently than expected. The rebase will proceed, and
-the caller (`reword_commit`) will detect that the commit wasn't stopped at and
-report the failure at a higher level.
+Most actions (`Edit`, `Fixup`, `Move`, `Drop`) return an error if the target
+hash is not found in the todo file. This is the correct behavior since the
+caller needs to know that the operation could not be applied.
+
+`DropBranch` is the exception: if the branch label is not found, it emits a
+warning to stderr and returns `Ok(())`. This handles cases where a branch may
+not be woven into the integration branch. Similarly, a missing merge line
+produces a warning but the section is still cleaned up.
 
 ### Multiple Actions Support
 
 The JSON format naturally supports multiple actions in a single invocation:
 
-- Multiple `Edit` actions can mark several commits for editing
-- Each commit hash appears at most once in a rebase todo
-- Actions are processed in a single pass through the file
+- Actions are processed sequentially, each modifying the in-memory line buffer
+- Order matters: earlier actions may remove or reorder lines that later actions
+  reference
 - Hash prefix matching stops at the first match per action
-
-This design allows operations like:
-```bash
-# Mark multiple commits for editing in one rebase
-git-loom reword abc123 def456 ghi789
-```
-
-Future commands can combine different action types:
-```bash
-# Hypothetical: edit one commit, drop another, reorder a third
-git-loom amend-batch --edit abc123 --drop def456 --move ghi789:after:abc123
-```
 
 ### Automatic Abort on Rebase Failure
 
@@ -226,3 +321,10 @@ This design choice means:
 - The repository is never left in a mid-rebase state requiring manual recovery
 - Error handling is simplified: just use `?` and let the infrastructure clean up
 - Future rebase-based commands get this safety automatically
+
+### Unix Shell Escaping on All Platforms
+
+The `GIT_SEQUENCE_EDITOR` command string uses Unix-style shell escaping
+(`shell_escape::unix::escape`) even on Windows. This is because Git for Windows
+uses MSYS2/bash to execute the sequence editor, not `cmd.exe` or PowerShell.
+The binary path is also normalized to use forward slashes for Git compatibility.
