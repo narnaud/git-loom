@@ -65,7 +65,7 @@ fn no_commits_no_changes() {
     assert_eq!(
         output,
         "\
-╭─ zz [unstaged changes]
+╭─ zz [local changes]
 │   no changes
 │
 ● aaa0000 (upstream) [origin/main] Initial commit
@@ -79,18 +79,20 @@ fn working_changes_shown() {
     info.working_changes = vec![
         FileChange {
             path: "src/main.rs".to_string(),
-            status: 'M',
+            index: ' ',
+            worktree: 'M',
         },
         FileChange {
             path: "new_file.txt".to_string(),
-            status: 'A',
+            index: 'A',
+            worktree: ' ',
         },
     ];
 
     let output = render_plain(info);
     assert!(
         output
-            .starts_with("╭─ zz [unstaged changes]\n│   ma M src/main.rs\n│   nf A new_file.txt\n")
+            .starts_with("╭─ zz [local changes]\n│   ma  M src/main.rs\n│   nf A  new_file.txt\n")
     );
 }
 
@@ -108,7 +110,7 @@ fn single_branch() {
     assert_eq!(
         output,
         "\
-╭─ zz [unstaged changes]
+╭─ zz [local changes]
 │   no changes
 │
 │╭─ fa [feature-a]
@@ -392,23 +394,25 @@ fn short_ids_for_files_use_filename() {
     info.working_changes = vec![
         FileChange {
             path: "src/graph.rs".to_string(),
-            status: 'M',
+            index: ' ',
+            worktree: 'M',
         },
         FileChange {
             path: "src/git.rs".to_string(),
-            status: 'M',
+            index: ' ',
+            worktree: 'M',
         },
     ];
 
     let output = render_plain(info);
     // "graph.rs" -> "gr", "git.rs" -> "it" (skip 'g' since already used)
     assert!(
-        output.contains("gr M src/graph.rs"),
+        output.contains("gr  M src/graph.rs"),
         "expected file short ID 'gr', got:\n{}",
         output
     );
     assert!(
-        output.contains("it M src/git.rs"),
+        output.contains("it  M src/git.rs"),
         "expected file short ID 'it', got:\n{}",
         output
     );
@@ -420,11 +424,13 @@ fn short_ids_collision_extends() {
     info.working_changes = vec![
         FileChange {
             path: "src/main.rs".to_string(),
-            status: 'M',
+            index: ' ',
+            worktree: 'M',
         },
         FileChange {
             path: "src/manifest.rs".to_string(),
-            status: 'A',
+            index: 'A',
+            worktree: ' ',
         },
     ];
 

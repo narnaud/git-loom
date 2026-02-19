@@ -18,6 +18,10 @@ const COLOR_DIM: Color = Color::AnsiColor(240);
 const COLOR_MESSAGE: Color = Color::AnsiColor(248);
 /// Short ID prefix (blue + underline, applied in rendering).
 const COLOR_SHORTID: Color = Color::Blue;
+/// Staged (index) file status: green, matching git convention.
+const COLOR_STAGED: Color = Color::Green;
+/// Unstaged (worktree) file status: red, matching git convention.
+const COLOR_UNSTAGED: Color = Color::Red;
 
 /// Rotating colors for commit dots on feature branches.
 /// Each branch gets the next color in this cycle.
@@ -257,7 +261,7 @@ fn render_working_changes(out: &mut String, changes: &[FileChange], ids: &IdAllo
         "╭─".color(COLOR_GRAPH),
         ids.get_unstaged().color(COLOR_SHORTID).underline(),
         "[".color(COLOR_DIM),
-        "unstaged changes".color(COLOR_LABEL),
+        "local changes".color(COLOR_LABEL),
         "]".color(COLOR_DIM)
     )
     .unwrap();
@@ -273,10 +277,11 @@ fn render_working_changes(out: &mut String, changes: &[FileChange], ids: &IdAllo
         for change in changes {
             writeln!(
                 out,
-                "{}   {} {} {}",
+                "{}   {} {}{} {}",
                 "│".color(COLOR_GRAPH),
                 ids.get_file(&change.path).color(COLOR_SHORTID).underline(),
-                change.status.to_string().color(COLOR_DIM),
+                change.index.to_string().color(COLOR_STAGED),
+                change.worktree.to_string().color(COLOR_UNSTAGED),
                 change.path.color(COLOR_MESSAGE)
             )
             .unwrap();

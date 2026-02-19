@@ -12,7 +12,7 @@ couple of characters, enabling future interactive commands such as
 
 | Entity | Candidate source | Default ID | Example |
 |--------|-----------------|------------|---------|
-| Unstaged changes | `zz` (hardcoded) | `zz` | always `zz` |
+| Local changes | `zz` (hardcoded) | `zz` | always `zz` |
 | Branch | Word-based candidates | First letter of each word | `feature-a` → `fa` |
 | Commit | Full hex hash (40 chars) | First 2 hex chars | `d0472f9…` → `d0` |
 | File | Word-based candidates from stem | First letter of each word | `new_file.txt` → `nf` |
@@ -95,22 +95,22 @@ first gets `ma`, the second gets `ai` (skipping 'm').
 Short IDs are rendered in **blue with underline** (`COLOR_SHORTID`). Their
 position varies by entity type:
 
-### Unstaged changes header
+### Local changes header
 
 The short ID `zz` appears between the graph connector and the label:
 
 ```
-╭─ zz [unstaged changes]
+╭─ zz [local changes]
 │   no changes
 │
 ```
 
-### Files (in the unstaged section)
+### Files (in the local section)
 
 The short ID appears before the status character:
 
 ```
-╭─ zz [unstaged changes]
+╭─ zz [local changes]
 │   ma M src/main.rs
 │   nf A new_file.txt
 │
@@ -154,7 +154,7 @@ not an actionable entity.
 ## Complete Example
 
 ```
-╭─ zz [unstaged changes]
+╭─ zz [local changes]
 │   ma M src/main.rs
 │   nf A new_file.txt
 │

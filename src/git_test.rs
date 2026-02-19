@@ -182,14 +182,16 @@ fn working_tree_changes_detected() {
         .iter()
         .find(|c| c.path == "tracked.txt")
         .unwrap();
-    assert_eq!(tracked.status, 'M');
+    assert_eq!(tracked.index, ' ');
+    assert_eq!(tracked.worktree, 'M');
 
     let untracked = info
         .working_changes
         .iter()
         .find(|c| c.path == "untracked.txt")
         .unwrap();
-    assert_eq!(untracked.status, '?');
+    assert_eq!(untracked.index, '?');
+    assert_eq!(untracked.worktree, '?');
 }
 
 #[test]

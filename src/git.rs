@@ -91,9 +91,10 @@ pub struct BranchInfo {
 #[derive(Debug)]
 pub struct FileChange {
     pub path: String,
-    /// One of: 'A' (added), 'M' (modified), 'D' (deleted), 'R' (renamed),
-    /// '?' (unknown/untracked).
-    pub status: char,
+    /// Index (staged) status: ' ', 'A', 'M', 'D', 'R', or '?'
+    pub index: char,
+    /// Worktree (unstaged) status: ' ', 'M', 'D', 'R', or '?'
+    pub worktree: char,
 }
 
 /// Collect all data needed for the status display: walk commits from HEAD to the
@@ -401,23 +402,36 @@ fn get_working_changes(repo: &Repository) -> Result<Vec<FileChange>, git2::Error
         };
         let status = entry.status();
 
-        let status_char = if status.is_wt_new() {
+        let index = if status.is_wt_new() {
             '?'
         } else if status.is_index_new() {
             'A'
-        } else if status.is_index_modified() || status.is_wt_modified() {
+        } else if status.is_index_modified() {
             'M'
-        } else if status.is_index_deleted() || status.is_wt_deleted() {
+        } else if status.is_index_deleted() {
             'D'
-        } else if status.is_index_renamed() || status.is_wt_renamed() {
+        } else if status.is_index_renamed() {
             'R'
         } else {
+            ' '
+        };
+
+        let worktree = if status.is_wt_new() {
             '?'
+        } else if status.is_wt_modified() {
+            'M'
+        } else if status.is_wt_deleted() {
+            'D'
+        } else if status.is_wt_renamed() {
+            'R'
+        } else {
+            ' '
         };
 
         changes.push(FileChange {
             path,
-            status: status_char,
+            index,
+            worktree,
         });
     }
 

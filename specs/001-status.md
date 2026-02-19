@@ -18,9 +18,9 @@ The log is rendered top-to-bottom using UTF-8 box-drawing characters:
 Independent branches (each forked from integration line):
 
 ```
-╭─ [unstaged changes]
-│   M file.txt
-│   A new_file.rs
+╭─ [local changes]
+│    M file.txt
+│   A  new_file.rs
 │
 │╭─ [feature-b]
 │●   d0472f9 Fix bug in feature B
@@ -86,7 +86,7 @@ Branches that track the same upstream remote as the integration branch
 Loose commits (on the integration line, no feature branch):
 
 ```
-╭─ [unstaged changes]
+╭─ [local changes]
 │   no changes
 │
 ●   abc1234 Fix typo
@@ -106,9 +106,11 @@ Upstream ahead (upstream has new commits beyond the common base):
 
 ### Sections (top to bottom)
 
-1. **Unstaged changes** (optional): shown only if the working tree has
-   modifications, new files, or deletions. Introduced with `╭─ [unstaged changes]`.
-   Each file is listed with its status character (`M`, `A`, `D`, `R`, `?`).
+1. **Local changes** (optional): shown only if the working tree has
+   modifications, new files, or deletions. Introduced with `╭─ [local changes]`.
+   Each file is listed with a 2-char `XY` status (index + worktree), matching
+   `git status --short`. The index char is colored green and the worktree char
+   is colored red.
 
 2. **Feature branches**: each local branch whose tip is reachable from HEAD
    (or at the merge-base) is rendered as a side branch. The branch name
@@ -133,13 +135,13 @@ Upstream ahead (upstream has new commits beyond the common base):
 
 | Symbol | Meaning |
 |--------|---------|
-| `╭─`   | Start of a section (unstaged changes or first branch in a stack/group) |
+| `╭─`   | Start of a section (local changes or first branch in a stack/group) |
 | `├─`   | Start of a subsequent branch within a stack or co-located group |
 | `│`    | Continuation of the integration line (dotted) |
 | `││`   | Continuation between stacked branches |
 | `●`    | A commit |
 | `├╯`   | End of a side branch (or stack), merging back to integration line |
-| `M/A/D/R/?` | File status: modified, added, deleted, renamed, unknown |
+| `XY`    | 2-char file status (`X`=index, `Y`=worktree), matching `git status --short`. `X` is green, `Y` is red. Values: `M` modified, `A` added, `D` deleted, `R` renamed, `?` untracked, ` ` unchanged |
 | `⏫`  | Upstream has new commits ahead of the common base |
 
 ### Commit line format
