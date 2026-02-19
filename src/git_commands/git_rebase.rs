@@ -265,10 +265,26 @@ fn apply_fixup(
 
 /// Move a commit line to the tip of a branch's section in the rebase todo.
 ///
-/// With `--rebase-merges --update-refs`, the todo has `update-ref refs/heads/<branch>`
-/// directives that control where branch refs end up after rebase. We insert the commit
-/// just before the `update-ref` line so the branch ref will point to the moved commit.
-/// Falls back to inserting before `label <branch>` if no `update-ref` is found.
+/// With `--rebase-merges --update-refs`, each branch section ends with a block of
+/// `update-ref` and `label` directives (possibly separated by blank lines):
+///
+/// ```text
+/// pick abc feat2
+/// update-ref refs/heads/test3
+///
+/// update-ref refs/heads/test2
+///
+/// label test3
+/// ```
+///
+/// The `label` defines the merge parent (used by `merge -C ... test3`).
+/// The `update-ref` lines update branch pointers.
+///
+/// When inserting a commit at the tip of a branch, we must ensure:
+/// - The `label` and target's `update-ref` come AFTER the inserted commit
+///   (so the merge includes the commit and the branch pointer advances).
+/// - Other branches' `update-ref` lines stay BEFORE the inserted commit
+///   (so co-located branches don't accidentally advance).
 fn apply_move(
     lines: &mut Vec<String>,
     commit_hash: &str,
@@ -283,26 +299,90 @@ fn apply_move(
         commit_idx.ok_or_else(|| format!("Commit {} not found in rebase todo", commit_hash))?;
     let commit_line = lines.remove(commit_idx);
 
-    // Try to find `update-ref refs/heads/<branch>` first (preferred anchor)
+    let label_target = format!("label {}", before_label);
     let update_ref_target = format!("update-ref refs/heads/{}", before_label);
-    let insert_idx = lines
-        .iter()
-        .position(|line| line.trim() == update_ref_target)
-        .or_else(|| {
-            // Fall back to `label <branch>`
-            let label_target = format!("label {}", before_label);
-            lines.iter().position(|line| line.trim() == label_target)
-        });
 
-    let insert_idx = insert_idx.ok_or_else(|| {
-        format!(
+    let label_pos = lines.iter().position(|l| l.trim() == label_target);
+    let update_ref_pos = lines.iter().position(|l| l.trim() == update_ref_target);
+
+    if label_pos.is_none() && update_ref_pos.is_none() {
+        return Err(format!(
             "Branch '{}' not found in rebase todo. \
              The target branch may not be woven into the integration branch.",
             before_label
         )
-    })?;
+        .into());
+    }
 
-    lines.insert(insert_idx, commit_line);
+    // Determine the furthest anchor position (label or update-ref).
+    let anchor_end = match (label_pos, update_ref_pos) {
+        (Some(lp), Some(up)) => lp.max(up),
+        (Some(lp), None) => lp,
+        (None, Some(up)) => up,
+        _ => unreachable!(),
+    };
+
+    // Walk backwards from anchor_end to find the start of the block.
+    // The block includes update-ref lines, the target's label, and blank lines
+    // that separate them. Stop at any other line type (pick, reset, merge, etc.).
+    let block_start = {
+        let mut start = anchor_end;
+        while start > 0 {
+            let trimmed = lines[start - 1].trim();
+            if trimmed.is_empty() || trimmed.starts_with("update-ref ") || trimmed == label_target {
+                start -= 1;
+            } else {
+                break;
+            }
+        }
+        start
+    };
+
+    // Walk forwards from anchor_end to capture trailing blank lines.
+    let block_end = {
+        let mut end = anchor_end;
+        while end + 1 < lines.len() && lines[end + 1].trim().is_empty() {
+            end += 1;
+        }
+        end
+    };
+
+    // Extract the entire block
+    let block: Vec<String> = lines.drain(block_start..=block_end).collect();
+
+    // Categorize lines (skip blanks)
+    let mut other_refs = Vec::new();
+    let mut label_line = None;
+    let mut target_ref = None;
+    for line in block {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        } else if trimmed == label_target {
+            label_line = Some(line);
+        } else if trimmed == update_ref_target {
+            target_ref = Some(line);
+        } else {
+            other_refs.push(line);
+        }
+    }
+
+    // Re-insert: [other refs] [commit] [label] [target ref]
+    let mut pos = block_start;
+    for ref_line in other_refs {
+        lines.insert(pos, ref_line);
+        pos += 1;
+    }
+    lines.insert(pos, commit_line);
+    pos += 1;
+    if let Some(ll) = label_line {
+        lines.insert(pos, ll);
+        pos += 1;
+    }
+    if let Some(tr) = target_ref {
+        lines.insert(pos, tr);
+    }
+
     Ok(())
 }
 
@@ -517,6 +597,128 @@ mod tests {
                 .iter()
                 .any(|l| l.contains("update-ref refs/heads/integration")),
             "integration update-ref should remain"
+        );
+    }
+
+    #[test]
+    fn apply_move_inserts_before_label_and_update_ref() {
+        let mut lines = vec![
+            "pick abc1234 Feat1".to_string(),
+            "update-ref refs/heads/test".to_string(),
+            "label test".to_string(),
+            "pick def5678 Feat3".to_string(),
+        ];
+        apply_move(&mut lines, "def5678", "test").unwrap();
+        assert_eq!(
+            lines,
+            vec![
+                "pick abc1234 Feat1",
+                "pick def5678 Feat3",
+                "label test",
+                "update-ref refs/heads/test",
+            ]
+        );
+    }
+
+    #[test]
+    fn apply_move_colocated_target_after_other() {
+        // test2's update-ref comes before test3's — already correct order
+        let mut lines = vec![
+            "pick abc1234 feat2".to_string(),
+            "update-ref refs/heads/test2".to_string(),
+            "update-ref refs/heads/test3".to_string(),
+            "label test3".to_string(),
+            "pick def5678 Feat3".to_string(),
+        ];
+        apply_move(&mut lines, "def5678", "test3").unwrap();
+        assert_eq!(
+            lines,
+            vec![
+                "pick abc1234 feat2",
+                "update-ref refs/heads/test2",
+                "pick def5678 Feat3",
+                "label test3",
+                "update-ref refs/heads/test3",
+            ]
+        );
+    }
+
+    #[test]
+    fn apply_move_colocated_target_before_other() {
+        // test3's update-ref comes before test2's — needs reordering
+        let mut lines = vec![
+            "pick abc1234 feat2".to_string(),
+            "update-ref refs/heads/test3".to_string(),
+            "update-ref refs/heads/test2".to_string(),
+            "label test3".to_string(),
+            "pick def5678 Feat3".to_string(),
+        ];
+        apply_move(&mut lines, "def5678", "test3").unwrap();
+        // test2 must stay before the commit, test3 after it
+        assert_eq!(
+            lines,
+            vec![
+                "pick abc1234 feat2",
+                "update-ref refs/heads/test2",
+                "pick def5678 Feat3",
+                "label test3",
+                "update-ref refs/heads/test3",
+            ]
+        );
+    }
+
+    #[test]
+    fn apply_move_three_colocated_branches() {
+        // Three co-located branches, target in the middle
+        let mut lines = vec![
+            "pick abc1234 feat2".to_string(),
+            "update-ref refs/heads/test".to_string(),
+            "update-ref refs/heads/test3".to_string(),
+            "update-ref refs/heads/test2".to_string(),
+            "label test3".to_string(),
+            "pick def5678 Feat3".to_string(),
+        ];
+        apply_move(&mut lines, "def5678", "test3").unwrap();
+        // test and test2 must stay before the commit, test3 after it
+        assert_eq!(
+            lines,
+            vec![
+                "pick abc1234 feat2",
+                "update-ref refs/heads/test",
+                "update-ref refs/heads/test2",
+                "pick def5678 Feat3",
+                "label test3",
+                "update-ref refs/heads/test3",
+            ]
+        );
+    }
+
+    #[test]
+    fn apply_move_colocated_with_blank_lines() {
+        // Real git format: blank lines separate update-ref directives
+        let mut lines = vec![
+            "pick abc1234 feat2".to_string(),
+            "update-ref refs/heads/test3".to_string(),
+            "".to_string(),
+            "update-ref refs/heads/test2".to_string(),
+            "".to_string(),
+            "label test3".to_string(),
+            "".to_string(),
+            "reset branch-point".to_string(),
+            "pick def5678 Feat3".to_string(),
+        ];
+        apply_move(&mut lines, "def5678", "test3").unwrap();
+        // test2 must stay before the commit, blank lines are stripped
+        assert_eq!(
+            lines,
+            vec![
+                "pick abc1234 feat2",
+                "update-ref refs/heads/test2",
+                "pick def5678 Feat3",
+                "label test3",
+                "update-ref refs/heads/test3",
+                "reset branch-point",
+            ]
         );
     }
 
