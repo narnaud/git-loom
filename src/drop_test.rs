@@ -59,14 +59,21 @@ fn drop_commit_removes_it_from_history() {
 }
 
 #[test]
-fn drop_commit_dirty_tree_fails() {
+fn drop_commit_dirty_tree_autostashed() {
     let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("Base", "base.txt");
     let c1_oid = test_repo.commit("Commit", "file.txt");
-    test_repo.write_file("file.txt", "dirty");
+    test_repo.write_file("base.txt", "dirty");
 
     let result = super::drop_commit(&test_repo.repo, &c1_oid.to_string());
-    assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("clean"));
+    assert!(
+        result.is_ok(),
+        "drop should succeed with autostash: {:?}",
+        result
+    );
+
+    // Dirty changes should be preserved after autostash
+    assert_eq!(test_repo.read_file("base.txt"), "dirty");
 }
 
 #[test]

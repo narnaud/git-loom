@@ -170,9 +170,6 @@ fn fold_files_into_commit(
         git_commit::stage_files(workdir, &file_refs)?;
         git_commit::amend_no_edit(workdir)?;
     } else {
-        // Non-HEAD: check for other uncommitted changes
-        check_only_specified_files_changed(repo, files)?;
-
         // Stage files, create a temp commit, then fixup into target
         git_commit::stage_files(workdir, &file_refs)?;
         git_commit::commit(workdir, "fold: temp fixup")?;
@@ -200,27 +197,6 @@ fn fold_files_into_commit(
     Ok(())
 }
 
-/// Validate that no uncommitted changes exist beyond the specified files.
-fn check_only_specified_files_changed(
-    repo: &Repository,
-    allowed_files: &[String],
-) -> Result<(), Box<dyn std::error::Error>> {
-    let mut opts = StatusOptions::new();
-    opts.include_untracked(true).recurse_untracked_dirs(true);
-
-    let statuses = repo.statuses(Some(&mut opts))?;
-    for entry in statuses.iter() {
-        let path = entry.path().unwrap_or("");
-        if !allowed_files.iter().any(|f| f == path) {
-            return Err("Working tree has other uncommitted changes. \
-                 Please commit or stash them before folding into a non-HEAD commit."
-                .into());
-        }
-    }
-
-    Ok(())
-}
-
 /// Fold a commit into another commit (Case 2: Commit + Commit → Fixup).
 fn fold_commit_into_commit(
     repo: &Repository,
@@ -240,9 +216,6 @@ fn fold_commit_into_commit(
     if !repo.graph_descendant_of(source_oid, target_oid)? {
         return Err("Source commit must be newer than target commit.".into());
     }
-
-    // Validate clean working tree
-    git::check_clean_working_tree(repo)?;
 
     // Check if the target is a root commit (no parent)
     let target_commit = repo.find_commit(target_oid)?;
@@ -277,7 +250,6 @@ fn fold_commit_to_branch(
     commit_hash: &str,
     branch_name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    git::check_clean_working_tree(repo)?;
     move_commit_to_branch(repo, commit_hash, branch_name)?;
 
     println!(

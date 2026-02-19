@@ -34,8 +34,6 @@ pub fn run(target: String) -> Result<(), Box<dyn std::error::Error>> {
 fn drop_commit(repo: &Repository, commit_hash: &str) -> Result<(), Box<dyn std::error::Error>> {
     let workdir = repo.workdir().ok_or("Cannot drop in bare repository")?;
 
-    git::check_clean_working_tree(repo)?;
-
     let commit_oid = git2::Oid::from_str(commit_hash)?;
 
     // Check if this commit is the only commit on a branch.
@@ -103,8 +101,6 @@ fn drop_branch(repo: &Repository, branch_name: &str) -> Result<(), Box<dyn std::
         println!("Dropped branch '{}'", branch_name);
         return Ok(());
     }
-
-    git::check_clean_working_tree(repo)?;
 
     // Determine if the branch is woven (tip NOT on first-parent line)
     let is_woven = branch_info.tip_oid != head_oid

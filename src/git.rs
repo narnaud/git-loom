@@ -424,19 +424,6 @@ fn get_working_changes(repo: &Repository) -> Result<Vec<FileChange>, git2::Error
     Ok(changes)
 }
 
-/// Check that the working tree is clean (no staged or unstaged changes).
-pub fn check_clean_working_tree(repo: &Repository) -> Result<(), Box<dyn std::error::Error>> {
-    let mut opts = StatusOptions::new();
-    opts.include_untracked(true).recurse_untracked_dirs(true);
-
-    let statuses = repo.statuses(Some(&mut opts))?;
-    if !statuses.is_empty() {
-        return Err("Working tree must be clean. Please commit or stash your changes.".into());
-    }
-
-    Ok(())
-}
-
 #[cfg(test)]
 #[path = "git_test.rs"]
 mod tests;

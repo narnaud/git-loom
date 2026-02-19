@@ -106,7 +106,7 @@ fn fold_file_no_changes_fails() {
 }
 
 #[test]
-fn fold_file_into_non_head_with_other_changes_fails() {
+fn fold_file_into_non_head_with_other_changes_autostashed() {
     let test_repo = TestRepo::new();
     let c1_oid = test_repo.commit("First commit", "file1.txt");
     test_repo.commit("Second commit", "file2.txt");
@@ -121,13 +121,14 @@ fn fold_file_into_non_head_with_other_changes_fails() {
         &c1_oid.to_string(),
     );
 
-    assert!(result.is_err());
     assert!(
+        result.is_ok(),
+        "fold should succeed with autostash: {:?}",
         result
-            .unwrap_err()
-            .to_string()
-            .contains("other uncommitted changes")
     );
+
+    // Other dirty file should be preserved after autostash
+    assert_eq!(test_repo.read_file("file2.txt"), "change 2");
 }
 
 // ── Case 2: Commit + Commit (Fixup) ─────────────────────────────────────
@@ -206,7 +207,7 @@ fn fold_commit_wrong_direction_fails() {
 }
 
 #[test]
-fn fold_commit_dirty_working_tree_fails() {
+fn fold_commit_dirty_working_tree_autostashed() {
     let test_repo = TestRepo::new();
     let c1_oid = test_repo.commit("First", "file1.txt");
     let c2_oid = test_repo.commit("Second", "file2.txt");
@@ -217,8 +218,14 @@ fn fold_commit_dirty_working_tree_fails() {
     let result =
         super::fold_commit_into_commit(&test_repo.repo, &c2_oid.to_string(), &c1_oid.to_string());
 
-    assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("clean"));
+    assert!(
+        result.is_ok(),
+        "fold should succeed with autostash: {:?}",
+        result
+    );
+
+    // Dirty changes should be preserved after autostash
+    assert_eq!(test_repo.read_file("file1.txt"), "dirty");
 }
 
 // ── Case 3: Commit + Branch (Move) ──────────────────────────────────────
@@ -277,18 +284,42 @@ fn fold_commit_to_branch() {
 }
 
 #[test]
-fn fold_commit_to_branch_dirty_fails() {
+fn fold_commit_to_branch_dirty_autostashed() {
+    // Set up an integration branch with a woven feature branch and a loose commit
     let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+
     test_repo.commit("A1", "a1.txt");
+    let a1_oid = test_repo.head_oid();
 
-    test_repo.write_file("dirty.txt", "dirty");
+    git_branch::create(workdir.as_path(), "feature-a", &a1_oid.to_string()).unwrap();
 
-    let head_oid = test_repo.head_oid();
-    let result =
-        super::fold_commit_to_branch(&test_repo.repo, &head_oid.to_string(), "some-branch");
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+    test_repo.commit("B1", "b1.txt");
 
-    assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("clean"));
+    git_commands::git_rebase::rebase_onto(
+        workdir.as_path(),
+        &base_oid.to_string(),
+        &a1_oid.to_string(),
+    )
+    .unwrap();
+    git_merge::merge(workdir.as_path(), "feature-a").unwrap();
+
+    let loose_oid = test_repo.commit("Loose", "loose.txt");
+
+    // Dirty the working tree
+    test_repo.write_file("a1.txt", "dirty");
+
+    let result = super::fold_commit_to_branch(&test_repo.repo, &loose_oid.to_string(), "feature-a");
+
+    assert!(
+        result.is_ok(),
+        "fold should succeed with autostash: {:?}",
+        result
+    );
+
+    // Dirty changes should be preserved after autostash
+    assert_eq!(test_repo.read_file("a1.txt"), "dirty");
 }
 
 // ── Type dispatch / classify tests ───────────────────────────────────────

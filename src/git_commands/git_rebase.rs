@@ -160,7 +160,14 @@ pub fn rebase_onto(
 ) -> Result<(), Box<dyn std::error::Error>> {
     super::run_git(
         workdir,
-        &["rebase", "--onto", newbase, upstream, "--update-refs"],
+        &[
+            "rebase",
+            "--onto",
+            newbase,
+            upstream,
+            "--autostash",
+            "--update-refs",
+        ],
     )
 }
 

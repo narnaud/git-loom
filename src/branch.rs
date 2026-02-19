@@ -57,9 +57,6 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<(), Box<dyn s
 
     // Check if weaving is needed
     if let Some(weave_info) = should_weave(&repo, &commit_hash)? {
-        // Check for clean working tree before weaving
-        git::check_clean_working_tree(&repo)?;
-
         // Rebase commits after the branch point onto the merge-base
         git_rebase::rebase_onto(workdir, &weave_info.merge_base_hash, &commit_hash)?;
 
