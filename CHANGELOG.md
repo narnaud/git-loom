@@ -1,5 +1,61 @@
 # Changelog
 
+## [0.4.0](https://github.com/narnaud/git-loom/compare/v0.3.0...v0.4.0) (2026-02-19)
+
+
+### Features ✨
+
+* Add minimum git version check ([f00e75c](https://github.com/narnaud/git-loom/commit/f00e75c85f51c6a8699946f8eae31b79c32f9cc7))
+* Allow dirty working tree for some commands ([6b01029](https://github.com/narnaud/git-loom/commit/6b01029ae28dee8aef4e018140b12b603cd9b856))
+* **branch:** "Weave" branch if needed ([f215b12](https://github.com/narnaud/git-loom/commit/f215b12a1c7efb94289b8ac5876780142005e889))
+* **branch:** Create a new branch with the `branch` command ([11be764](https://github.com/narnaud/git-loom/commit/11be7645afa23b686949ec897f1ae09f62674c35))
+* **commit:** Add the commit command ([79b1358](https://github.com/narnaud/git-loom/commit/79b135852dae77a555ff8f6d7b358f079716a88d))
+* **drop:** Add the drop command ([ae3d8e9](https://github.com/narnaud/git-loom/commit/ae3d8e9d938b0d8b8f8a6f08c6685ed0fcc2a86e))
+* **fold:** Add fold command ([bed1219](https://github.com/narnaud/git-loom/commit/bed1219ea6b0d72b4428eef33b58b786fc54cc91))
+* **init:** Add init command ([b37466a](https://github.com/narnaud/git-loom/commit/b37466a85a8aab12a0387e1199b5da8cce4701a9))
+* **status:** Use different characters for staged/unstaged status ([c5107e6](https://github.com/narnaud/git-loom/commit/c5107e6c337df4ab241d77614ee0417c8fc4f4dc))
+* **update:** Add udpate command ([892322e](https://github.com/narnaud/git-loom/commit/892322e28c90e91d0c99af9a37805ba55d7cb07c))
+
+
+### Bug Fixes 🐞
+
+* **commit:** Create parallel branches if the branch has no commits ([fcd8e8f](https://github.com/narnaud/git-loom/commit/fcd8e8ff2ab05e5e1948de9939385b2bb13f4c0e))
+* Fix clippy warning, remove unused method ([e3f3aae](https://github.com/narnaud/git-loom/commit/e3f3aae46fecc1b30c2af81644083e38693b7ce3))
+* Fix dropping co-located branches ([d424ef9](https://github.com/narnaud/git-loom/commit/d424ef921a13a585c9867ac0f73472b3ea7babd8))
+* Moving a commit during the interactive rebase ([e7eff18](https://github.com/narnaud/git-loom/commit/e7eff186e0928d7f59d31678804488a6d2e7802d))
+
+
+### Documentation
+
+* Add commit command ([2a1c649](https://github.com/narnaud/git-loom/commit/2a1c64981f8e4a92c3a3f398e62cdcc7d2a0750a))
+* Add fold command ([ba1226f](https://github.com/narnaud/git-loom/commit/ba1226fbc27c3350b0d77a528a0cf34bb195055b))
+* Add init command ([c1814e3](https://github.com/narnaud/git-loom/commit/c1814e33fd933886645dea3affc8cb69c293a95e))
+* Add the drop command ([c13bca2](https://github.com/narnaud/git-loom/commit/c13bca27541243cb83a96e084e67492040631aa6))
+* Add update command ([f751439](https://github.com/narnaud/git-loom/commit/f7514390242f19b0c285470ec6625409c0f9b363))
+* **branch:** Add branch command specification ([cf93149](https://github.com/narnaud/git-loom/commit/cf931491d74ea662e4d11811a213c58e0b444e6b))
+* Upate documentaiton to match code ([8a89878](https://github.com/narnaud/git-loom/commit/8a898785ade47bbb1bba0b8b77692036ba5bfe3d))
+* Update specs following latest changes ([6356138](https://github.com/narnaud/git-loom/commit/6356138cefac2fd2aa46e0ca996e30d2ad6a31d9))
+* Update the rebase editor spec ([ff68624](https://github.com/narnaud/git-loom/commit/ff68624f49d2b2775eefa45c48da320819a5d668))
+
+
+### Changes
+
+* Add utility methods for pre-condition, add consistent error messages ([b56af32](https://github.com/narnaud/git-loom/commit/b56af323e6ce17f61d468ddcfdf0e5dd999beb80))
+* Improve code quality and error handling ([bde5218](https://github.com/narnaud/git-loom/commit/bde5218099a41a75f8463b8f66359fad663555fe))
+* **reword:** Update with new shared API ([3a52d0a](https://github.com/narnaud/git-loom/commit/3a52d0a94e0bbd0729f8a295009d0fcab1412254))
+* **update:** Do a fetch before a rebase ([dd8adbc](https://github.com/narnaud/git-loom/commit/dd8adbc02dc55c8b9acf42d103931cfa52b42cd8))
+
+
+### Tests
+
+* Refactor tests for better readability ([c140647](https://github.com/narnaud/git-loom/commit/c140647a6eddb5040bd5ccea293f19965a78b510))
+
+
+### Other
+
+* **claude:** Update CLAUDE.md ([b9bf8fc](https://github.com/narnaud/git-loom/commit/b9bf8fc570f22467b9a55c4e7c90ad3c3254577d))
+* Reformat ([218f434](https://github.com/narnaud/git-loom/commit/218f4340390788975c4458b3f59d2e37b45c2ff7))
+
 ## [0.3.0](https://github.com/narnaud/git-loom/compare/v0.2.0...v0.3.0) (2026-02-13)
 
 
