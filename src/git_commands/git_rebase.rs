@@ -26,6 +26,15 @@ pub enum RebaseAction {
     Drop { short_hash: String },
     /// Remove an entire woven branch section and its merge line from history.
     DropBranch { branch_name: String },
+    /// Reassign a woven branch section to a co-located branch.
+    ///
+    /// When dropping a woven branch that shares its tip with another branch,
+    /// the section's label and merge line are renamed to the co-located branch
+    /// instead of being removed. This keeps the commits for the surviving branch.
+    ReassignBranch {
+        drop_branch: String,
+        keep_branch: String,
+    },
 }
 
 /// The target of a rebase operation.
@@ -82,7 +91,7 @@ impl<'a> Rebase<'a> {
                 RebaseAction::Drop { short_hash } => {
                     validate_hex(short_hash)?;
                 }
-                RebaseAction::DropBranch { .. } => {
+                RebaseAction::DropBranch { .. } | RebaseAction::ReassignBranch { .. } => {
                     // Branch names don't need hex validation
                 }
             }
@@ -211,6 +220,12 @@ pub fn apply_actions_to_todo(
             }
             RebaseAction::DropBranch { branch_name } => {
                 apply_drop_branch(&mut lines, branch_name)?;
+            }
+            RebaseAction::ReassignBranch {
+                drop_branch,
+                keep_branch,
+            } => {
+                apply_reassign_branch(&mut lines, drop_branch, keep_branch)?;
             }
         }
     }
@@ -509,6 +524,71 @@ fn apply_drop_branch(
     Ok(())
 }
 
+/// Reassign a woven branch section to a co-located branch.
+///
+/// When two branches share the same tip and one is dropped, the section's
+/// `label` and `merge` lines are renamed to the surviving branch. The
+/// dropped branch's `update-ref` is removed while the surviving branch's
+/// `update-ref` is preserved.
+///
+/// Transforms:
+/// ```text
+/// reset onto
+/// pick abc1234 A1
+/// label drop-branch
+/// update-ref refs/heads/drop-branch
+/// update-ref refs/heads/keep-branch
+/// ...
+/// merge -C xxx drop-branch
+/// ```
+/// Into:
+/// ```text
+/// reset onto
+/// pick abc1234 A1
+/// label keep-branch
+/// update-ref refs/heads/keep-branch
+/// ...
+/// merge -C xxx keep-branch
+/// ```
+fn apply_reassign_branch(
+    lines: &mut Vec<String>,
+    drop_branch: &str,
+    keep_branch: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let label_target = format!("label {}", drop_branch);
+    let new_label = format!("label {}", keep_branch);
+    let drop_update_ref = format!("update-ref refs/heads/{}", drop_branch);
+
+    // Rename the label
+    if let Some(line) = lines.iter_mut().find(|l| l.trim() == label_target) {
+        *line = new_label;
+    }
+
+    // Remove the dropped branch's update-ref
+    lines.retain(|l| l.trim() != drop_update_ref);
+
+    // Rename the merge line: `merge -C <hash> drop-branch` → `merge -C <hash> keep-branch`
+    // Format: `merge [-C|-c] <hash> <label> [# comment]`
+    for line in lines.iter_mut() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 4 && parts[0] == "merge" && parts[3] == drop_branch {
+            // Reconstruct: keep first 3 tokens, replace the 4th, append the rest
+            let rest: String = if parts.len() > 4 {
+                format!(" {}", parts[4..].join(" "))
+            } else {
+                String::new()
+            };
+            *line = format!(
+                "{} {} {} {}{}",
+                parts[0], parts[1], parts[2], keep_branch, rest
+            );
+            break;
+        }
+    }
+
+    Ok(())
+}
+
 /// Validate that a string contains only hexadecimal characters.
 fn validate_hex(s: &str) -> Result<(), Box<dyn std::error::Error>> {
     if s.is_empty() || !s.chars().all(|c| c.is_ascii_hexdigit()) {
@@ -719,6 +799,63 @@ mod tests {
                 "update-ref refs/heads/test3",
                 "reset branch-point",
             ]
+        );
+    }
+
+    #[test]
+    fn apply_reassign_branch_renames_section() {
+        let mut lines = vec![
+            "label onto".to_string(),
+            "".to_string(),
+            "reset onto".to_string(),
+            "pick abc1234 A1".to_string(),
+            "label feature-a".to_string(),
+            "update-ref refs/heads/feature-a".to_string(),
+            "update-ref refs/heads/feature-b".to_string(),
+            "".to_string(),
+            "reset onto".to_string(),
+            "pick 1111111 Int".to_string(),
+            "merge -C 9999999 feature-a # Merge branch 'feature-a'".to_string(),
+            "update-ref refs/heads/integration".to_string(),
+        ];
+
+        apply_reassign_branch(&mut lines, "feature-a", "feature-b").unwrap();
+
+        let remaining: Vec<&str> = lines.iter().map(|l| l.as_str()).collect();
+        // Label should be renamed to feature-b
+        assert!(
+            remaining.contains(&"label feature-b"),
+            "label should be renamed to feature-b"
+        );
+        // feature-a's update-ref should be removed
+        assert!(
+            !remaining
+                .iter()
+                .any(|l| l.contains("update-ref refs/heads/feature-a")),
+            "feature-a update-ref should be removed"
+        );
+        // feature-b's update-ref should remain
+        assert!(
+            remaining
+                .iter()
+                .any(|l| l.contains("update-ref refs/heads/feature-b")),
+            "feature-b update-ref should remain"
+        );
+        // Merge should reference feature-b now
+        assert!(
+            remaining
+                .iter()
+                .any(|l| l.contains("merge") && l.contains("feature-b")),
+            "merge should reference feature-b"
+        );
+        // Commits should remain
+        assert!(
+            remaining.iter().any(|l| l.contains("A1")),
+            "A1 should remain"
+        );
+        assert!(
+            remaining.iter().any(|l| l.contains("Int")),
+            "Int should remain"
         );
     }
 

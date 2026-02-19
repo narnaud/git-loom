@@ -248,6 +248,97 @@ fn drop_woven_branch_with_two_branches_preserves_other() {
     assert!(messages.contains(&"B1"), "B1 should remain");
 }
 
+// ── Co-located branch tests (same tip) ───────────────────────────────────
+
+#[test]
+fn drop_colocated_non_woven_preserves_other_branch_and_commits() {
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    // Create feature-a with a commit
+    git_branch::create(workdir.as_path(), "feature-a", &base_oid.to_string()).unwrap();
+    test_repo.switch_branch("feature-a");
+    test_repo.commit("A1", "a1.txt");
+    test_repo.switch_branch("integration");
+
+    // Fast-forward integration to feature-a
+    git_merge::merge_no_ff(workdir.as_path(), "feature-a").unwrap();
+    test_repo.force_checkout();
+
+    // Create feature-b at the same tip as feature-a (co-located)
+    let fa_tip = test_repo.get_branch_target("feature-a");
+    git_branch::create(workdir.as_path(), "feature-b", &fa_tip.to_string()).unwrap();
+
+    // Add a commit after so branches are not at HEAD
+    test_repo.commit("Int", "int.txt");
+
+    // Drop feature-a — feature-b shares the same tip
+    let result = super::drop_branch(&test_repo.repo, "feature-a");
+    assert!(result.is_ok(), "drop_branch failed: {:?}", result);
+
+    // feature-a should be deleted
+    assert!(
+        !test_repo.branch_exists("feature-a"),
+        "feature-a should be deleted"
+    );
+
+    // feature-b should still exist and point to the same commit content
+    assert!(
+        test_repo.branch_exists("feature-b"),
+        "feature-b should still exist"
+    );
+
+    // Commits should still be in history (not dropped)
+    let info = git::gather_repo_info(&test_repo.repo).unwrap();
+    let messages: Vec<&str> = info.commits.iter().map(|c| c.message.as_str()).collect();
+    assert!(messages.contains(&"A1"), "A1 should still be in history");
+    assert!(messages.contains(&"Int"), "Int should still be in history");
+}
+
+#[test]
+fn drop_colocated_woven_preserves_other_branch_and_commits() {
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    // Create feature-a with a commit
+    git_branch::create(workdir.as_path(), "feature-a", &base_oid.to_string()).unwrap();
+    test_repo.switch_branch("feature-a");
+    test_repo.commit("A1", "a1.txt");
+    test_repo.switch_branch("integration");
+
+    // Create feature-b at the same tip as feature-a (co-located)
+    let fa_tip = test_repo.get_branch_target("feature-a");
+    git_branch::create(workdir.as_path(), "feature-b", &fa_tip.to_string()).unwrap();
+
+    // Add integration commit and weave feature-a (creates merge topology)
+    test_repo.commit("Int", "int.txt");
+    git_merge::merge_no_ff(workdir.as_path(), "feature-a").unwrap();
+
+    // Drop feature-a — feature-b shares the same tip
+    let result = super::drop_branch(&test_repo.repo, "feature-a");
+    assert!(result.is_ok(), "drop_branch failed: {:?}", result);
+
+    // feature-a should be deleted
+    assert!(
+        !test_repo.branch_exists("feature-a"),
+        "feature-a should be deleted"
+    );
+
+    // feature-b should still exist
+    assert!(
+        test_repo.branch_exists("feature-b"),
+        "feature-b should still exist"
+    );
+
+    // A1 should still be in history (feature-b still needs it)
+    let info = git::gather_repo_info(&test_repo.repo).unwrap();
+    let messages: Vec<&str> = info.commits.iter().map(|c| c.message.as_str()).collect();
+    assert!(messages.contains(&"A1"), "A1 should still be in history");
+    assert!(messages.contains(&"Int"), "Int should still be in history");
+}
+
 // ── Drop via run() (end-to-end) ─────────────────────────────────────────
 
 #[test]

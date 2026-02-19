@@ -43,8 +43,13 @@ fn drop_commit(repo: &Repository, commit_hash: &str) -> Result<(), Box<dyn std::
         if let Some(branch_name) = find_branch_owning_commit_from_info(&info, commit_oid)
             && let Some(branch_info) = info.branches.iter().find(|b| b.name == branch_name)
         {
-            let owned =
-                find_owned_commits(repo, branch_info.tip_oid, merge_base_oid, &info.branches)?;
+            let owned = find_owned_commits(
+                repo,
+                branch_info.tip_oid,
+                merge_base_oid,
+                &info.branches,
+                &branch_name,
+            )?;
             if owned.len() == 1 {
                 // This is the only commit on the branch — drop the whole branch
                 return drop_branch(repo, &branch_name);
@@ -95,6 +100,12 @@ fn drop_branch(repo: &Repository, branch_name: &str) -> Result<(), Box<dyn std::
         return Ok(());
     }
 
+    // Check if another branch shares the same tip (co-located branches)
+    let colocated_branch = info
+        .branches
+        .iter()
+        .find(|b| b.name != branch_name && b.tip_oid == branch_info.tip_oid);
+
     // Determine if the branch is woven (tip NOT on first-parent line)
     let is_woven = branch_info.tip_oid != head_oid
         && !is_on_first_parent_line(repo, head_oid, merge_base_oid, branch_info.tip_oid)?;
@@ -102,25 +113,44 @@ fn drop_branch(repo: &Repository, branch_name: &str) -> Result<(), Box<dyn std::
     let rebase_target = git::rebase_target_for_commit(repo, merge_base_oid)?;
 
     if is_woven {
-        // Woven branch: use DropBranch action to remove the entire section + merge
-        Rebase::new(workdir, rebase_target)
-            .action(RebaseAction::DropBranch {
-                branch_name: branch_name.to_string(),
-            })
-            .run()?;
-    } else {
-        // Non-woven branch with commits: drop each owned commit individually
-        let owned = find_owned_commits(repo, branch_info.tip_oid, merge_base_oid, &info.branches)?;
-
-        let mut rebase = Rebase::new(workdir, rebase_target);
-        for oid in &owned {
-            let hash_str = oid.to_string();
-            let short = git_commands::short_hash(&hash_str);
-            rebase = rebase.action(RebaseAction::Drop {
-                short_hash: short.to_string(),
-            });
+        if let Some(keep) = colocated_branch {
+            // Woven branch with a co-located sibling: reassign the section
+            // to the sibling instead of removing it entirely.
+            Rebase::new(workdir, rebase_target)
+                .action(RebaseAction::ReassignBranch {
+                    drop_branch: branch_name.to_string(),
+                    keep_branch: keep.name.clone(),
+                })
+                .run()?;
+        } else {
+            // Woven branch: use DropBranch action to remove the entire section + merge
+            Rebase::new(workdir, rebase_target)
+                .action(RebaseAction::DropBranch {
+                    branch_name: branch_name.to_string(),
+                })
+                .run()?;
         }
-        rebase.run()?;
+    } else {
+        // Non-woven branch: drop each uniquely owned commit individually
+        let owned = find_owned_commits(
+            repo,
+            branch_info.tip_oid,
+            merge_base_oid,
+            &info.branches,
+            branch_name,
+        )?;
+
+        if !owned.is_empty() {
+            let mut rebase = Rebase::new(workdir, rebase_target);
+            for oid in &owned {
+                let hash_str = oid.to_string();
+                let short = git_commands::short_hash(&hash_str);
+                rebase = rebase.action(RebaseAction::Drop {
+                    short_hash: short.to_string(),
+                });
+            }
+            rebase.run()?;
+        }
     }
 
     // Delete the branch ref
@@ -165,20 +195,31 @@ fn find_branch_owning_commit_from_info(
 }
 
 /// Find all commits owned by a branch (from tip to next boundary or merge-base).
+///
+/// `dropping_branch_name` identifies the branch being dropped so that other
+/// branches sharing the same tip are properly excluded. Without this, co-located
+/// branches (same tip) would not be hidden, causing their shared commits to be
+/// incorrectly reported as owned by the dropping branch.
 fn find_owned_commits(
     repo: &Repository,
     branch_tip: git2::Oid,
     merge_base_oid: git2::Oid,
     all_branches: &[git::BranchInfo],
+    dropping_branch_name: &str,
 ) -> Result<Vec<git2::Oid>, Box<dyn std::error::Error>> {
     let mut revwalk = repo.revwalk()?;
     revwalk.push(branch_tip)?;
     revwalk.hide(merge_base_oid)?;
 
-    // Hide other branch tips that are ancestors of our tip
+    // Hide other branch tips that are ancestors of (or co-located with) our tip.
+    // Skip the branch being dropped (by name), so co-located branches with the
+    // same tip_oid are still hidden — their shared commits are not "owned" by us.
     for other_branch in all_branches {
-        if other_branch.tip_oid != branch_tip
-            && repo.graph_descendant_of(branch_tip, other_branch.tip_oid)?
+        if other_branch.name == dropping_branch_name {
+            continue;
+        }
+        if other_branch.tip_oid == branch_tip
+            || repo.graph_descendant_of(branch_tip, other_branch.tip_oid)?
         {
             revwalk.hide(other_branch.tip_oid)?;
         }
