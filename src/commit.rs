@@ -57,7 +57,19 @@ pub fn run(
     let head_hash = git::head_oid(&repo)?.to_string();
 
     if branch_is_empty {
-        weave_head_commit_to_branch(&workdir, &branch_name)?;
+        let info = git::gather_repo_info(&repo)?;
+        let merge_base_hash = info.upstream.merge_base_oid.to_string();
+        let head_ref = repo.head()?;
+        let integration_branch = head_ref
+            .shorthand()
+            .ok_or("HEAD branch name is not valid UTF-8")?
+            .to_string();
+        weave_head_commit_to_branch(
+            &workdir,
+            &branch_name,
+            &merge_base_hash,
+            &integration_branch,
+        )?;
     } else {
         fold::move_commit_to_branch(&repo, &head_hash, &branch_name)?;
     }
@@ -259,20 +271,38 @@ fn is_branch_at_merge_base(
 /// Weave a newly-committed HEAD into a branch that previously had no commits.
 ///
 /// For branches at the merge-base, the rebase-based move can't create merge topology.
-/// Instead, we point the branch at the new commit, reset integration back, and merge
-/// with `--no-ff` to create a proper merge commit.
+/// Instead, we point the branch at the new commit, rebase it onto the merge-base
+/// (so it forks from there, not from the integration tip), then merge with `--no-ff`.
 fn weave_head_commit_to_branch(
     workdir: &std::path::Path,
     branch_name: &str,
+    merge_base_hash: &str,
+    integration_branch: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Stash any remaining working tree changes (mimics rebase --autostash)
     let stashed = git_commands::run_git(workdir, &["stash", "--include-untracked"]).is_ok();
 
-    // Point the branch to HEAD (the new commit)
     let result = (|| -> Result<(), Box<dyn std::error::Error>> {
+        // Point the branch to HEAD (the new commit)
         git_commands::run_git(workdir, &["branch", "-f", branch_name, "HEAD"])?;
         // Move integration back to before the new commit
         git_commands::run_git(workdir, &["reset", "--hard", "HEAD~1"])?;
+        // Rebase the branch onto the merge-base so it forks from there,
+        // not from the integration tip (which may be a merge commit from
+        // previously woven branches). This ensures parallel branch topology.
+        git_commands::run_git(
+            workdir,
+            &[
+                "rebase",
+                "--onto",
+                merge_base_hash,
+                integration_branch,
+                branch_name,
+                "--autostash",
+            ],
+        )?;
+        // Return to the integration branch (rebase left us on the feature branch)
+        git_commands::run_git(workdir, &["checkout", integration_branch])?;
         // Merge the branch to create proper merge topology
         git_merge::merge_no_ff(workdir, branch_name)?;
         Ok(())

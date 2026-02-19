@@ -242,6 +242,81 @@ fn commit_to_empty_branch_creates_merge_topology() {
     assert_eq!(second_parent.id(), branch_oid);
 }
 
+/// Helper: set up a test repo with one woven branch (with a commit) and one empty branch.
+///
+/// Creates:
+///   origin/main → (merge-base)
+///   feature-a has A1 commit, merged into integration
+///   feature-b at merge-base (empty)
+///   HEAD = integration = Merge feature-a
+fn setup_with_one_woven_one_empty() -> TestRepo {
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    // Create feature-a at merge-base with one commit
+    git_branch::create(workdir.as_path(), "feature-a", &base_oid.to_string()).unwrap();
+    test_repo.switch_branch("feature-a");
+    test_repo.commit("A1", "a1.txt");
+    test_repo.switch_branch("integration");
+
+    // Weave feature-a into integration
+    git_merge::merge_no_ff(workdir.as_path(), "feature-a").unwrap();
+
+    // Create feature-b at merge-base (empty, no commits)
+    git_branch::create(workdir.as_path(), "feature-b", &base_oid.to_string()).unwrap();
+
+    test_repo
+}
+
+#[test]
+fn commit_to_second_empty_branch_creates_parallel_topology() {
+    let test_repo = setup_with_one_woven_one_empty();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    test_repo.write_file("b1.txt", "content");
+
+    let result = test_repo.in_dir(|| {
+        super::run(
+            Some("feature-b".to_string()),
+            Some("B1".to_string()),
+            vec!["b1.txt".to_string()],
+        )
+    });
+
+    assert!(result.is_ok(), "commit failed: {:?}", result);
+
+    // feature-b should have the commit
+    let branch_b_oid = test_repo.get_branch_target("feature-b");
+    let commit_b = test_repo.find_commit(branch_b_oid);
+    assert_eq!(commit_b.summary().unwrap(), "B1");
+
+    // feature-b's commit should have the merge-base as its parent,
+    // NOT the merge commit of feature-a (parallel topology, not stacked)
+    let parent = commit_b.parent(0).unwrap();
+    assert_eq!(
+        parent.id(),
+        base_oid,
+        "feature-b's commit should fork from merge-base, not from the merge commit"
+    );
+
+    // HEAD should be a merge commit (merge of feature-b into integration)
+    let head = test_repo.head_commit();
+    assert_eq!(head.parent_count(), 2, "HEAD should be a merge commit");
+
+    // The first parent should be the merge of feature-a (the old integration tip)
+    let first_parent = head.parent(0).unwrap();
+    assert_eq!(
+        first_parent.parent_count(),
+        2,
+        "first parent should also be a merge commit (feature-a merge)"
+    );
+
+    // The second parent should be feature-b
+    let second_parent = head.parent(1).unwrap();
+    assert_eq!(second_parent.id(), branch_b_oid);
+}
+
 // ── Move via rebase ──────────────────────────────────────────────────────
 
 #[test]
