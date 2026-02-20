@@ -30,6 +30,7 @@ git-loom is a Git CLI tool written in Rust (edition 2024) that supercharges the 
 - `src/commit.rs` — Commit to feature branches from the integration branch.
 - `src/drop.rs` — Drop commits or branches from history, with automatic unweaving.
 - `src/fold.rs` — Fold: amend files into commits, fixup commits, move commits between branches.
+- `src/weave.rs` — Weave: structured graph model for integration topology, rebase todo generation, and execution.
 - `src/update.rs` — Pull-rebase the integration branch and update submodules.
 - `src/graph.rs` — Graph rendering logic for the status output.
 - `src/git.rs` — Git abstraction layer (uses `git2` crate).
@@ -47,7 +48,7 @@ The `specs/` directory contains detailed design documents that describe each fea
 | `specs/001-status.md` | Branch-aware status / commit graph display |
 | `specs/002-shortid.md` | Short ID generation and collision resolution |
 | `specs/003-reword.md` | Commit reword / branch rename via short IDs |
-| `specs/004-internal-sequence-edit.md` | Self-invocation as `GIT_SEQUENCE_EDITOR` for portable rebase |
+| `specs/004-weave.md` | Weave: structured graph model for topology-aware rebase |
 | `specs/005-branch.md` | Branch creation and weaving into integration branches |
 | `specs/006-commit.md` | Commit to feature branches from the integration branch |
 | `specs/007-fold.md` | Fold: amend files, fixup commits, move commits between branches |
