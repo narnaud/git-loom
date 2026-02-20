@@ -94,12 +94,11 @@ The target commit keeps its original message.
 1. Resolve source as a commit, resolve target as a commit.
 2. Validate that the source is a descendant of the target (source is newer).
    Error if not: `"Source commit must be newer than target commit."`
-3. Use interactive rebase to reorder and fixup (uncommitted changes are
-   autostashed):
-   - Start `git rebase -i <target>^` with a sequence editor that:
-     - Moves the source commit line to immediately after the target commit line
-     - Changes the source commit's action from `pick` to `fixup`
-   - Rebase executes: target absorbs source's changes, source disappears
+3. Build a `Weave` from the repo, call `fixup_commit(source_oid, target_oid)`.
+   This removes the source commit, changes its command to `fixup`, and inserts
+   it immediately after the target commit.
+4. Execute via `run_rebase()` (with `--autostash`). The rebase replays the
+   history: the target absorbs the source's changes, and the source disappears.
 
 **What changes:**
 
@@ -127,14 +126,12 @@ branch refs correct automatically.
 **Steps:**
 
 1. Resolve source as a commit, resolve target as a branch.
-2. Use interactive rebase with a sequence editor that (uncommitted changes are
-   autostashed):
-   - Removes the source commit line from its current position
-   - Inserts it at the tip of the target branch's section (just before the
-     target branch's merge commit, or after the last commit of the target
-     branch)
-3. `--update-refs` ensures both the source and target branch refs update
-   to reflect the new topology.
+2. Build a `Weave` from the repo, call `move_commit(source_oid, branch_name)`.
+   This removes the commit from its current position and appends it to the
+   target branch section. If the target branch is co-located, the section is
+   split (see Spec 004).
+3. Execute via `run_rebase()` (with `--autostash`). `--update-refs` ensures
+   both the source and target branch refs update to reflect the new topology.
 
 **Conflict handling:**
 
@@ -262,25 +259,21 @@ match:
 **Key integration points:**
 
 - **`git::resolve_target()`** - Shared resolution logic (Spec 002)
-- **`git_rebase` module** - Interactive rebase for fixup and move
+- **Weave graph model** - Topology mutation and rebase execution (Spec 004)
 - **`git_commit` module** - `stage_files()`, `amend_no_edit()`, `commit()`
-- **Self-as-sequence-editor** (Spec 004) - Non-interactive rebase control
-- **Automatic abort on failure** - Atomic operations via rebase infrastructure
+- **Automatic abort on failure** - Atomic operations via `run_rebase()`
 
-### Sequence Editor Extensions
+### Weave Mutations
 
-The `internal-sequence-edit` command (Spec 004) supports new actions for fold:
+Fold uses two Weave mutations (Spec 004):
 
-- **`Fixup { source_hash, target_hash }`**: move source commit line after
-  target and change its action to `fixup`
-- **`Move { commit_hash, before_label }`**: remove a commit line and insert
-  it at the tip of the target branch's section in the rebase todo. The action
-  extracts the block of `update-ref` and `label` directives at the section
-  boundary, then re-inserts them so the target branch's `label` and
-  `update-ref` come after the commit, while co-located branches' `update-ref`
-  lines stay before it
-
-These extend the existing `Edit` action used by reword.
+- **`fixup_commit(source_oid, target_oid)`**: Remove the source commit,
+  change its command to `Fixup`, and insert it immediately after the target.
+  Used for commit-into-commit and file-into-non-HEAD-commit operations.
+- **`move_commit(oid, to_branch)`**: Remove the commit from its current
+  location and append it to the target branch section. Handles co-located
+  branches by splitting the section when needed. Used for commit-to-branch
+  operations.
 
 ## Design Decisions
 
@@ -348,16 +341,17 @@ the rebase at the target commit and amending in-place because:
 
 ### Move Handles Co-Located Branches
 
-The commit+branch move extracts the entire block of `update-ref` and `label`
-directives at the target branch's section boundary, categorizes them, and
-re-inserts them in a specific order: co-located branches' `update-ref` lines
-first, then the moved commit, then the target branch's `label` and
-`update-ref`. This ensures:
+When moving a commit to a branch that shares a section with other co-located
+branches, the Weave's `move_commit()` method splits the section. The original
+section keeps its existing commits and the remaining branch names. A new
+stacked section is created for the target branch, containing only the moved
+commit, with its `reset_target` pointing to the original section. This ensures:
 
 - The target branch ref advances to include the moved commit
-- Co-located branches (sharing the same tip) don't accidentally advance past
-  the commit they should still point to
-- Blank lines between directives (as git produces) are handled correctly
+- Co-located branches (sharing the same tip) stay pointing at the original
+  section's tip, unaffected by the move
+- The integration line's merge entry is updated to reference the outermost
+  (stacked) section
 
 ### Autostash Over Clean Working Tree Requirements
 

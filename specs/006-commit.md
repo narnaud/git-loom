@@ -4,8 +4,8 @@
 
 `git loom commit` creates a commit on a feature branch without leaving the
 integration branch. It stages files, creates the commit at HEAD, then uses
-the fold infrastructure (interactive rebase with `--update-refs`) to move it
-to the target feature branch.
+the Weave graph model (Spec 004) to move it to the target feature branch
+via a single interactive rebase.
 
 ## Why Commit?
 
@@ -103,20 +103,20 @@ The staged changes are committed directly at HEAD on the integration branch.
 This is a regular `git commit` — the commit temporarily lives at the tip of
 the integration branch before being relocated by the rebase step.
 
-### Move via Rebase
+### Move via Weave
 
 After the commit is created at HEAD, it is relocated to the target feature
-branch using the same Move rebase action that `fold commit+branch` uses:
+branch using the Weave graph model (Spec 004):
 
-1. Start an interactive rebase from the merge-base (or `--root` if needed).
-2. The sequence editor removes the new commit line from its current position
-   (tip of integration) and inserts it just before the target branch's
-   `update-ref` directive.
-3. `--update-refs` ensures the target branch ref advances to include the new
-   commit, and all other branch refs stay correct.
+1. Build a `Weave` from the repository state.
+2. For empty branches (branch at merge-base with no commits): call
+   `add_branch_section()` and `add_merge()` to create the merge topology.
+3. Call `move_commit(head_oid, branch_name)` to relocate the commit from
+   the integration line to the target branch section.
+4. Serialize and execute via `run_rebase()`.
 
-This is a single atomic rebase operation — identical to `git loom fold <commit>
-<branch>`.
+This is a single atomic rebase operation. The `--update-refs` flag ensures
+all branch refs stay correct.
 
 **Conflicts**: If the rebase encounters conflicts (e.g., the new commit
 conflicts with other commits in the topology), the operation stops and the
@@ -238,7 +238,7 @@ verify_index_not_empty()
 resolve_branch(branch)
     match branch:
         Some(b) → resolve_target(b) → must be branch
-                   if not found → validate name, create at merge-base, weave
+                   if not found → validate name, create at merge-base
         None    → interactive picker (woven branches + create new)
     ↓
 resolve_message(message)
@@ -248,15 +248,15 @@ resolve_message(message)
     ↓
 git_commit::commit(workdir, message)   // commit at HEAD
     ↓
+Weave::from_repo(repo)
+    ↓
 if branch_is_empty:
-    weave_head_commit_to_branch(workdir, branch, merge_base, integration)
-        // Point branch at HEAD, reset integration back
-        // Rebase branch onto merge-base (parallel topology)
-        // Checkout integration, merge --no-ff
-else:
-    fold::move_commit_to_branch(repo, HEAD, branch)
-        // Reuses fold's Commit+Branch Move rebase action
-        // Single interactive rebase with --update-refs
+    graph.add_branch_section(branch)   // create merge topology
+    graph.add_merge(branch)
+    ↓
+graph.move_commit(head_oid, branch)    // relocate commit
+    ↓
+run_rebase(workdir, base_oid, todo)
 ```
 
 **Key integration points:**
@@ -265,29 +265,29 @@ else:
 - **`git::gather_repo_info()`** - To list woven branches and their merge order
 - **`git_branch::create()`** - For creating new branches at merge-base
 - **`git_branch::validate_name()`** - Git-native name validation
-- **`fold::move_commit_to_branch()`** - Reuses fold's Move rebase action
-- **`git_rebase::Rebase`** - Interactive rebase with `--update-refs`
+- **Weave graph model** - Topology mutation and rebase execution (Spec 004)
 - **`cliclack`** - Interactive branch picker and name prompt
 
-### Rebase Strategy (replaces Re-weave)
+### Unified Weave Strategy
 
-Instead of resetting to merge-base and re-merging all feature branches, the
-commit command reuses fold's Move rebase action:
+Both the empty-branch and non-empty-branch paths use the same Weave-based
+approach:
 
-1. The new commit is created at HEAD (tip of integration branch).
-2. A single interactive rebase relocates the commit to the target branch's
-   section in the topology.
-3. `--update-refs` automatically updates all affected branch refs.
+1. Build a `Weave` from the repository state.
+2. For empty branches, add the branch section and merge topology to the graph.
+3. Call `move_commit()` to relocate the commit.
+4. Serialize and execute a single interactive rebase.
 
-This approach is superior to a full re-weave because:
+This unified approach replaces the earlier split where empty branches required
+manual stash/reset/rebase-onto/merge gymnastics:
 
 - **Preserves merge resolution**: Existing merge commits keep their conflict
-  resolutions intact. A re-weave from scratch could produce different results.
-- **Atomic**: A single rebase operation, not N sequential merges.
-- **Reuses infrastructure**: The same Move action and sequence editor logic
-  that fold already uses and tests.
+  resolutions intact.
+- **Atomic**: A single rebase operation, not N sequential steps.
 - **Consistent**: All topology-modifying operations in git-loom use the same
-  rebase mechanism.
+  Weave mechanism.
+- **Parallel topology**: Empty branches are correctly placed as parallel
+  sections forking from the merge-base, not stacked on existing merges.
 
 ## Design Decisions
 
@@ -324,8 +324,8 @@ pattern where the name can be provided as an argument or prompted for.
 The command creates the commit at HEAD first, then moves it via rebase, rather
 than creating it directly on the feature branch tip. This was chosen because:
 
-- **Reuses fold**: The move operation is identical to `fold <commit> <branch>`,
-  avoiding a parallel code path
+- **Reuses Weave**: The move operation uses the same `move_commit()` mutation
+  as `fold <commit> <branch>`, avoiding a parallel code path
 - **Simplicity**: No need to check out the feature branch, apply changes, commit,
   then switch back — just commit where you are and relocate
 - **Working tree stays clean**: The staged changes are committed normally; the

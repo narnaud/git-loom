@@ -199,6 +199,7 @@ match Target:
 - **`git::gather_repo_info()`** - Used internally by resolve_target for short IDs
 - **`shortid::IdAllocator`** - Used internally by resolve_target for consistent IDs
 - **`cliclack`** - Interactive prompts for branch renaming without `-m` flag
+- **Weave graph model** - Topology-aware rebase via the Weave module (Spec 004)
 - **Native git commands** - All mutation operations (rebase, amend, branch rename)
 
 The reword module contains only the domain-specific logic for commit message
@@ -240,20 +241,25 @@ rather than using libgit2 APIs. This choice prioritizes:
 
 Using native commands means git-loom is a workflow tool, not a git reimplementation.
 
-**Implementation: Self-as-Sequence-Editor**
+**Implementation: Weave-Based Rebase**
 
 To non-interactively mark a specific commit for editing during rebase, git-loom
-uses a clever technique: it sets itself as the `GIT_SEQUENCE_EDITOR`:
+uses the Weave graph model (see Spec 004):
 
-1. Start `git rebase -i` with `GIT_SEQUENCE_EDITOR="git-loom internal-sequence-edit <hash>"`
-2. Git calls git-loom to edit the todo file
-3. Git-loom replaces `pick <hash>` with `edit <hash>` and exits
-4. Rebase stops at that commit, ready for amending
+1. Build a `Weave` from the repository state
+2. Call `edit_commit(oid)` to change the target commit's command to `edit`
+3. Serialize the graph to a todo file via `to_todo()`
+4. Run a single interactive rebase via `run_rebase()` with the pre-generated todo
+5. Rebase stops at that commit, ready for amending
+
+For non-integration repos (no upstream tracking), a fallback builds a minimal
+linear todo by walking from HEAD to the target commit's parent, without using
+the full Weave data model.
 
 This approach:
 - Works reliably across platforms (no shell script files)
-- Avoids parsing rebase todo file formats in the main code path
-- Keeps the sequence editing logic separate and testable
+- Generates the complete todo from the commit graph, not by patching git's output
+- Preserves merge topology via `--rebase-merges`
 - Doesn't interfere with user's configured editor (used later during amend)
 
 ### Automatic Abort on Failure

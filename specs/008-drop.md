@@ -59,8 +59,8 @@ topology.
 1. Resolve target as a commit.
 2. Check if the commit is the sole commit on a branch (via branch ownership
    and owned-commit count). If so, delegate to branch drop.
-3. Otherwise, use interactive rebase (with `--autostash`) with a sequence
-   editor that removes the `pick <hash>` line from the todo.
+3. Otherwise, build a `Weave` from the repo, call `drop_commit(oid)`, and
+   execute via `run_rebase()` (with `--autostash`).
 
 **What changes:**
 
@@ -99,14 +99,10 @@ merge commit and lives on a side branch.
 2. Verify the branch is in the integration range (between merge-base and HEAD).
    Error: `"Branch '<name>' is not in the integration range. Use 'git branch -d
    <name>' to delete it directly."`
-3. Use interactive rebase (with `--autostash`) with the `DropBranch` action,
-   which removes:
-   - The `reset` line that opens the branch section
-   - All `pick` lines in the section (the branch's commits)
-   - The `label <branch>` line
-   - The `update-ref refs/heads/<branch>` line
-   - The `merge ... <branch>` line (the merge commit)
-4. Delete the branch ref with `git branch -D`.
+3. Build a `Weave` from the repo, call `drop_branch(name)` which removes
+   the branch section and its merge entry from the graph.
+4. Execute via `run_rebase()` (with `--autostash`).
+5. Delete the branch ref with `git branch -D`.
 
 #### Non-woven branch (on the first-parent line)
 
@@ -119,8 +115,10 @@ line without merge topology.
 1. Same validation as woven branch.
 2. Determine all commits owned by the branch (from tip to the next branch
    boundary or merge-base).
-3. Use interactive rebase with individual `Drop` actions for each owned commit.
-4. Delete the branch ref.
+3. Build a `Weave` from the repo, call `drop_commit(oid)` for each owned
+   commit.
+4. Execute via `run_rebase()`.
+5. Delete the branch ref.
 
 #### Co-located woven branch (shares tip with another branch)
 
@@ -132,11 +130,11 @@ the surviving sibling branch.
 
 1. Same validation as woven branch.
 2. Detect that another branch shares the same tip.
-3. Use interactive rebase with the `ReassignBranch` action, which:
-   - Renames `label <drop-branch>` to `label <keep-branch>`
-   - Removes `update-ref refs/heads/<drop-branch>`
-   - Renames `merge ... <drop-branch>` to `merge ... <keep-branch>`
-4. Delete the branch ref with `git branch -D`.
+3. Build a `Weave` from the repo, call `reassign_branch(drop, keep)` which
+   renames the section's label and merge entry from the dropped branch to the
+   surviving branch and removes the dropped branch from `branch_names`.
+4. Execute via `run_rebase()`.
+5. Delete the branch ref with `git branch -D`.
 
 The surviving branch inherits the section and merge topology. If multiple
 co-located branches exist, the first one found (by branch order) becomes
@@ -280,14 +278,14 @@ match Target:
     Commit(hash) → drop_commit(repo, hash)
         ↓
         check if only commit on a branch → delegate to drop_branch
-        otherwise → Rebase with Drop action
+        otherwise → Weave::from_repo → graph.drop_commit → run_rebase
     Branch(name) → drop_branch(repo, name)
         ↓
         at merge-base → just delete ref
-        co-located woven → Rebase with ReassignBranch action + delete ref
-        woven → Rebase with DropBranch action + delete ref
+        co-located woven → Weave → graph.reassign_branch → run_rebase + delete ref
+        woven → Weave → graph.drop_branch → run_rebase + delete ref
         co-located non-woven → just delete ref (no rebase, 0 owned commits)
-        non-woven → Rebase with multiple Drop actions + delete ref
+        non-woven → Weave → graph.drop_commit (each) → run_rebase + delete ref
     File(_) → error
 ```
 
@@ -297,11 +295,9 @@ match Target:
 - **`git::gather_repo_info()`** — Branch discovery and ownership analysis
 - **`git::require_workdir()`** — Working directory validation
 - **`git::head_oid()`** — HEAD resolution
-- **`git::rebase_target_for_commit()`** — Rebase target determination
 - **`branch::is_on_first_parent_line()`** — Woven vs non-woven detection
-- **`git_rebase` module** — Interactive rebase for commit/branch removal
+- **Weave graph model** — Topology mutation and rebase execution (Spec 004)
 - **`git_branch::delete()`** — Branch ref deletion
-- **Self-as-sequence-editor** (Spec 004) — Non-interactive rebase control
 
 ### Branch Ownership
 
@@ -320,18 +316,18 @@ it can correctly identify co-located siblings — branches with the same
 set of commits uniquely owned by the branch, excluding merge commits. For
 co-located branches, this set is empty (all commits are shared).
 
-### Sequence Editor Extensions
+### Weave Mutations
 
-The `internal-sequence-edit` command (Spec 004) supports three actions for drop:
+Drop uses three Weave mutations (Spec 004):
 
-- **`Drop { short_hash }`**: removes the `pick <hash>` line from the rebase
-  todo, causing git to skip that commit
-- **`DropBranch { branch_name }`**: removes the entire branch section (reset,
-  picks, label, update-ref) and the corresponding merge line from the rebase
-  todo
-- **`ReassignBranch { drop_branch, keep_branch }`**: renames the section's
-  label and merge line from the dropped branch to the surviving co-located
-  branch, removes the dropped branch's `update-ref`, and preserves all commits
+- **`drop_commit(oid)`**: Remove a commit from the graph. If it was the
+  last commit in a branch section, the section and its merge entry are also
+  removed automatically.
+- **`drop_branch(branch_name)`**: Remove an entire branch section and its
+  merge entry from the graph.
+- **`reassign_branch(drop, keep)`**: Rename a section's label and merge
+  entry from the dropped branch to the surviving co-located branch, removing
+  the dropped branch from `branch_names` while preserving all commits.
 
 ## Design Decisions
 
@@ -348,15 +344,15 @@ section. This was chosen because:
 
 ### Woven vs Non-Woven Strategy
 
-Woven branches use `DropBranch` (removes the entire section atomically) while
-non-woven branches use individual `Drop` actions. This was chosen because:
+Woven branches use `drop_branch()` (removes the entire section atomically)
+while non-woven branches use individual `drop_commit()` calls. This was
+chosen because:
 
-- Woven branches have a well-defined section structure in the rebase todo
-  (reset/picks/label/update-ref/merge) that can be removed as a unit
+- Woven branches have a `BranchSection` in the graph that can be removed
+  as a unit along with its merge entry
 - Non-woven branches have their commits inline on the integration line,
   so individual drop is the natural approach
-- Using `DropBranch` for non-woven branches would fail since there is no
-  branch section to find
+- `drop_branch()` on a non-woven branch would not find a matching section
 
 ### Branch Must Be in Integration Range
 

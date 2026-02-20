@@ -94,10 +94,11 @@ cases are no-ops:
 **How it works:**
 
 1. The branch ref is created at the target commit (as before).
-2. `git rebase --onto <merge-base> <target> --update-refs` replays the commits
-   after the branch point onto the merge-base, creating a parallel line.
-3. `git merge <branch> --no-edit` joins the branch back into the integration
-   branch with a merge commit.
+2. A `Weave` is built from the repository state (see Spec 004).
+3. `weave_branch(name)` is called, which moves the branch's commits from the
+   integration line into a new branch section and adds a merge entry.
+4. The graph is serialized and executed as a single interactive rebase via
+   `run_rebase()`, which restructures the topology.
 
 **Dirty working tree:**
 
@@ -219,13 +220,13 @@ match target:
     ↓
 git_branch::create(workdir, name, hash)
     ↓
-should_weave? (branch not at HEAD and not at merge-base)
+should_weave? (branch on first-parent line, not at HEAD or merge-base)
     ↓ yes
-check_clean_working_tree()
+Weave::from_repo(repo)
     ↓
-git_rebase::rebase_onto(workdir, merge_base, branch_commit)
+graph.weave_branch(name)
     ↓
-git_merge::merge(workdir, branch_name)
+run_rebase(workdir, base_oid, todo)
 ```
 
 **Key integration points:**
@@ -234,8 +235,7 @@ git_merge::merge(workdir, branch_name)
 - **`git::gather_repo_info()`** - Used for default merge-base target and weave check
 - **`git_branch::validate_name()`** - Git-native name validation
 - **`git_branch::create()`** - Wraps `git branch <name> <hash>`
-- **`git_rebase::rebase_onto()`** - Wraps `git rebase --onto` for weaving
-- **`git_merge::merge()`** - Wraps `git merge --no-edit` for weaving
+- **Weave graph model** - Topology restructuring via `weave_branch()` (Spec 004)
 - **`cliclack`** - Interactive prompt for branch name when not provided
 
 ### Module: `git_commands/git_branch.rs`
@@ -245,14 +245,6 @@ Low-level git operations:
 - **`validate_name(name)`** - Calls `git check-ref-format --branch`
 - **`create(workdir, name, hash)`** - Calls `git branch <name> <hash>`
 - **`rename(workdir, old, new)`** - Calls `git branch -m <old> <new>`
-
-### Module: `git_commands/git_merge.rs`
-
-- **`merge(workdir, branch)`** - Calls `git merge <branch> --no-edit`
-
-### Module: `git_commands/git_rebase.rs`
-
-- **`rebase_onto(workdir, newbase, upstream)`** - Calls `git rebase --onto <newbase> <upstream> --update-refs`
 
 ## Design Decisions
 
