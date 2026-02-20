@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.1](https://github.com/narnaud/git-loom/compare/v0.4.0...v0.4.1) (2026-02-20)
+
+
+### Documentation
+
+* Update specs following Weave graph model refactor ([35f47c9](https://github.com/narnaud/git-loom/commit/35f47c9132c0ac9d5286348c469c2d001b4da7ed))
+
+
+### Changes
+
+* Unified interactive rebase via Weave graph model ([9f2ba3d](https://github.com/narnaud/git-loom/commit/9f2ba3d38342cb9ddc124cb8e602d27b40f1021e))
+
+
+### Other
+
+* **claude:** Update following weave refactoring ([ead99d7](https://github.com/narnaud/git-loom/commit/ead99d7856cfbca74fe22a9c8fa966ae42dfda3e))
+
 ## [0.4.0](https://github.com/narnaud/git-loom/compare/v0.3.0...v0.4.0) (2026-02-19)
 
 
