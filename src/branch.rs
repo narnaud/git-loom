@@ -1,7 +1,8 @@
 use git2::Repository;
 
 use crate::git;
-use crate::git_commands::{self, git_branch, git_merge, git_rebase};
+use crate::git_commands::{self, git_branch};
+use crate::weave::{self, Weave};
 
 /// Create a new branch at a target commit, weaving it into the integration branch
 /// if the target is between the merge-base and HEAD.
@@ -51,22 +52,17 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<(), Box<dyn s
     );
 
     // Check if weaving is needed
-    if let Some(weave_info) = should_weave(&repo, &commit_hash)? {
-        // Rebase commits after the branch point onto the merge-base
-        git_rebase::rebase_onto(workdir, &weave_info.merge_base_hash, &commit_hash)?;
+    if should_weave(&repo, &commit_hash)? {
+        let mut graph = Weave::from_repo(&repo)?;
+        graph.weave_branch(&name);
 
-        // Merge the branch back in to create the merge topology
-        git_merge::merge_no_ff(workdir, &name)?;
+        let todo = graph.to_todo();
+        weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
 
         println!("Woven '{}' into integration branch", name);
     }
 
     Ok(())
-}
-
-/// Info needed to perform a weave operation.
-struct WeaveInfo {
-    merge_base_hash: String,
 }
 
 /// Determine if weaving is needed after branch creation.
@@ -75,33 +71,29 @@ struct WeaveInfo {
 /// from HEAD to the merge-base (i.e., it's a loose commit on the integration
 /// line, not already on a side branch). Commits at HEAD or the merge-base
 /// are excluded since no topology change is needed for those.
-fn should_weave(
-    repo: &Repository,
-    commit_hash: &str,
-) -> Result<Option<WeaveInfo>, Box<dyn std::error::Error>> {
+fn should_weave(repo: &Repository, commit_hash: &str) -> Result<bool, Box<dyn std::error::Error>> {
     let info = match git::gather_repo_info(repo) {
         Ok(info) => info,
-        Err(_) => return Ok(None), // No upstream info available, skip weave
+        Err(_) => return Ok(false), // No upstream info available, skip weave
     };
 
     let head_oid = git::head_oid(repo)?;
     let branch_oid = git2::Oid::from_str(commit_hash)?;
 
     let merge_base_oid = info.upstream.merge_base_oid;
-    let merge_base_hash = merge_base_oid.to_string();
 
     if branch_oid == head_oid || branch_oid == merge_base_oid {
-        return Ok(None);
+        return Ok(false);
     }
 
     // Only weave if the target commit is on the first-parent line.
     // Commits on side branches (reachable only through merge second-parents)
     // already have the merge topology in place.
     if !is_on_first_parent_line(repo, head_oid, merge_base_oid, branch_oid)? {
-        return Ok(None);
+        return Ok(false);
     }
 
-    Ok(Some(WeaveInfo { merge_base_hash }))
+    Ok(true)
 }
 
 /// Check if `target` is on the first-parent path from `from` down to `stop`.

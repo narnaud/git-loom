@@ -10,6 +10,7 @@ mod reword;
 mod shortid;
 mod status;
 mod update;
+mod weave;
 
 #[cfg(test)]
 mod test_helpers;
@@ -79,13 +80,13 @@ enum Command {
     },
     /// Pull-rebase the integration branch and update submodules
     Update,
-    /// Internal: used as GIT_SEQUENCE_EDITOR to apply rebase actions
+    /// Internal: used as GIT_SEQUENCE_EDITOR to write a pre-generated todo file
     #[command(hide = true)]
-    InternalSequenceEdit {
-        /// JSON-encoded list of rebase actions
-        #[arg(long = "actions-json")]
-        actions_json: String,
-        /// Path to the git rebase todo file
+    InternalWriteTodo {
+        /// Path to the source file containing the todo content
+        #[arg(long = "source")]
+        source: String,
+        /// Path to the git rebase todo file (provided by git)
         todo_file: String,
     },
 }
@@ -119,10 +120,9 @@ fn main() {
         Some(Command::Drop { target }) => drop::run(target),
         Some(Command::Update) => update::run(),
         Some(Command::Fold { args }) => fold::run(args),
-        Some(Command::InternalSequenceEdit {
-            actions_json,
-            todo_file,
-        }) => handle_sequence_edit(&actions_json, &todo_file),
+        Some(Command::InternalWriteTodo { source, todo_file }) => {
+            handle_write_todo(&source, &todo_file)
+        }
     };
 
     if let Err(e) = result {
@@ -131,18 +131,10 @@ fn main() {
     }
 }
 
-fn handle_sequence_edit(
-    actions_json: &str,
-    todo_file: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let actions: Vec<git_commands::git_rebase::RebaseAction> = serde_json::from_str(actions_json)
-        .map_err(|e| {
-        format!(
-            "Failed to parse --actions-json: {}. Value was: {}",
-            e,
-            &actions_json[..actions_json.len().min(200)]
-        )
-    })?;
-
-    git_commands::git_rebase::apply_actions_to_todo(&actions, todo_file)
+fn handle_write_todo(source: &str, todo_file: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let content = std::fs::read_to_string(source)
+        .map_err(|e| format!("Failed to read source file '{}': {}", source, e))?;
+    std::fs::write(todo_file, content)
+        .map_err(|e| format!("Failed to write todo file '{}': {}", todo_file, e))?;
+    Ok(())
 }

@@ -210,7 +210,6 @@ impl TestRepo {
     }
 
     /// Get the OID of a commit relative to HEAD.
-    #[allow(dead_code)]
     pub fn get_oid(&self, steps_back: usize) -> git2::Oid {
         self.get_commit(steps_back).id()
     }
@@ -289,7 +288,6 @@ impl TestRepo {
     }
 
     /// Get the current branch name (shorthand).
-    #[allow(dead_code)]
     pub fn current_branch_name(&self) -> String {
         self.repo.head().unwrap().shorthand().unwrap().to_string()
     }
@@ -369,7 +367,6 @@ impl TestRepo {
     ///
     /// # Returns
     /// The path to the editor script (for reference)
-    #[allow(dead_code)]
     pub fn set_fake_editor(&self, new_message: &str) -> String {
         // Git on Windows uses Git Bash, so we use the same shell command format for all platforms
         let editor_script = format!("sh -c 'echo \"{}\" > \"$1\"' --", new_message);

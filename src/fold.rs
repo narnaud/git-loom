@@ -1,8 +1,8 @@
 use git2::{Repository, StatusOptions};
 
 use crate::git::{self, Target};
-use crate::git_commands::git_rebase::{Rebase, RebaseAction, RebaseTarget};
 use crate::git_commands::{self, git_commit};
+use crate::weave::{self, Weave};
 
 /// Fold source(s) into a target.
 ///
@@ -169,22 +169,18 @@ fn fold_files_into_commit(
         git_commit::stage_files(workdir, &file_refs)?;
         git_commit::amend_no_edit(workdir)?;
     } else {
-        // Stage files, create a temp commit, then fixup into target
+        // Stage files, create a temp commit, then fixup into target via Weave
         git_commit::stage_files(workdir, &file_refs)?;
         git_commit::commit(workdir, "fold: temp fixup")?;
 
         // The temp commit is now at HEAD — fixup it into the target
         let temp_oid = git::head_oid(repo)?;
-        let temp_hash = temp_oid.to_string();
-        let temp_short = git_commands::short_hash(&temp_hash);
-        let target_short = git_commands::short_hash(commit_hash);
 
-        Rebase::new(workdir, RebaseTarget::Commit(commit_hash.to_string()))
-            .action(RebaseAction::Fixup {
-                source_hash: temp_short.to_string(),
-                target_hash: target_short.to_string(),
-            })
-            .run()?;
+        let mut graph = Weave::from_repo(repo)?;
+        graph.fixup_commit(temp_oid, target_oid);
+
+        let todo = graph.to_todo();
+        weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
     }
 
     println!(
@@ -216,17 +212,11 @@ fn fold_commit_into_commit(
         return Err("Source commit must be newer than target commit".into());
     }
 
-    let rebase_target = git::rebase_target_for_commit(repo, target_oid)?;
+    let mut graph = Weave::from_repo(repo)?;
+    graph.fixup_commit(source_oid, target_oid);
 
-    let source_short = git_commands::short_hash(source_hash);
-    let target_short = git_commands::short_hash(target_hash);
-
-    Rebase::new(workdir, rebase_target)
-        .action(RebaseAction::Fixup {
-            source_hash: source_short.to_string(),
-            target_hash: target_short.to_string(),
-        })
-        .run()?;
+    let todo = graph.to_todo();
+    weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
 
     println!(
         "Folded {} into {}",
@@ -254,7 +244,7 @@ fn fold_commit_to_branch(
     Ok(())
 }
 
-/// Move a commit to the tip of a branch using interactive rebase.
+/// Move a commit to the tip of a branch using Weave.
 ///
 /// The caller is responsible for ensuring the working tree is in an appropriate
 /// state. The rebase uses `--autostash` to handle any remaining uncommitted changes.
@@ -267,19 +257,13 @@ pub fn move_commit_to_branch(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let workdir = git::require_workdir(repo, "fold")?;
 
-    let info = git::gather_repo_info(repo)?;
-    let merge_base_oid = info.upstream.merge_base_oid;
+    let commit_oid = git2::Oid::from_str(commit_hash)?;
 
-    let target = git::rebase_target_for_commit(repo, merge_base_oid)?;
+    let mut graph = Weave::from_repo(repo)?;
+    graph.move_commit(commit_oid, branch_name);
 
-    let commit_short = git_commands::short_hash(commit_hash);
-
-    Rebase::new(workdir, target)
-        .action(RebaseAction::Move {
-            commit_hash: commit_short.to_string(),
-            before_label: branch_name.to_string(),
-        })
-        .run()?;
+    let todo = graph.to_todo();
+    weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
 
     Ok(())
 }

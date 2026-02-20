@@ -4,8 +4,8 @@ use git2::Repository;
 
 use crate::branch::is_on_first_parent_line;
 use crate::git::{self, Target};
-use crate::git_commands::git_rebase::{Rebase, RebaseAction};
 use crate::git_commands::{self, git_branch};
+use crate::weave::{self, Weave};
 
 /// Drop a commit or a branch from history.
 ///
@@ -57,16 +57,14 @@ fn drop_commit(repo: &Repository, commit_hash: &str) -> Result<(), Box<dyn std::
         }
     }
 
-    // Normal commit drop
-    let rebase_target = git::rebase_target_for_commit(repo, commit_oid)?;
+    // Build weave and drop the commit
+    let mut graph = Weave::from_repo(repo)?;
+    graph.drop_commit(commit_oid);
+
+    let todo = graph.to_todo();
+    weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
+
     let short_hash = git_commands::short_hash(commit_hash);
-
-    Rebase::new(workdir, rebase_target)
-        .action(RebaseAction::Drop {
-            short_hash: short_hash.to_string(),
-        })
-        .run()?;
-
     println!("Dropped commit {}", short_hash);
     Ok(())
 }
@@ -110,25 +108,14 @@ fn drop_branch(repo: &Repository, branch_name: &str) -> Result<(), Box<dyn std::
     let is_woven = branch_info.tip_oid != head_oid
         && !is_on_first_parent_line(repo, head_oid, merge_base_oid, branch_info.tip_oid)?;
 
-    let rebase_target = git::rebase_target_for_commit(repo, merge_base_oid)?;
+    // Build weave and apply the appropriate mutation
+    let mut graph = Weave::from_repo(repo)?;
 
     if is_woven {
         if let Some(keep) = colocated_branch {
-            // Woven branch with a co-located sibling: reassign the section
-            // to the sibling instead of removing it entirely.
-            Rebase::new(workdir, rebase_target)
-                .action(RebaseAction::ReassignBranch {
-                    drop_branch: branch_name.to_string(),
-                    keep_branch: keep.name.clone(),
-                })
-                .run()?;
+            graph.reassign_branch(branch_name, &keep.name);
         } else {
-            // Woven branch: use DropBranch action to remove the entire section + merge
-            Rebase::new(workdir, rebase_target)
-                .action(RebaseAction::DropBranch {
-                    branch_name: branch_name.to_string(),
-                })
-                .run()?;
+            graph.drop_branch(branch_name);
         }
     } else {
         // Non-woven branch: drop each uniquely owned commit individually
@@ -140,18 +127,13 @@ fn drop_branch(repo: &Repository, branch_name: &str) -> Result<(), Box<dyn std::
             branch_name,
         )?;
 
-        if !owned.is_empty() {
-            let mut rebase = Rebase::new(workdir, rebase_target);
-            for oid in &owned {
-                let hash_str = oid.to_string();
-                let short = git_commands::short_hash(&hash_str);
-                rebase = rebase.action(RebaseAction::Drop {
-                    short_hash: short.to_string(),
-                });
-            }
-            rebase.run()?;
+        for oid in &owned {
+            graph.drop_commit(*oid);
         }
     }
+
+    let todo = graph.to_todo();
+    weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
 
     // Delete the branch ref
     git_branch::delete(workdir, branch_name)?;

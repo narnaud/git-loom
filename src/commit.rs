@@ -1,8 +1,8 @@
 use git2::{Repository, StatusOptions};
 
-use crate::fold;
 use crate::git::{self, Target};
-use crate::git_commands::{self, git_branch, git_commit, git_merge};
+use crate::git_commands::{self, git_branch, git_commit};
+use crate::weave::{self, Weave};
 
 /// Verify that we're on an integration branch (has upstream tracking).
 fn verify_on_integration_branch(repo: &Repository) -> Result<(), Box<dyn std::error::Error>> {
@@ -19,8 +19,8 @@ fn verify_on_integration_branch(repo: &Repository) -> Result<(), Box<dyn std::er
 
 /// Create a commit on a feature branch without leaving the integration branch.
 ///
-/// Stages files, creates the commit at HEAD, then uses fold's Move rebase action
-/// to relocate it to the target feature branch.
+/// Stages files, creates the commit at HEAD, then uses Weave to relocate
+/// it to the target feature branch (creating merge topology if needed).
 pub fn run(
     branch: Option<String>,
     message: Option<String>,
@@ -42,8 +42,8 @@ pub fn run(
     let branch_name = resolve_branch_target(&repo, branch.as_deref())?;
 
     // Check if the branch is at the merge-base (no commits of its own).
-    // Empty branches need a different strategy: reset + merge instead of rebase,
-    // because rebase can't create the merge topology needed for weaving.
+    // Empty branches need to have a branch section and merge entry created
+    // in the Weave before moving the commit there.
     let branch_is_empty = is_branch_at_merge_base(&repo, &branch_name)?;
 
     // Step 4: Create commit at HEAD
@@ -53,30 +53,30 @@ pub fn run(
         git_commit::commit_with_editor(&workdir)?;
     }
 
-    // Step 5: Move commit to branch
-    let head_hash = git::head_oid(&repo)?.to_string();
+    // Step 5: Move commit to branch via Weave
+    let head_oid = git::head_oid(&repo)?;
+
+    let mut graph = Weave::from_repo(&repo)?;
 
     if branch_is_empty {
-        let info = git::gather_repo_info(&repo)?;
-        let merge_base_hash = info.upstream.merge_base_oid.to_string();
-        let head_ref = repo.head()?;
-        let integration_branch = head_ref
-            .shorthand()
-            .ok_or("HEAD branch name is not valid UTF-8")?
-            .to_string();
-        weave_head_commit_to_branch(
-            &workdir,
-            &branch_name,
-            &merge_base_hash,
-            &integration_branch,
-        )?;
-    } else {
-        fold::move_commit_to_branch(&repo, &head_hash, &branch_name)?;
+        // For empty branches, create a new branch section and merge topology
+        graph.add_branch_section(
+            branch_name.clone(),
+            vec![branch_name.clone()],
+            vec![],
+            "onto".to_string(),
+        );
+        graph.add_merge(branch_name.clone(), None, None);
     }
+
+    graph.move_commit(head_oid, &branch_name);
+
+    let todo = graph.to_todo();
+    weave::run_rebase(&workdir, Some(&graph.base_oid.to_string()), &todo)?;
 
     println!(
         "Created commit {} on branch '{}'",
-        git_commands::short_hash(&head_hash),
+        git_commands::short_hash(&head_oid.to_string()),
         branch_name
     );
 
@@ -268,58 +268,10 @@ fn is_branch_at_merge_base(
     Ok(branch_oid == info.upstream.merge_base_oid)
 }
 
-/// Weave a newly-committed HEAD into a branch that previously had no commits.
-///
-/// For branches at the merge-base, the rebase-based move can't create merge topology.
-/// Instead, we point the branch at the new commit, rebase it onto the merge-base
-/// (so it forks from there, not from the integration tip), then merge with `--no-ff`.
-fn weave_head_commit_to_branch(
-    workdir: &std::path::Path,
-    branch_name: &str,
-    merge_base_hash: &str,
-    integration_branch: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // Stash any remaining working tree changes (mimics rebase --autostash)
-    let stashed = git_commands::run_git(workdir, &["stash", "--include-untracked"]).is_ok();
-
-    let result = (|| -> Result<(), Box<dyn std::error::Error>> {
-        // Point the branch to HEAD (the new commit)
-        git_commands::run_git(workdir, &["branch", "-f", branch_name, "HEAD"])?;
-        // Move integration back to before the new commit
-        git_commands::run_git(workdir, &["reset", "--hard", "HEAD~1"])?;
-        // Rebase the branch onto the merge-base so it forks from there,
-        // not from the integration tip (which may be a merge commit from
-        // previously woven branches). This ensures parallel branch topology.
-        git_commands::run_git(
-            workdir,
-            &[
-                "rebase",
-                "--onto",
-                merge_base_hash,
-                integration_branch,
-                branch_name,
-                "--autostash",
-            ],
-        )?;
-        // Return to the integration branch (rebase left us on the feature branch)
-        git_commands::run_git(workdir, &["checkout", integration_branch])?;
-        // Merge the branch to create proper merge topology
-        git_merge::merge_no_ff(workdir, branch_name)?;
-        Ok(())
-    })();
-
-    // Always restore stashed changes, even on error
-    if stashed {
-        let _ = git_commands::run_git(workdir, &["stash", "pop"]);
-    }
-
-    result
-}
-
 /// Create a new branch at the merge-base.
 ///
 /// The branch is not yet woven — weaving happens after the commit is created,
-/// in the main `run` flow via `weave_head_commit_to_branch`.
+/// in the main `run` flow via Weave.
 fn create_branch_at_merge_base(
     repo: &Repository,
     workdir: &std::path::Path,

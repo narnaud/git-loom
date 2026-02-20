@@ -3,8 +3,6 @@ use std::path::Path;
 use chrono::{DateTime, Utc};
 use git2::{BranchType, Repository, StatusOptions};
 
-use crate::git_commands::git_rebase::RebaseTarget;
-
 /// Open a `Repository` by discovering it from the current working directory.
 pub fn open_repo() -> Result<Repository, Box<dyn std::error::Error>> {
     let cwd = std::env::current_dir()?;
@@ -27,21 +25,6 @@ pub fn head_oid(repo: &Repository) -> Result<git2::Oid, Box<dyn std::error::Erro
     repo.head()?
         .target()
         .ok_or_else(|| "HEAD has no target".into())
-}
-
-/// Determine the `RebaseTarget` for a given commit OID.
-///
-/// Returns `RebaseTarget::Root` for root commits, otherwise `RebaseTarget::Commit`.
-pub fn rebase_target_for_commit(
-    repo: &Repository,
-    oid: git2::Oid,
-) -> Result<RebaseTarget, Box<dyn std::error::Error>> {
-    let commit = repo.find_commit(oid)?;
-    if commit.parent_count() == 0 {
-        Ok(RebaseTarget::Root)
-    } else {
-        Ok(RebaseTarget::Commit(oid.to_string()))
-    }
 }
 
 /// Error if a local branch with the given name already exists.

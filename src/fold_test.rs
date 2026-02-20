@@ -60,7 +60,7 @@ fn fold_multiple_files_into_head() {
 
 #[test]
 fn fold_file_into_non_head_commit() {
-    let test_repo = TestRepo::new();
+    let test_repo = TestRepo::new_with_remote();
     let c1_oid = test_repo.commit("First commit", "file1.txt");
     test_repo.commit("Second commit", "file2.txt");
 
@@ -107,7 +107,7 @@ fn fold_file_no_changes_fails() {
 
 #[test]
 fn fold_file_into_non_head_with_other_changes_autostashed() {
-    let test_repo = TestRepo::new();
+    let test_repo = TestRepo::new_with_remote();
     let c1_oid = test_repo.commit("First commit", "file1.txt");
     test_repo.commit("Second commit", "file2.txt");
 
@@ -135,7 +135,7 @@ fn fold_file_into_non_head_with_other_changes_autostashed() {
 
 #[test]
 fn fold_commit_into_earlier_commit() {
-    let test_repo = TestRepo::new();
+    let test_repo = TestRepo::new_with_remote();
     let c1_oid = test_repo.commit("Original feature", "feature.txt");
     let c2_oid = test_repo.commit("Fix typo in feature", "feature.txt");
 
@@ -159,7 +159,7 @@ fn fold_commit_into_earlier_commit() {
 
 #[test]
 fn fold_commit_into_commit_preserves_other_commits() {
-    let test_repo = TestRepo::new();
+    let test_repo = TestRepo::new_with_remote();
     let c1_oid = test_repo.commit("First", "file1.txt");
     test_repo.commit("Second", "file2.txt");
     let c3_oid = test_repo.commit("Fix for first", "file1.txt");
@@ -208,7 +208,7 @@ fn fold_commit_wrong_direction_fails() {
 
 #[test]
 fn fold_commit_dirty_working_tree_autostashed() {
-    let test_repo = TestRepo::new();
+    let test_repo = TestRepo::new_with_remote();
     let c1_oid = test_repo.commit("First", "file1.txt");
     let c2_oid = test_repo.commit("Second", "file2.txt");
 
@@ -320,6 +320,91 @@ fn fold_commit_to_branch_dirty_autostashed() {
 
     // Dirty changes should be preserved after autostash
     assert_eq!(test_repo.read_file("a1.txt"), "dirty");
+}
+
+#[test]
+fn fold_commit_to_colocated_branch_only_affects_target() {
+    // Reproduce: two co-located woven branches (feat2 and feat3 sharing the same
+    // merge commit), plus a third branch (test) with commits.
+    // Moving a commit from 'test' to 'feat3' should put it only on feat3,
+    // NOT on feat2.
+    //
+    // Before:
+    //   ╭─ [feat3]
+    //   ├─ [feat2]
+    //   ●  Feat2
+    //   ╯
+    //   ╭─ [test]
+    //   ●  Feat3
+    //   ●  Feat1
+    //   ╯
+    //
+    // After fold Feat3 → feat3:
+    //   ╭─ [feat3]
+    //   ●  Feat3    ← only on feat3
+    //   ├─ [feat2]
+    //   ●  Feat2
+    //   ╯
+    //   ╭─ [test]
+    //   ●  Feat1
+    //   ╯
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    // Build the 'test' branch with two commits: Feat1 and Feat3
+    git_branch::create(workdir.as_path(), "test", &base_oid.to_string()).unwrap();
+    test_repo.switch_branch("test");
+    test_repo.commit("Feat1", "feat1.txt");
+    test_repo.commit("Feat3", "feat3.txt");
+    let feat3_oid = test_repo.head_oid();
+    test_repo.switch_branch("integration");
+
+    // Weave the 'test' branch
+    git_merge::merge_no_ff(workdir.as_path(), "test").unwrap();
+
+    // Build the 'feat2' branch with one commit: Feat2
+    git_branch::create(workdir.as_path(), "feat2", &base_oid.to_string()).unwrap();
+    test_repo.switch_branch("feat2");
+    test_repo.commit("Feat2", "feat2.txt");
+    test_repo.switch_branch("integration");
+
+    // Create feat3 as co-located with feat2 (same tip)
+    let feat2_tip = test_repo.get_branch_target("feat2");
+    git_branch::create(workdir.as_path(), "feat3", &feat2_tip.to_string()).unwrap();
+
+    // Weave feat2 (which also brings in feat3 since they're co-located)
+    git_merge::merge_no_ff(workdir.as_path(), "feat2").unwrap();
+
+    // Now move the Feat3 commit from 'test' branch to 'feat3' branch
+    let result = super::fold_commit_to_branch(&test_repo.repo, &feat3_oid.to_string(), "feat3");
+
+    assert!(result.is_ok(), "fold_commit_to_branch failed: {:?}", result);
+
+    // feat3 should have Feat3 at its tip (above feat2)
+    let feat3_tip = test_repo.get_branch_target("feat3");
+    let feat3_commit = test_repo.find_commit(feat3_tip);
+    assert_eq!(
+        feat3_commit.summary().unwrap_or(""),
+        "Feat3",
+        "feat3 tip should be Feat3"
+    );
+
+    // feat2 should still have Feat2 at its tip (NOT Feat3)
+    let feat2_tip = test_repo.get_branch_target("feat2");
+    let feat2_commit = test_repo.find_commit(feat2_tip);
+    assert_eq!(
+        feat2_commit.summary().unwrap_or(""),
+        "Feat2",
+        "feat2 tip should still be Feat2, not Feat3"
+    );
+
+    // feat3 should be stacked on feat2: feat3's parent should be feat2's tip
+    assert_eq!(
+        feat3_commit.parent_id(0).unwrap(),
+        feat2_tip,
+        "feat3 should be stacked on feat2"
+    );
 }
 
 // ── Type dispatch / classify tests ───────────────────────────────────────
