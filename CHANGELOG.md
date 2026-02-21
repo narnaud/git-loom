@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/narnaud/git-loom/compare/v0.5.0...v0.5.1) (2026-02-21)
+
+
+### Bug Fixes 🐞
+
+* Remove completions from completions matcher ([c11909b](https://github.com/narnaud/git-loom/commit/c11909b9693ecc4ef52268395e64c139e931c3f2))
+
 ## [0.5.0](https://github.com/narnaud/git-loom/compare/v0.4.1...v0.5.0) (2026-02-21)
 
 
