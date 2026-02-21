@@ -1,1 +1,1 @@
-load(io.popen('git-loom completions clink'):read("*a"))()
+load(io.popen('git-loom completions cmd'):read("*a"))()

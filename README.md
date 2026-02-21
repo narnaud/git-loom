@@ -4,12 +4,8 @@
 
 **git-loom** is a Git CLI tool that makes working with integration branches seamless. Inspired by tools like [jujutsu](https://github.com/martinvonz/jj) and [Git Butler](https://gitbutler.com/), git-loom helps you work on multiple features simultaneously while keeping your branches organized and independent.
 
-## Status
-
-🚧 **Early Development** - git-loom is currently in active development. The core infrastructure is in place, with more features being added.
-
-- [x] Git repository analysis and graph building
-- [x] Enhanced `status` command with branch-aware output
+> [!IMPORTANT]
+> `git-loom` has been written with the help of AI, especially [Claude](https://claude.ai/)
 
 ## What is git-loom?
 
@@ -24,6 +20,21 @@ git-loom introduces the concept of **integration branches** - a special branch t
 Think of it as a loom that weaves multiple threads (feature branches) into a single fabric (integration branch).
 
 ## Installation
+
+### Installation via [Scoop](https://scoop.sh/) (preferred)
+
+Install **git-loom** with [scoop](<https://scoop.sh/>):
+
+```
+scoop bucket add narnaud https://github.com/narnaud/scoop-bucket
+scoop install git-loom
+```
+
+### Or via archive files
+
+1. Go to the [Releases](https://github.com/narnaud/git-loom/releases) page
+2. Download the latest `git-loom-x86_64-pc-windows-msvc.zip` file
+3. Extract the files from it into a directory.
 
 ### From Source
 
@@ -42,15 +53,41 @@ Add it to your PATH or use `cargo install --path .` to install it globally.
 ## Usage
 
 ```
-Usage: git-loom.exe [OPTIONS] [COMMAND]
+Usage: git-loom [OPTIONS] [COMMAND]
 
 Commands:
-  status  Show the branch-aware status
-  help    Print this message or the help of the given subcommand(s)
+  status       Show the branch-aware status (default)
+  init         Initialize a new integration branch tracking a remote
+  branch       Create a new feature branch
+  reword       Reword a commit message or rename a branch
+  commit       Create a commit on a feature branch without leaving integration
+  drop         Drop a commit or a branch from history
+  fold         Fold source(s) into a target (amend files, fixup commits, move commits)
+  update       Pull-rebase the integration branch and update submodules
+  completions  Generate shell completions (powershell, clink)
+  help         Print this message or the help of the given subcommand(s)
 
 Options:
       --no-color  Disable colored output
   -h, --help      Print help
+```
+
+## Set Up Your Shell
+
+### PowerShell
+
+Add the following to your PowerShell profile (`$PROFILE`):
+
+```powershell
+Invoke-Expression (&git-loom completions powershell | Out-String)
+```
+
+### Clink
+
+Create a file at `%LocalAppData%\clink\git-loom.lua` with:
+
+```lua
+load(io.popen('git-loom completions clink'):read("*a"))()
 ```
 
 ## Core Concepts

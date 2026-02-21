@@ -12,7 +12,7 @@ local commit_matcher = clink.argmatcher()
     :addflags("-b", "--branch", "-m", "--message", "--help", "-h")
 
 local completions_matcher = clink.argmatcher()
-    :addarg("powershell", "clink")
+    :addarg("powershell", "cmd")
 
 clink.argmatcher("git-loom")
     :addarg(
