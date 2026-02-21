@@ -11,9 +11,6 @@ local reword_matcher = clink.argmatcher()
 local commit_matcher = clink.argmatcher()
     :addflags("-b", "--branch", "-m", "--message", "--help", "-h")
 
-local completions_matcher = clink.argmatcher()
-    :addarg("powershell", "cmd")
-
 clink.argmatcher("git-loom")
     :addarg(
         "status",
@@ -23,7 +20,6 @@ clink.argmatcher("git-loom")
         "commit"       .. commit_matcher,
         "drop",
         "fold",
-        "update",
-        "completions"  .. completions_matcher
+        "update"
     )
     :addflags("--no-color", "--help", "-h")

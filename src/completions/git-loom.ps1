@@ -59,12 +59,6 @@ Register-ArgumentCompleter -Native -CommandName 'git-loom' -ScriptBlock {
                 @{ Name = '--message'; Description = 'Commit message' }
             )
         }
-        'completions' {
-            @('powershell', 'cmd') | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
-                [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', "$_ completions")
-            }
-            return
-        }
     }
 
     $allFlags = $globalFlags + $subFlags
