@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.0](https://github.com/narnaud/git-loom/compare/v0.4.1...v0.5.0) (2026-02-21)
+
+
+### Features ✨
+
+* Add completions for clink and powershell ([8c96ed1](https://github.com/narnaud/git-loom/commit/8c96ed17a95b2b8a6ff00e50e00cf2b96d33088a))
+
+
+### Documentation
+
+* Remove architecture details from the specificaitons ([75ba39f](https://github.com/narnaud/git-loom/commit/75ba39f33ccc9f3123d6ece4fde2397efbc9192d))
+* Update README.md file ([bc4664c](https://github.com/narnaud/git-loom/commit/bc4664c385e5f3ce3f0eef81e9d47d05eeea5898))
+
+
+### Other
+
+* Add lua script for clink completions ([27f4ca3](https://github.com/narnaud/git-loom/commit/27f4ca33f333cfb9ad85d7d16895131ef6c6a59e))
+
 ## [0.4.1](https://github.com/narnaud/git-loom/compare/v0.4.0...v0.4.1) (2026-02-20)
 
 
