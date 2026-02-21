@@ -26,7 +26,9 @@ jobs:
       - name: Post Build | Package [Windows]
         if: matrix.os == 'windows-latest'
         run: |
-          7z a git-loom-${{ matrix.target }}.zip LICENSE README.md ./target/${{ matrix.target }}/release/git-loom.exe
+          7z a git-loom-${{ matrix.target }}.zip `
+            LICENSE README.md ./shell/* `
+            ./target/${{ matrix.target }}/release/git-loom.exe
       - name: Post Build | Checksums
         shell: bash
         run: for file in git-loom-*; do openssl dgst -sha256 -r "$file" | awk '{print $1}' > "${file}.sha256"; done
