@@ -61,22 +61,12 @@ combination:
 Folds file changes into an existing commit, effectively amending that commit
 to include the current working tree changes for the specified files.
 
-**Steps:**
+**Behavior:**
 
-1. Resolve all sources as files, resolve target as a commit.
-2. Validate that the specified files have changes (staged or unstaged).
-   Error if a file has no changes: `"File '<path>' has no changes to fold."`
-3. Stage the specified files (`git add <files>`).
-4. If the target is HEAD: `git commit --amend --no-edit`.
-5. If the target is not HEAD: create a temporary commit with the staged
-   changes, then use the fixup mechanism (same as Case 2) to fold the
-   temporary commit into the target. This avoids stash/unstash complexity
-   during interactive rebase and reuses the fixup infrastructure.
-
-**Dirty working tree:**
-
-- For non-HEAD targets: uncommitted changes are automatically stashed before
-  the rebase and restored after (`--autostash`).
+- The specified files must have changes (staged or unstaged).
+  Error if a file has no changes: `"File '<path>' has no changes to fold."`
+- Works for any commit in history, including HEAD.
+- Uncommitted changes in other files are preserved automatically.
 
 **What changes:**
 
@@ -89,16 +79,13 @@ Folds the source commit into the target commit. The source commit's changes
 are absorbed into the target, and the source commit disappears from history.
 The target commit keeps its original message.
 
-**Steps:**
+**Behavior:**
 
-1. Resolve source as a commit, resolve target as a commit.
-2. Validate that the source is a descendant of the target (source is newer).
-   Error if not: `"Source commit must be newer than target commit."`
-3. Build a `Weave` from the repo, call `fixup_commit(source_oid, target_oid)`.
-   This removes the source commit, changes its command to `fixup`, and inserts
-   it immediately after the target commit.
-4. Execute via `run_rebase()` (with `--autostash`). The rebase replays the
-   history: the target absorbs the source's changes, and the source disappears.
+- The source must be a descendant of the target (source is newer).
+  Error if not: `"Source commit must be newer than target commit."`
+- The operation is atomic: either it completes fully or the repository is
+  left unchanged.
+- Uncommitted changes are preserved automatically.
 
 **What changes:**
 
@@ -118,44 +105,37 @@ Moves a commit from its current position to the tip of the target branch.
 The commit is removed from its source branch and relocated in a single rebase
 operation.
 
-In git-loom's integration branch topology, all feature branch commits are
-reachable from HEAD. This means a single interactive rebase can move a commit
-line from one branch's section to another, and `--update-refs` keeps all
-branch refs correct automatically.
+**Behavior:**
 
-**Steps:**
-
-1. Resolve source as a commit, resolve target as a branch.
-2. Build a `Weave` from the repo, call `move_commit(source_oid, branch_name)`.
-   This removes the commit from its current position and appends it to the
-   target branch section. If the target branch is co-located, the section is
-   split (see Spec 004).
-3. Execute via `run_rebase()` (with `--autostash`). `--update-refs` ensures
-   both the source and target branch refs update to reflect the new topology.
+- The commit is removed from its source branch and appended to the target
+  branch's tip in a single atomic operation.
+- Both source and target branch refs are updated automatically.
+- If the target branch shares its tip with other co-located branches, only
+  the target branch advances; co-located branches remain unaffected.
+- Uncommitted changes are preserved automatically.
 
 **Conflict handling:**
 
-- If the rebase encounters conflicts, stop and let the user resolve.
-  Message: `"Rebase conflict while moving commit. Resolve and run
-  'git rebase --continue'."`
+- If the operation encounters conflicts, it stops and lets the user resolve
+  them with standard git tools.
 
 **What changes:**
 
 - The commit moves to the target branch's section (new hash)
 - The commit is removed from its original branch
 - Affected commits in both branches get new hashes
-- Branch refs are updated automatically via `--update-refs`
+- Branch refs are updated automatically
 
 ## Target Resolution
 
-Arguments are resolved using a fold-specific wrapper around the shared
-`resolve_target()` function (see Spec 002):
+Arguments are resolved using the shared resolution strategy (see Spec 002)
+with an additional filesystem fallback:
 
-1. **`resolve_target()`** is tried first — handles branch names, git
+1. **Standard resolution** is tried first — handles branch names, git
    references (hashes, `HEAD`, etc.), and short IDs.
-2. **Filesystem fallback** — if `resolve_target()` fails, the argument is
+2. **Filesystem fallback** — if standard resolution fails, the argument is
    checked as a filesystem path. If the path exists and has uncommitted
-   changes, it resolves as `Target::File`.
+   changes, it resolves as a file target.
 
 This means arguments can be:
 
@@ -170,7 +150,7 @@ argument is target).
 
 ## Prerequisites
 
-- Git 2.38 or later (for `--update-refs` during rebases)
+- Git 2.38 or later
 - Must be in a git repository with a working tree
 - For short ID arguments: must have upstream tracking configured
 
@@ -230,51 +210,6 @@ git-loom fold README.md HEAD
 # Amend README.md changes into HEAD
 ```
 
-## Architecture
-
-### Module: `fold.rs`
-
-The fold command is an orchestration layer that dispatches to the appropriate
-operation based on resolved argument types:
-
-```
-fold::run(args)
-    ↓
-split: sources = args[..n-1], target = args[n-1]
-    ↓
-resolve each arg via resolve_fold_arg()
-    (resolve_target() first, filesystem path fallback)
-    ↓
-classify: (source_types, target_type)
-    ↓
-match:
-    (File(s), Commit) →
-        if HEAD: stage + amend_no_edit
-        if not HEAD: stage + temp commit + Fixup rebase
-    (Commit, Commit)  → Fixup rebase
-    (Commit, Branch)  → Move rebase
-    _                 → error (invalid combination)
-```
-
-**Key integration points:**
-
-- **`git::resolve_target()`** - Shared resolution logic (Spec 002)
-- **Weave graph model** - Topology mutation and rebase execution (Spec 004)
-- **`git_commit` module** - `stage_files()`, `amend_no_edit()`, `commit()`
-- **Automatic abort on failure** - Atomic operations via `run_rebase()`
-
-### Weave Mutations
-
-Fold uses two Weave mutations (Spec 004):
-
-- **`fixup_commit(source_oid, target_oid)`**: Remove the source commit,
-  change its command to `Fixup`, and insert it immediately after the target.
-  Used for commit-into-commit and file-into-non-HEAD-commit operations.
-- **`move_commit(oid, to_branch)`**: Remove the commit from its current
-  location and append it to the target branch section. Handles co-located
-  branches by splitting the section when needed. Used for commit-to-branch
-  operations.
-
 ## Design Decisions
 
 ### Single Verb, Multiple Actions
@@ -315,48 +250,19 @@ rather than a copy. This was chosen because:
 - Leaving a copy behind would be surprising and create duplicate work
 - If users want a copy, they can use `git cherry-pick` directly
 
-### Single Rebase for Move
+### Atomic Operations
 
-The commit+branch move uses a single interactive rebase to relocate the commit
-line within the integration branch topology, rather than cherry-pick + drop.
-This was chosen because:
+All fold operations are atomic: either they complete fully or the repository
+is left in its original state. The user is never left in a partially-applied
+state that requires manual recovery.
 
-- **Atomic**: one operation instead of two — no half-done state if something fails
-- **Consistent**: uses the same rebase infrastructure as all other operations
-- **Correct**: `--update-refs` automatically updates all affected branch refs
-- **Simple**: no branch switching needed — everything happens from HEAD
+### Automatic Working Tree Preservation
 
-### Temp Commit for Non-HEAD File Fold
-
-When folding files into a non-HEAD commit, the implementation creates a
-temporary commit with the staged files, then uses the fixup mechanism to
-fold it into the target. This was chosen over the alternative of stopping
-the rebase at the target commit and amending in-place because:
-
-- **Avoids stash issues**: `--autostash` would stash the staged files before
-  the rebase stops, requiring fragile manual stash pop during a checkpoint
-- **Reuses infrastructure**: the fixup mechanism is already built and tested
-  for commit+commit; non-HEAD file fold is just a special case
-- **Simpler**: single rebase operation instead of a three-step edit/amend/continue
+All operations automatically preserve uncommitted changes in the working tree.
+Users don't need to manually stash before folding.
 
 ### Move Handles Co-Located Branches
 
-When moving a commit to a branch that shares a section with other co-located
-branches, the Weave's `move_commit()` method splits the section. The original
-section keeps its existing commits and the remaining branch names. A new
-stacked section is created for the target branch, containing only the moved
-commit, with its `reset_target` pointing to the original section. This ensures:
-
-- The target branch ref advances to include the moved commit
-- Co-located branches (sharing the same tip) stay pointing at the original
-  section's tip, unaffected by the move
-- The integration line's merge entry is updated to reference the outermost
-  (stacked) section
-
-### Autostash Over Clean Working Tree Requirements
-
-All rebase-based operations (commit+commit, commit+branch, and non-HEAD
-file+commit) use `--autostash` to transparently stash and restore uncommitted
-changes. This reduces friction — users don't need to manually stash before
-folding. File+commit targeting HEAD uses `git commit --amend` directly, which
-handles dirty trees natively.
+When moving a commit to a branch that shares its tip with other co-located
+branches, only the target branch advances to include the moved commit.
+Co-located branches remain unaffected, pointing at their original tip.

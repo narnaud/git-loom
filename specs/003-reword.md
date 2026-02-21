@@ -76,8 +76,7 @@ a placeholder for convenience.
 
 ## Target Resolution
 
-The `<target>` is interpreted using the shared `resolve_target()` function from
-the `git` module, which uses the following resolution strategy:
+The `<target>` is interpreted using the shared resolution strategy (see Spec 002):
 
 **Resolution Order**:
 
@@ -103,7 +102,7 @@ For the reword command, file targets are rejected with an error message.
 - `git-loom reword abc123` rewords a commit (opens editor if no -m)
 - Git references work without upstream tracking
 - Short IDs require upstream tracking (same IDs shown in status)
-- The resolution logic is **shared** across all commands that accept entity
+- The resolution logic is shared across all commands that accept entity
   identifiers
 
 ## Prerequisites
@@ -175,135 +174,61 @@ git-loom reword fa -m feature-authentication
 # Directly renames feature-a → feature-authentication without prompting
 ```
 
-## Architecture
-
-### Module: `reword.rs`
-
-The reword command is a thin orchestration layer that delegates to shared
-utilities:
-
-```
-reword::run(target, message)
-    ↓
-git::resolve_target(repo, target) → Target enum
-    ↓
-match Target:
-    Commit(hash) → reword_commit(repo, hash, message)
-    Branch(name) → reword_branch(repo, name, new_name)
-    File(_) → error (files cannot be reworded)
-```
-
-**Key integration points:**
-
-- **`git::resolve_target()`** - Shared resolution logic (see Spec 002)
-- **`git::gather_repo_info()`** - Used internally by resolve_target for short IDs
-- **`shortid::IdAllocator`** - Used internally by resolve_target for consistent IDs
-- **`cliclack`** - Interactive prompts for branch renaming without `-m` flag
-- **Weave graph model** - Topology-aware rebase via the Weave module (Spec 004)
-- **Native git commands** - All mutation operations (rebase, amend, branch rename)
-
-The reword module contains only the domain-specific logic for commit message
-editing and branch renaming. All entity resolution is delegated to the `git`
-module's shared utilities.
-
 ## Design Decisions
 
 ### Shared Resolution Logic
 
-Target resolution is implemented as a **shared utility** in the `git` module,
-not as reword-specific logic. This design enables:
-
-- **Reusability**: Other commands (amend, goto, etc.) can use the same resolver
-- **Consistency**: All commands interpret identifiers identically
-- **Maintainability**: Resolution behavior is defined once, tested once
-- **Composability**: Commands focus on their domain logic, not parsing
-
-Any valid git reference (hash, `HEAD`, `HEAD~2`, branch name) works, plus
-short IDs when available. This hybrid approach means:
+Target resolution is shared across all commands, not specific to reword. Any
+valid git reference (hash, `HEAD`, `HEAD~2`, branch name) works, plus short IDs
+when available. This means:
 
 - Users can use familiar git syntax without learning new conventions
 - Short IDs are a convenience, not a requirement
 - The command works even without upstream tracking (using hashes)
-- Migration from raw git commands is seamless
+- All commands interpret identifiers identically
 
 See **Spec 002: Short IDs** for the full resolution algorithm and design
 rationale.
 
 ### Native Git Operations
 
-All mutation operations (rebase, amend, branch rename) call git CLI commands
-rather than using libgit2 APIs. This choice prioritizes:
+All mutation operations use native git commands rather than reimplementing git
+internals. This ensures:
 
 - **Correctness**: git's rebase has decades of edge-case handling
 - **Compatibility**: respects user's git configuration and hooks
-- **Maintainability**: rebase behavior changes are handled by git updates
 - **Transparency**: operations match what users would do manually
 
-Using native commands means git-loom is a workflow tool, not a git reimplementation.
+git-loom is a workflow tool, not a git reimplementation.
 
-**Implementation: Weave-Based Rebase**
+### Atomic Operations
 
-To non-interactively mark a specific commit for editing during rebase, git-loom
-uses the Weave graph model (see Spec 004):
-
-1. Build a `Weave` from the repository state
-2. Call `edit_commit(oid)` to change the target commit's command to `edit`
-3. Serialize the graph to a todo file via `to_todo()`
-4. Run a single interactive rebase via `run_rebase()` with the pre-generated todo
-5. Rebase stops at that commit, ready for amending
-
-For non-integration repos (no upstream tracking), a fallback builds a minimal
-linear todo by walking from HEAD to the target commit's parent, without using
-the full Weave data model.
-
-This approach:
-- Works reliably across platforms (no shell script files)
-- Generates the complete todo from the commit graph, not by patching git's output
-- Preserves merge topology via `--rebase-merges`
-- Doesn't interfere with user's configured editor (used later during amend)
-
-### Automatic Abort on Failure
-
-The rebase infrastructure (`git_commands::git_rebase`) provides automatic abort
-on failure at every step.
-
-This ensures atomic operations: either the reword succeeds completely or the
-repository is left in its original state. Callers don't need to implement
-abort logic—the infrastructure handles cleanup automatically. This matches user
-expectations and prevents leaving the repository in a mid-rebase state that
-requires manual recovery.
+Either the reword succeeds completely or the repository is left in its original
+state. The user is never left in a mid-rebase state that requires manual
+recovery.
 
 ### Branch Renaming: Interactive vs Non-Interactive
 
 Branch renaming supports both interactive and non-interactive workflows:
 
 **Interactive (no `-m` flag):**
-- Uses `cliclack` for a polished command-line prompt
 - Shows the current branch name as a placeholder
 - Allows users to see and edit the name inline
-- Consistent with modern CLI tool UX expectations
 
 **Non-interactive (with `-m` flag):**
 - Ideal for scripts and automation
 - Direct: "rename X to Y" with no prompting
-- Backward compatible with existing workflows
 
 Unlike commit rewording (which opens a full editor), branch renaming uses a
 single-line prompt because branch names are simple strings, not multi-line
-messages. This makes the interactive experience quick and focused.
+messages.
 
 ### Short ID Consistency
 
-Short IDs must match exactly what `git-loom status` shows. This guarantee is
-maintained by the **shared resolution system** in the `git` module:
-
-- Both status and reword use `git::resolve_target()`
-- Both use the same `collect_entities()` ordering
-- Both use the same `IdAllocator` collision resolution
-
-What you see in status is what you type in reword (and any future command).
-This consistency is architectural: all commands delegate to the same resolver,
-so drift is impossible.
+Short IDs must match exactly what `git-loom status` shows. What you see in
+status is what you type in reword (and any future command). All commands use
+the same resolution logic, so drift between displayed and accepted IDs is
+impossible.
 
 ## Future Enhancements
 

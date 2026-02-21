@@ -13,11 +13,9 @@ After initializing an integration branch with `git loom init`, the upstream
 remote will continue to receive new commits. The update command brings those
 changes into the local integration branch in a single step:
 
-- **Fetch** with `--tags --force --prune` to pull all refs, force-update moved
-  tags, and remove stale remote-tracking branches
-- **Rebase** with `--autostash` onto the upstream tracking branch
+- **Fetch** all upstream changes, including tags, and prune deleted remote branches
+- **Rebase** local commits onto the updated upstream
 - **Submodule sync** automatically when the project uses submodules
-- **Visual feedback** via spinners during potentially slow network operations
 
 ## CLI
 
@@ -30,30 +28,23 @@ git-loom update
 **Behavior:**
 
 - Validates the current branch is an integration branch (has upstream tracking)
-- Runs `git fetch --tags --force --prune`
-- Runs `git rebase --autostash <upstream>`
-- If `.gitmodules` exists, runs `git submodule update --init --recursive`
+- Fetches all upstream changes (tags, pruning deleted remote branches)
+- Rebases local commits onto the updated upstream
+- Updates submodules if any are configured
 - On conflict, reports the error and lets the user resolve manually
 
 ## What Happens
 
-1. **Repository discovery**: Find the git repository from the current directory
-2. **Validation**:
+1. **Validation**:
    - HEAD must be on a branch (not detached)
    - The current branch must have an upstream tracking ref
    - Must not be a bare repository
-3. **Fetch**: `git fetch --tags --force --prune`
-   - `--tags` fetches all tags from the remote
-   - `--force` updates local tags even when the remote tag has been moved
-     (e.g., release tags that are force-pushed)
-   - `--prune` removes local remote-tracking refs for branches that have been
-     deleted on the remote, keeping the local state clean
-4. **Rebase**: `git rebase --autostash <upstream>`
-   - Replays local commits on top of the fetched upstream changes
-   - `--autostash` stashes dirty working tree changes before rebase and
-     restores them after
-5. **Submodule update** (conditional): If `.gitmodules` exists in the working
-   directory, run `git submodule update --init --recursive`
+2. **Fetch**: All upstream changes are fetched, including tags. Moved tags
+   are force-updated. Deleted remote branches are pruned locally.
+3. **Rebase**: Local commits are replayed on top of the fetched upstream
+   changes. Uncommitted working tree changes are preserved automatically.
+4. **Submodule update** (conditional): If the project uses submodules, they
+   are initialized and updated recursively.
 
 ## Conflict Handling
 
@@ -63,16 +54,7 @@ When the rebase encounters a merge conflict:
 2. The git error output (stderr) is displayed
 3. git-loom exits with a non-zero status
 
-The user then resolves the conflict using standard git commands:
-
-```bash
-# Fix conflicts in files
-git add <resolved-files>
-git rebase --continue
-
-# Or abort the rebase
-git rebase --abort
-```
+The user then resolves the conflict using standard git commands.
 
 ## Prerequisites
 
@@ -170,98 +152,23 @@ git-loom update
 # error: HEAD is detached. Please switch to an integration branch.
 ```
 
-## Architecture
-
-### Module: `update.rs`
-
-The update command is a straightforward orchestration layer:
-
-```
-update::run()
-    |
-    v
-Repository::discover(cwd)
-    |
-    v
-validate HEAD is on a branch
-    |
-    v
-validate branch has upstream tracking ref
-    |
-    v
-capture upstream ref name (e.g., "origin/main")
-    |
-    v
-get workdir (reject bare repos)
-    |
-    v
-[spinner] git fetch --tags --force --prune
-    |
-    v
-[spinner] git rebase --autostash <upstream>
-    |
-    v
-if .gitmodules exists:
-    [spinner] git submodule update --init --recursive
-    |
-    v
-done
-```
-
-### Dependencies
-
-- **`git_commands::run_git`** for executing git shell commands
-- **`cliclack::spinner`** for visual progress feedback
-- **`git2`** for repository discovery and upstream validation
-
 ## Design Decisions
 
-### Explicit Fetch + Rebase Over `git pull`
+### Full Upstream Synchronization
 
-The update command uses an explicit `git fetch` followed by `git rebase` rather
-than `git pull --rebase`. This separation allows the fetch step to include
-`--tags --force --prune` flags that `git pull` does not support in a single
-invocation. The two-step approach is functionally equivalent to `git pull
---rebase` but with richer fetch behavior.
+The fetch step synchronizes all upstream state, not just branch commits:
 
-### `--tags --force` for Tag Synchronization
+- **Tags** are force-updated so moved tags (e.g., release tags re-pointed
+  after a hotfix) reflect the remote state
+- **Deleted remote branches** are pruned locally, keeping the remote-tracking
+  state clean
 
-Tags are fetched with `--force` so that tags which have been moved on the remote
-(e.g., release tags that get re-pointed after a hotfix) are updated locally.
-Without `--force`, git would skip tags whose names already exist locally, leaving
-stale tag refs.
+This provides a complete sync rather than a minimal one.
 
-### `--prune` for Clean Remote-Tracking State
+### Automatic Working Tree Preservation
 
-The `--prune` flag removes local remote-tracking refs (e.g., `origin/feature-x`)
-for branches that have been deleted on the remote. This keeps the local
-repository's remote-tracking state clean and avoids confusion when listing
-branches.
-
-### Plain `--rebase` (not `--rebase=merges`)
-
-The update uses a plain rebase rather than `--rebase=merges`. This keeps
-the rebase operation simple and predictable.
-
-### `--autostash` Over Clean Tree Requirement
-
-Unlike other git-loom commands that require a clean working tree, update uses
-`--autostash` to automatically stash and restore uncommitted changes. This
-reduces friction since updating is a common operation that shouldn't require
-the user to manually stash their work first.
-
-### Captured Output With Spinner
-
-Git output is captured (not streamed to the terminal) to keep the UI clean.
-A cliclack spinner provides visual feedback during potentially slow network
-operations. On failure, the captured stderr is included in the error message.
-
-### Submodule Detection Via `.gitmodules`
-
-The presence of `.gitmodules` in the working directory is used as a simple
-proxy for whether submodules need updating. This avoids the overhead of
-programmatic submodule enumeration and is correct for the common case.
-`git submodule update` is a no-op when no submodules are configured.
+Uncommitted changes are automatically preserved during the rebase. Users
+don't need to manually stash before updating.
 
 ### No Arguments
 

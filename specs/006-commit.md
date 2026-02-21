@@ -3,9 +3,8 @@
 ## Overview
 
 `git loom commit` creates a commit on a feature branch without leaving the
-integration branch. It stages files, creates the commit at HEAD, then uses
-the Weave graph model (Spec 004) to move it to the target feature branch
-via a single interactive rebase.
+integration branch. It stages files, creates the commit, and automatically
+relocates it to the target feature branch, updating the integration topology.
 
 ## Why Commit?
 
@@ -59,9 +58,9 @@ git-loom commit [-b <branch>] [-m <message>] [files...]
 1. **Stage resolution**: Apply the staging rules (see CLI section above).
 2. **Branch resolution**: Determine the target feature branch.
 3. **Message resolution**: Get the commit message.
-4. **Commit at HEAD**: Create the commit on the integration branch.
-5. **Move via rebase**: Use fold's Move rebase action to relocate the commit
-   to the target feature branch. `--update-refs` keeps all branch refs correct.
+4. **Commit creation**: Create the commit.
+5. **Relocation**: Move the commit to the target feature branch, updating all
+   branch refs and the integration topology automatically.
 
 ### Branch Resolution
 
@@ -84,48 +83,31 @@ When `-b` is omitted:
 When the target branch doesn't exist:
 
 1. Validate the name (same rules as `git-loom branch`: trim, empty check,
-   `git check-ref-format`, duplicate check).
+   format check, duplicate check).
 2. Create the branch at the merge-base commit.
 3. The commit will land on this new branch.
-4. The branch is woven into the integration branch before the rebase step,
-   so `--update-refs` tracks it.
+4. The branch is woven into the integration topology automatically.
 
 **Parallel topology for empty branches:** When the target is a new (empty)
-branch and other woven branches already exist, the new branch is rebased onto
-the merge-base so it forks from there — not from the integration tip (which
-may be a merge commit from previously woven branches). This ensures parallel
-branch topology: each branch section forks independently from the merge-base
-rather than stacking on top of existing merges.
+branch and other woven branches already exist, the new branch forks from the
+merge-base — not from the integration tip. This ensures parallel branch
+topology: each branch section forks independently from the merge-base rather
+than stacking on top of existing merges.
 
-### Commit at HEAD
+### Commit and Relocate
 
-The staged changes are committed directly at HEAD on the integration branch.
-This is a regular `git commit` — the commit temporarily lives at the tip of
-the integration branch before being relocated by the rebase step.
+The staged changes are committed, then automatically relocated to the target
+feature branch. The integration topology is updated in a single atomic
+operation — all branch refs stay correct.
 
-### Move via Weave
-
-After the commit is created at HEAD, it is relocated to the target feature
-branch using the Weave graph model (Spec 004):
-
-1. Build a `Weave` from the repository state.
-2. For empty branches (branch at merge-base with no commits): call
-   `add_branch_section()` and `add_merge()` to create the merge topology.
-3. Call `move_commit(head_oid, branch_name)` to relocate the commit from
-   the integration line to the target branch section.
-4. Serialize and execute via `run_rebase()`.
-
-This is a single atomic rebase operation. The `--update-refs` flag ensures
-all branch refs stay correct.
-
-**Conflicts**: If the rebase encounters conflicts (e.g., the new commit
-conflicts with other commits in the topology), the operation stops and the
-user resolves conflicts with standard git tools (`git rebase --continue`).
+**Conflicts**: If the operation encounters conflicts (e.g., the new commit
+conflicts with other commits in the topology), it stops and the user resolves
+conflicts with standard git tools.
 
 ## Target Resolution
 
-The `-b <branch>` argument uses the shared `resolve_target()` function for
-short ID resolution, but is restricted to branches only:
+The `-b <branch>` argument uses the shared resolution strategy (see Spec 002),
+restricted to branches only:
 
 **Resolution Order:**
 
@@ -150,7 +132,7 @@ unstaged changes are staged regardless of other arguments.
 
 ## Prerequisites
 
-- Git 2.38 or later (required for `--update-refs` during rebases)
+- Git 2.38 or later
 - Must be in a git repository with a working tree (not bare)
 - Must be on an integration branch with upstream tracking configured
 - Working tree must have staged changes or files to stage
@@ -217,78 +199,6 @@ git-loom commit zz
 # Creates branch, commits at HEAD, rebases onto feature-logging
 ```
 
-## Architecture
-
-### Module: `commit.rs`
-
-The commit command orchestrates staging, branch resolution, commit creation,
-and relocation via fold's rebase infrastructure:
-
-```
-commit::run(branch, message, files)
-    ↓
-resolve_staging(files)
-    match files:
-        []       → use index as-is
-        [zz, ..] → git add -A
-        [f1, f2] → resolve each (short ID or path), git add each
-    ↓
-verify_index_not_empty()
-    ↓
-resolve_branch(branch)
-    match branch:
-        Some(b) → resolve_target(b) → must be branch
-                   if not found → validate name, create at merge-base
-        None    → interactive picker (woven branches + create new)
-    ↓
-resolve_message(message)
-    match message:
-        Some(m) → use directly
-        None    → open editor
-    ↓
-git_commit::commit(workdir, message)   // commit at HEAD
-    ↓
-Weave::from_repo(repo)
-    ↓
-if branch_is_empty:
-    graph.add_branch_section(branch)   // create merge topology
-    graph.add_merge(branch)
-    ↓
-graph.move_commit(head_oid, branch)    // relocate commit
-    ↓
-run_rebase(workdir, base_oid, todo)
-```
-
-**Key integration points:**
-
-- **`git::resolve_target()`** - Shared resolution logic (see Spec 002)
-- **`git::gather_repo_info()`** - To list woven branches and their merge order
-- **`git_branch::create()`** - For creating new branches at merge-base
-- **`git_branch::validate_name()`** - Git-native name validation
-- **Weave graph model** - Topology mutation and rebase execution (Spec 004)
-- **`cliclack`** - Interactive branch picker and name prompt
-
-### Unified Weave Strategy
-
-Both the empty-branch and non-empty-branch paths use the same Weave-based
-approach:
-
-1. Build a `Weave` from the repository state.
-2. For empty branches, add the branch section and merge topology to the graph.
-3. Call `move_commit()` to relocate the commit.
-4. Serialize and execute a single interactive rebase.
-
-This unified approach replaces the earlier split where empty branches required
-manual stash/reset/rebase-onto/merge gymnastics:
-
-- **Preserves merge resolution**: Existing merge commits keep their conflict
-  resolutions intact.
-- **Atomic**: A single rebase operation, not N sequential steps.
-- **Consistent**: All topology-modifying operations in git-loom use the same
-  Weave mechanism.
-- **Parallel topology**: Empty branches are correctly placed as parallel
-  sections forking from the merge-base, not stacked on existing merges.
-
 ## Design Decisions
 
 ### No Loose Commits
@@ -319,24 +229,21 @@ The `-b` flag is the primary interface. The interactive picker is a convenience
 for when you don't remember the branch name. This mirrors the `branch` command's
 pattern where the name can be provided as an argument or prompted for.
 
-### Commit-then-Move over Direct Branch Commit
+### Commit-then-Relocate
 
-The command creates the commit at HEAD first, then moves it via rebase, rather
-than creating it directly on the feature branch tip. This was chosen because:
+The command creates the commit first, then relocates it to the target branch,
+rather than switching to the feature branch to commit directly. This means:
 
-- **Reuses Weave**: The move operation uses the same `move_commit()` mutation
-  as `fold <commit> <branch>`, avoiding a parallel code path
-- **Simplicity**: No need to check out the feature branch, apply changes, commit,
-  then switch back — just commit where you are and relocate
-- **Working tree stays clean**: The staged changes are committed normally; the
-  rebase only rearranges commit order, not file content
-- **Atomic**: If the rebase fails (conflict), the commit still exists and can
-  be recovered or resolved
+- **No branch switching**: The user stays on the integration branch throughout
+- **Working tree stays clean**: The staged changes are committed normally; only
+  commit ordering changes, not file content
+- **Atomic**: If the operation fails (conflict), the commit still exists and
+  can be recovered or resolved
 
 ### Conflicts Are User-Resolved
 
-If the rebase encounters conflicts, the operation pauses and the user resolves
-them with standard git tools. This was chosen over automatic abort because:
+If the operation encounters conflicts, it pauses and the user resolves them
+with standard git tools. This was chosen over automatic abort because:
 
 - **Progress preservation**: The commit is already created; aborting would lose
   work

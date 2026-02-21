@@ -43,10 +43,10 @@ git-loom branch [name] [-t <target>]
 ## What Happens
 
 1. **Name resolution**: If no name is provided, an interactive prompt asks for one
-2. **Validation**: The name is trimmed, checked for emptiness, validated via
-   `git check-ref-format`, and checked for duplicates
+2. **Validation**: The name is trimmed, checked for emptiness, validated against
+   git's naming rules, and checked for duplicates
 3. **Target resolution**: The target is resolved to a full commit hash using
-   the shared `resolve_target()` system (or defaults to merge-base)
+   the shared resolution system (see Spec 002), or defaults to the merge-base
 4. **Creation**: A branch is created at the resolved commit using `git branch`
 
 ### Branch Ownership
@@ -91,37 +91,26 @@ cases are no-ops:
   is needed. The branch ref is created and ownership is split, but the topology
   stays unchanged.
 
-**How it works:**
-
-1. The branch ref is created at the target commit (as before).
-2. A `Weave` is built from the repository state (see Spec 004).
-3. `weave_branch(name)` is called, which moves the branch's commits from the
-   integration line into a new branch section and adds a merge entry.
-4. The graph is serialized and executed as a single interactive rebase via
-   `run_rebase()`, which restructures the topology.
-
 **Dirty working tree:**
 
 - If the working tree has uncommitted changes, they are automatically stashed
-  before the rebase and restored after (`--autostash`). The user does not need
-  to manually stash or commit before weaving.
+  before the operation and restored after. The user does not need to manually
+  stash or commit before weaving.
 
 **Conflicts:**
 
-If the rebase or merge encounters conflicts, the operation stops and the user
-must resolve them manually using standard git tools (`git rebase --continue`,
-`git merge --continue`, etc.).
+If the operation encounters conflicts, it stops and the user must resolve them
+manually using standard git tools.
 
 ### Rebase Survival
 
-Branches created by git-loom survive integration rebases thanks to git's
-`--update-refs` flag (Git 2.38+). When the integration branch is rebased onto
-updated upstream, all feature branch refs are automatically updated to point
-to the new rewritten commits.
+Branches created by git-loom survive integration rebases. When the integration
+branch is rebased onto updated upstream, all feature branch refs are automatically
+updated to point to the new rewritten commits.
 
 ## Target Resolution
 
-The optional `-t <target>` uses the shared `resolve_target()` function:
+The optional `-t <target>` uses the shared resolution strategy (see Spec 002):
 
 **Resolution Order:**
 
@@ -142,18 +131,18 @@ File targets are rejected with an error message.
 
 ## Prerequisites
 
-- Git 2.38 or later (required for `--update-refs` during rebases)
+- Git 2.38 or later
 - Must be in a git repository with a working tree (not bare)
 - For the default target: must have upstream tracking configured
 - For short ID targets: must have upstream tracking configured
 
 ## Name Validation
 
-Branch names are validated in two steps:
+Branch names are validated before creation:
 
 1. **Empty check**: Rejects empty or whitespace-only names
-2. **Git format check**: Uses `git check-ref-format --branch` to validate
-   against git's naming rules (no `..`, no spaces, no control characters, etc.)
+2. **Format check**: Validates against git's naming rules (no `..`, no spaces,
+   no control characters, etc.)
 3. **Duplicate check**: Rejects names that match existing local branches
 
 ## Examples
@@ -198,54 +187,6 @@ git-loom branch feature-auth -t abc123d
 # Created branch 'feature-auth' at abc123d
 ```
 
-## Architecture
-
-### Module: `branch.rs`
-
-The branch command is a thin orchestration layer:
-
-```
-branch::run(name, target)
-    ↓
-name validation (trim, empty check, git check-ref-format, duplicate check)
-    ↓
-resolve_commit(repo, target)
-    ↓
-match target:
-    None → git::gather_repo_info() → merge-base commit
-    Some(t) → git::resolve_target(repo, t) → Target enum
-        Commit(hash) → use hash
-        Branch(name) → resolve to tip commit
-        File(_) → error
-    ↓
-git_branch::create(workdir, name, hash)
-    ↓
-should_weave? (branch on first-parent line, not at HEAD or merge-base)
-    ↓ yes
-Weave::from_repo(repo)
-    ↓
-graph.weave_branch(name)
-    ↓
-run_rebase(workdir, base_oid, todo)
-```
-
-**Key integration points:**
-
-- **`git::resolve_target()`** - Shared resolution logic (see Spec 002)
-- **`git::gather_repo_info()`** - Used for default merge-base target and weave check
-- **`git_branch::validate_name()`** - Git-native name validation
-- **`git_branch::create()`** - Wraps `git branch <name> <hash>`
-- **Weave graph model** - Topology restructuring via `weave_branch()` (Spec 004)
-- **`cliclack`** - Interactive prompt for branch name when not provided
-
-### Module: `git_commands/git_branch.rs`
-
-Low-level git operations:
-
-- **`validate_name(name)`** - Calls `git check-ref-format --branch`
-- **`create(workdir, name, hash)`** - Calls `git branch <name> <hash>`
-- **`rename(workdir, old, new)`** - Calls `git branch -m <old> <new>`
-
 ## Design Decisions
 
 ### Weave on Creation
@@ -257,7 +198,6 @@ restructures the topology into a merge-based layout. This was chosen because:
   `git-loom status` shows the correct branch sections immediately
 - **Consistency**: All feature branches in the integration branch appear as
   merge-based side branches, matching the target mental model
-- **`--update-refs`**: Keeps all branch refs in sync during the rebase step
 
 ### Default Target: Merge-Base
 
@@ -268,20 +208,14 @@ and local history diverge.
 
 ### Validation Before Creation
 
-The command validates the branch name (format + uniqueness) before calling
-git to create it. This provides clear, actionable error messages:
+The command validates the branch name (format + uniqueness) before creating
+it. This provides clear, actionable error messages:
 
 - `"Branch 'feature-a' already exists"` instead of a git error
 - `"'my..branch' is not a valid branch name"` instead of a cryptic ref error
 
 ### Interactive Prompt
 
-When no name is provided, `cliclack` prompts interactively. This follows
+When no name is provided, an interactive prompt asks for one. This follows
 the same pattern as `reword` for branch renaming, providing a consistent
 UX across git-loom commands.
-
-### Git Version Requirement
-
-git-loom requires Git 2.38+ (checked at startup) for the `--update-refs`
-flag on rebase operations. This ensures feature branches survive rebases
-without manual ref updates.

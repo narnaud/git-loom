@@ -42,8 +42,8 @@ git-loom init [name]
 ## What Happens
 
 1. **Name resolution**: Use the provided name or default to `"loom"`
-2. **Validation**: Name is trimmed, checked for emptiness, validated via
-   `git check-ref-format`, and checked for duplicates
+2. **Validation**: Name is trimmed, checked for emptiness, validated against
+   git's naming rules, and checked for duplicates
 3. **Upstream detection**: The upstream tracking ref is determined:
    - If the current branch has an upstream (e.g., `main` tracks `origin/main`),
      use that upstream
@@ -52,8 +52,8 @@ git-loom init [name]
    - If exactly one candidate is found, use it automatically
    - If multiple candidates exist, prompt the user to choose
    - If no candidates are found, error with guidance to add a remote
-4. **Creation**: `git switch -c <name> --track <upstream>` creates the branch,
-   sets up tracking, and switches to it in one operation
+4. **Creation**: The branch is created at the upstream tip, tracking is
+   configured, and HEAD is switched to it in one atomic operation.
 
 ## Upstream Detection
 
@@ -83,11 +83,10 @@ The upstream is resolved in priority order:
 
 ## Name Validation
 
-Branch names are validated in three steps:
+Branch names are validated before creation:
 
 1. **Empty check**: Rejects empty or whitespace-only names
-2. **Git format check**: Uses `git check-ref-format --branch` to validate
-   against git's naming rules
+2. **Format check**: Validates against git's naming rules
 3. **Duplicate check**: Rejects names that match existing local branches
 
 ## Examples
@@ -132,48 +131,6 @@ git-loom init loom
 # error: Branch 'loom' already exists
 ```
 
-## Architecture
-
-### Module: `init.rs`
-
-The init command is a thin orchestration layer:
-
-```
-init::run(name)
-    |
-    v
-name resolution (default to "loom", trim, empty check)
-    |
-    v
-git_branch::validate_name(name)
-    |
-    v
-duplicate check (repo.find_branch)
-    |
-    v
-detect_upstream(repo)
-    |
-    v
-match upstream detection:
-    Current branch has upstream -> use it
-    One candidate found         -> use it
-    Multiple candidates         -> prompt user
-    No candidates               -> error
-    |
-    v
-git_branch::switch_create_tracking(workdir, name, upstream)
-    |
-    v
-print success message
-```
-
-### Module: `git_commands/git_branch.rs`
-
-New function added:
-
-- **`switch_create_tracking(workdir, name, upstream)`** — Wraps
-  `git switch -c <name> --track <upstream>`
-
 ## Design Decisions
 
 ### Default Name: "loom"
@@ -186,14 +143,13 @@ The default name `"loom"` was chosen because:
 
 ### Auto-Detection Over Explicit Arguments
 
-Rather than requiring `git-loom init --track origin/main`, the command
-auto-detects the upstream. This reduces friction in the common case (where
-the user is on `main` tracking `origin/main`) while still handling edge
-cases through prompting.
+Rather than requiring an explicit upstream argument, the command auto-detects
+the upstream. This reduces friction in the common case (where the user is on
+`main` tracking `origin/main`) while still handling edge cases through
+prompting.
 
-### Single Git Command
+### Atomic Creation
 
-Using `git switch -c <name> --track <upstream>` handles branch creation,
-tracking setup, and checkout in one atomic operation. This avoids partial
-states where the branch exists but isn't checked out or doesn't have
-tracking configured.
+Branch creation, tracking setup, and checkout happen in a single atomic
+operation. This avoids partial states where the branch exists but isn't
+checked out or doesn't have tracking configured.

@@ -2,289 +2,164 @@
 
 ## Overview
 
-The **Weave** module (`src/weave.rs`) is the heart of git-loom's history
-rewriting. It provides a structured graph model of the integration branch
-topology and a set of pure mutation methods. All commands that modify history
-(branch, commit, drop, fold, reword) follow the same pattern:
+The **Weave** is the heart of git-loom's history rewriting. It provides a
+structured graph model of the integration branch topology and a set of pure
+mutation operations. All commands that modify history (branch, commit, drop,
+fold, reword) follow the same pattern:
 
-1. **Build** a `Weave` from the repository state
+1. **Build** a graph from the repository state
 2. **Mutate** the graph (drop a commit, move a commit, fixup, etc.)
-3. **Serialize** the graph to a git rebase todo file
-4. **Execute** a single interactive rebase with the pre-generated todo
+3. **Serialize** the graph to a rebase todo
+4. **Execute** a single rebase with the pre-generated todo
 
-This replaces the earlier approach of parsing and manipulating git's generated
-todo file with string operations. Instead, git-loom generates the entire todo
-from scratch based on the graph, making the process robust and predictable.
+git-loom generates the entire rebase todo from scratch based on the graph,
+rather than parsing and patching git's generated todo. This makes the process
+robust and predictable.
 
 ## Data Model
 
-### `Weave`
+The Weave graph captures the integration branch topology as three components:
 
-The top-level struct representing the integration branch topology:
+### Base
 
-```rust
-pub struct Weave {
-    pub base_oid: Oid,                        // merge-base ("onto")
-    pub branch_sections: Vec<BranchSection>,  // woven branches (dependency order)
-    pub integration_line: Vec<IntegrationEntry>,  // first-parent line entries
-}
-```
+The merge-base commit between HEAD and the upstream — the root of the
+integration range.
 
-### `BranchSection`
+### Branch Sections
 
-A woven branch section. Each section corresponds to a side branch that is
-merged into the integration line via a merge commit.
+Each woven branch is represented as a section containing:
 
-```rust
-pub struct BranchSection {
-    pub reset_target: String,       // "onto" or another branch label
-    pub commits: Vec<CommitEntry>,  // oldest first
-    pub label: String,              // canonical name for the section
-    pub branch_names: Vec<String>,  // all refs at this tip (co-located)
-}
-```
+- **Reset target**: Where the section forks from (the base, or another section)
+- **Commits**: The branch's commits in oldest-first order
+- **Label**: A canonical name for the section
+- **Branch names**: All branch refs at this tip (supports co-located branches
+  where multiple branches point to the same commit)
 
-When multiple branches point to the same tip (co-located branches), they
-share a single `BranchSection` with multiple entries in `branch_names`.
+### Integration Line
 
-### `CommitEntry`
+The first-parent line from the base to HEAD. Each entry is either:
 
-A single commit in the todo file:
+- **A regular commit** (with optional branch refs for non-woven branches)
+- **A merge point** referencing a branch section
 
-```rust
-pub struct CommitEntry {
-    pub oid: Oid,
-    pub short_hash: String,
-    pub message: String,
-    pub command: Command,
-    pub update_refs: Vec<String>,  // non-woven branch names at this commit
-}
-```
+For existing merge commits, the original merge message is preserved. For
+newly created merges, git generates a default message.
 
-### `Command`
+### Commit Commands
 
-The rebase todo command for a commit:
+Each commit in the graph carries a command that controls its behavior during
+rebase:
 
-| Variant | Serializes to | Used by |
-|---------|---------------|---------|
-| `Pick` | `pick` | Default for all commits |
-| `Edit` | `edit` | `reword` (pauses rebase at commit) |
-| `Fixup` | `fixup` | `fold` (absorbs into previous commit) |
-
-### `IntegrationEntry`
-
-An entry on the integration (first-parent) line:
-
-| Variant | Meaning |
-|---------|---------|
-| `Pick(CommitEntry)` | A regular commit on the integration line |
-| `Merge { original_oid, label }` | A merge point referencing a branch section |
-
-For existing merge commits, `original_oid` is `Some(oid)` and the serialized
-line uses `merge -C <hash> <label>` to preserve the original merge message.
-For newly created merges (e.g., from `weave_branch`), `original_oid` is
-`None` and the line is `merge <label>`.
+- **Pick**: Replay the commit as-is (default)
+- **Edit**: Pause the rebase at this commit (used by reword)
+- **Fixup**: Absorb this commit's changes into the previous commit (used by fold)
 
 ## Building the Graph
 
-### `Weave::from_repo(repo)`
+The graph is constructed by walking the first-parent line from HEAD to the
+merge-base:
 
-Constructs the graph from the current repository state by walking the
-first-parent line from HEAD to the merge-base:
+- **Merge commits** identify woven branches: the second parent is followed
+  to collect the branch's commits, branch refs are matched by tip, and a
+  branch section + merge entry are created.
+- **Regular commits** become entries on the integration line. If a branch
+  ref points at a regular commit, it's recorded as a non-woven branch.
+- **Empty branches** (tip at merge-base with no commits) are skipped.
 
-1. For each **merge commit**: identify the branch (second parent), walk
-   backward to collect the branch's commits, match branch refs by tip OID,
-   and create a `BranchSection` + `Merge` entry on the integration line.
-2. For each **regular commit**: create a `Pick` entry on the integration
-   line. If a branch ref points at this commit, add its name to `update_refs`.
-3. Branches at the merge-base with no commits are skipped.
+Building the graph requires an integration branch with upstream tracking.
+Commands that need to operate outside this context (e.g., reword on a
+non-integration branch) fall back to a simpler linear approach.
 
-The walk uses two helpers:
-
-- `walk_first_parent_line(repo, head, stop)` — walks from HEAD following
-  only first parents, collecting both regular and merge commits in
-  oldest-first order.
-- `walk_branch_commits(repo, tip, stop)` — walks a side branch from its
-  tip back to the merge-base, collecting non-merge commits.
-
-### Prerequisites
-
-`from_repo` requires an integration branch with upstream tracking configured
-(it calls `gather_repo_info`). For non-integration repos, callers should
-handle the error and fall back to a simpler approach (see `reword.rs`).
-
-## Mutation Methods
+## Mutations
 
 All mutations are pure operations on the in-memory graph. They do not touch
-the repository.
+the repository until the graph is serialized and executed.
 
-### `drop_commit(oid)`
+### Drop Commit
 
-Remove a commit from the graph. Searches branch sections first, then the
-integration line. If the removed commit was the last one in a branch section,
-the section and its merge entry are also removed.
+Remove a commit from the graph. If it was the last commit in a branch
+section, the section and its merge entry are also removed.
 
-Used by: `drop` (commit drop)
+### Drop Branch
 
-### `drop_branch(branch_name)`
+Remove an entire branch section and its merge entry.
 
-Remove an entire branch section and its merge entry. Matches by branch name
-in `branch_names` or by section `label`.
-
-Used by: `drop` (branch drop)
-
-### `move_commit(oid, to_branch)`
+### Move Commit
 
 Move a commit to the tip of a target branch section. The commit is removed
-from its current location (branch section or integration line) and appended
-to the target section.
+from its current location and appended to the target.
 
 **Co-located branch handling:** When the target branch shares a section with
-other branches (co-located), the section is split. The original section keeps
-the remaining branches and all existing commits. A new stacked section is
-created for the target branch, containing only the moved commit, with its
-`reset_target` pointing to the original section's label. The integration
-line's merge entry is updated to reference the outermost (stacked) section.
+other branches, the section is split. The original section keeps the remaining
+branches and existing commits. A new stacked section is created for the target
+branch containing only the moved commit. This ensures the moved commit appears
+only on the target branch, not on all co-located branches.
 
-Used by: `fold` (commit to branch), `commit` (move to feature branch)
+### Fixup Commit
 
-### `fixup_commit(source_oid, target_oid)`
+Remove a commit from its current location and insert it immediately after a
+target commit with a fixup command. During rebase, the source's changes are
+absorbed into the target.
 
-Remove the source commit from its current location, change its command to
-`Fixup`, and insert it immediately after the target commit. The source's
-changes are absorbed into the target during rebase.
+### Edit Commit
 
-Used by: `fold` (commit into commit, file into non-HEAD commit)
+Mark a commit so the rebase pauses there, allowing the user to amend it.
 
-### `edit_commit(oid)`
-
-Change a commit's command to `Edit`, causing the rebase to pause at that
-commit. Used with a subsequent `git commit --amend` and `git rebase
---continue`.
-
-Used by: `reword` (pause at commit for message editing)
-
-### `add_branch_section(label, branch_names, commits, reset_target)`
+### Add Branch Section
 
 Add a new branch section to the graph. Used when creating merge topology for
-a branch that has no section yet (e.g., a newly created empty branch).
+a branch that doesn't have a section yet (e.g., a newly created empty branch).
 
-Used by: `commit` (empty branch path)
+### Add Merge
 
-### `add_merge(label, original_oid, position)`
+Add a merge entry on the integration line, referencing a branch section.
 
-Add a merge entry on the integration line. If `position` is `None`, appends
-at the end. If `Some(idx)`, inserts at that index.
+### Weave Branch
 
-Used by: `commit` (empty branch path)
+Convert a non-woven branch (commits on the integration line) into a woven
+branch. The commits are moved into a new branch section and a merge entry
+is added.
 
-### `weave_branch(branch_name)`
+### Reassign Branch
 
-Convert a non-woven branch (commits sitting on the integration line with an
-`update_ref`) into a woven branch. Collects all integration line picks from
-the start up to and including the branch tip, moves them into a new branch
-section, and adds a merge entry.
-
-Used by: `branch` (weave on creation)
-
-### `reassign_branch(drop_branch, keep_branch)`
-
-Reassign a branch section from one branch to another. Renames the section's
-label and merge entry, removes the dropped branch from `branch_names`, and
-ensures the keep branch is present. Used when dropping a co-located woven
-branch.
-
-Used by: `drop` (co-located woven branch)
+Reassign a branch section from one branch to another. Used when dropping a
+co-located woven branch — the surviving branch inherits the section and
+merge topology.
 
 ## Serialization
 
-### `Weave::to_todo()`
-
-Serializes the graph to a git rebase `--rebase-merges` todo file:
-
-```
-label onto
-
-reset <reset_target>
-pick <hash> <message>
-update-ref refs/heads/<non-woven-branch>
-label <section-label>
-update-ref refs/heads/<branch-name>
-
-reset onto
-pick <hash> <message>
-update-ref refs/heads/<non-woven-branch>
-merge -C <hash> <label> # Merge branch '<label>'
-merge <label> # Merge branch '<label>'
-```
-
-Key serialization rules:
+The graph is serialized to a git rebase todo file. The output follows git's
+`--rebase-merges` format:
 
 - Branch sections are emitted first, in dependency order
-- Each section starts with `reset <target>` and ends with `label <name>`
-  followed by `update-ref` lines for all `branch_names`
-- The integration line follows, starting with `reset onto`
-- Existing merges use `merge -C <oid> <label>` to preserve the message
-- New merges use `merge <label>` (git generates a default message)
-- Non-woven branches at specific commits emit `update-ref` lines after
-  their pick line
+- Each section forks from its reset target and ends with a label
+- The integration line follows, with merge entries referencing branch sections
+- Existing merges preserve their original message
+- New merges use git's default message
+- Non-woven branch refs are tracked via update-ref directives
 
 ## Execution
 
-### `run_rebase(workdir, upstream, todo_content)`
+The serialized todo is executed as a single native git interactive rebase.
+Key behaviors:
 
-Executes the pre-generated todo via interactive rebase:
-
-1. Write `todo_content` to a temporary file
-2. Set `GIT_SEQUENCE_EDITOR` to
-   `git-loom internal-write-todo --source <temp_file>`
-3. Set `GIT_EDITOR=true` to suppress editor prompts for new merge commits
-4. Run `git rebase` with flags:
-   - `--interactive` — enables the sequence editor
-   - `--autostash` — stashes dirty working tree changes
-   - `--keep-empty` — preserves empty commits
-   - `--no-autosquash` — disables fixup!/squash! auto-reordering
-   - `--rebase-merges` — preserves/creates merge topology
-   - `--update-refs` — keeps branch refs up to date
-5. On failure, automatically runs `git rebase --abort` before returning
-
-The `upstream` parameter controls the rebase range:
-- `Some(oid)` — rebases from `<oid>` (exclusive) to HEAD
-- `None` — rebases from `--root`
-
-### `InternalWriteTodo` Subcommand
-
-```bash
-git-loom internal-write-todo --source <path> <todo_file>
-```
-
-A hidden subcommand that copies the contents of `--source` to `<todo_file>`.
-Git calls this as the `GIT_SEQUENCE_EDITOR` and appends the todo file path
-as the final positional argument.
-
-This is a simple file copy — no parsing, no transformation. The entire
-intelligence is in the graph model and serializer; this subcommand is just
-the delivery mechanism.
-
-### Binary Path Resolution
-
-During normal execution, `std::env::current_exe()` returns the git-loom
-binary path. During `cargo test`, `current_exe()` returns the test harness
-binary in `target/<profile>/deps/`.
-
-The `loom_exe_path()` helper detects this: if the parent directory is named
-`deps`, it looks one level up for the actual `git-loom` binary. This means
-`cargo build && cargo test` is required after source changes.
+- The full integration range (merge-base to HEAD) is replayed
+- Merge topology is preserved and created via `--rebase-merges`
+- All branch refs are kept up to date automatically
+- Uncommitted working tree changes are preserved
+- Empty commits are preserved
+- On failure, the rebase is automatically aborted, leaving the repository
+  in its original state
 
 ## Integration with Commands
 
-| Command | Weave mutations used |
-|---------|---------------------|
-| `branch` (Spec 005) | `weave_branch` |
-| `commit` (Spec 006) | `add_branch_section` + `add_merge` (empty branch), `move_commit` |
-| `drop` (Spec 008) | `drop_commit`, `drop_branch`, `reassign_branch` |
-| `fold` (Spec 007) | `fixup_commit`, `move_commit` |
-| `reword` (Spec 003) | `edit_commit` |
+| Command | Mutations used |
+|---------|---------------|
+| `branch` (Spec 005) | Weave branch |
+| `commit` (Spec 006) | Add branch section + merge (empty branch), move commit |
+| `drop` (Spec 008) | Drop commit, drop branch, reassign branch |
+| `fold` (Spec 007) | Fixup commit, move commit |
+| `reword` (Spec 003) | Edit commit |
 
 Commands that don't modify history (`status`, `init`, `update`, `reword`
 for branch rename) do not use the Weave.
@@ -293,58 +168,31 @@ for branch rename) do not use the Weave.
 
 ### Generate Todo From Scratch
 
-Rather than parsing git's generated todo file and applying text-level surgery
-(find a `pick` line, move it, insert `fixup`, remove sections), git-loom
-generates the entire todo from the repository's commit graph. This eliminates
+Rather than parsing git's generated todo file and applying text-level edits,
+git-loom generates the entire todo from the commit graph. This eliminates
 dependence on git's exact output format and makes operations composable —
 multiple mutations can be applied to the graph before a single serialization.
 
 ### Always Rebase from Merge-Base
 
-All Weave-based operations scope the rebase from the merge-base commit. This
-means the full integration history is replayed. The trade-off is slightly
-slower for large branches, but dramatically simpler — one graph covers the
-entire topology.
-
-### File-Based Todo Transfer
-
-The generated todo is written to a temporary file, and `internal-write-todo`
-copies it to git's todo file. This avoids command-line length limits and
-encoding issues with large todo files.
-
-### `GIT_EDITOR=true` for New Merges
-
-New merge commits (those without `-C` in the todo) would normally prompt for
-a merge message. Setting `GIT_EDITOR=true` suppresses this by using a no-op
-command that leaves the default "Merge branch '...'" message intact. This
-only affects the rebase process — not the user's shell when rebase pauses
-at an `edit` command.
+All operations scope the rebase from the merge-base commit, replaying the
+full integration history. The trade-off is slightly slower for large branches,
+but dramatically simpler — one graph covers the entire topology.
 
 ### Co-Located Branch Splitting
 
 When moving a commit to a co-located branch (one that shares a section with
 other branches), the section is split into a stacked topology. This ensures
 the moved commit appears only on the target branch, not on all co-located
-branches. The resulting topology has the original section as the base and a
-new section stacked on top for the target branch.
+branches.
 
-### Automatic Abort on Failure
+### Atomic Operations
 
-If the rebase fails, `run_rebase` automatically calls `git rebase --abort`
-before returning the error. This ensures atomic operations: either the
-rebase succeeds completely or the repository is left in its original state.
-
-### Unix Shell Escaping on All Platforms
-
-The `GIT_SEQUENCE_EDITOR` command string uses Unix-style shell escaping
-(`shell_escape::unix::escape`) even on Windows. Git for Windows uses
-MSYS2/bash to execute the sequence editor, not `cmd.exe` or PowerShell.
-Binary paths are normalized to forward slashes for Git compatibility.
+If the rebase fails, it is automatically aborted, leaving the repository in
+its original state. Either the operation succeeds completely or nothing changes.
 
 ### Fallback for Non-Integration Repos
 
 `reword` is the only command that can operate outside an integration branch
-context (rewording commits on any branch). When `Weave::from_repo()` fails,
-`reword` falls back to building a minimal linear todo by walking the
-first-parent line from HEAD to the target commit's parent. This fallback
-does not use the Weave data model.
+context. When the full graph cannot be built, `reword` falls back to a
+simpler linear approach that doesn't require the Weave data model.

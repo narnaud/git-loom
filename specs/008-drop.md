@@ -49,24 +49,15 @@ The commit is removed from history via interactive rebase. All descendant
 commits are replayed to maintain a consistent history.
 
 **Special case — last commit on a branch:** If the commit is the only commit
-owned by a branch, the operation automatically delegates to the branch-drop
-path. This ensures the merge topology is properly cleaned up and the branch
-ref is deleted, rather than leaving an empty branch section in the integration
-topology.
-
-**Steps:**
-
-1. Resolve target as a commit.
-2. Check if the commit is the sole commit on a branch (via branch ownership
-   and owned-commit count). If so, delegate to branch drop.
-3. Otherwise, build a `Weave` from the repo, call `drop_commit(oid)`, and
-   execute via `run_rebase()` (with `--autostash`).
+owned by a branch, the operation automatically drops the entire branch instead.
+This ensures the merge topology is properly cleaned up and the branch ref is
+deleted, rather than leaving an empty branch section.
 
 **What changes:**
 
 - Target commit is removed from history
 - All descendant commits get new hashes (same content/messages)
-- Branch refs are updated via `--update-refs`
+- Branch refs are updated automatically
 
 **What stays the same:**
 
@@ -84,8 +75,8 @@ Five sub-cases are handled:
 #### Branch at merge-base (no commits)
 
 If the branch tip equals the merge-base, it has no owned commits. The branch
-ref is simply deleted with `git branch -D`. No rebase is needed, and the
-working tree does not need to be clean.
+ref is simply deleted. No rebase is needed, and the working tree does not
+need to be clean.
 
 #### Woven branch (merged into integration via merge commit)
 
@@ -93,16 +84,13 @@ A branch is "woven" when its tip is NOT on the first-parent line from HEAD
 to the merge-base — meaning it was merged into the integration branch via a
 merge commit and lives on a side branch.
 
-**Steps:**
+The branch section and its merge entry are removed from the integration
+topology, and the branch ref is deleted. All of this happens in a single
+atomic operation.
 
-1. Resolve target as a branch name.
-2. Verify the branch is in the integration range (between merge-base and HEAD).
-   Error: `"Branch '<name>' is not in the integration range. Use 'git branch -d
-   <name>' to delete it directly."`
-3. Build a `Weave` from the repo, call `drop_branch(name)` which removes
-   the branch section and its merge entry from the graph.
-4. Execute via `run_rebase()` (with `--autostash`).
-5. Delete the branch ref with `git branch -D`.
+The branch must be in the integration range (between merge-base and HEAD).
+Branches outside this range are rejected with: `"Branch '<name>' is not in
+the integration range. Use 'git branch -d <name>' to delete it directly."`
 
 #### Non-woven branch (on the first-parent line)
 
@@ -110,50 +98,24 @@ A branch is "non-woven" when its tip IS on the first-parent line — meaning
 it was fast-forward merged or its commits sit directly on the integration
 line without merge topology.
 
-**Steps:**
-
-1. Same validation as woven branch.
-2. Determine all commits owned by the branch (from tip to the next branch
-   boundary or merge-base).
-3. Build a `Weave` from the repo, call `drop_commit(oid)` for each owned
-   commit.
-4. Execute via `run_rebase()`.
-5. Delete the branch ref.
+All commits owned by the branch are removed from history, and the branch
+ref is deleted.
 
 #### Co-located woven branch (shares tip with another branch)
 
 Two or more branches are "co-located" when they point to the same tip commit.
-When dropping a co-located woven branch, the commits must be preserved for
+When dropping a co-located woven branch, the commits are preserved for
 the surviving sibling branch.
 
-**Steps:**
-
-1. Same validation as woven branch.
-2. Detect that another branch shares the same tip.
-3. Build a `Weave` from the repo, call `reassign_branch(drop, keep)` which
-   renames the section's label and merge entry from the dropped branch to the
-   surviving branch and removes the dropped branch from `branch_names`.
-4. Execute via `run_rebase()`.
-5. Delete the branch ref with `git branch -D`.
-
-The surviving branch inherits the section and merge topology. If multiple
+The section and merge topology are reassigned to the surviving branch.
+The dropped branch ref is deleted, but no commits are removed. If multiple
 co-located branches exist, the first one found (by branch order) becomes
 the new section owner.
 
 #### Co-located non-woven branch (shares tip, on first-parent line)
 
 When dropping a co-located non-woven branch, the commits are shared with
-the sibling branch. `find_owned_commits()` correctly returns zero owned
-commits (because the sibling's tip is hidden in the revwalk), so no rebase
-is needed.
-
-**Steps:**
-
-1. Same validation as non-woven branch.
-2. `find_owned_commits()` returns an empty set (sibling branch hides the
-   shared commits).
-3. Skip the rebase entirely.
-4. Delete the branch ref with `git branch -D`.
+the sibling branch. No commits are removed — only the branch ref is deleted.
 
 **What changes (woven and non-woven, non-co-located):**
 
@@ -161,7 +123,7 @@ is needed.
 - Merge commit is removed (woven case)
 - Branch ref is deleted
 - Remaining commits get new hashes
-- Other branch refs are updated via `--update-refs`
+- Other branch refs are updated automatically
 
 **What changes (co-located):**
 
@@ -177,7 +139,7 @@ is needed.
 
 ## Target Resolution
 
-The `<target>` is interpreted using the shared `resolve_target()` function
+The `<target>` is interpreted using the shared resolution strategy
 (see Spec 002):
 
 1. **Local branch names** — exact match resolves to a branch (drops the branch)
@@ -190,7 +152,7 @@ discard file changes."`
 
 ## Prerequisites
 
-- Git 2.38 or later (for `--update-refs` during rebases)
+- Git 2.38 or later
 - Must be in a git repository with a working tree (not bare)
 - For branch drops: the branch must be in the integration range
 - For short ID arguments: must have upstream tracking configured
@@ -263,72 +225,6 @@ git-loom drop a1
 # Drops the branch (commits + merge + ref) automatically
 ```
 
-## Architecture
-
-### Module: `drop.rs`
-
-The drop command dispatches based on the resolved target type:
-
-```
-drop::run(target)
-    ↓
-git::resolve_target(repo, target) → Target enum
-    ↓
-match Target:
-    Commit(hash) → drop_commit(repo, hash)
-        ↓
-        check if only commit on a branch → delegate to drop_branch
-        otherwise → Weave::from_repo → graph.drop_commit → run_rebase
-    Branch(name) → drop_branch(repo, name)
-        ↓
-        at merge-base → just delete ref
-        co-located woven → Weave → graph.reassign_branch → run_rebase + delete ref
-        woven → Weave → graph.drop_branch → run_rebase + delete ref
-        co-located non-woven → just delete ref (no rebase, 0 owned commits)
-        non-woven → Weave → graph.drop_commit (each) → run_rebase + delete ref
-    File(_) → error
-```
-
-**Key integration points:**
-
-- **`git::resolve_target()`** — Shared resolution logic (Spec 002)
-- **`git::gather_repo_info()`** — Branch discovery and ownership analysis
-- **`git::require_workdir()`** — Working directory validation
-- **`git::head_oid()`** — HEAD resolution
-- **`branch::is_on_first_parent_line()`** — Woven vs non-woven detection
-- **Weave graph model** — Topology mutation and rebase execution (Spec 004)
-- **`git_branch::delete()`** — Branch ref deletion
-
-### Branch Ownership
-
-To determine which branch owns a given commit (used for the "last commit on
-branch" auto-delete feature), `find_branch_owning_commit_from_info()` walks
-from each branch tip along parent links using the pre-gathered `RepoInfo`.
-The walk stops at another branch's tip or the edge of the commit range.
-
-### Owned Commits
-
-`find_owned_commits()` uses a git revwalk from the branch tip to the
-merge-base, hiding other branch tips that are ancestors **or co-located**
-(sharing the same tip). The function takes the dropping branch's name so
-it can correctly identify co-located siblings — branches with the same
-`tip_oid` but a different name are hidden in the revwalk. This produces the
-set of commits uniquely owned by the branch, excluding merge commits. For
-co-located branches, this set is empty (all commits are shared).
-
-### Weave Mutations
-
-Drop uses three Weave mutations (Spec 004):
-
-- **`drop_commit(oid)`**: Remove a commit from the graph. If it was the
-  last commit in a branch section, the section and its merge entry are also
-  removed automatically.
-- **`drop_branch(branch_name)`**: Remove an entire branch section and its
-  merge entry from the graph.
-- **`reassign_branch(drop, keep)`**: Rename a section's label and merge
-  entry from the dropped branch to the surviving co-located branch, removing
-  the dropped branch from `branch_names` while preserving all commits.
-
 ## Design Decisions
 
 ### Automatic Branch Cleanup
@@ -344,15 +240,13 @@ section. This was chosen because:
 
 ### Woven vs Non-Woven Strategy
 
-Woven branches use `drop_branch()` (removes the entire section atomically)
-while non-woven branches use individual `drop_commit()` calls. This was
-chosen because:
+Woven and non-woven branches are handled differently because they have
+different topologies:
 
-- Woven branches have a `BranchSection` in the graph that can be removed
-  as a unit along with its merge entry
+- Woven branches have a distinct merge topology (side branch + merge commit)
+  that can be removed as a unit
 - Non-woven branches have their commits inline on the integration line,
-  so individual drop is the natural approach
-- `drop_branch()` on a non-woven branch would not find a matching section
+  so individual commit removal is the natural approach
 
 ### Branch Must Be in Integration Range
 
@@ -366,28 +260,20 @@ merge-base and HEAD) is rejected with a helpful error suggesting
   do nothing, which is confusing
 - The error message guides users to the right tool
 
-### Autostash Over Clean Working Tree Requirement
+### Automatic Working Tree Preservation
 
-All rebase-based drop operations use `--autostash` to transparently stash and
-restore uncommitted changes. This reduces friction — users don't need to
-manually stash before dropping. Dropping a branch at the merge-base (which
-only deletes the ref, no rebase needed) works regardless of working tree state.
+All operations automatically preserve uncommitted changes in the working tree.
+Users don't need to manually stash before dropping. Dropping a branch at the
+merge-base (which only deletes the ref) works regardless of working tree state.
 
 ### Co-Located Branches Preserve Shared Commits
 
 When dropping a branch that shares its tip with another branch (co-located),
-the commits are preserved for the surviving branch. This was chosen because:
+the commits are preserved for the surviving branch. The surviving branch
+transparently inherits the topology — no manual intervention required.
 
-- The commits are shared — removing them would break the sibling branch
-- For the non-woven case, `find_owned_commits()` naturally returns zero
-  commits when the sibling's tip is hidden, so no rebase is needed
-- For the woven case, `ReassignBranch` renames the section to the sibling
-  instead of removing it, keeping the merge topology intact
-- The surviving branch transparently inherits the section — no manual
-  intervention required
+### Atomic Operations
 
-### Rebase from Merge-Base
-
-Both woven and non-woven branch drops rebase from the merge-base (not from
-the commit being dropped). This ensures the entire integration topology is
-replayed correctly, and `--update-refs` can update all affected branch refs.
+All drop operations are atomic: either they complete fully or the repository
+is left in its original state. The user is never left in a partially-applied
+state that requires manual recovery.

@@ -176,56 +176,6 @@ In this example:
 - `main.rs` gets `ma` (first two letters)
 - `new_file.txt` gets `nf` (first letters of words in stem: 'n' + 'f')
 
-## Architecture
-
-### Module: `shortid.rs`
-
-The short ID system lives in a dedicated `shortid` module, separate from
-rendering logic. This enables reuse by future commands.
-
-**Public types:**
-
-- `Entity` — enum with variants `Unstaged`, `Branch(String)`,
-  `Commit(git2::Oid)`, `File(String)`.
-- `IdAllocator` — computes and stores the mapping from entities to short IDs.
-
-**Public API:**
-
-```rust
-impl IdAllocator {
-    pub fn new(entities: Vec<Entity>) -> Self;
-    pub fn get_unstaged(&self) -> &str;
-    pub fn get_branch(&self, name: &str) -> &str;
-    pub fn get_commit(&self, oid: git2::Oid) -> &str;
-    pub fn get_file(&self, path: &str) -> &str;
-}
-```
-
-### Integration with rendering (`graph.rs`)
-
-During rendering, all entities are collected from the built sections and
-passed to `IdAllocator::new()`. The allocator is then threaded through each
-`render_*` function, which calls the appropriate getter to display the ID.
-
-```
-RepoInfo → build_sections() → Vec<Section>
-    ↓
-collect entities from sections → Vec<Entity>
-    ↓
-IdAllocator::new(entities) → collision-free mapping
-    ↓
-render_*() functions look up IDs and format output
-```
-
-### Color constant
-
-```rust
-const COLOR_SHORTID: Color = Color::Blue;
-```
-
-Added to the color palette in `graph.rs`. Short IDs are always rendered with
-`.color(COLOR_SHORTID).underline()`.
-
 ## Properties
 
 - **Deterministic:** same repository state produces the same short IDs.
@@ -244,55 +194,33 @@ Short IDs are designed for display **and** for user input. Commands that accept
 entity identifiers (like `git-loom reword`) can resolve both git references and
 short IDs using shared resolution logic.
 
-### Resolution API
-
-The resolution system lives in the `git` module (`git.rs`), making it available
-to all commands. It provides a universal way to map user input to entities.
-
-**Public types:**
-
-```rust
-pub enum Target {
-    Commit(String),  // Full commit hash
-    Branch(String),  // Branch name
-    File(String),    // File path
-}
-
-pub fn resolve_target(
-    repo: &Repository,
-    target: &str,
-) -> Result<Target, Box<dyn std::error::Error>>;
-```
-
 ### Resolution Strategy
 
-The `resolve_target` function tries multiple strategies in order:
+Resolution tries multiple strategies in order:
 
 **1. Git native references (tried first)**
 
-Uses `repo.revparse_single()` to check if the target is a valid git object:
+Checks if the target is a valid git object:
 
 - Full commit hashes: `abc123def456...`
 - Partial hashes: `abc123` (minimum 4 characters)
 - Symbolic refs: `HEAD`, `HEAD~2`, `main`, `origin/main`
 - Any valid git revision syntax
 
-If resolved, returns `Target::Commit(hash)` with the full commit hash.
+If resolved, returns the target as a commit.
 
 **2. Short ID lookup (tried second)**
 
-If git resolution fails, treat the input as a short ID:
+If git resolution fails, the input is treated as a short ID. The full
+commit graph is built using the same algorithm as status rendering, and
+the short ID is searched in this order:
 
-- Calls `gather_repo_info()` to build the full graph (requires upstream)
-- Uses `collect_entities()` to gather all entities in display order
-- Creates an `IdAllocator` with the same algorithm as status rendering
-- Searches for a matching short ID in this order:
-  1. **Branches** - if match found, returns `Target::Branch(name)`
-  2. **Commits** - if match found, returns `Target::Commit(hash)`
-  3. **Files** - if match found, returns `Target::File(path)`
+1. **Branches** - if match found, resolves to a branch
+2. **Commits** - if match found, resolves to a commit
+3. **Files** - if match found, resolves to a file
 
-If no match is found, returns an error suggesting the user run
-`git-loom status` to see available IDs.
+If no match is found, an error suggests the user run `git-loom status`
+to see available IDs.
 
 ### Why This Order?
 
@@ -311,16 +239,10 @@ replacement.
 
 The resolution system ensures that **what you see is what you type**:
 
-- Both `git-loom status` and `resolve_target` use `collect_entities()` with
-  the same entity order
-- Both use the same `IdAllocator` collision resolution algorithm
+- Both `git-loom status` and resolution use the same entity ordering
+  and the same collision resolution algorithm
 - A short ID visible in status output will always resolve to the same entity
-
-This consistency is maintained by:
-
-1. Sharing the `collect_entities()` method on `RepoInfo`
-2. Using identical entity ordering (Unstaged, Branches, Commits, Files)
-3. Recomputing IDs on every invocation (no stale caches)
+- IDs are recomputed on every invocation (no stale caches)
 
 ### Prerequisites for Short ID Resolution
 
@@ -351,9 +273,9 @@ Git reference resolution has no prerequisites (works in any repository).
   better stability when files move between directories.
 - **No persistence:** the repository state changes constantly; recomputing
   is fast and avoids stale-mapping bugs.
-- **Reusable module:** `shortid.rs` is independent of rendering so that
-  future commands can resolve user-provided IDs to entities using the same
-  allocator.
+- **Reusable module:** the short ID system is independent of rendering so
+  that future commands can resolve user-provided IDs to entities using the
+  same algorithm.
 - **Unstaged is always `zz`:** a fixed, memorable ID for the working tree
   section. The letters `zz` are unlikely to collide with branch/file/commit
   prefixes in practice.
