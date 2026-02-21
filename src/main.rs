@@ -1,5 +1,6 @@
 mod branch;
 mod commit;
+mod completions;
 mod drop;
 mod fold;
 mod git;
@@ -80,6 +81,11 @@ enum Command {
     },
     /// Pull-rebase the integration branch and update submodules
     Update,
+    /// Generate shell completions (powershell, clink)
+    Completions {
+        /// Shell to generate completions for (powershell, clink)
+        shell: String,
+    },
     /// Internal: used as GIT_SEQUENCE_EDITOR to write a pre-generated todo file
     #[command(hide = true)]
     InternalWriteTodo {
@@ -102,6 +108,15 @@ fn main() {
         control::set_override(false);
     }
 
+    // Completions don't need git, handle before version check
+    if let Some(Command::Completions { shell }) = cli.command {
+        if let Err(e) = completions::run(shell) {
+            eprintln!("error: {:#}", e);
+            std::process::exit(1);
+        }
+        return;
+    }
+
     if let Err(e) = git_commands::check_git_version() {
         eprintln!("error: {:#}", e);
         std::process::exit(1);
@@ -120,6 +135,7 @@ fn main() {
         Some(Command::Drop { target }) => drop::run(target),
         Some(Command::Update) => update::run(),
         Some(Command::Fold { args }) => fold::run(args),
+        Some(Command::Completions { .. }) => unreachable!(),
         Some(Command::InternalWriteTodo { source, todo_file }) => {
             handle_write_todo(&source, &todo_file)
         }
