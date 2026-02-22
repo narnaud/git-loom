@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.6.0](https://github.com/narnaud/git-loom/compare/v0.5.1...v0.6.0) (2026-02-22)
+
+
+### Features ✨
+
+* Add `git loom push` to push feature branches to remote ([5a3af25](https://github.com/narnaud/git-loom/commit/5a3af25ab5fe9aec058a542bb3b86523ba77b60e))
+* Add uncommit via `git loom fold <commit> zz` ([31fe70a](https://github.com/narnaud/git-loom/commit/31fe70a3c7393ee9e53670e8718bca072052e971))
+
+
+### Documentation
+
+* Add Configuration section to README ([6e323dc](https://github.com/narnaud/git-loom/commit/6e323dc0c0f4b04b7a9ec2d3b02f75663a425545))
+
+
+### Changes
+
+* Migrate error handling from Box&lt;dyn Error&gt; to anyhow ([7ccf6c6](https://github.com/narnaud/git-loom/commit/7ccf6c63f0bf40360d68905801fbe14ccfcb2b99))
+
 ## [0.5.1](https://github.com/narnaud/git-loom/compare/v0.5.0...v0.5.1) (2026-02-21)
 
 
