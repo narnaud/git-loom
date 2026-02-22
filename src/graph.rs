@@ -333,6 +333,20 @@ fn render_branch(
             commit.message.color(COLOR_MESSAGE)
         )
         .unwrap();
+        for (i, file) in commit.files.iter().enumerate() {
+            let file_sid = format!("{}:{}", sid, i);
+            writeln!(
+                out,
+                "{}{}    {} {}{} {}",
+                "│".color(COLOR_GRAPH),
+                "┊".color(dot_color),
+                file_sid.color(COLOR_SHORTID).underline(),
+                file.index.to_string().color(COLOR_STAGED),
+                file.worktree.to_string().color(COLOR_UNSTAGED),
+                file.path.color(COLOR_MESSAGE)
+            )
+            .unwrap();
+        }
     }
     if next_stacked {
         writeln!(out, "{}", "││".color(COLOR_GRAPH)).unwrap();
@@ -357,6 +371,19 @@ fn render_loose(out: &mut String, commits: &[CommitInfo], more_sections: bool, i
             commit.message.color(COLOR_MESSAGE)
         )
         .unwrap();
+        for (i, file) in commit.files.iter().enumerate() {
+            let file_sid = format!("{}:{}", sid, i);
+            writeln!(
+                out,
+                "{}     {} {}{} {}",
+                "┊".color(COLOR_GRAPH),
+                file_sid.color(COLOR_SHORTID).underline(),
+                file.index.to_string().color(COLOR_STAGED),
+                file.worktree.to_string().color(COLOR_UNSTAGED),
+                file.path.color(COLOR_MESSAGE)
+            )
+            .unwrap();
+        }
     }
     if more_sections {
         writeln!(out, "{}", "│".color(COLOR_GRAPH)).unwrap();

@@ -144,7 +144,7 @@ impl Weave {
     /// Walks the first-parent line from HEAD to the merge-base, collecting
     /// branch sections (from merge commits) and integration-line entries.
     pub fn from_repo(repo: &Repository) -> Result<Self> {
-        let info = git::gather_repo_info(repo)?;
+        let info = git::gather_repo_info(repo, false)?;
         let head_oid = git::head_oid(repo)?;
         let merge_base_oid = info.upstream.merge_base_oid;
 

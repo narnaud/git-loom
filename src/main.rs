@@ -37,7 +37,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Show the branch-aware status
-    Status,
+    Status {
+        /// Show files changed in each commit
+        #[arg(short = 'f', long = "files")]
+        files: bool,
+    },
     /// Initialize a new integration branch tracking a remote
     Init {
         /// Branch name (defaults to "loom")
@@ -130,7 +134,8 @@ fn main() {
     }
 
     let result = match cli.command {
-        None | Some(Command::Status) => status::run(),
+        None => status::run(false),
+        Some(Command::Status { files }) => status::run(files),
         Some(Command::Init { name }) => init::run(name),
         Some(Command::Branch { name, target }) => branch::run(name, target),
         Some(Command::Reword { target, message }) => reword::run(target, message),

@@ -73,7 +73,7 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
 /// line, not already on a side branch). Commits at HEAD or the merge-base
 /// are excluded since no topology change is needed for those.
 fn should_weave(repo: &Repository, commit_hash: &str) -> Result<bool> {
-    let info = match git::gather_repo_info(repo) {
+    let info = match git::gather_repo_info(repo, false) {
         Ok(info) => info,
         Err(_) => return Ok(false), // No upstream info available, skip weave
     };
@@ -131,7 +131,7 @@ fn resolve_commit(repo: &Repository, target: Option<&str>) -> Result<String> {
     match target {
         None => {
             // Default: merge-base commit
-            let info = git::gather_repo_info(repo)?;
+            let info = git::gather_repo_info(repo, false)?;
             Ok(info.upstream.merge_base_oid.to_string())
         }
         Some(t) => {

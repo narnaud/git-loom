@@ -110,6 +110,8 @@ pub struct CommitInfo {
     /// Parent commit OID (None for root commits). Always a single parent
     /// since merge commits are excluded.
     pub parent_oid: Option<git2::Oid>,
+    /// Files changed in this commit (only populated when `-f` is active).
+    pub files: Vec<FileChange>,
 }
 
 /// A local branch whose tip falls within the upstream..HEAD range.
@@ -131,7 +133,9 @@ pub struct FileChange {
 
 /// Collect all data needed for the status display: walk commits from HEAD to the
 /// upstream tracking branch, detect feature branches, and gather working tree status.
-pub fn gather_repo_info(repo: &Repository) -> Result<RepoInfo> {
+///
+/// When `show_files` is true, each commit will include the list of files it touches.
+pub fn gather_repo_info(repo: &Repository, show_files: bool) -> Result<RepoInfo> {
     let head = repo.head()?;
 
     if !head.is_branch() {
@@ -166,7 +170,7 @@ pub fn gather_repo_info(repo: &Repository) -> Result<RepoInfo> {
 
     let merge_base_oid = repo.merge_base(head_oid, upstream_oid)?;
 
-    let commits = walk_commits(repo, head_oid, merge_base_oid)?;
+    let commits = walk_commits(repo, head_oid, merge_base_oid, show_files)?;
     let commit_set: std::collections::HashSet<git2::Oid> = commits.iter().map(|c| c.oid).collect();
     let branches = find_branches_in_range(
         repo,
@@ -264,8 +268,8 @@ pub fn resolve_target(repo: &Repository, target: &str) -> Result<Target> {
 
 /// Resolve a shortid to a commit, branch, or file by rebuilding the graph.
 fn resolve_shortid(repo: &Repository, shortid: &str) -> Result<Target> {
-    // Gather repo info (this checks for upstream and builds the graph)
-    let info = gather_repo_info(repo)?;
+    // Gather repo info with files enabled so commit file shortids are resolvable
+    let info = gather_repo_info(repo, true)?;
 
     // Build entities using the shared method
     let entities = info.collect_entities();
@@ -290,10 +294,27 @@ fn resolve_shortid(repo: &Repository, shortid: &str) -> Result<Target> {
         }
     }
 
-    // Search for matching shortid in files
+    // Search for matching shortid in working change files
     for file in &info.working_changes {
         if allocator.get_file(&file.path) == shortid {
             return Ok(Target::File(file.path.clone()));
+        }
+    }
+
+    // Search for commit file shortids (format: "commit_sid:index")
+    if let Some((commit_part, index_part)) = shortid.split_once(':') {
+        if let Ok(index) = index_part.parse::<usize>() {
+            for commit in &info.commits {
+                if allocator.get_commit(commit.oid) == commit_part {
+                    if let Some(file) = commit.files.get(index) {
+                        return Ok(Target::File(file.path.clone()));
+                    }
+                    bail!(
+                        "Commit has no file at index {}. Run 'git-loom status -f' to see available IDs.",
+                        index
+                    );
+                }
+            }
         }
     }
 
@@ -332,6 +353,7 @@ fn walk_commits(
     repo: &Repository,
     head_oid: git2::Oid,
     stop_oid: git2::Oid,
+    show_files: bool,
 ) -> Result<Vec<CommitInfo>> {
     let mut revwalk = repo.revwalk()?;
     revwalk.push(head_oid)?;
@@ -354,15 +376,58 @@ fn walk_commits(
             .to_string();
         let message = commit.summary().unwrap_or("").to_string();
         let parent_oid = commit.parent_id(0).ok();
+        let files = if show_files {
+            get_commit_files(repo, &commit)?
+        } else {
+            vec![]
+        };
         commits.push(CommitInfo {
             oid,
             short_id,
             message,
             parent_oid,
+            files,
         });
     }
 
     Ok(commits)
+}
+
+/// Get the files changed in a commit by diffing against its parent tree.
+/// For root commits (no parent), diffs against an empty tree.
+fn get_commit_files(repo: &Repository, commit: &git2::Commit) -> Result<Vec<FileChange>> {
+    let commit_tree = commit.tree()?;
+    let parent_tree = if commit.parent_count() > 0 {
+        Some(commit.parent(0)?.tree()?)
+    } else {
+        None
+    };
+
+    let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&commit_tree), None)?;
+
+    let mut files = Vec::new();
+    for delta in diff.deltas() {
+        let status = match delta.status() {
+            git2::Delta::Added => 'A',
+            git2::Delta::Modified => 'M',
+            git2::Delta::Deleted => 'D',
+            git2::Delta::Renamed => 'R',
+            _ => '?',
+        };
+        let path = delta
+            .new_file()
+            .path()
+            .and_then(|p| p.to_str())
+            .unwrap_or("")
+            .to_string();
+        files.push(FileChange {
+            path,
+            index: status,
+            worktree: ' ',
+        });
+    }
+
+    Ok(files)
 }
 
 /// Find all local branches whose tip is in the commit range or at the

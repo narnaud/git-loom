@@ -23,7 +23,7 @@ enum RemoteType {
 pub fn run(branch: Option<String>) -> Result<()> {
     let repo = git::open_repo()?;
     let workdir = git::require_workdir(&repo, "push")?.to_path_buf();
-    let info = git::gather_repo_info(&repo)?;
+    let info = git::gather_repo_info(&repo, false)?;
 
     if info.branches.is_empty() {
         bail!("No woven branches to push. Create a branch with 'git loom branch' first.");
@@ -48,7 +48,7 @@ pub fn run(branch: Option<String>) -> Result<()> {
 
 /// Resolve an explicit branch argument to a woven branch name.
 fn resolve_branch(repo: &Repository, branch_arg: &str) -> Result<String> {
-    let info = git::gather_repo_info(repo)?;
+    let info = git::gather_repo_info(repo, false)?;
 
     match git::resolve_target(repo, branch_arg) {
         Ok(Target::Branch(name)) => {
@@ -70,7 +70,7 @@ fn resolve_branch(repo: &Repository, branch_arg: &str) -> Result<String> {
 
 /// Interactive branch picker: list woven branches.
 fn pick_branch(repo: &Repository) -> Result<String> {
-    let info = git::gather_repo_info(repo)?;
+    let info = git::gather_repo_info(repo, false)?;
 
     let mut select = cliclack::select("Select branch to push");
     for branch in &info.branches {

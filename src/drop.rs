@@ -41,7 +41,7 @@ fn drop_commit(repo: &Repository, commit_hash: &str) -> Result<()> {
 
     // Check if this commit is the only commit on a branch.
     // If so, delegate to drop_branch for clean section removal.
-    if let Ok(info) = git::gather_repo_info(repo) {
+    if let Ok(info) = git::gather_repo_info(repo, false) {
         let merge_base_oid = info.upstream.merge_base_oid;
 
         if let Some(branch_name) = find_branch_owning_commit_from_info(&info, commit_oid)
@@ -77,7 +77,7 @@ fn drop_commit(repo: &Repository, commit_hash: &str) -> Result<()> {
 fn drop_branch(repo: &Repository, branch_name: &str) -> Result<()> {
     let workdir = git::require_workdir(repo, "drop")?;
 
-    let info = git::gather_repo_info(repo)?;
+    let info = git::gather_repo_info(repo, false)?;
 
     // Verify the branch is in the integration range
     let branch_info = info

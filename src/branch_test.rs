@@ -8,7 +8,7 @@ fn branch_at_merge_base_default() {
     test_repo.commit_empty("A1");
     test_repo.commit_empty("A2");
 
-    let info = git::gather_repo_info(&test_repo.repo).unwrap();
+    let info = git::gather_repo_info(&test_repo.repo, false).unwrap();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
     // Create branch at merge-base (default, no target)
@@ -84,7 +84,7 @@ fn branch_shows_in_status() {
     )
     .unwrap();
 
-    let info = git::gather_repo_info(&test_repo.repo).unwrap();
+    let info = git::gather_repo_info(&test_repo.repo, false).unwrap();
     let branch_names: Vec<&str> = info.branches.iter().map(|b| b.name.as_str()).collect();
     assert!(
         branch_names.contains(&"feature-a"),
@@ -121,7 +121,7 @@ fn branch_ownership_splits_commits() {
     )
     .unwrap();
 
-    let info = git::gather_repo_info(&test_repo.repo).unwrap();
+    let info = git::gather_repo_info(&test_repo.repo, false).unwrap();
     assert_eq!(info.branches.len(), 2);
 }
 

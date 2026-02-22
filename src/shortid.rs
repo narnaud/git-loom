@@ -64,7 +64,7 @@ impl IdAllocator {
 ///
 /// For commits, candidates are successive prefixes of the hex hash (2, 3, 4…).
 fn generate_candidates(entity: &Entity) -> Vec<String> {
-    match entity {
+    let candidates = match entity {
         Entity::Unstaged => vec!["zz".to_string()],
         Entity::Commit(oid) => {
             let hex = oid.to_string();
@@ -85,7 +85,9 @@ fn generate_candidates(entity: &Entity) -> Vec<String> {
                 .unwrap_or(filename);
             word_candidates(stem)
         }
-    }
+    };
+    // Short IDs are always lowercase for consistency.
+    candidates.into_iter().map(|c| c.to_lowercase()).collect()
 }
 
 /// Build candidate IDs from a name, splitting on `-`, `_`, `/`.

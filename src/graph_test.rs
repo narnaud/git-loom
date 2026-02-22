@@ -40,6 +40,22 @@ fn commit(byte: u8, message: &str, parent: Option<u8>) -> CommitInfo {
         short_id: format!("{:07x}", byte),
         message: message.to_string(),
         parent_oid: parent.map(oid),
+        files: vec![],
+    }
+}
+
+fn commit_with_files(
+    byte: u8,
+    message: &str,
+    parent: Option<u8>,
+    files: Vec<FileChange>,
+) -> CommitInfo {
+    CommitInfo {
+        oid: oid(byte),
+        short_id: format!("{:07x}", byte),
+        message: message.to_string(),
+        parent_oid: parent.map(oid),
+        files,
     }
 }
 
@@ -441,4 +457,185 @@ fn short_ids_collision_extends() {
     let manifest_line = lines.iter().find(|l| l.contains("manifest.rs")).unwrap();
     // They should have different IDs
     assert_ne!(main_line, manifest_line);
+}
+
+#[test]
+fn files_shown_under_branch_commits() {
+    let mut info = base_info();
+    info.commits = vec![
+        commit_with_files(
+            2,
+            "A2",
+            Some(1),
+            vec![
+                FileChange {
+                    path: "src/graph.rs".to_string(),
+                    index: 'M',
+                    worktree: ' ',
+                },
+                FileChange {
+                    path: "new_file.txt".to_string(),
+                    index: 'A',
+                    worktree: ' ',
+                },
+            ],
+        ),
+        commit_with_files(
+            1,
+            "A1",
+            None,
+            vec![FileChange {
+                path: "src/status.rs".to_string(),
+                index: 'M',
+                worktree: ' ',
+            }],
+        ),
+    ];
+    info.branches = vec![BranchInfo {
+        name: "feature-a".to_string(),
+        tip_oid: oid(2),
+    }];
+
+    let output = render_plain(info);
+    // File shortids use commit_sid:index format
+    assert!(
+        output
+            .contains("│●   0200002 A2\n│┊    02:0 M  src/graph.rs\n│┊    02:1 A  new_file.txt\n"),
+        "expected files under A2, got:\n{}",
+        output
+    );
+    assert!(
+        output.contains("│●   0100001 A1\n│┊    01:0 M  src/status.rs\n"),
+        "expected files under A1, got:\n{}",
+        output
+    );
+}
+
+#[test]
+fn files_shown_under_loose_commits() {
+    let mut info = base_info();
+    info.commits = vec![commit_with_files(
+        2,
+        "Fix typo",
+        Some(1),
+        vec![FileChange {
+            path: "README.md".to_string(),
+            index: 'M',
+            worktree: ' ',
+        }],
+    )];
+
+    let output = render_plain(info);
+    // Loose commit file should have ┊ prefix with commit_sid:index format
+    assert!(
+        output.contains("●   0200002 Fix typo\n┊     02:0 M  README.md\n"),
+        "expected files under loose commit, got:\n{}",
+        output
+    );
+}
+
+#[test]
+fn commit_file_ids_use_commit_sid_colon_index() {
+    let mut info = base_info();
+    info.commits = vec![commit_with_files(
+        2,
+        "A1",
+        None,
+        vec![
+            FileChange {
+                path: "foo.rs".to_string(),
+                index: 'A',
+                worktree: ' ',
+            },
+            FileChange {
+                path: "bar.rs".to_string(),
+                index: 'M',
+                worktree: ' ',
+            },
+        ],
+    )];
+    info.branches = vec![BranchInfo {
+        name: "feature-a".to_string(),
+        tip_oid: oid(2),
+    }];
+
+    let output = render_plain(info);
+    assert!(
+        output.contains("02:0 A  foo.rs"),
+        "expected 02:0 for first file, got:\n{}",
+        output
+    );
+    assert!(
+        output.contains("02:1 M  bar.rs"),
+        "expected 02:1 for second file, got:\n{}",
+        output
+    );
+}
+
+#[test]
+fn root_commit_files_shown() {
+    // A commit with no parent (root commit) should still show files
+    let mut info = base_info();
+    info.commits = vec![commit_with_files(
+        1,
+        "Initial",
+        None,
+        vec![FileChange {
+            path: "init.rs".to_string(),
+            index: 'A',
+            worktree: ' ',
+        }],
+    )];
+
+    let output = render_plain(info);
+    assert!(
+        output.contains("●   0100001 Initial\n┊     01:0 A  init.rs\n"),
+        "expected file under root commit, got:\n{}",
+        output
+    );
+}
+
+#[test]
+fn same_file_in_multiple_commits_gets_unique_ids() {
+    let mut info = base_info();
+    // Same file "src/main.rs" modified in both commits
+    info.commits = vec![
+        commit_with_files(
+            2,
+            "A2",
+            Some(1),
+            vec![FileChange {
+                path: "src/main.rs".to_string(),
+                index: 'M',
+                worktree: ' ',
+            }],
+        ),
+        commit_with_files(
+            1,
+            "A1",
+            None,
+            vec![FileChange {
+                path: "src/main.rs".to_string(),
+                index: 'M',
+                worktree: ' ',
+            }],
+        ),
+    ];
+    info.branches = vec![BranchInfo {
+        name: "feature-a".to_string(),
+        tip_oid: oid(2),
+    }];
+
+    let output = render_plain(info);
+    // Same file in different commits should get different IDs (02:0 vs 01:0)
+    assert!(
+        output.contains("02:0 M  src/main.rs"),
+        "expected 02:0 for commit 2's file, got:\n{}",
+        output
+    );
+    assert!(
+        output.contains("01:0 M  src/main.rs"),
+        "expected 01:0 for commit 1's file, got:\n{}",
+        output
+    );
 }

@@ -6,7 +6,7 @@ use crate::test_helpers::TestRepo;
 #[test]
 fn no_commits_ahead_of_upstream() {
     let test_repo = TestRepo::new_with_remote();
-    let info = gather_repo_info(&test_repo.repo).unwrap();
+    let info = gather_repo_info(&test_repo.repo, false).unwrap();
 
     assert!(info.commits.is_empty());
     assert!(info.branches.is_empty());
@@ -22,7 +22,7 @@ fn commits_without_branches() {
     test_repo.commit_empty("Second");
     test_repo.commit_empty("Third");
 
-    let info = gather_repo_info(&test_repo.repo).unwrap();
+    let info = gather_repo_info(&test_repo.repo, false).unwrap();
 
     assert_eq!(info.commits.len(), 3);
     assert_eq!(info.commits[0].message, "Third");
@@ -42,7 +42,7 @@ fn single_feature_branch() {
     // Create feature-a branch at current HEAD
     test_repo.create_branch_at_commit("feature-a", a2_oid);
 
-    let info = gather_repo_info(&test_repo.repo).unwrap();
+    let info = gather_repo_info(&test_repo.repo, false).unwrap();
 
     assert_eq!(info.commits.len(), 2);
     assert_eq!(info.branches.len(), 1);
@@ -68,7 +68,7 @@ fn multiple_independent_branches() {
     let b1_oid = test_repo.head_oid();
     test_repo.create_branch_at_commit("feature-b", b1_oid);
 
-    let info = gather_repo_info(&test_repo.repo).unwrap();
+    let info = gather_repo_info(&test_repo.repo, false).unwrap();
 
     // Merge commit should be filtered out
     let messages: Vec<&str> = info.commits.iter().map(|c| c.message.as_str()).collect();
@@ -101,7 +101,7 @@ fn stacked_branches() {
     let b2_oid = test_repo.commit_empty("B2");
     test_repo.create_branch_at_commit("feature-b", b2_oid);
 
-    let info = gather_repo_info(&test_repo.repo).unwrap();
+    let info = gather_repo_info(&test_repo.repo, false).unwrap();
 
     assert_eq!(info.commits.len(), 4);
     assert_eq!(info.commits[0].message, "B2");
@@ -128,7 +128,7 @@ fn merge_commits_are_filtered() {
     test_repo.commit_merge("Merge side branch", c1_oid, upstream_oid);
     test_repo.commit_empty("C2");
 
-    let info = gather_repo_info(&test_repo.repo).unwrap();
+    let info = gather_repo_info(&test_repo.repo, false).unwrap();
 
     let messages: Vec<&str> = info.commits.iter().map(|c| c.message.as_str()).collect();
     assert_eq!(messages, vec!["C2", "C1"]);
@@ -141,7 +141,7 @@ fn detached_head_returns_error() {
     let head_oid = test_repo.head_oid();
     test_repo.set_detached_head(head_oid);
 
-    let result = gather_repo_info(&test_repo.repo);
+    let result = gather_repo_info(&test_repo.repo, false);
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("detached"));
 }
@@ -150,7 +150,7 @@ fn detached_head_returns_error() {
 fn no_upstream_returns_error() {
     let test_repo = TestRepo::new();
 
-    let result = gather_repo_info(&test_repo.repo);
+    let result = gather_repo_info(&test_repo.repo, false);
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("upstream"));
 }
@@ -167,7 +167,7 @@ fn working_tree_changes_detected() {
     // Add an untracked file
     test_repo.write_file("untracked.txt", "new");
 
-    let info = gather_repo_info(&test_repo.repo).unwrap();
+    let info = gather_repo_info(&test_repo.repo, false).unwrap();
 
     let paths: Vec<&str> = info
         .working_changes
@@ -198,7 +198,7 @@ fn working_tree_changes_detected() {
 fn no_working_changes_when_clean() {
     let test_repo = TestRepo::new_with_remote();
 
-    let info = gather_repo_info(&test_repo.repo).unwrap();
+    let info = gather_repo_info(&test_repo.repo, false).unwrap();
     assert!(info.working_changes.is_empty());
 }
 
@@ -215,7 +215,7 @@ fn upstream_ahead_of_merge_base() {
     // Fetch to update origin/main in the working repo
     test_repo.fetch_remote();
 
-    let info = gather_repo_info(&test_repo.repo).unwrap();
+    let info = gather_repo_info(&test_repo.repo, false).unwrap();
 
     // Upstream is 2 commits ahead of the merge-base (which is the original "Initial" commit)
     assert_eq!(info.upstream.commits_ahead, 2);
@@ -234,7 +234,7 @@ fn branch_at_upstream_is_detected() {
 
     test_repo.commit_empty("Ahead");
 
-    let info = gather_repo_info(&test_repo.repo).unwrap();
+    let info = gather_repo_info(&test_repo.repo, false).unwrap();
 
     let branch_names: Vec<&str> = info.branches.iter().map(|b| b.name.as_str()).collect();
     assert!(

@@ -7,7 +7,7 @@ use crate::weave::{self, Weave};
 
 /// Verify that we're on an integration branch (has upstream tracking).
 fn verify_on_integration_branch(repo: &Repository) -> Result<()> {
-    git::gather_repo_info(repo).context(
+    git::gather_repo_info(repo, false).context(
         "Must be on an integration branch to use commit. \
          Use `git commit` directly on feature branches.",
     )?;
@@ -152,7 +152,7 @@ fn resolve_branch_target(repo: &Repository, branch: Option<&str>) -> Result<Stri
 /// - Known branch but not woven: error
 /// - Unknown: treat as new branch name, validate, create at merge-base, weave
 fn resolve_explicit_branch(repo: &Repository, branch: &str) -> Result<String> {
-    let info = git::gather_repo_info(repo)?;
+    let info = git::gather_repo_info(repo, false)?;
 
     match git::resolve_target(repo, branch) {
         Ok(Target::Branch(name)) => {
@@ -192,7 +192,7 @@ fn resolve_explicit_branch(repo: &Repository, branch: &str) -> Result<String> {
 
 /// Interactive branch picker: list woven branches + option to create new.
 fn pick_branch(repo: &Repository) -> Result<String> {
-    let info = git::gather_repo_info(repo)?;
+    let info = git::gather_repo_info(repo, false)?;
 
     if info.branches.is_empty() {
         // No woven branches — prompt to create one
@@ -237,7 +237,7 @@ fn prompt_new_branch(repo: &Repository) -> Result<String> {
 
 /// Check if a branch points to the merge-base commit (i.e., has no commits of its own).
 fn is_branch_at_merge_base(repo: &Repository, branch_name: &str) -> Result<bool> {
-    let info = git::gather_repo_info(repo)?;
+    let info = git::gather_repo_info(repo, false)?;
     let branch = repo.find_branch(branch_name, git2::BranchType::Local)?;
     let branch_oid = branch.get().target().context("Branch has no target")?;
     Ok(branch_oid == info.upstream.merge_base_oid)
@@ -252,7 +252,7 @@ fn create_branch_at_merge_base(
     workdir: &std::path::Path,
     name: &str,
 ) -> Result<()> {
-    let info = git::gather_repo_info(repo)?;
+    let info = git::gather_repo_info(repo, false)?;
     let merge_base_hash = info.upstream.merge_base_oid.to_string();
 
     git_branch::create(workdir, name, &merge_base_hash)?;
