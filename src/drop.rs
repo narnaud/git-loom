@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use anyhow::{Context, Result, bail};
 use git2::Repository;
 
 use crate::branch::is_on_first_parent_line;
@@ -12,7 +13,7 @@ use crate::weave::{self, Weave};
 /// Dispatches based on the resolved target type:
 /// - Commit → remove the commit via interactive rebase
 /// - Branch → remove all branch commits, unweave merge topology, delete the ref
-pub fn run(target: String) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(target: String) -> Result<()> {
     let repo = git::open_repo()?;
 
     let resolved = git::resolve_target(&repo, &target)?;
@@ -21,10 +22,10 @@ pub fn run(target: String) -> Result<(), Box<dyn std::error::Error>> {
         Target::Commit(hash) => drop_commit(&repo, &hash),
         Target::Branch(name) => drop_branch(&repo, &name),
         Target::File(_) => {
-            Err("Cannot drop a file. Use 'git restore' to discard file changes.".into())
+            bail!("Cannot drop a file. Use 'git restore' to discard file changes.")
         }
         Target::Unstaged => {
-            Err("Cannot drop unstaged changes. Use 'git restore' to discard changes.".into())
+            bail!("Cannot drop unstaged changes. Use 'git restore' to discard changes.")
         }
     }
 }
@@ -33,7 +34,7 @@ pub fn run(target: String) -> Result<(), Box<dyn std::error::Error>> {
 ///
 /// If the commit is the only commit on a branch, delegates to `drop_branch`
 /// to properly remove the entire branch section and merge topology.
-fn drop_commit(repo: &Repository, commit_hash: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn drop_commit(repo: &Repository, commit_hash: &str) -> Result<()> {
     let workdir = git::require_workdir(repo, "drop")?;
 
     let commit_oid = git2::Oid::from_str(commit_hash)?;
@@ -73,7 +74,7 @@ fn drop_commit(repo: &Repository, commit_hash: &str) -> Result<(), Box<dyn std::
 }
 
 /// Drop a branch: remove all its commits, unweave merge topology, delete the ref.
-fn drop_branch(repo: &Repository, branch_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn drop_branch(repo: &Repository, branch_name: &str) -> Result<()> {
     let workdir = git::require_workdir(repo, "drop")?;
 
     let info = git::gather_repo_info(repo)?;
@@ -83,7 +84,7 @@ fn drop_branch(repo: &Repository, branch_name: &str) -> Result<(), Box<dyn std::
         .branches
         .iter()
         .find(|b| b.name == branch_name)
-        .ok_or_else(|| {
+        .with_context(|| {
             format!(
                 "Branch '{}' is not in the integration range. \
                  Use 'git branch -d {}' to delete it directly.",
@@ -191,7 +192,7 @@ fn find_owned_commits(
     merge_base_oid: git2::Oid,
     all_branches: &[git::BranchInfo],
     dropping_branch_name: &str,
-) -> Result<Vec<git2::Oid>, Box<dyn std::error::Error>> {
+) -> Result<Vec<git2::Oid>> {
     let mut revwalk = repo.revwalk()?;
     revwalk.push(branch_tip)?;
     revwalk.hide(merge_base_oid)?;

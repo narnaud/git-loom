@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::process::Command;
 
+use anyhow::{Result, bail};
 use git2::Repository;
 
 use crate::git::{self, Target};
@@ -19,15 +20,13 @@ enum RemoteType {
 /// Detects the remote type (plain, GitHub, Gerrit) and dispatches to the
 /// appropriate push strategy. Accepts an optional branch argument (name or
 /// shortID); if omitted, shows an interactive picker.
-pub fn run(branch: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(branch: Option<String>) -> Result<()> {
     let repo = git::open_repo()?;
     let workdir = git::require_workdir(&repo, "push")?.to_path_buf();
     let info = git::gather_repo_info(&repo)?;
 
     if info.branches.is_empty() {
-        return Err(
-            "No woven branches to push. Create a branch with 'git loom branch' first.".into(),
-        );
+        bail!("No woven branches to push. Create a branch with 'git loom branch' first.");
     }
 
     let branch_name = match branch {
@@ -48,10 +47,7 @@ pub fn run(branch: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Resolve an explicit branch argument to a woven branch name.
-fn resolve_branch(
-    repo: &Repository,
-    branch_arg: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
+fn resolve_branch(repo: &Repository, branch_arg: &str) -> Result<String> {
     let info = git::gather_repo_info(repo)?;
 
     match git::resolve_target(repo, branch_arg) {
@@ -59,22 +55,21 @@ fn resolve_branch(
             if info.branches.iter().any(|b| b.name == name) {
                 Ok(name)
             } else {
-                Err(format!(
+                bail!(
                     "Branch '{}' is not woven into the integration branch.",
                     name
                 )
-                .into())
             }
         }
-        Ok(Target::Commit(_)) => Err("Target must be a branch, not a commit.".into()),
-        Ok(Target::File(_)) => Err("Target must be a branch, not a file.".into()),
-        Ok(Target::Unstaged) => Err("Target must be a branch.".into()),
+        Ok(Target::Commit(_)) => bail!("Target must be a branch, not a commit."),
+        Ok(Target::File(_)) => bail!("Target must be a branch, not a file."),
+        Ok(Target::Unstaged) => bail!("Target must be a branch."),
         Err(e) => Err(e),
     }
 }
 
 /// Interactive branch picker: list woven branches.
-fn pick_branch(repo: &Repository) -> Result<String, Box<dyn std::error::Error>> {
+fn pick_branch(repo: &Repository) -> Result<String> {
     let info = git::gather_repo_info(repo)?;
 
     let mut select = cliclack::select("Select branch to push");
@@ -94,7 +89,7 @@ fn detect_remote_type(
     repo: &Repository,
     workdir: &Path,
     upstream_label: &str,
-) -> Result<RemoteType, Box<dyn std::error::Error>> {
+) -> Result<RemoteType> {
     // 1. Check explicit config override
     if let Ok(config_value) =
         git_commands::run_git_stdout(workdir, &["config", "--get", "loom.remote-type"])
@@ -153,11 +148,7 @@ fn extract_target_branch(upstream_label: &str) -> String {
 }
 
 /// Push using plain git with force-with-lease.
-fn push_plain(
-    workdir: &Path,
-    remote: &str,
-    branch: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn push_plain(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
     git_commands::run_git(
         workdir,
         &[
@@ -175,11 +166,7 @@ fn push_plain(
 }
 
 /// Push to GitHub: push the branch, then open `gh pr create --web`.
-fn push_github(
-    workdir: &Path,
-    remote: &str,
-    branch: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn push_github(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
     git_commands::run_git(workdir, &["push", "-u", remote, branch])?;
 
     println!("Pushed '{}' to {}", branch, remote);
@@ -209,12 +196,7 @@ fn push_github(
 }
 
 /// Push to Gerrit with topic and refs/for/ refspec.
-fn push_gerrit(
-    workdir: &Path,
-    remote: &str,
-    branch: &str,
-    target_branch: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn push_gerrit(workdir: &Path, remote: &str, branch: &str, target_branch: &str) -> Result<()> {
     let refspec = format!("{}:refs/for/{}", branch, target_branch);
     let topic_opt = format!("topic={}", branch);
 

@@ -1,12 +1,14 @@
 use std::path::Path;
 use std::process::Command;
 
+use anyhow::{Result, bail};
+
 /// Amend the current commit, optionally replacing its message.
 ///
 /// Wraps `git commit --allow-empty --amend --only [-m msg]`.
 /// Uses `--only` so that staged changes are not accidentally included.
 /// When `message` is `None`, inherits stdio so git can open the user's editor.
-pub fn amend(workdir: &Path, message: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn amend(workdir: &Path, message: Option<&str>) -> Result<()> {
     let mut cmd = Command::new("git");
     cmd.current_dir(workdir)
         .args(["commit", "--allow-empty", "--amend", "--only"]);
@@ -16,13 +18,13 @@ pub fn amend(workdir: &Path, message: Option<&str>) -> Result<(), Box<dyn std::e
         let output = cmd.output()?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("Git commit --amend failed:\n{}", stderr).into());
+            bail!("Git commit --amend failed:\n{}", stderr);
         }
     } else {
         // No message provided — open editor with inherited stdio
         let status = cmd.status()?;
         if !status.success() {
-            return Err("Git commit --amend failed (editor aborted or empty message).".into());
+            bail!("Git commit --amend failed (editor aborted or empty message).");
         }
     }
 
@@ -33,7 +35,7 @@ pub fn amend(workdir: &Path, message: Option<&str>) -> Result<(), Box<dyn std::e
 ///
 /// Wraps `git commit --amend --no-edit`.
 /// Unlike `amend()`, this does NOT use `--only`, so staged changes are included.
-pub fn amend_no_edit(workdir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+pub fn amend_no_edit(workdir: &Path) -> Result<()> {
     let output = Command::new("git")
         .current_dir(workdir)
         .args(["commit", "--amend", "--no-edit"])
@@ -41,7 +43,7 @@ pub fn amend_no_edit(workdir: &Path) -> Result<(), Box<dyn std::error::Error>> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Git commit --amend --no-edit failed:\n{}", stderr).into());
+        bail!("Git commit --amend --no-edit failed:\n{}", stderr);
     }
 
     Ok(())
@@ -50,7 +52,7 @@ pub fn amend_no_edit(workdir: &Path) -> Result<(), Box<dyn std::error::Error>> {
 /// Stage specific files.
 ///
 /// Wraps `git add <files>`.
-pub fn stage_files(workdir: &Path, files: &[&str]) -> Result<(), Box<dyn std::error::Error>> {
+pub fn stage_files(workdir: &Path, files: &[&str]) -> Result<()> {
     let mut args = vec!["add", "--"];
     args.extend(files);
     super::run_git(workdir, &args)
@@ -59,7 +61,7 @@ pub fn stage_files(workdir: &Path, files: &[&str]) -> Result<(), Box<dyn std::er
 /// Create a commit with a message.
 ///
 /// Wraps `git commit -m <message>`.
-pub fn commit(workdir: &Path, message: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub fn commit(workdir: &Path, message: &str) -> Result<()> {
     super::run_git(workdir, &["commit", "-m", message])
 }
 
@@ -67,14 +69,14 @@ pub fn commit(workdir: &Path, message: &str) -> Result<(), Box<dyn std::error::E
 ///
 /// Wraps `git reset <target>`. Moves HEAD to the target while keeping
 /// changes in the working directory as unstaged modifications.
-pub fn reset_mixed(workdir: &Path, target: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub fn reset_mixed(workdir: &Path, target: &str) -> Result<()> {
     super::run_git(workdir, &["reset", target])
 }
 
 /// Stage all changes (staged, unstaged, and untracked).
 ///
 /// Wraps `git add -A`.
-pub fn stage_all(workdir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+pub fn stage_all(workdir: &Path) -> Result<()> {
     super::run_git(workdir, &["add", "-A"])
 }
 
@@ -82,14 +84,14 @@ pub fn stage_all(workdir: &Path) -> Result<(), Box<dyn std::error::Error>> {
 ///
 /// Wraps `git commit` (no -m flag). Inherits stdin/stdout so the editor
 /// can interact with the terminal.
-pub fn commit_with_editor(workdir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+pub fn commit_with_editor(workdir: &Path) -> Result<()> {
     let status = Command::new("git")
         .current_dir(workdir)
         .arg("commit")
         .status()?;
 
     if !status.success() {
-        return Err("Git commit failed (editor aborted or empty message).".into());
+        bail!("Git commit failed (editor aborted or empty message).");
     }
 
     Ok(())

@@ -1,11 +1,13 @@
 use std::path::Path;
 
+use anyhow::{Result, bail};
+
 /// Continue an in-progress rebase.
 /// If continuation fails, automatically aborts the rebase.
-pub fn continue_rebase(workdir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+pub fn continue_rebase(workdir: &Path) -> Result<()> {
     if let Err(e) = super::run_git(workdir, &["rebase", "--continue"]) {
         let _ = abort(workdir);
-        return Err(format!("Git rebase --continue failed. Rebase aborted:\n{}", e).into());
+        bail!("Git rebase --continue failed. Rebase aborted:\n{}", e);
     }
     Ok(())
 }
@@ -15,11 +17,7 @@ pub fn continue_rebase(workdir: &Path) -> Result<(), Box<dyn std::error::Error>>
 /// Runs `git rebase --onto <newbase> <upstream> --update-refs`.
 /// The `--update-refs` flag keeps any branch refs in the rebased range up to date.
 #[cfg(test)]
-pub fn rebase_onto(
-    workdir: &Path,
-    newbase: &str,
-    upstream: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn rebase_onto(workdir: &Path, newbase: &str, upstream: &str) -> Result<()> {
     super::run_git(
         workdir,
         &[
@@ -34,6 +32,6 @@ pub fn rebase_onto(
 }
 
 /// Abort an in-progress rebase.
-pub fn abort(workdir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+pub fn abort(workdir: &Path) -> Result<()> {
     super::run_git(workdir, &["rebase", "--abort"])
 }

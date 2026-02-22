@@ -1,3 +1,4 @@
+use anyhow::{Context, Result, bail};
 use git2::Repository;
 
 use crate::git;
@@ -14,7 +15,7 @@ use crate::weave::{self, Weave};
 /// When the branch is created at a commit that is neither HEAD nor the merge-base,
 /// the topology is restructured: commits after the branch point are rebased onto
 /// the merge-base, and a merge commit joins them with the branch.
-pub fn run(name: Option<String>, target: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
     let repo = git::open_repo()?;
 
     let name = match name {
@@ -32,7 +33,7 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<(), Box<dyn s
 
     let name = name.trim().to_string();
     if name.is_empty() {
-        return Err("Branch name cannot be empty".into());
+        bail!("Branch name cannot be empty");
     }
 
     git_branch::validate_name(&name)?;
@@ -71,7 +72,7 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<(), Box<dyn s
 /// from HEAD to the merge-base (i.e., it's a loose commit on the integration
 /// line, not already on a side branch). Commits at HEAD or the merge-base
 /// are excluded since no topology change is needed for those.
-fn should_weave(repo: &Repository, commit_hash: &str) -> Result<bool, Box<dyn std::error::Error>> {
+fn should_weave(repo: &Repository, commit_hash: &str) -> Result<bool> {
     let info = match git::gather_repo_info(repo) {
         Ok(info) => info,
         Err(_) => return Ok(false), // No upstream info available, skip weave
@@ -105,7 +106,7 @@ pub fn is_on_first_parent_line(
     from: git2::Oid,
     stop: git2::Oid,
     target: git2::Oid,
-) -> Result<bool, Box<dyn std::error::Error>> {
+) -> Result<bool> {
     let mut current = from;
     loop {
         if current == stop {
@@ -126,10 +127,7 @@ pub fn is_on_first_parent_line(
 
 /// Resolve an optional target to a full commit hash.
 /// If no target, defaults to the merge-base (upstream base).
-fn resolve_commit(
-    repo: &Repository,
-    target: Option<&str>,
-) -> Result<String, Box<dyn std::error::Error>> {
+fn resolve_commit(repo: &Repository, target: Option<&str>) -> Result<String> {
     match target {
         None => {
             // Default: merge-base commit
@@ -146,15 +144,14 @@ fn resolve_commit(
                     let oid = branch
                         .get()
                         .target()
-                        .ok_or("Branch does not point to a commit")?;
+                        .context("Branch does not point to a commit")?;
                     Ok(oid.to_string())
                 }
-                git::Target::File(path) => Err(format!(
+                git::Target::File(path) => bail!(
                     "Target resolved to file '{}'. Use a commit or branch target instead.",
                     path
-                )
-                .into()),
-                git::Target::Unstaged => Err("Cannot use unstaged as a branch target.".into()),
+                ),
+                git::Target::Unstaged => bail!("Cannot use unstaged as a branch target."),
             }
         }
     }

@@ -6,12 +6,14 @@ pub mod git_rebase;
 use std::path::Path;
 use std::process::Command;
 
+use anyhow::{Context, Result, bail};
+
 /// Minimum Git version required (--update-refs was added in 2.38).
 const MIN_GIT_VERSION: (u32, u32) = (2, 38);
 
 /// Run a git command in the given working directory.
 /// On failure, returns an error containing stderr output.
-pub fn run_git(workdir: &Path, args: &[&str]) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_git(workdir: &Path, args: &[&str]) -> Result<()> {
     let output = Command::new("git")
         .current_dir(workdir)
         .args(args)
@@ -19,7 +21,7 @@ pub fn run_git(workdir: &Path, args: &[&str]) -> Result<(), Box<dyn std::error::
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("git {} failed:\n{}", args.join(" "), stderr).into());
+        bail!("git {} failed:\n{}", args.join(" "), stderr);
     }
 
     Ok(())
@@ -27,16 +29,16 @@ pub fn run_git(workdir: &Path, args: &[&str]) -> Result<(), Box<dyn std::error::
 
 /// Check that the installed Git version meets the minimum requirement.
 /// Returns an error with an actionable message if the version is too old.
-pub fn check_git_version() -> Result<(), Box<dyn std::error::Error>> {
+pub fn check_git_version() -> Result<()> {
     let output = Command::new("git").arg("--version").output()?;
     let version_str = String::from_utf8_lossy(&output.stdout);
 
     // Parse "git version X.Y.Z..." → (X, Y)
     let (major, minor) = parse_git_version(&version_str)
-        .ok_or_else(|| format!("Could not parse Git version from: {}", version_str.trim()))?;
+        .with_context(|| format!("Could not parse Git version from: {}", version_str.trim()))?;
 
     if (major, minor) < MIN_GIT_VERSION {
-        return Err(format!(
+        bail!(
             "Git {}.{} is too old. git-loom requires Git {}.{} or later (for --update-refs).\n\
              Current version: {}",
             major,
@@ -44,8 +46,7 @@ pub fn check_git_version() -> Result<(), Box<dyn std::error::Error>> {
             MIN_GIT_VERSION.0,
             MIN_GIT_VERSION.1,
             version_str.trim()
-        )
-        .into());
+        );
     }
 
     Ok(())
@@ -62,7 +63,7 @@ fn parse_git_version(version_str: &str) -> Option<(u32, u32)> {
 
 /// Run a git command and return its stdout as a string.
 /// On failure, returns an error containing stderr output.
-pub fn run_git_stdout(workdir: &Path, args: &[&str]) -> Result<String, Box<dyn std::error::Error>> {
+pub fn run_git_stdout(workdir: &Path, args: &[&str]) -> Result<String> {
     let output = Command::new("git")
         .current_dir(workdir)
         .args(args)
@@ -70,7 +71,7 @@ pub fn run_git_stdout(workdir: &Path, args: &[&str]) -> Result<String, Box<dyn s
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("git {} failed:\n{}", args.join(" "), stderr).into());
+        bail!("git {} failed:\n{}", args.join(" "), stderr);
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
@@ -79,14 +80,14 @@ pub fn run_git_stdout(workdir: &Path, args: &[&str]) -> Result<String, Box<dyn s
 /// Get the diff for a single commit (its changes relative to its parent).
 ///
 /// Wraps `git diff <oid>^..<oid>`.
-pub fn diff_commit(workdir: &Path, oid: &str) -> Result<String, Box<dyn std::error::Error>> {
+pub fn diff_commit(workdir: &Path, oid: &str) -> Result<String> {
     run_git_stdout(workdir, &["diff", &format!("{}^..{}", oid, oid)])
 }
 
 /// Apply a patch from stdin.
 ///
 /// Wraps `git apply` with the patch passed via stdin.
-pub fn apply_patch(workdir: &Path, patch: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub fn apply_patch(workdir: &Path, patch: &str) -> Result<()> {
     let mut child = Command::new("git")
         .current_dir(workdir)
         .args(["apply"])
@@ -103,7 +104,7 @@ pub fn apply_patch(workdir: &Path, patch: &str) -> Result<(), Box<dyn std::error
     let output = child.wait_with_output()?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("git apply failed:\n{}", stderr).into());
+        bail!("git apply failed:\n{}", stderr);
     }
 
     Ok(())
@@ -120,7 +121,7 @@ pub fn short_hash(hash: &str) -> &str {
 /// `target/<profile>/deps/`. The actual git-loom binary lives one level up
 /// in `target/<profile>/`. This function detects that case and returns the
 /// correct path.
-pub fn loom_exe_path() -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
+pub fn loom_exe_path() -> Result<std::path::PathBuf> {
     let exe = std::env::current_exe()?;
     if let Some(parent) = exe.parent()
         && parent.file_name().and_then(|n| n.to_str()) == Some("deps")

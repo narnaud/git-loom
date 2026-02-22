@@ -1,4 +1,6 @@
-pub fn run(shell: String) -> Result<(), Box<dyn std::error::Error>> {
+use anyhow::{Result, bail};
+
+pub fn run(shell: String) -> Result<()> {
     match shell.as_str() {
         "powershell" | "pwsh" => {
             print!("{}", include_str!("git-loom.ps1"));
@@ -8,10 +10,9 @@ pub fn run(shell: String) -> Result<(), Box<dyn std::error::Error>> {
             print!("{}", include_str!("git-loom.lua"));
             Ok(())
         }
-        _ => Err(format!(
+        _ => bail!(
             "Unsupported shell: '{}'. Supported shells: powershell, clink",
             shell
-        )
-        .into()),
+        ),
     }
 }

@@ -19,6 +19,7 @@ mod test_helpers;
 
 use std::io::IsTerminal;
 
+use anyhow::Context;
 use clap::{Parser, Subcommand};
 use colored::control;
 
@@ -154,10 +155,10 @@ fn main() {
     }
 }
 
-fn handle_write_todo(source: &str, todo_file: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn handle_write_todo(source: &str, todo_file: &str) -> anyhow::Result<()> {
     let content = std::fs::read_to_string(source)
-        .map_err(|e| format!("Failed to read source file '{}': {}", source, e))?;
+        .with_context(|| format!("Failed to read source file '{}'", source))?;
     std::fs::write(todo_file, content)
-        .map_err(|e| format!("Failed to write todo file '{}': {}", todo_file, e))?;
+        .with_context(|| format!("Failed to write todo file '{}'", todo_file))?;
     Ok(())
 }

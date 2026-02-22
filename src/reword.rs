@@ -1,3 +1,4 @@
+use anyhow::{Context, Result, bail};
 use git2::{Oid, Repository};
 
 use crate::git::{self, Target};
@@ -6,7 +7,7 @@ use crate::git_commands::{self, git_branch, git_commit};
 use crate::weave::{self, Weave};
 
 /// Reword a commit message or rename a branch.
-pub fn run(target: String, message: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(target: String, message: Option<String>) -> Result<()> {
     let repo = git::open_repo()?;
 
     let resolved = git::resolve_target(&repo, &target)?;
@@ -27,8 +28,8 @@ pub fn run(target: String, message: Option<String>) -> Result<(), Box<dyn std::e
             git_branch::validate_name(&new_name)?;
             reword_branch(&repo, &name, &new_name)
         }
-        Target::File(_) => Err("Cannot reword a file. Use 'git add' to stage file changes.".into()),
-        Target::Unstaged => Err("Cannot reword unstaged changes.".into()),
+        Target::File(_) => bail!("Cannot reword a file. Use 'git add' to stage file changes."),
+        Target::Unstaged => bail!("Cannot reword unstaged changes."),
     }
 }
 
@@ -39,11 +40,7 @@ pub fn run(target: String, message: Option<String>) -> Result<(), Box<dyn std::e
 /// 2. Run rebase (pauses at the target commit)
 /// 3. git commit --allow-empty --amend --only [-m "message"]
 /// 4. git rebase --continue
-pub fn reword_commit(
-    repo: &Repository,
-    commit_hash: &str,
-    message: Option<String>,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn reword_commit(repo: &Repository, commit_hash: &str, message: Option<String>) -> Result<()> {
     let workdir = git::require_workdir(repo, "reword")?;
 
     let commit_oid = repo.revparse_single(commit_hash)?.peel_to_commit()?.id();
@@ -78,11 +75,7 @@ pub fn reword_commit(
 /// Tries `Weave::from_repo()` first for full topology-aware rebase on
 /// integration branches. Falls back to a minimal linear todo for non-integration
 /// repos (no upstream tracking).
-fn start_edit_rebase(
-    repo: &Repository,
-    workdir: &std::path::Path,
-    commit_oid: Oid,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn start_edit_rebase(repo: &Repository, workdir: &std::path::Path, commit_oid: Oid) -> Result<()> {
     // Try Weave::from_repo first (for integration branches)
     if let Ok(mut graph) = Weave::from_repo(repo) {
         graph.edit_commit(commit_oid);
@@ -102,7 +95,7 @@ fn build_and_run_linear_edit(
     repo: &Repository,
     workdir: &std::path::Path,
     commit_oid: Oid,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     let head_oid = git::head_oid(repo)?;
     let commit = repo.find_commit(commit_oid)?;
 
@@ -129,7 +122,7 @@ fn build_and_run_linear_edit(
             .as_object()
             .short_id()?
             .as_str()
-            .ok_or("short_id not valid UTF-8")?
+            .context("short_id not valid UTF-8")?
             .to_string();
         let msg = c.summary().unwrap_or("").to_string();
         let cmd = if current == commit_oid {
@@ -158,11 +151,7 @@ fn build_and_run_linear_edit(
 }
 
 /// Rename a branch using git branch -m.
-pub fn reword_branch(
-    repo: &Repository,
-    old_name: &str,
-    new_name: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn reword_branch(repo: &Repository, old_name: &str, new_name: &str) -> Result<()> {
     let workdir = git::require_workdir(repo, "rename branch")?;
 
     git_branch::rename(workdir, old_name, new_name)?;

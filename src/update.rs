@@ -1,3 +1,4 @@
+use anyhow::{Context, Result, bail};
 use git2::BranchType;
 
 use crate::git;
@@ -9,32 +10,31 @@ use crate::git_commands;
 /// `git rebase --autostash <upstream>` on the current integration branch,
 /// then updates submodules if any are configured. On merge conflict, the error
 /// is reported so the user can resolve it manually.
-pub fn run() -> Result<(), Box<dyn std::error::Error>> {
+pub fn run() -> Result<()> {
     let repo = git::open_repo()?;
 
     // Validate that we're on a branch with an upstream tracking ref
     let head = repo.head()?;
     if !head.is_branch() {
-        return Err("HEAD is detached. Please switch to an integration branch.".into());
+        bail!("HEAD is detached. Please switch to an integration branch.");
     }
 
     let branch_name = head
         .shorthand()
-        .ok_or("Could not determine current branch name")?
+        .context("Could not determine current branch name")?
         .to_string();
 
     let local_branch = repo.find_branch(&branch_name, BranchType::Local)?;
-    let upstream = local_branch.upstream().map_err(|e| {
+    let upstream = local_branch.upstream().with_context(|| {
         format!(
             "Branch '{}' has no upstream tracking branch.\n\
-             Run 'git-loom init' to set up an integration branch.\n\
-             Cause: {}",
-            branch_name, e
+             Run 'git-loom init' to set up an integration branch.",
+            branch_name
         )
     })?;
     let upstream_name = upstream
         .name()?
-        .ok_or("Upstream branch name is not valid UTF-8")?
+        .context("Upstream branch name is not valid UTF-8")?
         .to_string();
 
     let workdir = git::require_workdir(&repo, "update")?;

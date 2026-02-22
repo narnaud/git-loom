@@ -1,3 +1,4 @@
+use anyhow::{Result, bail};
 use git2::{BranchType, Repository};
 
 use crate::git;
@@ -8,13 +9,13 @@ use crate::git_commands::git_branch;
 /// Creates a branch (default name: "loom") at the upstream tip and switches to it.
 /// The remote is auto-detected from the current branch's upstream tracking ref.
 /// If no upstream is found, the user is prompted to choose one.
-pub fn run(name: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(name: Option<String>) -> Result<()> {
     let repo = git::open_repo()?;
 
     let name = name.unwrap_or_else(|| "loom".to_string());
     let name = name.trim().to_string();
     if name.is_empty() {
-        return Err("Branch name cannot be empty".into());
+        bail!("Branch name cannot be empty");
     }
 
     git_branch::validate_name(&name)?;
@@ -42,7 +43,7 @@ pub fn run(name: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
 /// 2. Otherwise, check each remote's HEAD symref (e.g., refs/remotes/origin/HEAD).
 /// 3. Fall back to scanning for common branch names (main, master, develop).
 /// 4. If exactly one candidate, use it. If multiple, prompt the user.
-fn detect_upstream(repo: &Repository) -> Result<String, Box<dyn std::error::Error>> {
+fn detect_upstream(repo: &Repository) -> Result<String> {
     // Try the current branch's upstream first
     if let Ok(head) = repo.head()
         && head.is_branch()
@@ -58,9 +59,10 @@ fn detect_upstream(repo: &Repository) -> Result<String, Box<dyn std::error::Erro
     let candidates = gather_remote_candidates(repo)?;
 
     match candidates.len() {
-        0 => Err("No remote tracking branches found.\n\
+        0 => bail!(
+            "No remote tracking branches found.\n\
              Set up a remote with: git remote add origin <url>"
-            .into()),
+        ),
         1 => Ok(candidates[0].clone()),
         _ => {
             // Prompt the user to pick
@@ -82,7 +84,7 @@ fn detect_upstream(repo: &Repository) -> Result<String, Box<dyn std::error::Erro
 /// For each remote, first checks the remote's HEAD symref (e.g., refs/remotes/origin/HEAD)
 /// which points to the remote's default branch. Falls back to scanning for common
 /// branch names (main, master, develop) if the HEAD symref is not available.
-fn gather_remote_candidates(repo: &Repository) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+fn gather_remote_candidates(repo: &Repository) -> Result<Vec<String>> {
     let mut candidates = Vec::new();
 
     let remotes = repo.remotes()?;

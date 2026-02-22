@@ -1,5 +1,7 @@
-use git2::{Oid, Repository};
 use std::path::Path;
+
+use anyhow::{Context, Result, bail};
+use git2::{Oid, Repository};
 
 use crate::git;
 use crate::git_commands;
@@ -141,7 +143,7 @@ impl Weave {
     ///
     /// Walks the first-parent line from HEAD to the merge-base, collecting
     /// branch sections (from merge commits) and integration-line entries.
-    pub fn from_repo(repo: &Repository) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_repo(repo: &Repository) -> Result<Self> {
         let info = git::gather_repo_info(repo)?;
         let head_oid = git::head_oid(repo)?;
         let merge_base_oid = info.upstream.merge_base_oid;
@@ -599,7 +601,7 @@ fn walk_first_parent_line(
     repo: &Repository,
     head: Oid,
     stop: Oid,
-) -> Result<Vec<FirstParentEntry>, Box<dyn std::error::Error>> {
+) -> Result<Vec<FirstParentEntry>> {
     let mut entries = Vec::new();
     let mut current = head;
 
@@ -610,7 +612,7 @@ fn walk_first_parent_line(
             .as_object()
             .short_id()?
             .as_str()
-            .ok_or_else(|| git2::Error::from_str("short_id is not valid UTF-8"))?
+            .context("short_id is not valid UTF-8")?
             .to_string();
         let message = commit.summary().unwrap_or("").to_string();
 
@@ -644,11 +646,7 @@ fn walk_first_parent_line(
 /// Walk branch commits from `tip` back to `stop` (exclusive), skipping merges.
 ///
 /// Returns entries in newest-first order (like a revwalk).
-fn walk_branch_commits(
-    repo: &Repository,
-    tip: Oid,
-    stop: Oid,
-) -> Result<Vec<BranchCommitEntry>, Box<dyn std::error::Error>> {
+fn walk_branch_commits(repo: &Repository, tip: Oid, stop: Oid) -> Result<Vec<BranchCommitEntry>> {
     let mut entries = Vec::new();
     let mut current = tip;
 
@@ -661,7 +659,7 @@ fn walk_branch_commits(
                 .as_object()
                 .short_id()?
                 .as_str()
-                .ok_or_else(|| git2::Error::from_str("short_id is not valid UTF-8"))?
+                .context("short_id is not valid UTF-8")?
                 .to_string();
             let message = commit.summary().unwrap_or("").to_string();
 
@@ -698,11 +696,7 @@ struct BranchCommitEntry {
 /// this OID (exclusive) up to HEAD are rebased. This is passed directly as the
 /// `<upstream>` argument to `git rebase`, NOT with a `^` suffix. For root
 /// commits, pass `None` to use `--root`.
-pub fn run_rebase(
-    workdir: &Path,
-    upstream: Option<&str>,
-    todo_content: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_rebase(workdir: &Path, upstream: Option<&str>, todo_content: &str) -> Result<()> {
     use std::io::Write;
     use std::process::Command;
 
@@ -755,7 +749,7 @@ pub fn run_rebase(
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let _ = git_commands::git_rebase::abort(workdir);
-        return Err(format!("Git rebase failed:\n{}", stderr).into());
+        bail!("Git rebase failed:\n{}", stderr);
     }
 
     // Clean up the temp file

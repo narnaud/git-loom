@@ -143,7 +143,7 @@ fn detached_head_returns_error() {
 
     let result = gather_repo_info(&test_repo.repo);
     assert!(result.is_err());
-    assert!(result.unwrap_err().message().contains("detached"));
+    assert!(result.unwrap_err().to_string().contains("detached"));
 }
 
 #[test]
@@ -152,7 +152,7 @@ fn no_upstream_returns_error() {
 
     let result = gather_repo_info(&test_repo.repo);
     assert!(result.is_err());
-    assert!(result.unwrap_err().message().contains("upstream"));
+    assert!(result.unwrap_err().to_string().contains("upstream"));
 }
 
 #[test]

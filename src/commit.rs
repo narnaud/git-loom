@@ -1,3 +1,4 @@
+use anyhow::{Context, Result, bail};
 use git2::{Repository, StatusOptions};
 
 use crate::git::{self, Target};
@@ -5,15 +6,11 @@ use crate::git_commands::{self, git_branch, git_commit};
 use crate::weave::{self, Weave};
 
 /// Verify that we're on an integration branch (has upstream tracking).
-fn verify_on_integration_branch(repo: &Repository) -> Result<(), Box<dyn std::error::Error>> {
-    git::gather_repo_info(repo).map_err(|e| {
-        format!(
-            "Must be on an integration branch to use commit. \
-             Use `git commit` directly on feature branches.\n\
-             Cause: {}",
-            e
-        )
-    })?;
+fn verify_on_integration_branch(repo: &Repository) -> Result<()> {
+    git::gather_repo_info(repo).context(
+        "Must be on an integration branch to use commit. \
+         Use `git commit` directly on feature branches.",
+    )?;
     Ok(())
 }
 
@@ -21,11 +18,7 @@ fn verify_on_integration_branch(repo: &Repository) -> Result<(), Box<dyn std::er
 ///
 /// Stages files, creates the commit at HEAD, then uses Weave to relocate
 /// it to the target feature branch (creating merge topology if needed).
-pub fn run(
-    branch: Option<String>,
-    message: Option<String>,
-    files: Vec<String>,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) -> Result<()> {
     let repo = git::open_repo()?;
     let workdir = git::require_workdir(&repo, "commit")?.to_path_buf();
 
@@ -88,11 +81,7 @@ pub fn run(
 /// - Empty: use index as-is
 /// - Contains "zz": stage all changes
 /// - Otherwise: resolve each arg as short ID or file path, then stage
-fn resolve_staging(
-    repo: &Repository,
-    workdir: &std::path::Path,
-    files: &[String],
-) -> Result<(), Box<dyn std::error::Error>> {
+fn resolve_staging(repo: &Repository, workdir: &std::path::Path, files: &[String]) -> Result<()> {
     if files.is_empty() {
         return Ok(());
     }
@@ -115,27 +104,23 @@ fn resolve_staging(
 }
 
 /// Resolve a file argument: try as short ID first, fall back to filesystem path.
-fn resolve_file_arg(
-    repo: &Repository,
-    workdir: &std::path::Path,
-    arg: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
+fn resolve_file_arg(repo: &Repository, workdir: &std::path::Path, arg: &str) -> Result<String> {
     match git::resolve_target(repo, arg) {
         Ok(Target::File(path)) => Ok(path),
-        Ok(_) => Err(format!("'{}' is not a file", arg).into()),
+        Ok(_) => bail!("'{}' is not a file", arg),
         Err(_) => {
             let full_path = workdir.join(arg);
             if full_path.exists() {
                 Ok(arg.to_string())
             } else {
-                Err(format!("File '{}' not found", arg).into())
+                bail!("File '{}' not found", arg)
             }
         }
     }
 }
 
 /// Verify that the index has staged changes.
-fn verify_has_staged_changes(repo: &Repository) -> Result<(), Box<dyn std::error::Error>> {
+fn verify_has_staged_changes(repo: &Repository) -> Result<()> {
     let mut opts = StatusOptions::new();
     opts.include_untracked(false);
 
@@ -147,17 +132,14 @@ fn verify_has_staged_changes(repo: &Repository) -> Result<(), Box<dyn std::error
     });
 
     if !has_staged {
-        return Err("Nothing to commit".into());
+        bail!("Nothing to commit");
     }
 
     Ok(())
 }
 
 /// Resolve the target branch: explicit name/shortID, or interactive picker.
-fn resolve_branch_target(
-    repo: &Repository,
-    branch: Option<&str>,
-) -> Result<String, Box<dyn std::error::Error>> {
+fn resolve_branch_target(repo: &Repository, branch: Option<&str>) -> Result<String> {
     match branch {
         Some(b) => resolve_explicit_branch(repo, b),
         None => pick_branch(repo),
@@ -169,10 +151,7 @@ fn resolve_branch_target(
 /// - Known woven branch (by name or short ID): use it
 /// - Known branch but not woven: error
 /// - Unknown: treat as new branch name, validate, create at merge-base, weave
-fn resolve_explicit_branch(
-    repo: &Repository,
-    branch: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
+fn resolve_explicit_branch(repo: &Repository, branch: &str) -> Result<String> {
     let info = git::gather_repo_info(repo)?;
 
     match git::resolve_target(repo, branch) {
@@ -180,30 +159,28 @@ fn resolve_explicit_branch(
             if info.branches.iter().any(|b| b.name == name) {
                 Ok(name)
             } else {
-                Err(format!(
+                bail!(
                     "Branch '{}' is not woven into the integration branch.",
                     name
                 )
-                .into())
             }
         }
-        Ok(Target::Commit(_)) => Err("Commit target must be a branch".into()),
-        Ok(Target::File(_)) => Err("File target must be a branch".into()),
-        Ok(Target::Unstaged) => Err("Unstaged target must be a branch".into()),
+        Ok(Target::Commit(_)) => bail!("Commit target must be a branch"),
+        Ok(Target::File(_)) => bail!("File target must be a branch"),
+        Ok(Target::Unstaged) => bail!("Unstaged target must be a branch"),
         Err(_) => {
             // Treat as new branch name
             let name = branch.trim().to_string();
             if name.is_empty() {
-                return Err("Branch name cannot be empty".into());
+                bail!("Branch name cannot be empty");
             }
             git_branch::validate_name(&name)?;
 
             if repo.find_branch(&name, git2::BranchType::Local).is_ok() {
-                return Err(format!(
+                bail!(
                     "Branch '{}' exists but is not woven into the integration branch.",
                     name
-                )
-                .into());
+                );
             }
 
             let workdir = git::require_workdir(repo, "create branch")?;
@@ -214,7 +191,7 @@ fn resolve_explicit_branch(
 }
 
 /// Interactive branch picker: list woven branches + option to create new.
-fn pick_branch(repo: &Repository) -> Result<String, Box<dyn std::error::Error>> {
+fn pick_branch(repo: &Repository) -> Result<String> {
     let info = git::gather_repo_info(repo)?;
 
     if info.branches.is_empty() {
@@ -238,7 +215,7 @@ fn pick_branch(repo: &Repository) -> Result<String, Box<dyn std::error::Error>> 
 }
 
 /// Prompt for a new branch name and create it at merge-base.
-fn prompt_new_branch(repo: &Repository) -> Result<String, Box<dyn std::error::Error>> {
+fn prompt_new_branch(repo: &Repository) -> Result<String> {
     let name: String = cliclack::input("Branch name")
         .validate(|s: &String| {
             if s.trim().is_empty() {
@@ -259,13 +236,10 @@ fn prompt_new_branch(repo: &Repository) -> Result<String, Box<dyn std::error::Er
 }
 
 /// Check if a branch points to the merge-base commit (i.e., has no commits of its own).
-fn is_branch_at_merge_base(
-    repo: &Repository,
-    branch_name: &str,
-) -> Result<bool, Box<dyn std::error::Error>> {
+fn is_branch_at_merge_base(repo: &Repository, branch_name: &str) -> Result<bool> {
     let info = git::gather_repo_info(repo)?;
     let branch = repo.find_branch(branch_name, git2::BranchType::Local)?;
-    let branch_oid = branch.get().target().ok_or("Branch has no target")?;
+    let branch_oid = branch.get().target().context("Branch has no target")?;
     Ok(branch_oid == info.upstream.merge_base_oid)
 }
 
@@ -277,7 +251,7 @@ fn create_branch_at_merge_base(
     repo: &Repository,
     workdir: &std::path::Path,
     name: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     let info = git::gather_repo_info(repo)?;
     let merge_base_hash = info.upstream.merge_base_oid.to_string();
 

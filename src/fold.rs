@@ -1,3 +1,4 @@
+use anyhow::{Result, bail};
 use git2::{Repository, StatusOptions};
 
 use crate::git::{self, Target};
@@ -10,11 +11,12 @@ use crate::weave::{self, Weave};
 /// - File(s) + Commit → amend files into the commit
 /// - Commit + Commit  → fixup source into target (source disappears)
 /// - Commit + Branch   → move commit to the branch
-pub fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: Vec<String>) -> Result<()> {
     if args.len() < 2 {
-        return Err("Usage: git-loom fold <source>... <target>\n\
-                     At least two arguments required (one source + one target)."
-            .into());
+        bail!(
+            "Usage: git-loom fold <source>... <target>\n\
+             At least two arguments required (one source + one target)."
+        );
     }
 
     let repo = git::open_repo()?;
@@ -51,19 +53,18 @@ enum FoldOp {
 }
 
 /// Classify resolved arguments into a specific fold operation.
-fn classify(sources: &[Target], target: &Target) -> Result<FoldOp, Box<dyn std::error::Error>> {
+fn classify(sources: &[Target], target: &Target) -> Result<FoldOp> {
     // Check for invalid source types
     for source in sources {
         match source {
             Target::Branch(_) => {
-                return Err(
-                    "Cannot fold a branch. Use 'git loom branch' for branch operations.".into(),
-                );
+                bail!("Cannot fold a branch. Use 'git loom branch' for branch operations.");
             }
             Target::Unstaged => {
-                return Err("Cannot fold unstaged changes. Stage files first, or use \
-                            'git loom fold <file> <commit>' to amend specific files."
-                    .into());
+                bail!(
+                    "Cannot fold unstaged changes. Stage files first, or use \
+                     'git loom fold <file> <commit>' to amend specific files."
+                );
             }
             _ => {}
         }
@@ -73,14 +74,11 @@ fn classify(sources: &[Target], target: &Target) -> Result<FoldOp, Box<dyn std::
     if matches!(target, Target::Unstaged) {
         let has_files = sources.iter().any(|s| matches!(s, Target::File(_)));
         if has_files {
-            return Err(
-                "Cannot fold files into unstaged — files are already in the working directory."
-                    .into(),
-            );
+            bail!("Cannot fold files into unstaged — files are already in the working directory.");
         }
 
         if sources.len() > 1 {
-            return Err("Only one commit source is allowed".into());
+            bail!("Only one commit source is allowed");
         }
 
         let source_hash = match &sources[0] {
@@ -98,7 +96,7 @@ fn classify(sources: &[Target], target: &Target) -> Result<FoldOp, Box<dyn std::
     let has_commits = sources.iter().any(|s| matches!(s, Target::Commit(_)));
 
     if has_files && has_commits {
-        return Err("Cannot mix file and commit sources".into());
+        bail!("Cannot mix file and commit sources");
     }
 
     if has_files {
@@ -117,15 +115,15 @@ fn classify(sources: &[Target], target: &Target) -> Result<FoldOp, Box<dyn std::
                 commit: hash.clone(),
             }),
             Target::Branch(_) => {
-                Err("Cannot fold files into a branch. Target a specific commit.".into())
+                bail!("Cannot fold files into a branch. Target a specific commit.")
             }
-            Target::File(_) => Err("Target must be a commit or branch, not a file.".into()),
+            Target::File(_) => bail!("Target must be a commit or branch, not a file."),
             Target::Unstaged => unreachable!(),
         }
     } else {
         // Commit(s) + target
         if sources.len() > 1 {
-            return Err("Only one commit source is allowed".into());
+            bail!("Only one commit source is allowed");
         }
 
         let source_hash = match &sources[0] {
@@ -142,7 +140,7 @@ fn classify(sources: &[Target], target: &Target) -> Result<FoldOp, Box<dyn std::
                 commit: source_hash,
                 branch: name.clone(),
             }),
-            Target::File(_) => Err("Target must be a commit or branch, not a file.".into()),
+            Target::File(_) => bail!("Target must be a commit or branch, not a file."),
             Target::Unstaged => unreachable!(),
         }
     }
@@ -152,7 +150,7 @@ fn classify(sources: &[Target], target: &Target) -> Result<FoldOp, Box<dyn std::
 ///
 /// Tries `resolve_target()` first (handles branches, git refs, short IDs).
 /// Falls back to checking if the argument is a filesystem path with changes.
-fn resolve_fold_arg(repo: &Repository, arg: &str) -> Result<Target, Box<dyn std::error::Error>> {
+fn resolve_fold_arg(repo: &Repository, arg: &str) -> Result<Target> {
     match git::resolve_target(repo, arg) {
         Ok(target) => Ok(target),
         Err(resolve_err) => {
@@ -169,7 +167,7 @@ fn resolve_fold_arg(repo: &Repository, arg: &str) -> Result<Target, Box<dyn std:
 }
 
 /// Check if a file has staged or unstaged changes.
-fn file_has_changes(repo: &Repository, path: &str) -> Result<bool, Box<dyn std::error::Error>> {
+fn file_has_changes(repo: &Repository, path: &str) -> Result<bool> {
     let mut opts = StatusOptions::new();
     opts.pathspec(path)
         .include_untracked(true)
@@ -180,17 +178,13 @@ fn file_has_changes(repo: &Repository, path: &str) -> Result<bool, Box<dyn std::
 }
 
 /// Fold file changes into a commit (Case 1: File(s) + Commit).
-fn fold_files_into_commit(
-    repo: &Repository,
-    files: &[String],
-    commit_hash: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str) -> Result<()> {
     let workdir = git::require_workdir(repo, "fold")?;
 
     // Validate all files have changes
     for file in files {
         if !file_has_changes(repo, file)? {
-            return Err(format!("File '{}' has no changes to fold", file).into());
+            bail!("File '{}' has no changes to fold", file);
         }
     }
 
@@ -229,11 +223,7 @@ fn fold_files_into_commit(
 }
 
 /// Fold a commit into another commit (Case 2: Commit + Commit → Fixup).
-fn fold_commit_into_commit(
-    repo: &Repository,
-    source_hash: &str,
-    target_hash: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn fold_commit_into_commit(repo: &Repository, source_hash: &str, target_hash: &str) -> Result<()> {
     let workdir = git::require_workdir(repo, "fold")?;
 
     // Validate source is a descendant of target (source is newer)
@@ -241,11 +231,11 @@ fn fold_commit_into_commit(
     let target_oid = git2::Oid::from_str(target_hash)?;
 
     if source_oid == target_oid {
-        return Err("Source and target are the same commit".into());
+        bail!("Source and target are the same commit");
     }
 
     if !repo.graph_descendant_of(source_oid, target_oid)? {
-        return Err("Source commit must be newer than target commit".into());
+        bail!("Source commit must be newer than target commit");
     }
 
     let mut graph = Weave::from_repo(repo)?;
@@ -264,11 +254,7 @@ fn fold_commit_into_commit(
 }
 
 /// Move a commit to a branch (Case 3: Commit + Branch → Move).
-fn fold_commit_to_branch(
-    repo: &Repository,
-    commit_hash: &str,
-    branch_name: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn fold_commit_to_branch(repo: &Repository, commit_hash: &str, branch_name: &str) -> Result<()> {
     move_commit_to_branch(repo, commit_hash, branch_name)?;
 
     println!(
@@ -290,7 +276,7 @@ pub fn move_commit_to_branch(
     repo: &Repository,
     commit_hash: &str,
     branch_name: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     let workdir = git::require_workdir(repo, "fold")?;
 
     let commit_oid = git2::Oid::from_str(commit_hash)?;
@@ -308,10 +294,7 @@ pub fn move_commit_to_branch(
 ///
 /// Removes the commit from history and places its changes in the working
 /// directory as unstaged modifications.
-fn fold_commit_to_unstaged(
-    repo: &Repository,
-    commit_hash: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
     let workdir = git::require_workdir(repo, "fold")?;
 
     let head_oid = git::head_oid(repo)?;

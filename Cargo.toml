@@ -5,6 +5,7 @@ edition = "2024"
 rust-version = "1.90"
 
 [dependencies]
+anyhow = "1"
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
 cliclack = "0.3"

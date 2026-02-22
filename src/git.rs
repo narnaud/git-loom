@@ -1,10 +1,11 @@
 use std::path::Path;
 
+use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use git2::{BranchType, Repository, StatusOptions};
 
 /// Open a `Repository` by discovering it from the current working directory.
-pub fn open_repo() -> Result<Repository, Box<dyn std::error::Error>> {
+pub fn open_repo() -> Result<Repository> {
     let cwd = std::env::current_dir()?;
     Ok(Repository::discover(cwd)?)
 }
@@ -12,28 +13,20 @@ pub fn open_repo() -> Result<Repository, Box<dyn std::error::Error>> {
 /// Return the working directory of the repository, or error if bare.
 ///
 /// `operation` is a verb phrase used in the error message (e.g. "commit", "fold").
-pub fn require_workdir<'a>(
-    repo: &'a Repository,
-    operation: &str,
-) -> Result<&'a Path, Box<dyn std::error::Error>> {
+pub fn require_workdir<'a>(repo: &'a Repository, operation: &str) -> Result<&'a Path> {
     repo.workdir()
-        .ok_or_else(|| format!("Cannot {operation} in bare repository").into())
+        .with_context(|| format!("Cannot {operation} in bare repository"))
 }
 
 /// Return the OID that HEAD points to.
-pub fn head_oid(repo: &Repository) -> Result<git2::Oid, Box<dyn std::error::Error>> {
-    repo.head()?
-        .target()
-        .ok_or_else(|| "HEAD has no target".into())
+pub fn head_oid(repo: &Repository) -> Result<git2::Oid> {
+    repo.head()?.target().context("HEAD has no target")
 }
 
 /// Error if a local branch with the given name already exists.
-pub fn ensure_branch_not_exists(
-    repo: &Repository,
-    name: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn ensure_branch_not_exists(repo: &Repository, name: &str) -> Result<()> {
     if repo.find_branch(name, BranchType::Local).is_ok() {
-        return Err(format!("Branch '{name}' already exists").into());
+        bail!("Branch '{name}' already exists");
     }
     Ok(())
 }
@@ -138,48 +131,38 @@ pub struct FileChange {
 
 /// Collect all data needed for the status display: walk commits from HEAD to the
 /// upstream tracking branch, detect feature branches, and gather working tree status.
-pub fn gather_repo_info(repo: &Repository) -> Result<RepoInfo, git2::Error> {
+pub fn gather_repo_info(repo: &Repository) -> Result<RepoInfo> {
     let head = repo.head()?;
 
     if !head.is_branch() {
-        return Err(git2::Error::from_str(
-            "HEAD is detached. git-loom requires being on a branch.",
-        ));
+        bail!("HEAD is detached. git-loom requires being on a branch.");
     }
 
-    let head_oid = head
-        .target()
-        .ok_or_else(|| git2::Error::from_str("HEAD does not point to a commit"))?;
+    let head_oid = head.target().context("HEAD does not point to a commit")?;
 
     let branch_name = head.shorthand().unwrap_or("HEAD").to_string();
 
     let local_branch = repo
         .find_branch(&branch_name, BranchType::Local)
-        .map_err(|e| {
-            git2::Error::from_str(&format!(
-                "branch '{}' not found — are you on a branch? ({})",
-                branch_name, e
-            ))
-        })?;
+        .with_context(|| format!("branch '{}' not found — are you on a branch?", branch_name))?;
 
-    let upstream = local_branch.upstream().map_err(|e| {
-        git2::Error::from_str(&format!(
+    let upstream = local_branch.upstream().with_context(|| {
+        format!(
             "branch '{}' has no upstream tracking branch.\n\
-             Set one with: git branch --set-upstream-to=origin/main {}\n\
-             Cause: {}",
-            branch_name, branch_name, e
-        ))
+             Set one with: git branch --set-upstream-to=origin/main {}",
+            branch_name, branch_name
+        )
     })?;
 
     let upstream_name = upstream
         .name()?
-        .ok_or_else(|| git2::Error::from_str("upstream branch name is not valid UTF-8"))?
+        .context("upstream branch name is not valid UTF-8")?
         .to_string();
 
     let upstream_oid = upstream
         .get()
         .target()
-        .ok_or_else(|| git2::Error::from_str("upstream does not point to a commit"))?;
+        .context("upstream does not point to a commit")?;
 
     let merge_base_oid = repo.merge_base(head_oid, upstream_oid)?;
 
@@ -203,7 +186,7 @@ pub fn gather_repo_info(repo: &Repository) -> Result<RepoInfo, git2::Error> {
         .as_object()
         .short_id()?
         .as_str()
-        .ok_or_else(|| git2::Error::from_str("base commit short_id is not valid UTF-8"))?
+        .context("base commit short_id is not valid UTF-8")?
         .to_string();
     let base_message = base_commit.summary().unwrap_or("").to_string();
     let base_time = base_commit.time();
@@ -256,16 +239,13 @@ pub fn gather_repo_info(repo: &Repository) -> Result<RepoInfo, git2::Error> {
 /// - `Target::Branch(name)` - A branch name (from full name or branch shortid)
 /// - `Target::Commit(hash)` - A commit hash (from git ref or commit shortid)
 /// - `Target::File(path)` - A file path (from file shortid only)
-pub fn resolve_target(
-    repo: &Repository,
-    target: &str,
-) -> Result<Target, Box<dyn std::error::Error>> {
+pub fn resolve_target(repo: &Repository, target: &str) -> Result<Target> {
     // First, check if it's a local branch name
     // This allows intuitive branch operations: "git-loom reword feature-a -m new-name"
     if let Ok(branch) = repo.find_branch(target, BranchType::Local) {
         let branch_name = branch
             .name()?
-            .ok_or("Branch name is not valid UTF-8")?
+            .context("Branch name is not valid UTF-8")?
             .to_string();
         return Ok(Target::Branch(branch_name));
     }
@@ -283,7 +263,7 @@ pub fn resolve_target(
 }
 
 /// Resolve a shortid to a commit, branch, or file by rebuilding the graph.
-fn resolve_shortid(repo: &Repository, shortid: &str) -> Result<Target, Box<dyn std::error::Error>> {
+fn resolve_shortid(repo: &Repository, shortid: &str) -> Result<Target> {
     // Gather repo info (this checks for upstream and builds the graph)
     let info = gather_repo_info(repo)?;
 
@@ -317,19 +297,14 @@ fn resolve_shortid(repo: &Repository, shortid: &str) -> Result<Target, Box<dyn s
         }
     }
 
-    Err(format!(
+    bail!(
         "No commit, branch, file, or target with shortid '{}'. Run 'git-loom status' to see available IDs.",
         shortid
     )
-    .into())
 }
 
 /// Count the number of commits reachable from `from` but not from `hide`.
-fn count_commits(
-    repo: &Repository,
-    from: git2::Oid,
-    hide: git2::Oid,
-) -> Result<usize, git2::Error> {
+fn count_commits(repo: &Repository, from: git2::Oid, hide: git2::Oid) -> Result<usize> {
     if from == hide {
         return Ok(0);
     }
@@ -357,7 +332,7 @@ fn walk_commits(
     repo: &Repository,
     head_oid: git2::Oid,
     stop_oid: git2::Oid,
-) -> Result<Vec<CommitInfo>, git2::Error> {
+) -> Result<Vec<CommitInfo>> {
     let mut revwalk = repo.revwalk()?;
     revwalk.push(head_oid)?;
     revwalk.hide(stop_oid)?;
@@ -375,7 +350,7 @@ fn walk_commits(
             .as_object()
             .short_id()?
             .as_str()
-            .ok_or_else(|| git2::Error::from_str("short_id is not valid UTF-8"))?
+            .context("short_id is not valid UTF-8")?
             .to_string();
         let message = commit.summary().unwrap_or("").to_string();
         let parent_oid = commit.parent_id(0).ok();
@@ -399,7 +374,7 @@ fn find_branches_in_range(
     merge_base_oid: git2::Oid,
     current_branch: &str,
     upstream_name: &str,
-) -> Result<Vec<BranchInfo>, git2::Error> {
+) -> Result<Vec<BranchInfo>> {
     let mut branches = Vec::new();
     for branch_result in repo.branches(Some(BranchType::Local))? {
         let (branch, _) = branch_result?;
@@ -429,7 +404,7 @@ fn find_branches_in_range(
     Ok(branches)
 }
 
-fn get_working_changes(repo: &Repository) -> Result<Vec<FileChange>, git2::Error> {
+fn get_working_changes(repo: &Repository) -> Result<Vec<FileChange>> {
     let mut opts = StatusOptions::new();
     opts.include_untracked(true).recurse_untracked_dirs(true);
 
