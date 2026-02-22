@@ -13,7 +13,8 @@ Register-ArgumentCompleter -Native -CommandName 'git-loom' -ScriptBlock {
         @{ Name = 'drop';    Description = 'Drop a commit or a branch from history' },
         @{ Name = 'fold';    Description = 'Fold source(s) into a target' },
         @{ Name = 'update';  Description = 'Pull-rebase the integration branch' },
-        @{ Name = 'completions'; Description = 'Generate shell completions' }
+        @{ Name = 'completions'; Description = 'Generate shell completions' },
+        @{ Name = 'push';    Description = 'Push the integration branch to the remote' }
     )
 
     $globalFlags = @(

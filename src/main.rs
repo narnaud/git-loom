@@ -7,6 +7,7 @@ mod git;
 mod git_commands;
 mod graph;
 mod init;
+mod push;
 mod reword;
 mod shortid;
 mod status;
@@ -79,6 +80,11 @@ enum Command {
         #[arg(required = true, num_args = 2..)]
         args: Vec<String>,
     },
+    /// Push a feature branch to remote
+    Push {
+        /// Branch name or short ID (if not provided, will prompt interactively)
+        branch: Option<String>,
+    },
     /// Pull-rebase the integration branch and update submodules
     Update,
     /// Generate shell completions (powershell, clink)
@@ -133,6 +139,7 @@ fn main() {
             files,
         }) => commit::run(branch, message, files),
         Some(Command::Drop { target }) => drop::run(target),
+        Some(Command::Push { branch }) => push::run(branch),
         Some(Command::Update) => update::run(),
         Some(Command::Fold { args }) => fold::run(args),
         Some(Command::Completions { .. }) => unreachable!(),

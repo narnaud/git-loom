@@ -20,6 +20,7 @@ clink.argmatcher("git-loom")
         "commit"       .. commit_matcher,
         "drop",
         "fold",
-        "update"
+        "update",
+        "push"
     )
     :addflags("--no-color", "--help", "-h")
