@@ -63,6 +63,14 @@ pub fn commit(workdir: &Path, message: &str) -> Result<(), Box<dyn std::error::E
     super::run_git(workdir, &["commit", "-m", message])
 }
 
+/// Mixed reset to a target ref (uncommit and unstage).
+///
+/// Wraps `git reset <target>`. Moves HEAD to the target while keeping
+/// changes in the working directory as unstaged modifications.
+pub fn reset_mixed(workdir: &Path, target: &str) -> Result<(), Box<dyn std::error::Error>> {
+    super::run_git(workdir, &["reset", target])
+}
+
 /// Stage all changes (staged, unstaged, and untracked).
 ///
 /// Wraps `git add -A`.

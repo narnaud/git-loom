@@ -259,6 +259,7 @@ fn resolve_full_commit_hash() {
         crate::git::Target::Commit(hash) => assert_eq!(hash, head_oid.to_string()),
         crate::git::Target::Branch(_) => panic!("Expected Commit, got Branch"),
         crate::git::Target::File(_) => panic!("Expected Commit, got File"),
+        crate::git::Target::Unstaged => panic!("Expected Commit, got Unstaged"),
     }
 }
 
@@ -276,6 +277,7 @@ fn resolve_partial_commit_hash() {
         crate::git::Target::Commit(hash) => assert_eq!(hash, head_oid.to_string()),
         crate::git::Target::Branch(_) => panic!("Expected Commit, got Branch"),
         crate::git::Target::File(_) => panic!("Expected Commit, got File"),
+        crate::git::Target::Unstaged => panic!("Expected Commit, got Unstaged"),
     }
 }
 

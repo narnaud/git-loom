@@ -47,6 +47,8 @@ pub enum Target {
     Branch(String),
     /// A file path.
     File(String),
+    /// The unstaged working directory (short ID: `zz`).
+    Unstaged,
 }
 
 /// Info about the upstream tracking branch and the merge-base with HEAD.
@@ -289,6 +291,11 @@ fn resolve_shortid(repo: &Repository, shortid: &str) -> Result<Target, Box<dyn s
     let entities = info.collect_entities();
     let allocator = crate::shortid::IdAllocator::new(entities);
 
+    // Check if it matches the unstaged entity
+    if allocator.get_unstaged() == shortid {
+        return Ok(Target::Unstaged);
+    }
+
     // Search for matching shortid in branches
     for branch in &info.branches {
         if allocator.get_branch(&branch.name) == shortid {
@@ -311,7 +318,7 @@ fn resolve_shortid(repo: &Repository, shortid: &str) -> Result<Target, Box<dyn s
     }
 
     Err(format!(
-        "No commit, branch, or file with shortid '{}'. Run 'git-loom status' to see available IDs.",
+        "No commit, branch, file, or target with shortid '{}'. Run 'git-loom status' to see available IDs.",
         shortid
     )
     .into())

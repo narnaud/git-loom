@@ -60,6 +60,55 @@ fn parse_git_version(version_str: &str) -> Option<(u32, u32)> {
     Some((major, minor))
 }
 
+/// Run a git command and return its stdout as a string.
+/// On failure, returns an error containing stderr output.
+pub fn run_git_stdout(workdir: &Path, args: &[&str]) -> Result<String, Box<dyn std::error::Error>> {
+    let output = Command::new("git")
+        .current_dir(workdir)
+        .args(args)
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git {} failed:\n{}", args.join(" "), stderr).into());
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Get the diff for a single commit (its changes relative to its parent).
+///
+/// Wraps `git diff <oid>^..<oid>`.
+pub fn diff_commit(workdir: &Path, oid: &str) -> Result<String, Box<dyn std::error::Error>> {
+    run_git_stdout(workdir, &["diff", &format!("{}^..{}", oid, oid)])
+}
+
+/// Apply a patch from stdin.
+///
+/// Wraps `git apply` with the patch passed via stdin.
+pub fn apply_patch(workdir: &Path, patch: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let mut child = Command::new("git")
+        .current_dir(workdir)
+        .args(["apply"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        use std::io::Write;
+        stdin.write_all(patch.as_bytes())?;
+    }
+
+    let output = child.wait_with_output()?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git apply failed:\n{}", stderr).into());
+    }
+
+    Ok(())
+}
+
 /// Truncate a full commit hash to a short display form (7 chars).
 pub fn short_hash(hash: &str) -> &str {
     &hash[..7.min(hash.len())]

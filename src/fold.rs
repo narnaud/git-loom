@@ -37,6 +37,7 @@ pub fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             fold_commit_into_commit(&repo, &source, &target)
         }
         FoldOp::CommitToBranch { commit, branch } => fold_commit_to_branch(&repo, &commit, &branch),
+        FoldOp::CommitToUnstaged { commit } => fold_commit_to_unstaged(&repo, &commit),
     }
 }
 
@@ -46,17 +47,50 @@ enum FoldOp {
     FilesIntoCommit { files: Vec<String>, commit: String },
     CommitIntoCommit { source: String, target: String },
     CommitToBranch { commit: String, branch: String },
+    CommitToUnstaged { commit: String },
 }
 
 /// Classify resolved arguments into a specific fold operation.
 fn classify(sources: &[Target], target: &Target) -> Result<FoldOp, Box<dyn std::error::Error>> {
     // Check for invalid source types
     for source in sources {
-        if let Target::Branch(_) = source {
+        match source {
+            Target::Branch(_) => {
+                return Err(
+                    "Cannot fold a branch. Use 'git loom branch' for branch operations.".into(),
+                );
+            }
+            Target::Unstaged => {
+                return Err("Cannot fold unstaged changes. Stage files first, or use \
+                            'git loom fold <file> <commit>' to amend specific files."
+                    .into());
+            }
+            _ => {}
+        }
+    }
+
+    // Handle Unstaged target early
+    if matches!(target, Target::Unstaged) {
+        let has_files = sources.iter().any(|s| matches!(s, Target::File(_)));
+        if has_files {
             return Err(
-                "Cannot fold a branch. Use 'git loom branch' for branch operations.".into(),
+                "Cannot fold files into unstaged — files are already in the working directory."
+                    .into(),
             );
         }
+
+        if sources.len() > 1 {
+            return Err("Only one commit source is allowed".into());
+        }
+
+        let source_hash = match &sources[0] {
+            Target::Commit(hash) => hash.clone(),
+            _ => unreachable!(),
+        };
+
+        return Ok(FoldOp::CommitToUnstaged {
+            commit: source_hash,
+        });
     }
 
     // All sources must be the same type (all files or all commits)
@@ -86,6 +120,7 @@ fn classify(sources: &[Target], target: &Target) -> Result<FoldOp, Box<dyn std::
                 Err("Cannot fold files into a branch. Target a specific commit.".into())
             }
             Target::File(_) => Err("Target must be a commit or branch, not a file.".into()),
+            Target::Unstaged => unreachable!(),
         }
     } else {
         // Commit(s) + target
@@ -108,6 +143,7 @@ fn classify(sources: &[Target], target: &Target) -> Result<FoldOp, Box<dyn std::
                 branch: name.clone(),
             }),
             Target::File(_) => Err("Target must be a commit or branch, not a file.".into()),
+            Target::Unstaged => unreachable!(),
         }
     }
 }
@@ -264,6 +300,46 @@ pub fn move_commit_to_branch(
 
     let todo = graph.to_todo();
     weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
+
+    Ok(())
+}
+
+/// Uncommit a commit to the working directory (Case 4: Commit + Unstaged).
+///
+/// Removes the commit from history and places its changes in the working
+/// directory as unstaged modifications.
+fn fold_commit_to_unstaged(
+    repo: &Repository,
+    commit_hash: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let workdir = git::require_workdir(repo, "fold")?;
+
+    let head_oid = git::head_oid(repo)?;
+    let target_oid = git2::Oid::from_str(commit_hash)?;
+    let is_head = head_oid == target_oid;
+
+    if is_head {
+        // Simple case: mixed reset to HEAD~1
+        git_commit::reset_mixed(workdir, "HEAD~1")?;
+    } else {
+        // Non-HEAD: capture the diff, drop the commit, then apply the diff
+        let diff = git_commands::diff_commit(workdir, commit_hash)?;
+
+        let mut graph = Weave::from_repo(repo)?;
+        graph.drop_commit(target_oid);
+
+        let todo = graph.to_todo();
+        weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
+
+        if !diff.is_empty() {
+            git_commands::apply_patch(workdir, &diff)?;
+        }
+    }
+
+    println!(
+        "Uncommitted {} to working directory",
+        git_commands::short_hash(commit_hash)
+    );
 
     Ok(())
 }

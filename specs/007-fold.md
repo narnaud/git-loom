@@ -46,11 +46,14 @@ combination:
 | File(s) | Commit | Amend: stage files into the commit | Yes |
 | Commit | Commit | Fixup: absorb source into target | No |
 | Commit | Branch | Move: relocate commit to the branch | No |
+| Commit | Unstaged (`zz`) | Uncommit: remove commit, put changes in working directory | No |
 
 **Invalid combinations** produce an error:
 
 - File + Branch: `"Cannot fold files into a branch. Target a specific commit."`
 - Branch + anything: `"Cannot fold a branch. Use 'git loom branch' for branch operations."`
+- Unstaged + anything: `"Cannot fold unstaged changes. Stage files first, or use 'git loom fold <file> <commit>' to amend specific files."`
+- File + Unstaged: `"Cannot fold files into unstaged — files are already in the working directory."`
 - Mixed files and commits as sources: `"Cannot mix file and commit sources."`
 - Multiple commit sources: `"Only one commit source is allowed."`
 
@@ -126,6 +129,33 @@ operation.
 - Affected commits in both branches get new hashes
 - Branch refs are updated automatically
 
+### Case 4: Commit + Unstaged (`zz`) (Uncommit)
+
+Uncommits a commit, removing it from history and placing its changes in the
+working directory as unstaged modifications. The target is specified using
+`zz`, the reserved short ID for the unstaged working directory.
+
+**Behavior:**
+
+- **HEAD commit**: Performs a mixed reset (`git reset HEAD~1`), which moves
+  HEAD back one commit and leaves the commit's changes as unstaged
+  modifications.
+- **Non-HEAD commit**: Captures the commit's diff, drops the commit from
+  history via Weave rebase, then applies the diff to the working directory.
+- Uncommitted changes in other files are preserved automatically.
+
+**What changes:**
+
+- The target commit is removed from history
+- The commit's changes appear in the working directory as unstaged modifications
+- All descendant commits get new hashes (for non-HEAD case)
+
+**What stays the same:**
+
+- Other commits' content and messages
+- Other branches not in the ancestry chain
+- Existing uncommitted changes in the working directory
+
 ## Target Resolution
 
 Arguments are resolved using the shared resolution strategy (see Spec 002)
@@ -194,6 +224,16 @@ git-loom status
 
 git-loom fold d0 feature-b
 # Commit d0 is moved to the tip of feature-b and removed from current branch
+```
+
+### Uncommit a commit to the working directory
+
+```bash
+git-loom status
+# Shows: │●  ab  72f9d3 Fix login bug
+
+git-loom fold ab zz
+# Removes the commit and puts its changes in the working directory
 ```
 
 ### Using full git hashes

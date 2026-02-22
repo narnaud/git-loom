@@ -485,6 +485,124 @@ fn classify_multiple_commit_sources_rejected() {
     assert!(result.unwrap_err().to_string().contains("Only one commit"));
 }
 
+// ── Case 4: Commit + Unstaged (Uncommit) ─────────────────────────────────
+
+#[test]
+fn fold_commit_to_unstaged_head() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("First commit", "file1.txt");
+    test_repo.commit("Second commit", "file2.txt");
+
+    let head_oid = test_repo.head_oid();
+
+    let result = super::fold_commit_to_unstaged(&test_repo.repo, &head_oid.to_string());
+
+    assert!(
+        result.is_ok(),
+        "fold_commit_to_unstaged failed: {:?}",
+        result
+    );
+
+    // HEAD should now be "First commit"
+    assert_eq!(test_repo.get_message(0), "First commit");
+
+    // file2.txt should exist in working directory as unstaged change
+    assert_eq!(test_repo.read_file("file2.txt"), "Second commit");
+
+    // The old HEAD should be gone
+    assert_ne!(test_repo.head_oid(), head_oid);
+}
+
+#[test]
+fn fold_commit_to_unstaged_non_head() {
+    let test_repo = TestRepo::new_with_remote();
+    let c1_oid = test_repo.commit("First commit", "file1.txt");
+    test_repo.commit("Second commit", "file2.txt");
+
+    let result = super::fold_commit_to_unstaged(&test_repo.repo, &c1_oid.to_string());
+
+    assert!(
+        result.is_ok(),
+        "fold_commit_to_unstaged (non-HEAD) failed: {:?}",
+        result
+    );
+
+    // Only "Second commit" should remain
+    assert_eq!(test_repo.get_message(0), "Second commit");
+
+    // file1.txt should be in the working directory as unstaged
+    assert_eq!(test_repo.read_file("file1.txt"), "First commit");
+}
+
+#[test]
+fn fold_commit_to_unstaged_dirty_autostashed() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("First commit", "file1.txt");
+    test_repo.commit("Second commit", "file2.txt");
+
+    // Dirty the working tree with an unrelated change
+    test_repo.write_file("file1.txt", "dirty");
+
+    let head_oid = test_repo.head_oid();
+
+    let result = super::fold_commit_to_unstaged(&test_repo.repo, &head_oid.to_string());
+
+    assert!(
+        result.is_ok(),
+        "fold should succeed with dirty tree: {:?}",
+        result
+    );
+
+    // HEAD should now be "First commit"
+    assert_eq!(test_repo.get_message(0), "First commit");
+
+    // Existing dirty changes should be preserved
+    assert_eq!(test_repo.read_file("file1.txt"), "dirty");
+
+    // Uncommitted changes should appear
+    assert_eq!(test_repo.read_file("file2.txt"), "Second commit");
+}
+
+#[test]
+fn classify_commit_into_unstaged() {
+    let sources = vec![git::Target::Commit("abc123".into())];
+    let target = git::Target::Unstaged;
+    let result = super::classify(&sources, &target);
+    assert!(result.is_ok());
+    assert!(matches!(
+        result.unwrap(),
+        super::FoldOp::CommitToUnstaged { .. }
+    ));
+}
+
+#[test]
+fn classify_files_into_unstaged_rejected() {
+    let sources = vec![git::Target::File("f1.txt".into())];
+    let target = git::Target::Unstaged;
+    let result = super::classify(&sources, &target);
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Cannot fold files into unstaged")
+    );
+}
+
+#[test]
+fn classify_unstaged_source_rejected() {
+    let sources = vec![git::Target::Unstaged];
+    let target = git::Target::Commit("abc123".into());
+    let result = super::classify(&sources, &target);
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Cannot fold unstaged changes")
+    );
+}
+
 // ── Resolve fold arg tests ───────────────────────────────────────────────
 
 #[test]

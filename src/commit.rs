@@ -189,6 +189,7 @@ fn resolve_explicit_branch(
         }
         Ok(Target::Commit(_)) => Err("Commit target must be a branch".into()),
         Ok(Target::File(_)) => Err("File target must be a branch".into()),
+        Ok(Target::Unstaged) => Err("Unstaged target must be a branch".into()),
         Err(_) => {
             // Treat as new branch name
             let name = branch.trim().to_string();

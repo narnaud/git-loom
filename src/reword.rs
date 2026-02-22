@@ -28,6 +28,7 @@ pub fn run(target: String, message: Option<String>) -> Result<(), Box<dyn std::e
             reword_branch(&repo, &name, &new_name)
         }
         Target::File(_) => Err("Cannot reword a file. Use 'git add' to stage file changes.".into()),
+        Target::Unstaged => Err("Cannot reword unstaged changes.".into()),
     }
 }
 

@@ -23,6 +23,9 @@ pub fn run(target: String) -> Result<(), Box<dyn std::error::Error>> {
         Target::File(_) => {
             Err("Cannot drop a file. Use 'git restore' to discard file changes.".into())
         }
+        Target::Unstaged => {
+            Err("Cannot drop unstaged changes. Use 'git restore' to discard changes.".into())
+        }
     }
 }
 

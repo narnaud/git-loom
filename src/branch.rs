@@ -154,6 +154,7 @@ fn resolve_commit(
                     path
                 )
                 .into()),
+                git::Target::Unstaged => Err("Cannot use unstaged as a branch target.".into()),
             }
         }
     }
