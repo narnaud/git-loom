@@ -325,7 +325,7 @@ fn render_branch(
         let rest: String = commit.short_id.chars().skip(sid.len()).collect();
         writeln!(
             out,
-            "{}{}   {}{} {}",
+            "{}{}    {}{} {}",
             "│".color(COLOR_GRAPH),
             "●".color(dot_color),
             sid.color(COLOR_SHORTID).underline(),
@@ -337,7 +337,7 @@ fn render_branch(
             let file_sid = format!("{}:{}", sid, i);
             writeln!(
                 out,
-                "{}{}    {} {}{} {}",
+                "{}{}      {} {}{} {}",
                 "│".color(COLOR_GRAPH),
                 "┊".color(dot_color),
                 file_sid.color(COLOR_SHORTID).underline(),
@@ -364,7 +364,7 @@ fn render_loose(out: &mut String, commits: &[CommitInfo], more_sections: bool, i
         let rest: String = commit.short_id.chars().skip(sid.len()).collect();
         writeln!(
             out,
-            "{}   {}{} {}",
+            "{}    {}{} {}",
             "●".color(COLOR_GRAPH),
             sid.color(COLOR_SHORTID).underline(),
             rest.color(COLOR_DIM),
@@ -375,7 +375,7 @@ fn render_loose(out: &mut String, commits: &[CommitInfo], more_sections: bool, i
             let file_sid = format!("{}:{}", sid, i);
             writeln!(
                 out,
-                "{}     {} {}{} {}",
+                "{}       {} {}{} {}",
                 "┊".color(COLOR_GRAPH),
                 file_sid.color(COLOR_SHORTID).underline(),
                 file.index.to_string().color(COLOR_STAGED),

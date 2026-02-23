@@ -130,8 +130,8 @@ fn single_branch() {
 │   no changes
 │
 │╭─ fa [feature-a]
-│●   0200002 A2
-│●   0100001 A1
+│●    0200002 A2
+│●    0100001 A1
 ├╯
 │
 ● aaa0000 (upstream) [origin/main] Initial commit
@@ -214,7 +214,7 @@ fn loose_commits_on_integration_line() {
 
     let output = render_plain(info);
     assert!(
-        output.contains("●   0200002 Fix typo\n●   0100001 Refactor"),
+        output.contains("●    0200002 Fix typo\n●    0100001 Refactor"),
         "expected loose commits, got:\n{}",
         output
     );
@@ -244,7 +244,7 @@ fn mixed_loose_and_branch() {
     let output = render_plain(info);
     // Loose commit should appear before the branch
     assert!(
-        output.contains("●   0300003 Loose on top\n│\n│╭─ fb [feature-b]"),
+        output.contains("●    0300003 Loose on top\n│\n│╭─ fb [feature-b]"),
         "expected loose then branch, got:\n{}",
         output
     );
@@ -325,7 +325,7 @@ fn merge_based_integration_branch() {
 
     // Integration-line commits should be loose (plain ● without │ prefix)
     assert!(
-        output.contains("●   2300023 Feature 3 depends on Feature 2"),
+        output.contains("●    2300023 Feature 3 depends on Feature 2"),
         "expected loose integration commit, got:\n{}",
         output
     );
@@ -499,13 +499,14 @@ fn files_shown_under_branch_commits() {
     let output = render_plain(info);
     // File shortids use commit_sid:index format
     assert!(
-        output
-            .contains("│●   0200002 A2\n│┊    02:0 M  src/graph.rs\n│┊    02:1 A  new_file.txt\n"),
+        output.contains(
+            "│●    0200002 A2\n│┊      02:0 M  src/graph.rs\n│┊      02:1 A  new_file.txt\n"
+        ),
         "expected files under A2, got:\n{}",
         output
     );
     assert!(
-        output.contains("│●   0100001 A1\n│┊    01:0 M  src/status.rs\n"),
+        output.contains("│●    0100001 A1\n│┊      01:0 M  src/status.rs\n"),
         "expected files under A1, got:\n{}",
         output
     );
@@ -528,7 +529,7 @@ fn files_shown_under_loose_commits() {
     let output = render_plain(info);
     // Loose commit file should have ┊ prefix with commit_sid:index format
     assert!(
-        output.contains("●   0200002 Fix typo\n┊     02:0 M  README.md\n"),
+        output.contains("●    0200002 Fix typo\n┊       02:0 M  README.md\n"),
         "expected files under loose commit, got:\n{}",
         output
     );
@@ -589,7 +590,7 @@ fn root_commit_files_shown() {
 
     let output = render_plain(info);
     assert!(
-        output.contains("●   0100001 Initial\n┊     01:0 A  init.rs\n"),
+        output.contains("●    0100001 Initial\n┊       01:0 A  init.rs\n"),
         "expected file under root commit, got:\n{}",
         output
     );
