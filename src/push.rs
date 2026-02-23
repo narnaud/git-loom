@@ -107,22 +107,21 @@ fn detect_remote_type(
 
     // 2. Check remote URL for github.com
     let remote_name = extract_remote_name(upstream_label);
-    if let Ok(remote) = repo.find_remote(&remote_name) {
-        if let Some(url) = remote.url() {
-            if url.contains("github.com") {
-                return Ok(RemoteType::GitHub);
-            }
-        }
+    if let Ok(remote) = repo.find_remote(&remote_name)
+        && let Some(url) = remote.url()
+        && url.contains("github.com")
+    {
+        return Ok(RemoteType::GitHub);
     }
 
     // 3. Check for Gerrit commit-msg hook
     if let Some(git_dir) = workdir.join(".git").is_dir().then(|| workdir.join(".git")) {
         let hook_path = git_dir.join("hooks").join("commit-msg");
-        if let Ok(content) = std::fs::read_to_string(&hook_path) {
-            if content.to_lowercase().contains("gerrit") {
-                let target_branch = extract_target_branch(upstream_label);
-                return Ok(RemoteType::Gerrit { target_branch });
-            }
+        if let Ok(content) = std::fs::read_to_string(&hook_path)
+            && content.to_lowercase().contains("gerrit")
+        {
+            let target_branch = extract_target_branch(upstream_label);
+            return Ok(RemoteType::Gerrit { target_branch });
         }
     }
 
@@ -142,8 +141,8 @@ fn extract_remote_name(upstream_label: &str) -> String {
 /// Extract the target branch from an upstream label like "origin/main" → "main".
 fn extract_target_branch(upstream_label: &str) -> String {
     upstream_label
-        .splitn(2, '/')
-        .nth(1)
+        .split_once('/')
+        .map(|x| x.1)
         .unwrap_or("main")
         .to_string()
 }
