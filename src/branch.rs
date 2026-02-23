@@ -58,7 +58,10 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
         graph.weave_branch(&name);
 
         let todo = graph.to_todo();
-        weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
+        if let Err(e) = weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo) {
+            let _ = git_branch::delete(workdir, &name);
+            return Err(e);
+        }
 
         println!("Woven '{}' into integration branch", name);
     }

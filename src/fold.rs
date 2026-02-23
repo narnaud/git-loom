@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use git2::{Repository, StatusOptions};
 
 use crate::git::{self, Target};
-use crate::git_commands::{self, git_commit};
+use crate::git_commands::{self, git_commit, git_rebase};
 use crate::weave::{self, Weave};
 
 /// Fold source(s) into a target.
@@ -267,20 +267,32 @@ fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str
     if is_head {
         // Simple case: stage files and amend HEAD
         git_commit::stage_files(workdir, &file_refs)?;
-        git_commit::amend_no_edit(workdir)?;
+        if let Err(e) = git_commit::amend_no_edit(workdir) {
+            let _ = git_commands::unstage_files(workdir, &file_refs);
+            return Err(e);
+        }
     } else {
-        // Stage files, create a temp commit, then fixup into target via Weave
+        // Edit+continue: stage files, save patch, unstage, rebase with edit at target
         git_commit::stage_files(workdir, &file_refs)?;
-        git_commit::commit(workdir, "fold: temp fixup")?;
-
-        // The temp commit is now at HEAD — fixup it into the target
-        let temp_oid = git::head_oid(repo)?;
+        let patch = git_commands::diff_cached(workdir)?;
+        git_commands::unstage_files(workdir, &file_refs)?;
 
         let mut graph = Weave::from_repo(repo)?;
-        graph.fixup_commit(temp_oid, target_oid);
+        graph.edit_commit(target_oid);
 
         let todo = graph.to_todo();
         weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
+
+        // Now paused at the target commit — apply patch, stage, amend
+        if let Err(e) = git_commands::apply_patch(workdir, &patch)
+            .and_then(|()| git_commit::stage_files(workdir, &file_refs))
+            .and_then(|()| git_commit::amend_no_edit(workdir))
+        {
+            let _ = git_rebase::abort(workdir);
+            return Err(e);
+        }
+
+        git_rebase::continue_rebase(workdir)?;
     }
 
     println!(
@@ -384,31 +396,41 @@ fn fold_commit_file_to_unstaged(repo: &Repository, commit_hash: &str, path: &str
 
     if is_head {
         // Simple case: reverse the file's changes, amend HEAD, then re-apply
+        let saved_head = head_oid.to_string();
         git_commands::apply_patch_reverse(workdir, &file_diff)?;
         git_commit::stage_path(workdir, path)?;
         git_commit::amend_no_edit(workdir)?;
-        git_commands::apply_patch(workdir, &file_diff).context(
-            "The commit was already modified but the diff could not be re-applied to the working directory. \
-             Use 'git diff HEAD' or 'git reflog' to recover the changes.",
-        )?;
+        if let Err(e) = git_commands::apply_patch(workdir, &file_diff) {
+            let _ = git_commit::reset_hard(workdir, &saved_head);
+            return Err(e).context("Failed to uncommit file. Operation rolled back.");
+        }
     } else {
-        // Non-HEAD: reverse + temp commit + fixup, then re-apply
-        git_commands::apply_patch_reverse(workdir, &file_diff)?;
-        git_commit::stage_path(workdir, path)?;
-        git_commit::commit(workdir, "fold: remove file from commit")?;
-
-        let temp_oid = git::head_oid(repo)?;
+        // Non-HEAD: edit+continue pattern with save-head rollback
+        let saved_head = head_oid.to_string();
 
         let mut graph = Weave::from_repo(repo)?;
-        graph.fixup_commit(temp_oid, target_oid);
+        graph.edit_commit(target_oid);
 
         let todo = graph.to_todo();
         weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
 
-        git_commands::apply_patch(workdir, &file_diff).context(
-            "The commit was already modified but the diff could not be re-applied to the working directory. \
-             Use 'git reflog' to find the original commit and recover the changes.",
-        )?;
+        // Paused at target — reverse the file, stage, amend
+        if let Err(e) = git_commands::apply_patch_reverse(workdir, &file_diff)
+            .and_then(|()| git_commit::stage_path(workdir, path))
+            .and_then(|()| git_commit::amend_no_edit(workdir))
+        {
+            let _ = git_rebase::abort(workdir);
+            return Err(e);
+        }
+
+        // Continue the rebase
+        git_rebase::continue_rebase(workdir)?;
+
+        // Re-apply changes to working tree
+        if let Err(e) = git_commands::apply_patch(workdir, &file_diff) {
+            let _ = git_commit::reset_hard(workdir, &saved_head);
+            return Err(e).context("Failed to uncommit file. Operation rolled back.");
+        }
     }
 
     println!(
@@ -453,68 +475,114 @@ fn fold_commit_file_to_commit(
     let source_is_newer = repo.graph_descendant_of(source_oid, target_oid)?;
 
     if source_is_newer {
-        // Two-phase approach: when source is newer than target, a single rebase
-        // that fixups both temp commits causes an add/add conflict during
-        // cherry-pick of the source commit (because the target already has the
-        // file from its fixup). Instead, we do two separate rebases:
-        //   Phase 1: Remove the file from source.
-        //   Phase 2: Add the file to target.
-
-        // Phase 1: Remove file from source via fixup rebase.
-        git_commands::apply_patch_reverse(workdir, &file_diff)?;
-        git_commit::stage_path(workdir, path)?;
-        git_commit::commit(workdir, "fold: remove file from source")?;
-        let temp_oid = git::head_oid(repo)?;
-
-        let mut graph = Weave::from_repo(repo)?;
-        graph.fixup_commit(temp_oid, source_oid);
-        let todo = graph.to_todo();
+        // Two-phase approach with edit+continue and rollback.
+        // When source is newer than target, a single rebase can't do both
+        // edits: adding the file to target (older, picked first) would
+        // conflict when source (newer) is replayed — source still has the file.
+        //   Phase 1: Remove the file from source via edit+continue.
+        //   Phase 2: Add the file to target via edit+continue.
+        // On phase 2 failure, roll back to pre-phase-1 state.
+        let saved_head = git::head_oid(repo)?.to_string();
+        let saved_refs = git::snapshot_branch_refs(repo)?;
 
         // Create a temp branch on target so --update-refs tracks its new OID
-        // across the rebase. Created AFTER from_repo() to avoid polluting the
-        // Weave graph.
+        // through the phase 1 rebase. Created BEFORE from_repo() would include
+        // it in the graph, but after the graph snapshot — we create it right
+        // before the rebase so git's --update-refs picks it up.
         let tmp_branch = "_loom-fold-target";
+
+        // Phase 1: edit at source, remove file, continue
+        let mut graph = Weave::from_repo(repo)?;
+        graph.edit_commit(source_oid);
+        let todo = graph.to_todo();
+
+        // Create temp branch AFTER from_repo to avoid polluting the Weave graph
         git_commands::run_git(workdir, &["branch", "-f", tmp_branch, target_hash])?;
 
-        let phase1 = weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo);
-        if phase1.is_err() {
+        let phase1_rebase = weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo);
+        if let Err(e) = phase1_rebase {
             let _ = git_commands::run_git(workdir, &["branch", "-D", tmp_branch]);
-            return phase1;
+            return Err(e);
         }
 
-        // Phase 2: Add file to target via fixup rebase.
+        if let Err(e) = git_commands::apply_patch_reverse(workdir, &file_diff)
+            .and_then(|()| git_commit::stage_path(workdir, path))
+            .and_then(|()| git_commit::amend_no_edit(workdir))
+        {
+            let _ = git_rebase::abort(workdir);
+            let _ = git_commands::run_git(workdir, &["branch", "-D", tmp_branch]);
+            return Err(e);
+        }
+        if let Err(e) = git_rebase::continue_rebase(workdir) {
+            let _ = git_commands::run_git(workdir, &["branch", "-D", tmp_branch]);
+            return Err(e);
+        }
+
+        // Phase 2: Resolve the target's new OID via the temp branch
         let new_target_hash = git_commands::run_git_stdout(workdir, &["rev-parse", tmp_branch])?;
         let new_target_hash = new_target_hash.trim().to_string();
         let _ = git_commands::run_git(workdir, &["branch", "-D", tmp_branch]);
         let new_target_oid = git2::Oid::from_str(&new_target_hash)?;
 
-        git_commands::apply_patch(workdir, &file_diff)?;
-        git_commit::stage_path(workdir, path)?;
-        git_commit::commit(workdir, "fold: add file to target")?;
-        let temp_oid = git::head_oid(repo)?;
-
-        let mut graph = Weave::from_repo(repo)?;
-        graph.fixup_commit(temp_oid, new_target_oid);
+        let repo2 = git2::Repository::discover(workdir)?;
+        let mut graph = Weave::from_repo(&repo2)?;
+        graph.edit_commit(new_target_oid);
         let todo = graph.to_todo();
-        weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
+
+        if let Err(e) = weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo) {
+            let _ = git_commit::reset_hard(workdir, &saved_head);
+            let _ = git::restore_branch_refs(workdir, &saved_refs);
+            return Err(e);
+        }
+
+        if let Err(e) = git_commands::apply_patch(workdir, &file_diff)
+            .and_then(|()| git_commit::stage_path(workdir, path))
+            .and_then(|()| git_commit::amend_no_edit(workdir))
+        {
+            let _ = git_rebase::abort(workdir);
+            let _ = git_commit::reset_hard(workdir, &saved_head);
+            let _ = git::restore_branch_refs(workdir, &saved_refs);
+            return Err(e);
+        }
+
+        if let Err(e) = git_rebase::continue_rebase(workdir) {
+            let _ = git_commit::reset_hard(workdir, &saved_head);
+            let _ = git::restore_branch_refs(workdir, &saved_refs);
+            return Err(e);
+        }
     } else {
-        // Source is older than target: both fixups in one rebase (no conflict
-        // because the removal is picked before the addition in the todo).
-        git_commands::apply_patch_reverse(workdir, &file_diff)?;
-        git_commit::stage_path(workdir, path)?;
-        git_commit::commit(workdir, "fold: remove file from source")?;
-        let temp_a_oid = git::head_oid(repo)?;
-
-        git_commands::apply_patch(workdir, &file_diff)?;
-        git_commit::stage_path(workdir, path)?;
-        git_commit::commit(workdir, "fold: add file to target")?;
-        let temp_b_oid = git::head_oid(repo)?;
-
+        // Source is older than target: single rebase with two edit pauses.
+        // Source is picked first (older), target second (newer). Removing
+        // the file from source before target is replayed avoids conflicts.
         let mut graph = Weave::from_repo(repo)?;
-        graph.fixup_commit(temp_a_oid, source_oid);
-        graph.fixup_commit(temp_b_oid, target_oid);
+        graph.edit_commit(source_oid);
+        graph.edit_commit(target_oid);
+
         let todo = graph.to_todo();
         weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
+
+        // First pause: at source — remove file
+        if let Err(e) = git_commands::apply_patch_reverse(workdir, &file_diff)
+            .and_then(|()| git_commit::stage_path(workdir, path))
+            .and_then(|()| git_commit::amend_no_edit(workdir))
+        {
+            let _ = git_rebase::abort(workdir);
+            return Err(e);
+        }
+
+        // Continue to second pause: at target
+        git_rebase::continue_rebase(workdir)?;
+
+        // Second pause: at target — add file
+        if let Err(e) = git_commands::apply_patch(workdir, &file_diff)
+            .and_then(|()| git_commit::stage_path(workdir, path))
+            .and_then(|()| git_commit::amend_no_edit(workdir))
+        {
+            let _ = git_rebase::abort(workdir);
+            return Err(e);
+        }
+
+        git_rebase::continue_rebase(workdir)?;
     }
 
     println!(
@@ -544,6 +612,7 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
     } else {
         // Non-HEAD: capture the diff, drop the commit, then apply the diff
         let diff = git_commands::diff_commit(workdir, commit_hash)?;
+        let saved_head = head_oid.to_string();
 
         let mut graph = Weave::from_repo(repo)?;
         graph.drop_commit(target_oid);
@@ -551,8 +620,12 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
         let todo = graph.to_todo();
         weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
 
-        if !diff.is_empty() {
-            git_commands::apply_patch(workdir, &diff)?;
+        if !diff.is_empty()
+            && let Err(e) = git_commands::apply_patch(workdir, &diff)
+        {
+            let _ = git_commit::reset_hard(workdir, &saved_head);
+            return Err(e)
+                .context("Failed to apply changes to working directory. Operation rolled back.");
         }
     }
 

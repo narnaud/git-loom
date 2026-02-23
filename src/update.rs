@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use git2::BranchType;
 
 use crate::git;
-use crate::git_commands;
+use crate::git_commands::{self, git_rebase};
 
 /// Update the integration branch by fetching and rebasing from upstream.
 ///
@@ -66,6 +66,7 @@ pub fn run() -> Result<()> {
             spinner.stop("Rebased onto upstream");
         }
         Err(e) => {
+            let _ = git_rebase::abort(workdir);
             spinner.error("Rebase failed");
             return Err(e);
         }

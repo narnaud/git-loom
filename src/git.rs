@@ -1,8 +1,11 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use git2::{BranchType, Repository, StatusOptions};
+
+use crate::git_commands;
 
 /// Open a `Repository` by discovering it from the current working directory.
 pub fn open_repo() -> Result<Repository> {
@@ -21,6 +24,60 @@ pub fn require_workdir<'a>(repo: &'a Repository, operation: &str) -> Result<&'a 
 /// Return the OID that HEAD points to.
 pub fn head_oid(repo: &Repository) -> Result<git2::Oid> {
     repo.head()?.target().context("HEAD has no target")
+}
+
+/// Capture all local branch name→OID mappings for rollback.
+pub fn snapshot_branch_refs(repo: &Repository) -> Result<HashMap<String, git2::Oid>> {
+    let mut refs = HashMap::new();
+    for branch_result in repo.branches(Some(BranchType::Local))? {
+        let (branch, _) = branch_result?;
+        if let Some(name) = branch.name()?
+            && let Some(oid) = branch.get().target()
+        {
+            refs.insert(name.to_string(), oid);
+        }
+    }
+    Ok(refs)
+}
+
+/// Restore branches to snapshot OIDs, deleting any branches not in the snapshot.
+pub fn restore_branch_refs(workdir: &Path, snapshot: &HashMap<String, git2::Oid>) -> Result<()> {
+    let repo = Repository::discover(workdir)?;
+
+    // Collect current branches
+    let mut current_branches: HashMap<String, git2::Oid> = HashMap::new();
+    for branch_result in repo.branches(Some(BranchType::Local))? {
+        let (branch, _) = branch_result?;
+        if let Some(name) = branch.name()?
+            && let Some(oid) = branch.get().target()
+        {
+            current_branches.insert(name.to_string(), oid);
+        }
+    }
+
+    // Get the current branch name so we skip it (can't force-update HEAD's branch)
+    let head_branch = repo
+        .head()
+        .ok()
+        .and_then(|h| h.shorthand().map(|s| s.to_string()));
+
+    // Delete branches that weren't in the snapshot
+    for name in current_branches.keys() {
+        if !snapshot.contains_key(name) && Some(name.as_str()) != head_branch.as_deref() {
+            let _ = git_commands::run_git(workdir, &["branch", "-D", name]);
+        }
+    }
+
+    // Restore branches to their snapshot OIDs
+    for (name, oid) in snapshot {
+        if Some(name.as_str()) == head_branch.as_deref() {
+            continue; // HEAD's branch is handled by reset --hard
+        }
+        let oid_str = oid.to_string();
+        let _ = git_commands::run_git(workdir, &["branch", "-f", name, &oid_str]);
+    }
+
+    Ok(())
 }
 
 /// Error if a local branch with the given name already exists.

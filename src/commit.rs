@@ -31,7 +31,10 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
     // Step 2: Verify index has changes
     verify_has_staged_changes(&repo)?;
 
-    // Step 3: Resolve branch target (may create a new branch at merge-base)
+    // Step 3: Save HEAD for rollback
+    let saved_head = git::head_oid(&repo)?.to_string();
+
+    // Step 4: Resolve branch target (may create a new branch at merge-base)
     let branch_name = resolve_branch_target(&repo, branch.as_deref())?;
 
     // Check if the branch is at the merge-base (no commits of its own).
@@ -39,14 +42,14 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
     // in the Weave before moving the commit there.
     let branch_is_empty = is_branch_at_merge_base(&repo, &branch_name)?;
 
-    // Step 4: Create commit at HEAD
+    // Step 5: Create commit at HEAD
     if let Some(msg) = &message {
         git_commit::commit(&workdir, msg)?;
     } else {
         git_commit::commit_with_editor(&workdir)?;
     }
 
-    // Step 5: Move commit to branch via Weave
+    // Step 6: Move commit to branch via Weave
     let head_oid = git::head_oid(&repo)?;
 
     let mut graph = Weave::from_repo(&repo)?;
@@ -65,7 +68,13 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
     graph.move_commit(head_oid, &branch_name);
 
     let todo = graph.to_todo();
-    weave::run_rebase(&workdir, Some(&graph.base_oid.to_string()), &todo)?;
+    if let Err(e) = weave::run_rebase(&workdir, Some(&graph.base_oid.to_string()), &todo) {
+        let _ = git_commit::reset_hard(&workdir, &saved_head);
+        if branch_is_empty {
+            let _ = git_branch::delete(&workdir, &branch_name);
+        }
+        return Err(e);
+    }
 
     println!(
         "Created commit {} on branch '{}'",

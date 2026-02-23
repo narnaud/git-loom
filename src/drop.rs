@@ -142,8 +142,13 @@ fn drop_branch(repo: &Repository, branch_name: &str) -> Result<()> {
     let todo = graph.to_todo();
     weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
 
-    // Delete the branch ref
-    git_branch::delete(workdir, branch_name)?;
+    // Delete the branch ref (warn on failure — extremely unlikely)
+    if let Err(e) = git_branch::delete(workdir, branch_name) {
+        eprintln!(
+            "warning: Could not delete branch ref '{}': {} (may have been cleaned up automatically)",
+            branch_name, e
+        );
+    }
 
     println!("Dropped branch '{}'", branch_name);
     Ok(())

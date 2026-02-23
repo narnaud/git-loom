@@ -87,6 +87,14 @@ pub fn reset_mixed(workdir: &Path, target: &str) -> Result<()> {
     super::run_git(workdir, &["reset", target])
 }
 
+/// Hard reset to a target ref (discard all changes).
+///
+/// Wraps `git reset --hard <target>`. Moves HEAD and discards all working
+/// directory and index changes.
+pub fn reset_hard(workdir: &Path, target: &str) -> Result<()> {
+    super::run_git(workdir, &["reset", "--hard", target])
+}
+
 /// Stage all changes (staged, unstaged, and untracked).
 ///
 /// Wraps `git add -A`.
