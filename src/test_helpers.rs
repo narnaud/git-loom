@@ -297,6 +297,12 @@ impl TestRepo {
         self.repo.find_branch(name, BranchType::Local).is_ok()
     }
 
+    /// Delete a local branch (including its tracking config).
+    pub fn delete_branch(&self, name: &str) {
+        let workdir = self.workdir();
+        crate::git_commands::run_git(workdir.as_path(), &["branch", "-D", name]).unwrap();
+    }
+
     /// Get the current HEAD commit OID.
     pub fn head_oid(&self) -> git2::Oid {
         self.repo.head().unwrap().target().unwrap()

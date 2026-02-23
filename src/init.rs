@@ -6,13 +6,13 @@ use crate::git_commands::git_branch;
 
 /// Initialize a new integration branch tracking a remote upstream.
 ///
-/// Creates a branch (default name: "loom") at the upstream tip and switches to it.
+/// Creates a branch (default name: "integration") at the upstream tip and switches to it.
 /// The remote is auto-detected from the current branch's upstream tracking ref.
 /// If no upstream is found, the user is prompted to choose one.
 pub fn run(name: Option<String>) -> Result<()> {
     let repo = git::open_repo()?;
 
-    let name = name.unwrap_or_else(|| "loom".to_string());
+    let name = name.unwrap_or_else(|| "integration".to_string());
     let name = name.trim().to_string();
     if name.is_empty() {
         bail!("Branch name cannot be empty");

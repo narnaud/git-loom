@@ -18,7 +18,7 @@ Starting a git-loom integration workflow requires:
 
 - **Auto-detection**: Reads the upstream from the current branch, so you don't
   have to type `origin/main` manually
-- **Sensible default name**: Uses `loom` if no name is provided
+- **Sensible default name**: Uses `integration` if no name is provided
 - **Prompt when ambiguous**: If multiple remotes or default branches exist,
   asks the user to choose
 
@@ -30,18 +30,18 @@ git-loom init [name]
 
 **Arguments:**
 
-- `[name]`: Branch name (optional; defaults to `"loom"`)
+- `[name]`: Branch name (optional; defaults to `"integration"`)
 
 **Behavior:**
 
 - With `name`: creates the integration branch with that name
-- Without `name`: creates a branch named `"loom"`
+- Without `name`: creates a branch named `"integration"`
 - The branch is created at the upstream tip and tracks it
 - HEAD is switched to the new branch
 
 ## What Happens
 
-1. **Name resolution**: Use the provided name or default to `"loom"`
+1. **Name resolution**: Use the provided name or default to `"integration"`
 2. **Validation**: Name is trimmed, checked for emptiness, validated against
    git's naming rules, and checked for duplicates
 3. **Upstream detection**: The upstream tracking ref is determined:
@@ -95,7 +95,7 @@ Branch names are validated before creation:
 
 ```bash
 git-loom init
-# Initialized integration branch 'loom' tracking origin/main
+# Initialized integration branch 'integration' tracking origin/main
 ```
 
 ### Initialize with a custom name
@@ -111,7 +111,7 @@ git-loom init my-integration
 git checkout --detach HEAD
 git-loom init
 # (scans remotes, finds origin/main)
-# Initialized integration branch 'loom' tracking origin/main
+# Initialized integration branch 'integration' tracking origin/main
 ```
 
 ### Error: no remotes configured
@@ -125,20 +125,19 @@ git-loom init
 ### Error: branch already exists
 
 ```bash
-git-loom init loom
+git-loom init
 # (first time succeeds)
-git-loom init loom
-# error: Branch 'loom' already exists
+git-loom init
+# error: Branch 'integration' already exists
 ```
 
 ## Design Decisions
 
-### Default Name: "loom"
+### Default Name: "integration"
 
-The default name `"loom"` was chosen because:
+The default name `"integration"` was chosen because:
 
-- It's short and memorable
-- It clearly associates the branch with the git-loom tool
+- It clearly describes the branch's purpose (integrating multiple feature branches)
 - It avoids conflicts with common branch names like `main`, `master`, `develop`
 
 ### Auto-Detection Over Explicit Arguments

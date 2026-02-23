@@ -44,7 +44,7 @@ enum Command {
     },
     /// Initialize a new integration branch tracking a remote
     Init {
-        /// Branch name (defaults to "loom")
+        /// Branch name (defaults to "integration")
         name: Option<String>,
     },
     /// Create a new feature branch

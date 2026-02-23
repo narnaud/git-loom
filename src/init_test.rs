@@ -5,18 +5,20 @@ fn init_creates_tracking_branch_with_default_name() {
     let test_repo = TestRepo::new_with_remote();
     // Switch back to main so init can detect its upstream
     test_repo.switch_branch("main");
+    // Delete the pre-existing "integration" branch so the default name is available
+    test_repo.delete_branch("integration");
 
     let result = test_repo.in_dir(|| super::run(None));
     assert!(result.is_ok(), "init failed: {:?}", result.err());
 
     // Should have switched to the new branch
-    assert_eq!(test_repo.current_branch_name(), "loom");
+    assert_eq!(test_repo.current_branch_name(), "integration");
 
     // Branch should exist and track origin/main
     let branch = test_repo
         .repo
-        .find_branch("loom", git2::BranchType::Local)
-        .expect("loom branch should exist");
+        .find_branch("integration", git2::BranchType::Local)
+        .expect("integration branch should exist");
     let upstream = branch.upstream().expect("should have upstream");
     let upstream_name = upstream.name().unwrap().unwrap();
     assert_eq!(upstream_name, "origin/main");
@@ -84,6 +86,8 @@ fn init_fails_with_invalid_name() {
 fn init_points_branch_at_upstream_tip() {
     let test_repo = TestRepo::new_with_remote();
     test_repo.switch_branch("main");
+    // Delete the pre-existing "integration" branch so the default name is available
+    test_repo.delete_branch("integration");
 
     // The upstream tip should be origin/main
     let origin_main_oid = test_repo.find_remote_branch_target("origin/main");
@@ -92,8 +96,8 @@ fn init_points_branch_at_upstream_tip() {
     assert!(result.is_ok(), "init failed: {:?}", result.err());
 
     // The new branch should point at the same commit as origin/main
-    let loom_oid = test_repo.get_branch_target("loom");
-    assert_eq!(loom_oid, origin_main_oid);
+    let integration_oid = test_repo.get_branch_target("integration");
+    assert_eq!(integration_oid, origin_main_oid);
 }
 
 #[test]
