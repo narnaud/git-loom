@@ -260,6 +260,7 @@ fn resolve_full_commit_hash() {
         crate::git::Target::Branch(_) => panic!("Expected Commit, got Branch"),
         crate::git::Target::File(_) => panic!("Expected Commit, got File"),
         crate::git::Target::Unstaged => panic!("Expected Commit, got Unstaged"),
+        crate::git::Target::CommitFile { .. } => panic!("Expected Commit, got CommitFile"),
     }
 }
 
@@ -278,6 +279,7 @@ fn resolve_partial_commit_hash() {
         crate::git::Target::Branch(_) => panic!("Expected Commit, got Branch"),
         crate::git::Target::File(_) => panic!("Expected Commit, got File"),
         crate::git::Target::Unstaged => panic!("Expected Commit, got Unstaged"),
+        crate::git::Target::CommitFile { .. } => panic!("Expected Commit, got CommitFile"),
     }
 }
 

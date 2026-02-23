@@ -152,6 +152,9 @@ fn resolve_commit(repo: &Repository, target: Option<&str>) -> Result<String> {
                     path
                 ),
                 git::Target::Unstaged => bail!("Cannot use unstaged as a branch target."),
+                git::Target::CommitFile { .. } => {
+                    bail!("Cannot use a commit file as a branch target.")
+                }
             }
         }
     }

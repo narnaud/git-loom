@@ -84,13 +84,39 @@ pub fn diff_commit(workdir: &Path, oid: &str) -> Result<String> {
     run_git_stdout(workdir, &["diff", &format!("{}^..{}", oid, oid)])
 }
 
+/// Get the diff for a single file within a commit (relative to its parent).
+///
+/// Wraps `git diff <oid>^..<oid> -- <path>`.
+pub fn diff_commit_file(workdir: &Path, oid: &str, path: &str) -> Result<String> {
+    run_git_stdout(
+        workdir,
+        &["diff", &format!("{}^..{}", oid, oid), "--", path],
+    )
+}
+
 /// Apply a patch from stdin.
 ///
 /// Wraps `git apply` with the patch passed via stdin.
 pub fn apply_patch(workdir: &Path, patch: &str) -> Result<()> {
+    apply_patch_impl(workdir, patch, false)
+}
+
+/// Apply a patch in reverse from stdin.
+///
+/// Wraps `git apply --reverse` with the patch passed via stdin.
+pub fn apply_patch_reverse(workdir: &Path, patch: &str) -> Result<()> {
+    apply_patch_impl(workdir, patch, true)
+}
+
+fn apply_patch_impl(workdir: &Path, patch: &str, reverse: bool) -> Result<()> {
+    let mut args = vec!["apply"];
+    if reverse {
+        args.push("--reverse");
+    }
+
     let mut child = Command::new("git")
         .current_dir(workdir)
-        .args(["apply"])
+        .args(&args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -104,7 +130,8 @@ pub fn apply_patch(workdir: &Path, patch: &str) -> Result<()> {
     let output = child.wait_with_output()?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("git apply failed:\n{}", stderr);
+        let flag = if reverse { " --reverse" } else { "" };
+        bail!("git apply{} failed:\n{}", flag, stderr);
     }
 
     Ok(())

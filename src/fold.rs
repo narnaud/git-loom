@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use git2::{Repository, StatusOptions};
 
 use crate::git::{self, Target};
@@ -40,16 +40,46 @@ pub fn run(args: Vec<String>) -> Result<()> {
         }
         FoldOp::CommitToBranch { commit, branch } => fold_commit_to_branch(&repo, &commit, &branch),
         FoldOp::CommitToUnstaged { commit } => fold_commit_to_unstaged(&repo, &commit),
+        FoldOp::CommitFileToUnstaged { commit, path } => {
+            fold_commit_file_to_unstaged(&repo, &commit, &path)
+        }
+        FoldOp::CommitFileToCommit {
+            source_commit,
+            path,
+            target_commit,
+        } => fold_commit_file_to_commit(&repo, &source_commit, &path, &target_commit),
     }
 }
 
 /// The classified fold operation.
 #[derive(Debug)]
 enum FoldOp {
-    FilesIntoCommit { files: Vec<String>, commit: String },
-    CommitIntoCommit { source: String, target: String },
-    CommitToBranch { commit: String, branch: String },
-    CommitToUnstaged { commit: String },
+    FilesIntoCommit {
+        files: Vec<String>,
+        commit: String,
+    },
+    CommitIntoCommit {
+        source: String,
+        target: String,
+    },
+    CommitToBranch {
+        commit: String,
+        branch: String,
+    },
+    CommitToUnstaged {
+        commit: String,
+    },
+    /// Uncommit a single file from a commit to the working directory.
+    CommitFileToUnstaged {
+        commit: String,
+        path: String,
+    },
+    /// Move a file's changes from one commit to another.
+    CommitFileToCommit {
+        source_commit: String,
+        path: String,
+        target_commit: String,
+    },
 }
 
 /// Classify resolved arguments into a specific fold operation.
@@ -70,9 +100,57 @@ fn classify(sources: &[Target], target: &Target) -> Result<FoldOp> {
         }
     }
 
-    // Handle Unstaged target early
+    // Reject CommitFile as target
+    if matches!(target, Target::CommitFile { .. }) {
+        bail!("Target must be a commit, branch, or unstaged (zz), not a commit file.");
+    }
+
+    // Classify source types
+    let has_files = sources.iter().any(|s| matches!(s, Target::File(_)));
+    let has_commits = sources.iter().any(|s| matches!(s, Target::Commit(_)));
+    let has_commit_files = sources
+        .iter()
+        .any(|s| matches!(s, Target::CommitFile { .. }));
+
+    // Reject mixed source types
+    if [has_files, has_commits, has_commit_files]
+        .iter()
+        .filter(|&&x| x)
+        .count()
+        > 1
+    {
+        bail!("Cannot mix different source types (files, commits, commit files).");
+    }
+
+    // Handle CommitFile sources (file within a commit)
+    if has_commit_files {
+        if sources.len() > 1 {
+            bail!("Only one commit file source is allowed");
+        }
+        let (commit, path) = match &sources[0] {
+            Target::CommitFile { commit, path } => (commit.clone(), path.clone()),
+            _ => unreachable!(),
+        };
+
+        return match target {
+            Target::Unstaged => Ok(FoldOp::CommitFileToUnstaged { commit, path }),
+            Target::Commit(hash) => Ok(FoldOp::CommitFileToCommit {
+                source_commit: commit,
+                path,
+                target_commit: hash.clone(),
+            }),
+            Target::Branch(_) => {
+                bail!(
+                    "Cannot fold a commit file into a branch. Target a specific commit or use 'zz' to uncommit."
+                )
+            }
+            Target::File(_) => bail!("Target must be a commit or unstaged (zz), not a file."),
+            Target::CommitFile { .. } => unreachable!(),
+        };
+    }
+
+    // Handle Unstaged target
     if matches!(target, Target::Unstaged) {
-        let has_files = sources.iter().any(|s| matches!(s, Target::File(_)));
         if has_files {
             bail!("Cannot fold files into unstaged — files are already in the working directory.");
         }
@@ -89,14 +167,6 @@ fn classify(sources: &[Target], target: &Target) -> Result<FoldOp> {
         return Ok(FoldOp::CommitToUnstaged {
             commit: source_hash,
         });
-    }
-
-    // All sources must be the same type (all files or all commits)
-    let has_files = sources.iter().any(|s| matches!(s, Target::File(_)));
-    let has_commits = sources.iter().any(|s| matches!(s, Target::Commit(_)));
-
-    if has_files && has_commits {
-        bail!("Cannot mix file and commit sources");
     }
 
     if has_files {
@@ -118,7 +188,7 @@ fn classify(sources: &[Target], target: &Target) -> Result<FoldOp> {
                 bail!("Cannot fold files into a branch. Target a specific commit.")
             }
             Target::File(_) => bail!("Target must be a commit or branch, not a file."),
-            Target::Unstaged => unreachable!(),
+            _ => unreachable!(),
         }
     } else {
         // Commit(s) + target
@@ -141,7 +211,7 @@ fn classify(sources: &[Target], target: &Target) -> Result<FoldOp> {
                 branch: name.clone(),
             }),
             Target::File(_) => bail!("Target must be a commit or branch, not a file."),
-            Target::Unstaged => unreachable!(),
+            _ => unreachable!(),
         }
     }
 }
@@ -286,6 +356,173 @@ pub fn move_commit_to_branch(
 
     let todo = graph.to_todo();
     weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
+
+    Ok(())
+}
+
+/// Uncommit a single file from a commit to the working directory.
+///
+/// Removes the file's changes from the commit and places them in the working
+/// directory as unstaged modifications. The commit itself is preserved (minus
+/// the file's changes).
+fn fold_commit_file_to_unstaged(repo: &Repository, commit_hash: &str, path: &str) -> Result<()> {
+    let workdir = git::require_workdir(repo, "fold")?;
+
+    let head_oid = git::head_oid(repo)?;
+    let target_oid = git2::Oid::from_str(commit_hash)?;
+    let is_head = head_oid == target_oid;
+
+    // Get the file's diff from the commit
+    let file_diff = git_commands::diff_commit_file(workdir, commit_hash, path)?;
+    if file_diff.is_empty() {
+        bail!(
+            "File '{}' has no changes in commit {}",
+            path,
+            git_commands::short_hash(commit_hash)
+        );
+    }
+
+    if is_head {
+        // Simple case: reverse the file's changes, amend HEAD, then re-apply
+        git_commands::apply_patch_reverse(workdir, &file_diff)?;
+        git_commit::stage_path(workdir, path)?;
+        git_commit::amend_no_edit(workdir)?;
+        git_commands::apply_patch(workdir, &file_diff).context(
+            "The commit was already modified but the diff could not be re-applied to the working directory. \
+             Use 'git diff HEAD' or 'git reflog' to recover the changes.",
+        )?;
+    } else {
+        // Non-HEAD: reverse + temp commit + fixup, then re-apply
+        git_commands::apply_patch_reverse(workdir, &file_diff)?;
+        git_commit::stage_path(workdir, path)?;
+        git_commit::commit(workdir, "fold: remove file from commit")?;
+
+        let temp_oid = git::head_oid(repo)?;
+
+        let mut graph = Weave::from_repo(repo)?;
+        graph.fixup_commit(temp_oid, target_oid);
+
+        let todo = graph.to_todo();
+        weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
+
+        git_commands::apply_patch(workdir, &file_diff).context(
+            "The commit was already modified but the diff could not be re-applied to the working directory. \
+             Use 'git reflog' to find the original commit and recover the changes.",
+        )?;
+    }
+
+    println!(
+        "Uncommitted '{}' from {} to working directory",
+        path,
+        git_commands::short_hash(commit_hash)
+    );
+
+    Ok(())
+}
+
+/// Move a file's changes from one commit to another.
+///
+/// Removes the file's changes from the source commit and adds them to the
+/// target commit. Both commits are rewritten.
+fn fold_commit_file_to_commit(
+    repo: &Repository,
+    source_hash: &str,
+    path: &str,
+    target_hash: &str,
+) -> Result<()> {
+    let workdir = git::require_workdir(repo, "fold")?;
+
+    let source_oid = git2::Oid::from_str(source_hash)?;
+    let target_oid = git2::Oid::from_str(target_hash)?;
+
+    if source_oid == target_oid {
+        bail!("Source and target are the same commit");
+    }
+
+    // Get the file's diff from the source commit
+    let file_diff = git_commands::diff_commit_file(workdir, source_hash, path)?;
+    if file_diff.is_empty() {
+        bail!(
+            "File '{}' has no changes in commit {}",
+            path,
+            git_commands::short_hash(source_hash)
+        );
+    }
+
+    // Check direction: is source a descendant of target (source is newer)?
+    let source_is_newer = repo.graph_descendant_of(source_oid, target_oid)?;
+
+    if source_is_newer {
+        // Two-phase approach: when source is newer than target, a single rebase
+        // that fixups both temp commits causes an add/add conflict during
+        // cherry-pick of the source commit (because the target already has the
+        // file from its fixup). Instead, we do two separate rebases:
+        //   Phase 1: Remove the file from source.
+        //   Phase 2: Add the file to target.
+
+        // Phase 1: Remove file from source via fixup rebase.
+        git_commands::apply_patch_reverse(workdir, &file_diff)?;
+        git_commit::stage_path(workdir, path)?;
+        git_commit::commit(workdir, "fold: remove file from source")?;
+        let temp_oid = git::head_oid(repo)?;
+
+        let mut graph = Weave::from_repo(repo)?;
+        graph.fixup_commit(temp_oid, source_oid);
+        let todo = graph.to_todo();
+
+        // Create a temp branch on target so --update-refs tracks its new OID
+        // across the rebase. Created AFTER from_repo() to avoid polluting the
+        // Weave graph.
+        let tmp_branch = "_loom-fold-target";
+        git_commands::run_git(workdir, &["branch", "-f", tmp_branch, target_hash])?;
+
+        let phase1 = weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo);
+        if phase1.is_err() {
+            let _ = git_commands::run_git(workdir, &["branch", "-D", tmp_branch]);
+            return phase1;
+        }
+
+        // Phase 2: Add file to target via fixup rebase.
+        let new_target_hash = git_commands::run_git_stdout(workdir, &["rev-parse", tmp_branch])?;
+        let new_target_hash = new_target_hash.trim().to_string();
+        let _ = git_commands::run_git(workdir, &["branch", "-D", tmp_branch]);
+        let new_target_oid = git2::Oid::from_str(&new_target_hash)?;
+
+        git_commands::apply_patch(workdir, &file_diff)?;
+        git_commit::stage_path(workdir, path)?;
+        git_commit::commit(workdir, "fold: add file to target")?;
+        let temp_oid = git::head_oid(repo)?;
+
+        let mut graph = Weave::from_repo(repo)?;
+        graph.fixup_commit(temp_oid, new_target_oid);
+        let todo = graph.to_todo();
+        weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
+    } else {
+        // Source is older than target: both fixups in one rebase (no conflict
+        // because the removal is picked before the addition in the todo).
+        git_commands::apply_patch_reverse(workdir, &file_diff)?;
+        git_commit::stage_path(workdir, path)?;
+        git_commit::commit(workdir, "fold: remove file from source")?;
+        let temp_a_oid = git::head_oid(repo)?;
+
+        git_commands::apply_patch(workdir, &file_diff)?;
+        git_commit::stage_path(workdir, path)?;
+        git_commit::commit(workdir, "fold: add file to target")?;
+        let temp_b_oid = git::head_oid(repo)?;
+
+        let mut graph = Weave::from_repo(repo)?;
+        graph.fixup_commit(temp_a_oid, source_oid);
+        graph.fixup_commit(temp_b_oid, target_oid);
+        let todo = graph.to_todo();
+        weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
+    }
+
+    println!(
+        "Moved '{}' from {} to {}",
+        path,
+        git_commands::short_hash(source_hash),
+        git_commands::short_hash(target_hash)
+    );
 
     Ok(())
 }

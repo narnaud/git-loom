@@ -27,6 +27,9 @@ pub fn run(target: String) -> Result<()> {
         Target::Unstaged => {
             bail!("Cannot drop unstaged changes. Use 'git restore' to discard changes.")
         }
+        Target::CommitFile { .. } => {
+            bail!("Cannot drop a commit file. Use 'git loom fold <file_id> zz' to uncommit a file.")
+        }
     }
 }
 

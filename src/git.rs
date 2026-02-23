@@ -38,8 +38,10 @@ pub enum Target {
     Commit(String),
     /// A branch name.
     Branch(String),
-    /// A file path.
+    /// A file path (working tree change).
     File(String),
+    /// A file within a specific commit (e.g. short ID `02:0`).
+    CommitFile { commit: String, path: String },
     /// The unstaged working directory (short ID: `zz`).
     Unstaged,
 }
@@ -302,18 +304,21 @@ fn resolve_shortid(repo: &Repository, shortid: &str) -> Result<Target> {
     }
 
     // Search for commit file shortids (format: "commit_sid:index")
-    if let Some((commit_part, index_part)) = shortid.split_once(':') {
-        if let Ok(index) = index_part.parse::<usize>() {
-            for commit in &info.commits {
-                if allocator.get_commit(commit.oid) == commit_part {
-                    if let Some(file) = commit.files.get(index) {
-                        return Ok(Target::File(file.path.clone()));
-                    }
-                    bail!(
-                        "Commit has no file at index {}. Run 'git-loom status -f' to see available IDs.",
-                        index
-                    );
+    if let Some((commit_part, index_part)) = shortid.split_once(':')
+        && let Ok(index) = index_part.parse::<usize>()
+    {
+        for commit in &info.commits {
+            if allocator.get_commit(commit.oid) == commit_part {
+                if let Some(file) = commit.files.get(index) {
+                    return Ok(Target::CommitFile {
+                        commit: commit.oid.to_string(),
+                        path: file.path.clone(),
+                    });
                 }
+                bail!(
+                    "Commit has no file at index {}. Run 'git-loom status -f' to see available IDs.",
+                    index
+                );
             }
         }
     }

@@ -85,16 +85,28 @@ impl Weave {
         for section in &self.branch_sections {
             out.push('\n');
             out.push_str(&format!("reset {}\n", section.reset_target));
+            // Defer update-ref lines past any trailing fixups so that the
+            // ref points to the final (combined) result, not the pre-fixup hash.
+            let mut pending_refs: Vec<String> = Vec::new();
             for commit in &section.commits {
+                // A non-fixup command means any pending refs from the previous
+                // pick are now finalised — emit them before the new pick.
+                if commit.command != Command::Fixup && !pending_refs.is_empty() {
+                    for r in pending_refs.drain(..) {
+                        out.push_str(&format!("update-ref refs/heads/{}\n", r));
+                    }
+                }
                 out.push_str(&format!(
                     "{} {} {}\n",
                     commit.command.as_str(),
                     commit.short_hash,
                     commit.message
                 ));
-                for update_ref in &commit.update_refs {
-                    out.push_str(&format!("update-ref refs/heads/{}\n", update_ref));
-                }
+                pending_refs.extend(commit.update_refs.iter().cloned());
+            }
+            // Emit any remaining refs (from the last pick/fixup sequence)
+            for r in &pending_refs {
+                out.push_str(&format!("update-ref refs/heads/{}\n", r));
             }
             out.push_str(&format!("label {}\n", section.label));
             for branch_name in &section.branch_names {
@@ -105,23 +117,31 @@ impl Weave {
         // Integration line
         out.push('\n');
         out.push_str("reset onto\n");
+        let mut pending_refs: Vec<String> = Vec::new();
         for entry in &self.integration_line {
             match entry {
                 IntegrationEntry::Pick(commit) => {
+                    if commit.command != Command::Fixup && !pending_refs.is_empty() {
+                        for r in pending_refs.drain(..) {
+                            out.push_str(&format!("update-ref refs/heads/{}\n", r));
+                        }
+                    }
                     out.push_str(&format!(
                         "{} {} {}\n",
                         commit.command.as_str(),
                         commit.short_hash,
                         commit.message
                     ));
-                    for update_ref in &commit.update_refs {
-                        out.push_str(&format!("update-ref refs/heads/{}\n", update_ref));
-                    }
+                    pending_refs.extend(commit.update_refs.iter().cloned());
                 }
                 IntegrationEntry::Merge {
                     original_oid,
                     label,
                 } => {
+                    // Emit any pending refs before the merge
+                    for r in pending_refs.drain(..) {
+                        out.push_str(&format!("update-ref refs/heads/{}\n", r));
+                    }
                     if let Some(oid) = original_oid {
                         out.push_str(&format!(
                             "merge -C {} {} # Merge branch '{}'\n",
@@ -134,6 +154,10 @@ impl Weave {
                     }
                 }
             }
+        }
+        // Emit any remaining refs from the integration line
+        for r in &pending_refs {
+            out.push_str(&format!("update-ref refs/heads/{}\n", r));
         }
 
         out

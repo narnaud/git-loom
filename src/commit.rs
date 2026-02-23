@@ -168,6 +168,7 @@ fn resolve_explicit_branch(repo: &Repository, branch: &str) -> Result<String> {
         Ok(Target::Commit(_)) => bail!("Commit target must be a branch"),
         Ok(Target::File(_)) => bail!("File target must be a branch"),
         Ok(Target::Unstaged) => bail!("Unstaged target must be a branch"),
+        Ok(Target::CommitFile { .. }) => bail!("Commit file target must be a branch"),
         Err(_) => {
             // Treat as new branch name
             let name = branch.trim().to_string();

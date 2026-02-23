@@ -30,6 +30,7 @@ pub fn run(target: String, message: Option<String>) -> Result<()> {
         }
         Target::File(_) => bail!("Cannot reword a file. Use 'git add' to stage file changes."),
         Target::Unstaged => bail!("Cannot reword unstaged changes."),
+        Target::CommitFile { .. } => bail!("Cannot reword a commit file."),
     }
 }
 

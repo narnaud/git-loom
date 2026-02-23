@@ -64,6 +64,7 @@ fn resolve_branch(repo: &Repository, branch_arg: &str) -> Result<String> {
         Ok(Target::Commit(_)) => bail!("Target must be a branch, not a commit."),
         Ok(Target::File(_)) => bail!("Target must be a branch, not a file."),
         Ok(Target::Unstaged) => bail!("Target must be a branch."),
+        Ok(Target::CommitFile { .. }) => bail!("Target must be a branch, not a commit file."),
         Err(e) => Err(e),
     }
 }

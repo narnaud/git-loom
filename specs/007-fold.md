@@ -15,6 +15,8 @@ small structural operations:
 - "This file change should have been in that commit"
 - "This fixup commit should be folded into the original"
 - "This commit belongs on a different branch"
+- "This file doesn't belong in this commit"
+- "This file should be in a different commit"
 
 Each of these is doable with raw git, but requires different multi-step
 incantations (interactive rebase with fixup, cherry-pick + rebase to remove,
@@ -47,6 +49,11 @@ combination:
 | Commit | Commit | Fixup: absorb source into target | No |
 | Commit | Branch | Move: relocate commit to the branch | No |
 | Commit | Unstaged (`zz`) | Uncommit: remove commit, put changes in working directory | No |
+| CommitFile | Unstaged (`zz`) | Uncommit file: remove one file from a commit to working directory | No |
+| CommitFile | Commit | Move file: move one file's changes from one commit to another | No |
+
+CommitFile sources use the `commit_sid:index` format shown by `git loom status -f`
+(e.g. `fa:0` for the first file in commit `fa`).
 
 **Invalid combinations** produce an error:
 
@@ -56,6 +63,7 @@ combination:
 - File + Unstaged: `"Cannot fold files into unstaged — files are already in the working directory."`
 - Mixed files and commits as sources: `"Cannot mix file and commit sources."`
 - Multiple commit sources: `"Only one commit source is allowed."`
+- CommitFile + Branch: `"Cannot fold a commit file into a branch. Target a specific commit or use 'zz' to uncommit."`
 
 ## What Happens
 
@@ -156,6 +164,66 @@ working directory as unstaged modifications. The target is specified using
 - Other branches not in the ancestry chain
 - Existing uncommitted changes in the working directory
 
+### Case 5: CommitFile + Unstaged (`zz`) (Uncommit File)
+
+Removes a single file's changes from a commit and places them in the working
+directory as unstaged modifications. The commit itself is preserved, minus the
+file's changes. The source uses the `commit_sid:index` format shown by
+`git loom status -f`.
+
+**Behavior:**
+
+- The file must have changes in the specified commit.
+  Error if not: `"File '<path>' has no changes in commit <short_hash>"`
+- **HEAD commit**: Reverse-applies the file's diff, amends HEAD to exclude
+  the file, then re-applies the diff to the working directory.
+- **Non-HEAD commit**: Reverse-applies the file's diff, creates a temp commit,
+  fixups the temp into the target via Weave rebase, then re-applies the diff
+  to the working directory.
+- Uncommitted changes in other files are preserved automatically.
+
+**What changes:**
+
+- The target commit loses the file's changes (new hash)
+- The file's changes appear in the working directory as unstaged modifications
+- All descendant commits get new hashes (for non-HEAD case)
+
+**What stays the same:**
+
+- The target commit's message
+- All other files in the target commit
+- Other commits' content and messages
+- Existing uncommitted changes in the working directory
+
+### Case 6: CommitFile + Commit (Move File)
+
+Moves a single file's changes from one commit to another. The file is removed
+from the source commit and added to the target commit in a single atomic
+rebase operation. The source uses the `commit_sid:index` format.
+
+**Behavior:**
+
+- Source and target must be different commits.
+  Error if same: `"Source and target are the same commit"`
+- The file must have changes in the source commit.
+  Error if not: `"File '<path>' has no changes in commit <short_hash>"`
+- Creates two temp commits (one reverse, one forward) and fixups both into
+  their respective targets via a single Weave rebase.
+- Uncommitted changes are preserved automatically.
+
+**What changes:**
+
+- The source commit loses the file's changes (new hash)
+- The target commit gains the file's changes (new hash)
+- All commits between/after the affected commits get new hashes
+
+**What stays the same:**
+
+- Both commits' messages
+- All other files in both commits
+- Commit topology
+- Other branches not in the ancestry chain
+
 ## Target Resolution
 
 Arguments are resolved using the shared resolution strategy (see Spec 002)
@@ -234,6 +302,34 @@ git-loom status
 
 git-loom fold ab zz
 # Removes the commit and puts its changes in the working directory
+```
+
+### Uncommit a file from a commit
+
+```bash
+git-loom status -f
+# Shows:
+# │●  ab  72f9d3 Fix login bug
+#      ab:0 M  src/auth.rs
+#      ab:1 M  src/main.rs
+
+git-loom fold ab:1 zz
+# Removes src/main.rs changes from commit ab, puts them in the working directory
+```
+
+### Move a file between commits
+
+```bash
+git-loom status -f
+# Shows:
+# │●  c1  aaa111 Add feature X
+#      c1:0 M  src/feature.rs
+# │●  c2  bbb222 Add feature Y
+#      c2:0 M  src/feature.rs
+#      c2:1 A  src/other.rs    ← this should be in c1
+
+git-loom fold c2:1 c1
+# Moves src/other.rs from c2 to c1
 ```
 
 ### Using full git hashes

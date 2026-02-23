@@ -58,6 +58,20 @@ pub fn stage_files(workdir: &Path, files: &[&str]) -> Result<()> {
     super::run_git(workdir, &args)
 }
 
+/// Stage all changes for a specific path, including deletions.
+///
+/// Uses `git add` for existing files and `git rm -f` for deleted files.
+/// Needed when reverse-applying a patch that added a file (the file gets
+/// deleted and must be staged as a removal).
+pub fn stage_path(workdir: &Path, path: &str) -> Result<()> {
+    let full_path = workdir.join(path);
+    if full_path.exists() {
+        super::run_git(workdir, &["add", "--", path])
+    } else {
+        super::run_git(workdir, &["rm", "-f", "--", path])
+    }
+}
+
 /// Create a commit with a message.
 ///
 /// Wraps `git commit -m <message>`.
