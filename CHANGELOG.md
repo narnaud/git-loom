@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.7.0](https://github.com/narnaud/git-loom/compare/v0.6.0...v0.7.0) (2026-02-23)
+
+
+### Features ✨
+
+* Add `-f` flag to `git loom status` to show per-commit files ([e4d8a85](https://github.com/narnaud/git-loom/commit/e4d8a8532c4fe393f35d3e1a44b787c68dd1f6df))
+* Add CommitFile fold operations to move/uncommit individual files ([8905bf3](https://github.com/narnaud/git-loom/commit/8905bf3dbdd2ff81e81bb1ccc726dd9fce225879))
+
+
+### Bug Fixes 🐞
+
+* Add rollback and error recovery to rebase-based operations ([bdbf530](https://github.com/narnaud/git-loom/commit/bdbf53049aeb2580e63c1070e9fa25091f1f46a3))
+
+
+### Changes
+
+* Change default init branch name from "loom" to "integration" ([deba54d](https://github.com/narnaud/git-loom/commit/deba54d5cd4b8c1c8cbea8998bed372826b6d93a))
+
+
+### Other
+
+* **claude:** Allow cd ([6717b66](https://github.com/narnaud/git-loom/commit/6717b666ac7b888c9d3b492fe99ee8a0dd17c7c7))
+
 ## [0.6.0](https://github.com/narnaud/git-loom/compare/v0.5.1...v0.6.0) (2026-02-22)
 
 
