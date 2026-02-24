@@ -3,6 +3,7 @@ use git2::BranchType;
 
 use crate::git;
 use crate::git_commands::{self, git_rebase};
+use crate::msg;
 
 /// Update the integration branch by fetching and rebasing from upstream.
 ///
@@ -27,8 +28,8 @@ pub fn run() -> Result<()> {
     let local_branch = repo.find_branch(&branch_name, BranchType::Local)?;
     let upstream = local_branch.upstream().with_context(|| {
         format!(
-            "Branch '{}' has no upstream tracking branch.\n\
-             Run 'git-loom init' to set up an integration branch.",
+            "Branch `{}` has no upstream tracking branch.\n\
+             Run `git-loom init` to set up an integration branch.",
             branch_name
         )
     })?;
@@ -40,7 +41,7 @@ pub fn run() -> Result<()> {
     let workdir = git::require_workdir(&repo, "update")?;
 
     // Fetch with tags, force-update, and prune deleted remote branches
-    let spinner = cliclack::spinner();
+    let spinner = msg::spinner();
     spinner.start("Fetching latest changes...");
 
     let result = git_commands::run_git(workdir, &["fetch", "--tags", "--force", "--prune"]);
@@ -56,7 +57,7 @@ pub fn run() -> Result<()> {
     }
 
     // Rebase onto upstream with autostash
-    let spinner = cliclack::spinner();
+    let spinner = msg::spinner();
     spinner.start("Rebasing onto upstream...");
 
     let result = git_commands::run_git(workdir, &["rebase", "--autostash", &upstream_name]);
@@ -74,7 +75,7 @@ pub fn run() -> Result<()> {
 
     // Update submodules if .gitmodules exists
     if workdir.join(".gitmodules").exists() {
-        let spinner = cliclack::spinner();
+        let spinner = msg::spinner();
         spinner.start("Updating submodules...");
 
         let result =
@@ -90,6 +91,11 @@ pub fn run() -> Result<()> {
             }
         }
     }
+
+    msg::success(&format!(
+        "Updated branch `{}` with `{}`",
+        branch_name, upstream_name
+    ));
 
     Ok(())
 }
