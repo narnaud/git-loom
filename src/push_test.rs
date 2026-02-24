@@ -114,6 +114,55 @@ fn detect_remote_type_gerrit_by_hook() {
     );
 }
 
+// ── resolve_push_remote tests ────────────────────────────────────────────
+
+#[test]
+fn resolve_push_remote_github_fork_uses_origin() {
+    let test_repo = TestRepo::new_with_remote();
+
+    // Set up origin with a github.com URL and add an "upstream" remote
+    test_repo
+        .repo
+        .remote_set_url("origin", "https://github.com/user/fork.git")
+        .unwrap();
+    let remote_path = test_repo.remote_path().unwrap();
+    test_repo
+        .repo
+        .remote("upstream", remote_path.to_str().unwrap())
+        .unwrap();
+
+    // When tracking upstream/main on GitHub, push should go to origin
+    let result =
+        super::resolve_push_remote(&test_repo.repo, "upstream/main", &super::RemoteType::GitHub);
+    assert_eq!(result, "origin");
+}
+
+#[test]
+fn resolve_push_remote_github_origin_stays_origin() {
+    let test_repo = TestRepo::new_with_remote();
+
+    // When tracking origin/main on GitHub, push should stay on origin
+    let result =
+        super::resolve_push_remote(&test_repo.repo, "origin/main", &super::RemoteType::GitHub);
+    assert_eq!(result, "origin");
+}
+
+#[test]
+fn resolve_push_remote_plain_upstream_stays_upstream() {
+    let test_repo = TestRepo::new_with_remote();
+
+    let remote_path = test_repo.remote_path().unwrap();
+    test_repo
+        .repo
+        .remote("upstream", remote_path.to_str().unwrap())
+        .unwrap();
+
+    // Plain remote type should NOT redirect, even if "upstream" remote exists
+    let result =
+        super::resolve_push_remote(&test_repo.repo, "upstream/main", &super::RemoteType::Plain);
+    assert_eq!(result, "upstream");
+}
+
 // ── resolve_branch tests ─────────────────────────────────────────────────
 
 #[test]

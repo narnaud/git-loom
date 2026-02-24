@@ -39,11 +39,17 @@ pub fn run(name: Option<String>) -> Result<()> {
 /// Detect the upstream tracking ref to use for the new integration branch.
 ///
 /// Strategy:
-/// 1. If the current branch has an upstream, use it (e.g., "origin/main").
-/// 2. Otherwise, check each remote's HEAD symref (e.g., refs/remotes/origin/HEAD).
-/// 3. Fall back to scanning for common branch names (main, master, develop).
-/// 4. If exactly one candidate, use it. If multiple, prompt the user.
+/// 1. On GitHub repos with an "upstream" remote (fork workflow), use it.
+/// 2. If the current branch has an upstream, use it (e.g., "origin/main").
+/// 3. Otherwise, check each remote's HEAD symref (e.g., refs/remotes/origin/HEAD).
+/// 4. Fall back to scanning for common branch names (main, master, develop).
+/// 5. If exactly one candidate, use it. If multiple, prompt the user.
 fn detect_upstream(repo: &Repository) -> Result<String> {
+    // On GitHub repos with a fork workflow, prefer the "upstream" remote
+    if let Some(upstream) = try_github_upstream(repo) {
+        return Ok(upstream);
+    }
+
     // Try the current branch's upstream first
     if let Ok(head) = repo.head()
         && head.is_branch()
@@ -77,6 +83,46 @@ fn detect_upstream(repo: &Repository) -> Result<String> {
             Ok(selection.to_string())
         }
     }
+}
+
+/// On GitHub repositories with an "upstream" remote, find its default branch.
+///
+/// In the fork workflow, "origin" is the user's fork and "upstream" is the
+/// original repository. The integration branch should track the original repo.
+fn try_github_upstream(repo: &Repository) -> Option<String> {
+    // Check if any remote URL points to GitHub
+    let remotes = repo.remotes().ok()?;
+    let is_github = remotes.iter().flatten().any(|name| {
+        repo.find_remote(name)
+            .ok()
+            .and_then(|r| r.url().map(|u| u.contains("github.com")))
+            .unwrap_or(false)
+    });
+    if !is_github {
+        return None;
+    }
+
+    // Check if there's an "upstream" remote
+    repo.find_remote("upstream").ok()?;
+
+    // Find the upstream remote's default branch via HEAD symref
+    let head_ref = "refs/remotes/upstream/HEAD";
+    if let Ok(reference) = repo.find_reference(head_ref)
+        && let Ok(resolved) = reference.resolve()
+        && let Some(name) = resolved.shorthand()
+    {
+        return Some(name.to_string());
+    }
+
+    // Fall back to common branch names
+    for branch_name in &["main", "master", "develop"] {
+        let ref_name = format!("upstream/{}", branch_name);
+        if repo.find_branch(&ref_name, BranchType::Remote).is_ok() {
+            return Some(ref_name);
+        }
+    }
+
+    None
 }
 
 /// Gather candidate remote tracking branches.

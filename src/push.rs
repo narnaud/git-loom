@@ -34,8 +34,8 @@ pub fn run(branch: Option<String>) -> Result<()> {
         None => pick_branch(&repo)?,
     };
 
-    let remote_name = extract_remote_name(&info.upstream.label);
     let remote_type = detect_remote_type(&repo, &workdir, &info.upstream.label)?;
+    let remote_name = resolve_push_remote(&repo, &info.upstream.label, &remote_type);
 
     match remote_type {
         RemoteType::Plain => push_plain(&workdir, &remote_name, &branch_name),
@@ -145,6 +145,27 @@ fn extract_target_branch(upstream_label: &str) -> String {
         .map(|x| x.1)
         .unwrap_or("main")
         .to_string()
+}
+
+/// Determine the push remote for the given upstream label and remote type.
+///
+/// In the GitHub fork workflow, the integration branch tracks `upstream/main`
+/// but feature branches should be pushed to `origin` (the user's fork) so
+/// they can open a PR from the fork to the original repository.
+fn resolve_push_remote(
+    repo: &Repository,
+    upstream_label: &str,
+    remote_type: &RemoteType,
+) -> String {
+    let remote_name = extract_remote_name(upstream_label);
+    if *remote_type == RemoteType::GitHub
+        && remote_name == "upstream"
+        && repo.find_remote("origin").is_ok()
+    {
+        "origin".to_string()
+    } else {
+        remote_name
+    }
 }
 
 /// Push using plain git with force-with-lease.

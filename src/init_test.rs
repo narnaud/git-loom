@@ -1,4 +1,5 @@
 use crate::test_helpers::TestRepo;
+use git2::BranchType;
 
 #[test]
 fn init_creates_tracking_branch_with_default_name() {
@@ -113,6 +114,71 @@ fn init_detects_upstream_from_current_branch() {
         .repo
         .find_branch("my-loom", git2::BranchType::Local)
         .expect("my-loom branch should exist");
+    let upstream = branch.upstream().expect("should have upstream");
+    let upstream_name = upstream.name().unwrap().unwrap();
+    assert_eq!(upstream_name, "origin/main");
+}
+
+#[test]
+fn init_prefers_upstream_remote_on_github() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.switch_branch("main");
+    test_repo.delete_branch("integration");
+
+    // Set origin URL to github.com to simulate a GitHub fork
+    test_repo
+        .repo
+        .remote_set_url("origin", "https://github.com/user/fork.git")
+        .unwrap();
+
+    // Add "upstream" remote pointing to the same bare repo
+    let remote_path = test_repo.remote_path().unwrap();
+    test_repo
+        .repo
+        .remote("upstream", remote_path.to_str().unwrap())
+        .unwrap();
+
+    // Fetch from upstream to get upstream/main
+    test_repo
+        .repo
+        .find_remote("upstream")
+        .unwrap()
+        .fetch(&["main"], None, None)
+        .unwrap();
+
+    let result = test_repo.in_dir(|| super::run(None));
+    assert!(result.is_ok(), "init failed: {:?}", result.err());
+
+    // Should track upstream/main, not origin/main
+    let branch = test_repo
+        .repo
+        .find_branch("integration", BranchType::Local)
+        .expect("integration branch should exist");
+    let upstream = branch.upstream().expect("should have upstream");
+    let upstream_name = upstream.name().unwrap().unwrap();
+    assert_eq!(upstream_name, "upstream/main");
+}
+
+#[test]
+fn init_no_upstream_remote_uses_origin_on_github() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.switch_branch("main");
+    test_repo.delete_branch("integration");
+
+    // Set origin URL to github.com but don't add an "upstream" remote
+    test_repo
+        .repo
+        .remote_set_url("origin", "https://github.com/user/repo.git")
+        .unwrap();
+
+    let result = test_repo.in_dir(|| super::run(None));
+    assert!(result.is_ok(), "init failed: {:?}", result.err());
+
+    // Should still track origin/main since there's no "upstream" remote
+    let branch = test_repo
+        .repo
+        .find_branch("integration", BranchType::Local)
+        .expect("integration branch should exist");
     let upstream = branch.upstream().expect("should have upstream");
     let upstream_name = upstream.name().unwrap().unwrap();
     assert_eq!(upstream_name, "origin/main");
