@@ -3,6 +3,7 @@ use git2::{Repository, StatusOptions};
 
 use crate::git::{self, Target};
 use crate::git_commands::{self, git_branch, git_commit};
+use crate::msg;
 use crate::weave::{self, Weave};
 
 /// Verify that we're on an integration branch (has upstream tracking).
@@ -76,11 +77,11 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
         return Err(e);
     }
 
-    println!(
+    msg::success(&format!(
         "Created commit {} on branch '{}'",
         git_commands::short_hash(&head_oid.to_string()),
         branch_name
-    );
+    ));
 
     Ok(())
 }
@@ -267,11 +268,11 @@ fn create_branch_at_merge_base(
 
     git_branch::create(workdir, name, &merge_base_hash)?;
 
-    println!(
+    msg::success(&format!(
         "Created branch '{}' at {}",
         name,
         git_commands::short_hash(&merge_base_hash)
-    );
+    ));
 
     Ok(())
 }

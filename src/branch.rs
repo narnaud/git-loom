@@ -3,6 +3,7 @@ use git2::Repository;
 
 use crate::git;
 use crate::git_commands::{self, git_branch};
+use crate::msg;
 use crate::weave::{self, Weave};
 
 /// Create a new branch at a target commit, weaving it into the integration branch
@@ -46,11 +47,11 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
 
     git_branch::create(workdir, &name, &commit_hash)?;
 
-    println!(
+    msg::success(&format!(
         "Created branch '{}' at {}",
         name,
         git_commands::short_hash(&commit_hash)
-    );
+    ));
 
     // Check if weaving is needed
     if should_weave(&repo, &commit_hash)? {
@@ -63,7 +64,7 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
             return Err(e);
         }
 
-        println!("Woven '{}' into integration branch", name);
+        msg::success(&format!("Woven '{}' into integration branch", name));
     }
 
     Ok(())

@@ -7,6 +7,7 @@ mod git;
 mod git_commands;
 mod graph;
 mod init;
+mod msg;
 mod push;
 mod reword;
 mod shortid;
@@ -122,14 +123,14 @@ fn main() {
     // Completions don't need git, handle before version check
     if let Some(Command::Completions { shell }) = cli.command {
         if let Err(e) = completions::run(shell) {
-            eprintln!("error: {:#}", e);
+            msg::error(&format!("{:#}", e));
             std::process::exit(1);
         }
         return;
     }
 
     if let Err(e) = git_commands::check_git_version() {
-        eprintln!("error: {:#}", e);
+        msg::error(&format!("{:#}", e));
         std::process::exit(1);
     }
 
@@ -155,7 +156,7 @@ fn main() {
     };
 
     if let Err(e) = result {
-        eprintln!("error: {:#}", e);
+        msg::error(&format!("{:#}", e));
         std::process::exit(1);
     }
 }

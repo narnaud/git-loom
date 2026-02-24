@@ -6,6 +6,7 @@ use git2::Repository;
 use crate::branch::is_on_first_parent_line;
 use crate::git::{self, Target};
 use crate::git_commands::{self, git_branch};
+use crate::msg;
 use crate::weave::{self, Weave};
 
 /// Drop a commit or a branch from history.
@@ -72,7 +73,7 @@ fn drop_commit(repo: &Repository, commit_hash: &str) -> Result<()> {
     weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
 
     let short_hash = git_commands::short_hash(commit_hash);
-    println!("Dropped commit {}", short_hash);
+    msg::success(&format!("Dropped commit {}", short_hash));
     Ok(())
 }
 
@@ -101,7 +102,7 @@ fn drop_branch(repo: &Repository, branch_name: &str) -> Result<()> {
     // Check if branch is at the merge-base with no owned commits
     if branch_info.tip_oid == merge_base_oid {
         git_branch::delete(workdir, branch_name)?;
-        println!("Dropped branch '{}'", branch_name);
+        msg::success(&format!("Dropped branch '{}'", branch_name));
         return Ok(());
     }
 
@@ -150,7 +151,7 @@ fn drop_branch(repo: &Repository, branch_name: &str) -> Result<()> {
         );
     }
 
-    println!("Dropped branch '{}'", branch_name);
+    msg::success(&format!("Dropped branch '{}'", branch_name));
     Ok(())
 }
 

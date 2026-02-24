@@ -4,6 +4,7 @@ use git2::{Oid, Repository};
 use crate::git::{self, Target};
 use crate::git_commands::git_rebase;
 use crate::git_commands::{self, git_branch, git_commit};
+use crate::msg;
 use crate::weave::{self, Weave};
 
 /// Reword a commit message or rename a branch.
@@ -62,11 +63,11 @@ pub fn reword_commit(repo: &Repository, commit_hash: &str, message: Option<Strin
     let new_commit = repo.head()?.peel_to_commit()?;
     let new_hash = new_commit.id().to_string();
 
-    println!(
+    msg::success(&format!(
         "Updated commit message for {} (now {})",
         git_commands::short_hash(commit_hash),
         git_commands::short_hash(&new_hash)
-    );
+    ));
 
     Ok(())
 }
@@ -157,7 +158,7 @@ pub fn reword_branch(repo: &Repository, old_name: &str, new_name: &str) -> Resul
 
     git_branch::rename(workdir, old_name, new_name)?;
 
-    println!("Renamed branch '{}' to '{}'", old_name, new_name);
+    msg::success(&format!("Renamed branch '{}' to '{}'", old_name, new_name));
     Ok(())
 }
 

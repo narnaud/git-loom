@@ -6,6 +6,7 @@ use git2::Repository;
 
 use crate::git::{self, Target};
 use crate::git_commands;
+use crate::msg;
 
 /// Remote type detected for the push operation.
 #[derive(Debug, PartialEq, Eq)]
@@ -182,7 +183,7 @@ fn push_plain(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
         ],
     )?;
 
-    println!("Pushed '{}' to {}", branch, remote);
+    msg::success(&format!("Pushed '{}' to {}", branch, remote));
     Ok(())
 }
 
@@ -190,7 +191,7 @@ fn push_plain(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
 fn push_github(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
     git_commands::run_git(workdir, &["push", "-u", remote, branch])?;
 
-    println!("Pushed '{}' to {}", branch, remote);
+    msg::success(&format!("Pushed '{}' to {}", branch, remote));
 
     // Check if gh CLI is available
     let gh_available = Command::new("gh")
@@ -223,10 +224,10 @@ fn push_gerrit(workdir: &Path, remote: &str, branch: &str, target_branch: &str) 
 
     git_commands::run_git(workdir, &["push", "-o", &topic_opt, remote, &refspec])?;
 
-    println!(
+    msg::success(&format!(
         "Pushed '{}' to {} (Gerrit: refs/for/{})",
         branch, remote, target_branch
-    );
+    ));
     Ok(())
 }
 

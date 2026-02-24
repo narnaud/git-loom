@@ -3,6 +3,7 @@ use git2::{BranchType, Repository};
 
 use crate::git;
 use crate::git_commands::git_branch;
+use crate::msg;
 
 /// Initialize a new integration branch tracking a remote upstream.
 ///
@@ -28,10 +29,10 @@ pub fn run(name: Option<String>) -> Result<()> {
 
     git_branch::switch_create_tracking(workdir, &name, &upstream)?;
 
-    println!(
+    msg::success(&format!(
         "Initialized integration branch '{}' tracking {}",
         name, upstream
-    );
+    ));
 
     Ok(())
 }

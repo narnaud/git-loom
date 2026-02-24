@@ -3,6 +3,7 @@ use git2::{Repository, StatusOptions};
 
 use crate::git::{self, Target};
 use crate::git_commands::{self, git_commit, git_rebase};
+use crate::msg;
 use crate::weave::{self, Weave};
 
 /// Fold source(s) into a target.
@@ -295,11 +296,11 @@ fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str
         git_rebase::continue_rebase(workdir)?;
     }
 
-    println!(
+    msg::success(&format!(
         "Folded {} file(s) into {}",
         files.len(),
         git_commands::short_hash(commit_hash)
-    );
+    ));
 
     Ok(())
 }
@@ -326,11 +327,11 @@ fn fold_commit_into_commit(repo: &Repository, source_hash: &str, target_hash: &s
     let todo = graph.to_todo();
     weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
 
-    println!(
+    msg::success(&format!(
         "Folded {} into {}",
         git_commands::short_hash(source_hash),
         git_commands::short_hash(target_hash)
-    );
+    ));
 
     Ok(())
 }
@@ -339,11 +340,11 @@ fn fold_commit_into_commit(repo: &Repository, source_hash: &str, target_hash: &s
 fn fold_commit_to_branch(repo: &Repository, commit_hash: &str, branch_name: &str) -> Result<()> {
     move_commit_to_branch(repo, commit_hash, branch_name)?;
 
-    println!(
+    msg::success(&format!(
         "Moved {} to branch '{}'",
         git_commands::short_hash(commit_hash),
         branch_name
-    );
+    ));
 
     Ok(())
 }
@@ -433,11 +434,11 @@ fn fold_commit_file_to_unstaged(repo: &Repository, commit_hash: &str, path: &str
         }
     }
 
-    println!(
+    msg::success(&format!(
         "Uncommitted '{}' from {} to working directory",
         path,
         git_commands::short_hash(commit_hash)
-    );
+    ));
 
     Ok(())
 }
@@ -585,12 +586,12 @@ fn fold_commit_file_to_commit(
         git_rebase::continue_rebase(workdir)?;
     }
 
-    println!(
+    msg::success(&format!(
         "Moved '{}' from {} to {}",
         path,
         git_commands::short_hash(source_hash),
         git_commands::short_hash(target_hash)
-    );
+    ));
 
     Ok(())
 }
@@ -629,10 +630,10 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
         }
     }
 
-    println!(
+    msg::success(&format!(
         "Uncommitted {} to working directory",
         git_commands::short_hash(commit_hash)
-    );
+    ));
 
     Ok(())
 }
