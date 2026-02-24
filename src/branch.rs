@@ -48,7 +48,7 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
     git_branch::create(workdir, &name, &commit_hash)?;
 
     msg::success(&format!(
-        "Created branch '{}' at {}",
+        "Created branch `{}` at `{}`",
         name,
         git_commands::short_hash(&commit_hash)
     ));
@@ -64,7 +64,7 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
             return Err(e);
         }
 
-        msg::success(&format!("Woven '{}' into integration branch", name));
+        msg::success(&format!("Woven `{}` into integration branch", name));
     }
 
     Ok(())

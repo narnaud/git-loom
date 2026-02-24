@@ -297,7 +297,7 @@ fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str
     }
 
     msg::success(&format!(
-        "Folded {} file(s) into {}",
+        "Folded {} file(s) into `{}`",
         files.len(),
         git_commands::short_hash(commit_hash)
     ));
@@ -328,7 +328,7 @@ fn fold_commit_into_commit(repo: &Repository, source_hash: &str, target_hash: &s
     weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
 
     msg::success(&format!(
-        "Folded {} into {}",
+        "Folded `{}` into `{}`",
         git_commands::short_hash(source_hash),
         git_commands::short_hash(target_hash)
     ));
@@ -341,7 +341,7 @@ fn fold_commit_to_branch(repo: &Repository, commit_hash: &str, branch_name: &str
     move_commit_to_branch(repo, commit_hash, branch_name)?;
 
     msg::success(&format!(
-        "Moved {} to branch '{}'",
+        "Moved `{}` to branch `{}`",
         git_commands::short_hash(commit_hash),
         branch_name
     ));
@@ -435,7 +435,7 @@ fn fold_commit_file_to_unstaged(repo: &Repository, commit_hash: &str, path: &str
     }
 
     msg::success(&format!(
-        "Uncommitted '{}' from {} to working directory",
+        "Uncommitted `{}` from `{}` to working directory",
         path,
         git_commands::short_hash(commit_hash)
     ));
@@ -587,7 +587,7 @@ fn fold_commit_file_to_commit(
     }
 
     msg::success(&format!(
-        "Moved '{}' from {} to {}",
+        "Moved `{}` from `{}` to `{}`",
         path,
         git_commands::short_hash(source_hash),
         git_commands::short_hash(target_hash)
@@ -631,7 +631,7 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
     }
 
     msg::success(&format!(
-        "Uncommitted {} to working directory",
+        "Uncommitted `{}` to working directory",
         git_commands::short_hash(commit_hash)
     ));
 

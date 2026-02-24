@@ -30,7 +30,7 @@ pub fn run(name: Option<String>) -> Result<()> {
     git_branch::switch_create_tracking(workdir, &name, &upstream)?;
 
     msg::success(&format!(
-        "Initialized integration branch '{}' tracking {}",
+        "Initialized integration branch `{}` tracking `{}`",
         name, upstream
     ));
 
@@ -68,7 +68,7 @@ fn detect_upstream(repo: &Repository) -> Result<String> {
     match candidates.len() {
         0 => bail!(
             "No remote tracking branches found.\n\
-             Set up a remote with: git remote add origin <url>"
+             Set up a remote with: `git remote add origin <url>`"
         ),
         1 => Ok(candidates[0].clone()),
         _ => {

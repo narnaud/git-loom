@@ -78,7 +78,7 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
     }
 
     msg::success(&format!(
-        "Created commit {} on branch '{}'",
+        "Created commit `{}` on branch `{}`",
         git_commands::short_hash(&head_oid.to_string()),
         branch_name
     ));
@@ -269,7 +269,7 @@ fn create_branch_at_merge_base(
     git_branch::create(workdir, name, &merge_base_hash)?;
 
     msg::success(&format!(
-        "Created branch '{}' at {}",
+        "Created branch `{}` at `{}`",
         name,
         git_commands::short_hash(&merge_base_hash)
     ));

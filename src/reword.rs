@@ -64,7 +64,7 @@ pub fn reword_commit(repo: &Repository, commit_hash: &str, message: Option<Strin
     let new_hash = new_commit.id().to_string();
 
     msg::success(&format!(
-        "Updated commit message for {} (now {})",
+        "Updated commit message for `{}` (now `{}`)",
         git_commands::short_hash(commit_hash),
         git_commands::short_hash(&new_hash)
     ));
@@ -158,7 +158,7 @@ pub fn reword_branch(repo: &Repository, old_name: &str, new_name: &str) -> Resul
 
     git_branch::rename(workdir, old_name, new_name)?;
 
-    msg::success(&format!("Renamed branch '{}' to '{}'", old_name, new_name));
+    msg::success(&format!("Renamed branch `{}` to `{}`", old_name, new_name));
     Ok(())
 }
 
