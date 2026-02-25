@@ -201,48 +201,36 @@ fn resolve_explicit_branch(repo: &Repository, branch: &str) -> Result<String> {
     }
 }
 
-/// Interactive branch picker: list woven branches + option to create new.
+/// Interactive branch picker: select an existing woven branch or type a new name.
 fn pick_branch(repo: &Repository) -> Result<String> {
     let info = git::gather_repo_info(repo, false)?;
 
-    if info.branches.is_empty() {
-        // No woven branches — prompt to create one
-        return prompt_new_branch(repo);
-    }
+    let branch_names: Vec<String> = info.branches.iter().map(|b| b.name.clone()).collect();
 
-    let mut select = cliclack::select("Select target branch");
-    for branch in &info.branches {
-        select = select.item(branch.name.clone(), &branch.name, "");
-    }
-    select = select.item("__create_new__".to_string(), "Create new branch", "");
+    let not_empty = |s: &str| {
+        if s.trim().is_empty() {
+            Err("Branch name cannot be empty")
+        } else {
+            Ok(())
+        }
+    };
 
-    let selection: String = select.interact()?;
-
-    if selection == "__create_new__" {
-        prompt_new_branch(repo)
+    let name = if branch_names.is_empty() {
+        msg::input("Branch name", not_empty)?
     } else {
-        Ok(selection)
-    }
-}
+        msg::select_or_input("Select target branch", branch_names.clone(), not_empty)?
+    };
 
-/// Prompt for a new branch name and create it at merge-base.
-fn prompt_new_branch(repo: &Repository) -> Result<String> {
-    let name: String = cliclack::input("Branch name")
-        .validate(|s: &String| {
-            if s.trim().is_empty() {
-                Err("Branch name cannot be empty")
-            } else {
-                Ok(())
-            }
-        })
-        .interact()?;
     let name = name.trim().to_string();
-    git_branch::validate_name(&name)?;
 
-    git::ensure_branch_not_exists(repo, &name)?;
+    // If user typed a name that isn't an existing woven branch, create it
+    if !branch_names.contains(&name) {
+        git_branch::validate_name(&name)?;
+        git::ensure_branch_not_exists(repo, &name)?;
+        let workdir = git::require_workdir(repo, "create branch")?;
+        create_branch_at_merge_base(repo, workdir, &name)?;
+    }
 
-    let workdir = git::require_workdir(repo, "create branch")?;
-    create_branch_at_merge_base(repo, workdir, &name)?;
     Ok(name)
 }
 

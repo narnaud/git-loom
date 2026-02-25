@@ -20,9 +20,13 @@ pub fn run(target: String, message: Option<String>) -> Result<()> {
                 Some(msg) => msg,
                 None => {
                     // Prompt for new branch name with current name as placeholder
-                    cliclack::input("New branch name")
-                        .placeholder(&name)
-                        .interact()?
+                    msg::input_with_placeholder("New branch name", &name, |s| {
+                        if s.trim().is_empty() {
+                            Err("Branch name cannot be empty")
+                        } else {
+                            Ok(())
+                        }
+                    })?
                 }
             };
             let new_name = new_name.trim().to_string();

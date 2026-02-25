@@ -73,15 +73,10 @@ fn detect_upstream(repo: &Repository) -> Result<String> {
         1 => Ok(candidates[0].clone()),
         _ => {
             // Prompt the user to pick
-            let selection = cliclack::select("Which remote branch should this integration track?")
-                .items(
-                    &candidates
-                        .iter()
-                        .map(|c| (c.as_str(), c.as_str(), ""))
-                        .collect::<Vec<_>>(),
-                )
-                .interact()?;
-            Ok(selection.to_string())
+            msg::select(
+                "Which remote branch should this integration track?",
+                candidates,
+            )
         }
     }
 }

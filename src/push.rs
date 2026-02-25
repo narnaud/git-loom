@@ -73,14 +73,8 @@ fn resolve_branch(repo: &Repository, branch_arg: &str) -> Result<String> {
 /// Interactive branch picker: list woven branches.
 fn pick_branch(repo: &Repository) -> Result<String> {
     let info = git::gather_repo_info(repo, false)?;
-
-    let mut select = cliclack::select("Select branch to push");
-    for branch in &info.branches {
-        select = select.item(branch.name.clone(), &branch.name, "");
-    }
-
-    let selection: String = select.interact()?;
-    Ok(selection)
+    let items: Vec<String> = info.branches.iter().map(|b| b.name.clone()).collect();
+    msg::select("Select branch to push", items)
 }
 
 /// Detect the remote type from config, URL heuristics, or hook inspection.

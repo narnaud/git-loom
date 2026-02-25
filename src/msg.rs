@@ -6,7 +6,9 @@ use std::sync::{
 use std::thread;
 use std::time::Duration;
 
+use anyhow::Result;
 use colored::{ColoredString, Colorize};
+use inquire::validator::Validation;
 
 const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -101,5 +103,92 @@ pub fn error(message: &str) {
         for line in lines {
             eprintln!("  {} {}", "›".blue(), colorize_backticks(line));
         }
+    }
+}
+
+// --- Interactive prompts ---
+
+/// Prompt the user for text input with a validation function.
+///
+/// The validator receives the input string and returns `Ok(())` if valid,
+/// or `Err("message")` to show an error and re-prompt.
+pub fn input<F>(prompt: &str, validator: F) -> Result<String>
+where
+    F: Fn(&str) -> std::result::Result<(), &'static str> + Clone + 'static,
+{
+    let answer = inquire::Text::new(prompt)
+        .with_validator(move |input: &str| match validator(input) {
+            Ok(()) => Ok(Validation::Valid),
+            Err(msg) => Ok(Validation::Invalid(msg.into())),
+        })
+        .prompt()?;
+    Ok(answer)
+}
+
+/// Prompt the user for text input with a default value and validation.
+///
+/// The default value is pre-filled in the input; pressing Enter accepts it.
+pub fn input_with_placeholder<F>(prompt: &str, placeholder: &str, validator: F) -> Result<String>
+where
+    F: Fn(&str) -> std::result::Result<(), &'static str> + Clone + 'static,
+{
+    let answer = inquire::Text::new(prompt)
+        .with_default(placeholder)
+        .with_validator(move |input: &str| match validator(input) {
+            Ok(()) => Ok(Validation::Valid),
+            Err(msg) => Ok(Validation::Invalid(msg.into())),
+        })
+        .prompt()?;
+    Ok(answer)
+}
+
+/// Prompt the user to select one item from a list.
+pub fn select(prompt: &str, items: Vec<String>) -> Result<String> {
+    let answer = inquire::Select::new(prompt, items).prompt()?;
+    Ok(answer)
+}
+
+/// Prompt the user to select from suggestions or type a new value.
+///
+/// Shows a text input with autocomplete suggestions. The user can pick
+/// a suggestion or type a new value. The validator is applied to the
+/// final input.
+pub fn select_or_input<F>(prompt: &str, suggestions: Vec<String>, validator: F) -> Result<String>
+where
+    F: Fn(&str) -> std::result::Result<(), &'static str> + Clone + 'static,
+{
+    let answer = inquire::Text::new(prompt)
+        .with_autocomplete(SuggestionsHelper(suggestions))
+        .with_validator(move |input: &str| match validator(input) {
+            Ok(()) => Ok(Validation::Valid),
+            Err(msg) => Ok(Validation::Invalid(msg.into())),
+        })
+        .prompt()?;
+    Ok(answer)
+}
+
+#[derive(Clone)]
+struct SuggestionsHelper(Vec<String>);
+
+impl inquire::autocompletion::Autocomplete for SuggestionsHelper {
+    fn get_suggestions(
+        &mut self,
+        input: &str,
+    ) -> std::result::Result<Vec<String>, inquire::CustomUserError> {
+        let matches = self
+            .0
+            .iter()
+            .filter(|s| s.contains(input))
+            .cloned()
+            .collect();
+        Ok(matches)
+    }
+
+    fn get_completion(
+        &mut self,
+        _input: &str,
+        highlighted_suggestion: Option<String>,
+    ) -> std::result::Result<inquire::autocompletion::Replacement, inquire::CustomUserError> {
+        Ok(highlighted_suggestion)
     }
 }

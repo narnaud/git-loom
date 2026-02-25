@@ -21,15 +21,13 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
 
     let name = match name {
         Some(n) => n,
-        None => cliclack::input("Branch name")
-            .validate(|s: &String| {
-                if s.trim().is_empty() {
-                    Err("Branch name cannot be empty")
-                } else {
-                    Ok(())
-                }
-            })
-            .interact()?,
+        None => msg::input("Branch name", |s| {
+            if s.trim().is_empty() {
+                Err("Branch name cannot be empty")
+            } else {
+                Ok(())
+            }
+        })?,
     };
 
     let name = name.trim().to_string();
