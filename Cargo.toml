@@ -17,7 +17,7 @@ anyhow = "1"
 chrono = "0.4"
 clap = { version = "4", features = [ "derive" ] }
 colored = "3"
-inquire = "0.7"
+inquire = "0.9.4"
 git2 = "0.20"
 shell-escape = "0.1"
 tempfile = "3"
