@@ -92,9 +92,21 @@ pub fn run() -> Result<()> {
         }
     }
 
+    // Show the latest upstream commit
+    let upstream_info = repo
+        .revparse_single(&upstream_name)
+        .ok()
+        .and_then(|obj| obj.peel_to_commit().ok())
+        .map(|commit| {
+            let short_id = &commit.id().to_string()[..7];
+            let summary = commit.summary().unwrap_or("");
+            format!(" ({} {})", short_id, summary)
+        })
+        .unwrap_or_default();
+
     msg::success(&format!(
-        "Updated branch `{}` with `{}`",
-        branch_name, upstream_name
+        "Updated branch `{}` with `{}`{}",
+        branch_name, upstream_name, upstream_info
     ));
 
     Ok(())
