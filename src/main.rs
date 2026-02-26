@@ -25,7 +25,7 @@ use clap::{Parser, Subcommand};
 use colored::control;
 
 #[derive(Parser)]
-#[command(name = "git-loom", about = "Supercharge your Git workflow")]
+#[command(name = "git-loom", about = "Supercharge your Git workflow", version)]
 struct Cli {
     /// Disable colored output
     #[arg(long)]
