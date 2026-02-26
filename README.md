@@ -21,34 +21,42 @@ Think of it as a loom that weaves multiple threads (feature branches) into a sin
 
 ## Installation
 
-### Installation via [Scoop](https://scoop.sh/) (preferred)
+### Cargo (all platforms)
 
-Install **git-loom** with [scoop](<https://scoop.sh/>):
+```bash
+cargo install git-loom
+```
+
+### Scoop (Windows)
 
 ```
 scoop bucket add narnaud https://github.com/narnaud/scoop-bucket
 scoop install git-loom
 ```
 
-### Or via archive files
+### Pre-built binaries
 
-1. Go to the [Releases](https://github.com/narnaud/git-loom/releases) page
-2. Download the latest `git-loom-x86_64-pc-windows-msvc.zip` file
-3. Extract the files from it into a directory.
+Download the latest archive for your platform from the [Releases](https://github.com/narnaud/git-loom/releases) page:
+
+| Platform | Archive |
+|----------|---------|
+| Linux x86_64 | `git-loom-x86_64-unknown-linux-gnu.tar.gz` |
+| Linux aarch64 | `git-loom-aarch64-unknown-linux-gnu.tar.gz` |
+| macOS x86_64 | `git-loom-x86_64-apple-darwin.tar.gz` |
+| macOS Apple Silicon | `git-loom-aarch64-apple-darwin.tar.gz` |
+| Windows x86_64 | `git-loom-x86_64-pc-windows-msvc.zip` |
+
+Extract the binary and place it somewhere on your `PATH`.
 
 ### From Source
 
 Requires Rust 1.90 or later.
 
 ```bash
-git clone https://github.com/yourusername/git-loom.git
+git clone https://github.com/narnaud/git-loom.git
 cd git-loom
-cargo build --release
+cargo install --path .
 ```
-
-The binary will be available at `target/release/git-loom`.
-
-Add it to your PATH or use `cargo install --path .` to install it globally.
 
 ## Usage
 
