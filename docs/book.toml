@@ -1,0 +1,12 @@
+[book]
+title = "git-loom"
+authors = ["Nicolas Arnaud-Cormos"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "book"
+
+[output.html]
+git-repository-url = "https://github.com/narnaud/git-loom"
+edit-url-template = "https://github.com/narnaud/git-loom/edit/main/docs/{path}"
