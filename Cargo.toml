@@ -3,11 +3,19 @@ name = "git-loom"
 version = "0.8.0"
 edition = "2024"
 rust-version = "1.90"
+description = "A Git CLI tool that weaves together multiple feature branches into integration branches"
+license = "MIT"
+repository = "https://github.com/narnaud/git-loom"
+homepage = "https://narnaud.github.io/git-loom"
+readme = "README.md"
+keywords = [ "git", "cli", "branches", "workflow" ]
+categories = [ "command-line-utilities", "development-tools" ]
+exclude = [ ".claude/", ".github/" ]
 
 [dependencies]
 anyhow = "1"
 chrono = "0.4"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = [ "derive" ] }
 colored = "3"
 inquire = "0.7"
 git2 = "0.20"
