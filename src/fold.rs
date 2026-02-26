@@ -15,8 +15,8 @@ use crate::weave::{self, Weave};
 pub fn run(args: Vec<String>) -> Result<()> {
     if args.len() < 2 {
         bail!(
-            "Usage: git-loom fold <source>... <target>\n\
-             At least two arguments required (one source + one target)."
+            "At least two arguments required (one source + one target)\n\
+             Usage: git-loom fold <source>... <target>"
         );
     }
 
@@ -89,12 +89,12 @@ fn classify(sources: &[Target], target: &Target) -> Result<FoldOp> {
     for source in sources {
         match source {
             Target::Branch(_) => {
-                bail!("Cannot fold a branch. Use 'git loom branch' for branch operations.");
+                bail!("Cannot fold a branch\nUse `git loom branch` for branch operations");
             }
             Target::Unstaged => {
                 bail!(
-                    "Cannot fold unstaged changes. Stage files first, or use \
-                     'git loom fold <file> <commit>' to amend specific files."
+                    "Cannot fold unstaged changes\n\
+                     Stage files first, or use `git loom fold <file> <commit>` to amend specific files"
                 );
             }
             _ => {}
@@ -103,7 +103,7 @@ fn classify(sources: &[Target], target: &Target) -> Result<FoldOp> {
 
     // Reject CommitFile as target
     if matches!(target, Target::CommitFile { .. }) {
-        bail!("Target must be a commit, branch, or unstaged (zz), not a commit file.");
+        bail!("Target must be a commit, branch, or unstaged (zz), not a commit file");
     }
 
     // Classify source types
@@ -120,7 +120,7 @@ fn classify(sources: &[Target], target: &Target) -> Result<FoldOp> {
         .count()
         > 1
     {
-        bail!("Cannot mix different source types (files, commits, commit files).");
+        bail!("Cannot mix different source types (files, commits, commit files)");
     }
 
     // Handle CommitFile sources (file within a commit)
@@ -142,10 +142,11 @@ fn classify(sources: &[Target], target: &Target) -> Result<FoldOp> {
             }),
             Target::Branch(_) => {
                 bail!(
-                    "Cannot fold a commit file into a branch. Target a specific commit or use 'zz' to uncommit."
+                    "Cannot fold a commit file into a branch\n\
+                     Target a specific commit or use `zz` to uncommit"
                 )
             }
-            Target::File(_) => bail!("Target must be a commit or unstaged (zz), not a file."),
+            Target::File(_) => bail!("Target must be a commit or unstaged (zz), not a file"),
             Target::CommitFile { .. } => unreachable!(),
         };
     }
@@ -153,7 +154,7 @@ fn classify(sources: &[Target], target: &Target) -> Result<FoldOp> {
     // Handle Unstaged target
     if matches!(target, Target::Unstaged) {
         if has_files {
-            bail!("Cannot fold files into unstaged — files are already in the working directory.");
+            bail!("Cannot fold files into unstaged — files are already in the working directory");
         }
 
         if sources.len() > 1 {
@@ -186,9 +187,9 @@ fn classify(sources: &[Target], target: &Target) -> Result<FoldOp> {
                 commit: hash.clone(),
             }),
             Target::Branch(_) => {
-                bail!("Cannot fold files into a branch. Target a specific commit.")
+                bail!("Cannot fold files into a branch\nTarget a specific commit")
             }
-            Target::File(_) => bail!("Target must be a commit or branch, not a file."),
+            Target::File(_) => bail!("Target must be a commit or branch, not a file"),
             _ => unreachable!(),
         }
     } else {
@@ -211,7 +212,7 @@ fn classify(sources: &[Target], target: &Target) -> Result<FoldOp> {
                 commit: source_hash,
                 branch: name.clone(),
             }),
-            Target::File(_) => bail!("Target must be a commit or branch, not a file."),
+            Target::File(_) => bail!("Target must be a commit or branch, not a file"),
             _ => unreachable!(),
         }
     }
@@ -403,7 +404,7 @@ fn fold_commit_file_to_unstaged(repo: &Repository, commit_hash: &str, path: &str
         git_commit::amend_no_edit(workdir)?;
         if let Err(e) = git_commands::apply_patch(workdir, &file_diff) {
             let _ = git_commit::reset_hard(workdir, &saved_head);
-            return Err(e).context("Failed to uncommit file. Operation rolled back.");
+            return Err(e).context("Failed to uncommit file, operation rolled back");
         }
     } else {
         // Non-HEAD: edit+continue pattern with save-head rollback
@@ -430,7 +431,7 @@ fn fold_commit_file_to_unstaged(repo: &Repository, commit_hash: &str, path: &str
         // Re-apply changes to working tree
         if let Err(e) = git_commands::apply_patch(workdir, &file_diff) {
             let _ = git_commit::reset_hard(workdir, &saved_head);
-            return Err(e).context("Failed to uncommit file. Operation rolled back.");
+            return Err(e).context("Failed to uncommit file, operation rolled back");
         }
     }
 
@@ -626,7 +627,7 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
         {
             let _ = git_commit::reset_hard(workdir, &saved_head);
             return Err(e)
-                .context("Failed to apply changes to working directory. Operation rolled back.");
+                .context("Failed to apply changes to working directory, operation rolled back");
         }
     }
 

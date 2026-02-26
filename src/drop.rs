@@ -23,13 +23,13 @@ pub fn run(target: String) -> Result<()> {
         Target::Commit(hash) => drop_commit(&repo, &hash),
         Target::Branch(name) => drop_branch(&repo, &name),
         Target::File(_) => {
-            bail!("Cannot drop a file. Use 'git restore' to discard file changes.")
+            bail!("Cannot drop a file\nUse `git restore` to discard file changes")
         }
         Target::Unstaged => {
-            bail!("Cannot drop unstaged changes. Use 'git restore' to discard changes.")
+            bail!("Cannot drop unstaged changes\nUse `git restore` to discard changes")
         }
         Target::CommitFile { .. } => {
-            bail!("Cannot drop a commit file. Use 'git loom fold <file_id> zz' to uncommit a file.")
+            bail!("Cannot drop a commit file\nUse `git loom fold <file_id> zz` to uncommit a file")
         }
     }
 }
@@ -90,8 +90,8 @@ fn drop_branch(repo: &Repository, branch_name: &str) -> Result<()> {
         .find(|b| b.name == branch_name)
         .with_context(|| {
             format!(
-                "Branch '{}' is not in the integration range. \
-                 Use 'git branch -d {}' to delete it directly.",
+                "Branch '{}' is not woven into the integration branch\n\
+                 Use `git branch -d {}` to delete it directly",
                 branch_name, branch_name
             )
         })?;

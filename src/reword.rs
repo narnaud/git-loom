@@ -33,9 +33,9 @@ pub fn run(target: String, message: Option<String>) -> Result<()> {
             git_branch::validate_name(&new_name)?;
             reword_branch(&repo, &name, &new_name)
         }
-        Target::File(_) => bail!("Cannot reword a file. Use 'git add' to stage file changes."),
-        Target::Unstaged => bail!("Cannot reword unstaged changes."),
-        Target::CommitFile { .. } => bail!("Cannot reword a commit file."),
+        Target::File(_) => bail!("Cannot reword a file\nUse `git add` to stage file changes"),
+        Target::Unstaged => bail!("Cannot reword unstaged changes"),
+        Target::CommitFile { .. } => bail!("Cannot reword a commit file"),
     }
 }
 
@@ -128,7 +128,7 @@ fn build_and_run_linear_edit(
             .as_object()
             .short_id()?
             .as_str()
-            .context("short_id not valid UTF-8")?
+            .context("Short ID is not valid UTF-8")?
             .to_string();
         let msg = c.summary().unwrap_or("").to_string();
         let cmd = if current == commit_oid {

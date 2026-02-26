@@ -67,7 +67,7 @@ fn detect_upstream(repo: &Repository) -> Result<String> {
 
     match candidates.len() {
         0 => bail!(
-            "No remote tracking branches found.\n\
+            "No remote tracking branches found\n\
              Set up a remote with: `git remote add origin <url>`"
         ),
         1 => Ok(candidates[0].clone()),

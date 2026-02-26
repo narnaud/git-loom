@@ -15,9 +15,9 @@ pub fn run() -> Result<()> {
     let repo = git::open_repo()?;
 
     // Validate that we're on a branch with an upstream tracking ref
-    let head = repo.head()?;
+    let head = repo.head().context("Failed to get HEAD reference")?;
     if !head.is_branch() {
-        bail!("HEAD is detached. Please switch to an integration branch.");
+        bail!("HEAD is detached\nSwitch to an integration branch");
     }
 
     let branch_name = head
@@ -28,8 +28,8 @@ pub fn run() -> Result<()> {
     let local_branch = repo.find_branch(&branch_name, BranchType::Local)?;
     let upstream = local_branch.upstream().with_context(|| {
         format!(
-            "Branch `{}` has no upstream tracking branch.\n\
-             Run `git-loom init` to set up an integration branch.",
+            "Branch `{}` has no upstream tracking branch\n\
+             Run `git-loom init` to set up an integration branch",
             branch_name
         )
     })?;

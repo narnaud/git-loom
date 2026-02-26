@@ -13,7 +13,7 @@ pub fn validate_name(name: &str) -> Result<()> {
         .context("Failed to run git check-ref-format")?;
 
     if !output.status.success() {
-        bail!("'{}' is not a valid branch name", name);
+        bail!("Branch name '{}' is not valid", name);
     }
     Ok(())
 }

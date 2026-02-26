@@ -27,7 +27,7 @@ pub fn run(branch: Option<String>) -> Result<()> {
     let info = git::gather_repo_info(&repo, false)?;
 
     if info.branches.is_empty() {
-        bail!("No woven branches to push. Create a branch with 'git loom branch' first.");
+        bail!("No woven branches to push\nCreate a branch with `git loom branch` first");
     }
 
     let branch_name = match branch {
@@ -56,16 +56,13 @@ fn resolve_branch(repo: &Repository, branch_arg: &str) -> Result<String> {
             if info.branches.iter().any(|b| b.name == name) {
                 Ok(name)
             } else {
-                bail!(
-                    "Branch '{}' is not woven into the integration branch.",
-                    name
-                )
+                bail!("Branch '{}' is not woven into the integration branch", name)
             }
         }
-        Ok(Target::Commit(_)) => bail!("Target must be a branch, not a commit."),
-        Ok(Target::File(_)) => bail!("Target must be a branch, not a file."),
-        Ok(Target::Unstaged) => bail!("Target must be a branch."),
-        Ok(Target::CommitFile { .. }) => bail!("Target must be a branch, not a commit file."),
+        Ok(Target::Commit(_)) => bail!("Target must be a branch, not a commit"),
+        Ok(Target::File(_)) => bail!("Target must be a branch, not a file"),
+        Ok(Target::Unstaged) => bail!("Target must be a branch"),
+        Ok(Target::CommitFile { .. }) => bail!("Target must be a branch, not a commit file"),
         Err(e) => Err(e),
     }
 }

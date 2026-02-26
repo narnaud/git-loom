@@ -7,7 +7,7 @@ use anyhow::{Result, bail};
 pub fn continue_rebase(workdir: &Path) -> Result<()> {
     if let Err(e) = super::run_git(workdir, &["rebase", "--continue"]) {
         let _ = abort(workdir);
-        bail!("Git rebase --continue failed. Rebase aborted:\n{}", e);
+        bail!("Git rebase --continue failed, rebase aborted:\n{}", e);
     }
     Ok(())
 }

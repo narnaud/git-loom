@@ -123,14 +123,14 @@ fn main() {
     // Completions don't need git, handle before version check
     if let Some(Command::Completions { shell }) = cli.command {
         if let Err(e) = completions::run(shell) {
-            msg::error(&format!("{:#}", e));
+            msg::error(&format!("{}", e));
             std::process::exit(1);
         }
         return;
     }
 
     if let Err(e) = git_commands::check_git_version() {
-        msg::error(&format!("{:#}", e));
+        msg::error(&format!("{}", e));
         std::process::exit(1);
     }
 
@@ -156,7 +156,7 @@ fn main() {
     };
 
     if let Err(e) = result {
-        msg::error(&format!("{:#}", e));
+        msg::error(&format!("{}", e));
         std::process::exit(1);
     }
 }

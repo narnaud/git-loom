@@ -77,7 +77,7 @@ fn init_fails_with_invalid_name() {
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
     assert!(
-        err.contains("not a valid branch name"),
+        err.contains("is not valid"),
         "Expected invalid name error, got: {}",
         err
     );

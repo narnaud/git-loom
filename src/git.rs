@@ -198,7 +198,7 @@ pub fn gather_repo_info(repo: &Repository, show_files: bool) -> Result<RepoInfo>
     let head = repo.head()?;
 
     if !head.is_branch() {
-        bail!("HEAD is detached. git-loom requires being on a branch.");
+        bail!("HEAD is detached\nSwitch to an integration branch");
     }
 
     let head_oid = head.target().context("HEAD does not point to a commit")?;
@@ -207,25 +207,25 @@ pub fn gather_repo_info(repo: &Repository, show_files: bool) -> Result<RepoInfo>
 
     let local_branch = repo
         .find_branch(&branch_name, BranchType::Local)
-        .with_context(|| format!("branch '{}' not found — are you on a branch?", branch_name))?;
+        .with_context(|| format!("Branch '{}' not found — are you on a branch?", branch_name))?;
 
     let upstream = local_branch.upstream().with_context(|| {
         format!(
-            "branch '{}' has no upstream tracking branch.\n\
-             Set one with: git branch --set-upstream-to=origin/main {}",
+            "Branch '{}' has no upstream tracking branch\n\
+             Set one with: git branch --set-upstream-to=<upstream> {}",
             branch_name, branch_name
         )
     })?;
 
     let upstream_name = upstream
         .name()?
-        .context("upstream branch name is not valid UTF-8")?
+        .context("Upstream branch name is not valid UTF-8")?
         .to_string();
 
     let upstream_oid = upstream
         .get()
         .target()
-        .context("upstream does not point to a commit")?;
+        .context("Upstream does not point to a commit")?;
 
     let merge_base_oid = repo.merge_base(head_oid, upstream_oid)?;
 
@@ -249,7 +249,7 @@ pub fn gather_repo_info(repo: &Repository, show_files: bool) -> Result<RepoInfo>
         .as_object()
         .short_id()?
         .as_str()
-        .context("base commit short_id is not valid UTF-8")?
+        .context("Base commit short_id is not valid UTF-8")?
         .to_string();
     let base_message = base_commit.summary().unwrap_or("").to_string();
     let base_time = base_commit.time();
@@ -373,7 +373,7 @@ fn resolve_shortid(repo: &Repository, shortid: &str) -> Result<Target> {
                     });
                 }
                 bail!(
-                    "Commit has no file at index {}. Run 'git-loom status -f' to see available IDs.",
+                    "Commit has no file at index {}\nRun `git-loom status -f` to see available IDs",
                     index
                 );
             }
@@ -381,7 +381,7 @@ fn resolve_shortid(repo: &Repository, shortid: &str) -> Result<Target> {
     }
 
     bail!(
-        "No commit, branch, file, or target with shortid '{}'. Run 'git-loom status' to see available IDs.",
+        "No commit, branch, file, or target with shortid '{}'\nRun `git-loom status` to see available IDs",
         shortid
     )
 }
@@ -434,7 +434,7 @@ fn walk_commits(
             .as_object()
             .short_id()?
             .as_str()
-            .context("short_id is not valid UTF-8")?
+            .context("Commit short_id is not valid UTF-8")?
             .to_string();
         let message = commit.summary().unwrap_or("").to_string();
         let parent_oid = commit.parent_id(0).ok();

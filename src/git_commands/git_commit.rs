@@ -24,7 +24,7 @@ pub fn amend(workdir: &Path, message: Option<&str>) -> Result<()> {
         // No message provided — open editor with inherited stdio
         let status = cmd.status()?;
         if !status.success() {
-            bail!("Git commit --amend failed (editor aborted or empty message).");
+            bail!("Git commit --amend failed (editor aborted or empty message)");
         }
     }
 
@@ -113,7 +113,7 @@ pub fn commit_with_editor(workdir: &Path) -> Result<()> {
         .status()?;
 
     if !status.success() {
-        bail!("Git commit failed (editor aborted or empty message).");
+        bail!("Git commit failed (editor aborted or empty message)");
     }
 
     Ok(())

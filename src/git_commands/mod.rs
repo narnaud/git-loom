@@ -21,7 +21,7 @@ pub fn run_git(workdir: &Path, args: &[&str]) -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("git {} failed:\n{}", args.join(" "), stderr);
+        bail!("Git {} failed:\n{}", args.join(" "), stderr);
     }
 
     Ok(())
@@ -39,7 +39,7 @@ pub fn check_git_version() -> Result<()> {
 
     if (major, minor) < MIN_GIT_VERSION {
         bail!(
-            "Git {}.{} is too old. git-loom requires Git {}.{} or later (for --update-refs).\n\
+            "Git {}.{} is too old, git-loom requires Git {}.{} or later (for --update-refs)\n\
              Current version: {}",
             major,
             minor,
@@ -71,7 +71,7 @@ pub fn run_git_stdout(workdir: &Path, args: &[&str]) -> Result<String> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("git {} failed:\n{}", args.join(" "), stderr);
+        bail!("Git {} failed:\n{}", args.join(" "), stderr);
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
@@ -131,7 +131,7 @@ fn apply_patch_impl(workdir: &Path, patch: &str, reverse: bool) -> Result<()> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let flag = if reverse { " --reverse" } else { "" };
-        bail!("git apply{} failed:\n{}", flag, stderr);
+        bail!("Git apply{} failed:\n{}", flag, stderr);
     }
 
     Ok(())

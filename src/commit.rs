@@ -9,8 +9,8 @@ use crate::weave::{self, Weave};
 /// Verify that we're on an integration branch (has upstream tracking).
 fn verify_on_integration_branch(repo: &Repository) -> Result<()> {
     git::gather_repo_info(repo, false).context(
-        "Must be on an integration branch to use commit. \
-         Use `git commit` directly on feature branches.",
+        "Must be on an integration branch to use commit\n\
+         Use `git commit` directly on feature branches",
     )?;
     Ok(())
 }
@@ -117,7 +117,7 @@ fn resolve_staging(repo: &Repository, workdir: &std::path::Path, files: &[String
 fn resolve_file_arg(repo: &Repository, workdir: &std::path::Path, arg: &str) -> Result<String> {
     match git::resolve_target(repo, arg) {
         Ok(Target::File(path)) => Ok(path),
-        Ok(_) => bail!("'{}' is not a file", arg),
+        Ok(_) => bail!("Target '{}' is not a file", arg),
         Err(_) => {
             let full_path = workdir.join(arg);
             if full_path.exists() {
@@ -169,16 +169,13 @@ fn resolve_explicit_branch(repo: &Repository, branch: &str) -> Result<String> {
             if info.branches.iter().any(|b| b.name == name) {
                 Ok(name)
             } else {
-                bail!(
-                    "Branch '{}' is not woven into the integration branch.",
-                    name
-                )
+                bail!("Branch '{}' is not woven into the integration branch", name)
             }
         }
-        Ok(Target::Commit(_)) => bail!("Commit target must be a branch"),
-        Ok(Target::File(_)) => bail!("File target must be a branch"),
-        Ok(Target::Unstaged) => bail!("Unstaged target must be a branch"),
-        Ok(Target::CommitFile { .. }) => bail!("Commit file target must be a branch"),
+        Ok(Target::Commit(_)) => bail!("Target must be a branch, not a commit"),
+        Ok(Target::File(_)) => bail!("Target must be a branch, not a file"),
+        Ok(Target::Unstaged) => bail!("Target must be a branch"),
+        Ok(Target::CommitFile { .. }) => bail!("Target must be a branch, not a commit file"),
         Err(_) => {
             // Treat as new branch name
             let name = branch.trim().to_string();
@@ -189,7 +186,7 @@ fn resolve_explicit_branch(repo: &Repository, branch: &str) -> Result<String> {
 
             if repo.find_branch(&name, git2::BranchType::Local).is_ok() {
                 bail!(
-                    "Branch '{}' exists but is not woven into the integration branch.",
+                    "Branch '{}' exists but is not woven into the integration branch",
                     name
                 );
             }
