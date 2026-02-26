@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.9.0](https://github.com/narnaud/git-loom/compare/v0.8.0...v0.9.0) (2026-02-26)
+
+
+### Features ✨
+
+* **ci:** Publish to crates.io and package on Linux and Mac ([8cbe96e](https://github.com/narnaud/git-loom/commit/8cbe96ece2db6b07135535a6c9f99eb7bdc02586))
+* **update:** Show latest upstream commit after successful update ([a607fd1](https://github.com/narnaud/git-loom/commit/a607fd1de23ad9098ecd17bab1158809a49ef592))
+
+
+### Documentation
+
+* Update installation steps ([f4a1fe9](https://github.com/narnaud/git-loom/commit/f4a1fe94f537a204ef6f5df27ed5fb13a0bd3d3b))
+
+
+### Other
+
+* Add crates.io package metadata ([938a2bc](https://github.com/narnaud/git-loom/commit/938a2bcd1625c1e3b7c5531e2998af0b70f9f81a))
+
 ## [0.8.0](https://github.com/narnaud/git-loom/compare/v0.7.0...v0.8.0) (2026-02-26)
 
 
