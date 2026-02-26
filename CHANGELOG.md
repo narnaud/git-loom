@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.8.0](https://github.com/narnaud/git-loom/compare/v0.7.0...v0.8.0) (2026-02-26)
+
+
+### Features ✨
+
+* Add colored success/error messages ([ab37051](https://github.com/narnaud/git-loom/commit/ab37051f467c2cb0cdba00b70124159317b276bc))
+* Highlight command-line values in msg output ([73dbe8d](https://github.com/narnaud/git-loom/commit/73dbe8d2fb62a89c8a946fb2bb404e8331720cab))
+* Show hint lines with blue arrow on multi-line errors ([8233634](https://github.com/narnaud/git-loom/commit/82336348ca2e93e8cb8d5c5eb29921b5832f160b))
+* Support GitHub fork workflow in init and push ([ae9c702](https://github.com/narnaud/git-loom/commit/ae9c702a784ad2ce714a5465fa41590bd41c0251))
+
+
+### Documentation
+
+* Add mdBook documentation site with GitHub Pages deployment ([c813357](https://github.com/narnaud/git-loom/commit/c813357840db8008613316548ddef4a796d3e564))
+
+
+### Changes
+
+* Replace cliclack spinner with custom spinner in msg module ([e2aefea](https://github.com/narnaud/git-loom/commit/e2aefeadf57a56b16dee75be5d21664ec40d12d5))
+* Replace cliclack with inquire, add prompt helpers in msg module ([3889b21](https://github.com/narnaud/git-loom/commit/3889b211765682a78b5062c2062f45f49e24c833))
+
+
+### Other
+
+* **claude:** Update permissions ([b95bdd1](https://github.com/narnaud/git-loom/commit/b95bdd190ce58997faad8e2fa9edeec0f1cf4343))
+
 ## [0.7.0](https://github.com/narnaud/git-loom/compare/v0.6.0...v0.7.0) (2026-02-23)
 
 
