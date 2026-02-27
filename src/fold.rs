@@ -274,16 +274,27 @@ fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str
             return Err(e);
         }
     } else {
-        // Edit+continue: stage files, save patch, unstage, rebase with edit at target
+        // Edit+continue: stage files, save patch, unstage, clean working tree,
+        // then rebase with edit at target.
         git_commit::stage_files(workdir, &file_refs)?;
         let patch = git_commands::diff_cached(workdir)?;
         git_commands::unstage_files(workdir, &file_refs)?;
+
+        // Discard working-tree changes for the folded files. Their diff is
+        // captured in `patch` and will be amended into the target commit.
+        // Without this, --autostash stashes (then pops) these changes after
+        // the rebase rewrites history, causing spurious merge conflicts.
+        git_commands::restore_files_to_head(workdir, &file_refs)?;
 
         let mut graph = Weave::from_repo(repo)?;
         graph.edit_commit(target_oid);
 
         let todo = graph.to_todo();
-        weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
+        if let Err(e) = weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo) {
+            // Rebase failed before we could amend — restore working-tree changes.
+            let _ = git_commands::apply_patch(workdir, &patch);
+            return Err(e);
+        }
 
         // Now paused at the target commit — apply patch, stage, amend
         if let Err(e) = git_commands::apply_patch(workdir, &patch)
@@ -291,10 +302,15 @@ fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str
             .and_then(|()| git_commit::amend_no_edit(workdir))
         {
             let _ = git_rebase::abort(workdir);
+            let _ = git_commands::apply_patch(workdir, &patch);
             return Err(e);
         }
 
-        git_rebase::continue_rebase(workdir)?;
+        if let Err(e) = git_rebase::continue_rebase(workdir) {
+            // continue_rebase already aborts on failure — restore changes.
+            let _ = git_commands::apply_patch(workdir, &patch);
+            return Err(e);
+        }
     }
 
     msg::success(&format!(

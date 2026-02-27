@@ -154,6 +154,16 @@ pub fn unstage_files(workdir: &Path, files: &[&str]) -> Result<()> {
     run_git(workdir, &args)
 }
 
+/// Restore files in the working tree to their HEAD state.
+///
+/// Wraps `git checkout HEAD -- <files>`. Discards working-tree changes for the
+/// specified files without affecting other files or the index.
+pub fn restore_files_to_head(workdir: &Path, files: &[&str]) -> Result<()> {
+    let mut args = vec!["checkout", "HEAD", "--"];
+    args.extend(files);
+    run_git(workdir, &args)
+}
+
 /// Truncate a full commit hash to a short display form (7 chars).
 pub fn short_hash(hash: &str) -> &str {
     &hash[..7.min(hash.len())]

@@ -131,6 +131,60 @@ fn fold_file_into_non_head_with_other_changes_autostashed() {
     assert_eq!(test_repo.read_file("file2.txt"), "change 2");
 }
 
+/// Bug: folding a file into a woven branch commit (non-HEAD) where both the
+/// commit and working-tree modify the same file would leave unmerged paths.
+/// The autostash would pop stale changes that conflict with rewritten history.
+#[test]
+fn fold_file_into_woven_branch_commit() {
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    // Create feature branch with a commit that modifies feature1
+    git_branch::create(workdir.as_path(), "feat1", &base_oid.to_string()).unwrap();
+    test_repo.switch_branch("feat1");
+    test_repo.write_file("feature1", "initial feature content");
+    git_commit::stage_files(workdir.as_path(), &["feature1"]).unwrap();
+    git_commit::commit(workdir.as_path(), "Feature 1").unwrap();
+    let feat1_oid = test_repo.head_oid();
+
+    // Merge feat1 into integration branch
+    test_repo.switch_branch("integration");
+    git_merge::merge_no_ff(workdir.as_path(), "feat1").unwrap();
+
+    // Modify feature1 in the working tree (same file as the commit)
+    test_repo.write_file("feature1", "updated feature content");
+
+    // Fold the working-tree changes into the feat1 commit
+    let result = super::fold_files_into_commit(
+        &test_repo.repo,
+        &["feature1".to_string()],
+        &feat1_oid.to_string(),
+    );
+
+    assert!(
+        result.is_ok(),
+        "fold_files_into_commit (woven branch) failed: {:?}",
+        result
+    );
+
+    // The feat1 commit should have been rewritten
+    let feat1_new_tip = test_repo.get_branch_target("feat1");
+    assert_ne!(feat1_new_tip, feat1_oid, "feat1 should have been rewritten");
+
+    // The file should have the updated content (now in the commit)
+    assert_eq!(test_repo.read_file("feature1"), "updated feature content");
+
+    // There should be no unmerged paths
+    let status_output =
+        git_commands::run_git_stdout(workdir.as_path(), &["status", "--porcelain"]).unwrap();
+    assert!(
+        !status_output.contains("UU") && !status_output.contains("AA"),
+        "Working tree should have no merge conflicts, but status shows:\n{}",
+        status_output
+    );
+}
+
 // ── Case 2: Commit + Commit (Fixup) ─────────────────────────────────────
 
 #[test]
