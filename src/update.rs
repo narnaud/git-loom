@@ -65,10 +65,14 @@ pub fn run() -> Result<()> {
         Ok(()) => {
             spinner.stop("Rebased onto upstream");
         }
-        Err(e) => {
+        Err(_) => {
             let _ = git_rebase::abort(workdir);
             spinner.error("Rebase failed");
-            return Err(e);
+            bail!(
+                "Rebase onto `{}` had conflicts — aborted\n\
+                 Run `git rebase --autostash` to resolve the conflicts manually",
+                upstream_name
+            );
         }
     }
 

@@ -99,7 +99,7 @@ pub fn success(message: &str) {
 pub fn error(message: &str) {
     let mut lines = message.lines();
     if let Some(first) = lines.next() {
-        eprintln!("{} {}", "×".red(), colorize_backticks(first));
+        eprintln!("{} {}", "✗".red(), colorize_backticks(first));
         for line in lines {
             eprintln!("  {} {}", "›".blue(), colorize_backticks(line));
         }
