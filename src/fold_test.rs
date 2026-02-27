@@ -459,6 +459,14 @@ fn fold_commit_to_colocated_branch_only_affects_target() {
         feat2_tip,
         "feat3 should be stacked on feat2"
     );
+
+    // The outermost merge commit (HEAD) should reference feat3, not feat2
+    let head = test_repo.head_commit();
+    assert!(
+        head.summary().unwrap_or("").contains("feat3"),
+        "HEAD merge message should reference 'feat3', got: {:?}",
+        head.summary()
+    );
 }
 
 // ── Type dispatch / classify tests ───────────────────────────────────────

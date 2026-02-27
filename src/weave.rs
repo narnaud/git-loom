@@ -398,12 +398,18 @@ impl Weave {
             };
             self.branch_sections.insert(section_idx + 1, new_section);
 
-            // Update the merge entry to reference the outermost (stacked) section
+            // Update the merge entry to reference the outermost (stacked) section.
+            // Clear original_oid so the rebase generates a fresh merge message
+            // with the new branch name (instead of reusing "Merge branch '<old>'").
             for entry in &mut self.integration_line {
-                if let IntegrationEntry::Merge { label, .. } = entry
+                if let IntegrationEntry::Merge {
+                    label,
+                    original_oid,
+                } = entry
                     && *label == old_label
                 {
                     *label = to_branch.to_string();
+                    *original_oid = None;
                 }
             }
         } else {
@@ -547,13 +553,18 @@ impl Weave {
                 section.branch_names.push(keep_branch.to_string());
             }
 
-            // Update the merge entry label
+            // Update the merge entry label and clear original_oid so the
+            // rebase generates a fresh merge message with the new branch name.
             let new_label = section.label.clone();
             for entry in &mut self.integration_line {
-                if let IntegrationEntry::Merge { label, .. } = entry
+                if let IntegrationEntry::Merge {
+                    label,
+                    original_oid,
+                } = entry
                     && *label == old_label
                 {
                     *label = new_label.clone();
+                    *original_oid = None;
                 }
             }
         }
