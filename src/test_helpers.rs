@@ -5,7 +5,15 @@
 use git2::{BranchType, Repository, Signature};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use tempfile::TempDir;
+
+/// Global mutex to serialize `in_dir` calls.
+///
+/// `std::env::set_current_dir` mutates process-global state, and Cargo runs
+/// tests in parallel threads.  Without serialization two concurrent `in_dir`
+/// calls would corrupt each other's working directory.
+static IN_DIR_LOCK: Mutex<()> = Mutex::new(());
 
 /// A test repository wrapper with convenient helper methods.
 pub struct TestRepo {
@@ -227,18 +235,28 @@ impl TestRepo {
 
     /// Run a closure with the current directory set to the repo's working directory.
     ///
-    /// Saves the project directory, switches to the repo workdir, runs the closure,
-    /// then restores the original directory. Use this when calling `run()` functions
-    /// that depend on `std::env::current_dir()`.
+    /// Holds a global mutex so that concurrent test threads cannot corrupt
+    /// each other's process-wide cwd, and uses a drop guard to guarantee the
+    /// original directory is restored even if the closure panics.
     pub fn in_dir<F, R>(&self, f: F) -> R
     where
         F: FnOnce() -> R,
     {
+        let _lock = IN_DIR_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
         let restore = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         std::env::set_current_dir(self.workdir()).unwrap();
-        let result = f();
-        std::env::set_current_dir(restore).unwrap();
-        result
+
+        // Drop guard: restores cwd whether `f` returns normally or panics.
+        struct RestoreDir(PathBuf);
+        impl Drop for RestoreDir {
+            fn drop(&mut self) {
+                let _ = std::env::set_current_dir(&self.0);
+            }
+        }
+        let _guard = RestoreDir(restore);
+
+        f()
     }
 
     /// Switch HEAD to a branch and update the working directory.
