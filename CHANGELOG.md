@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.9.1](https://github.com/narnaud/git-loom/compare/v0.9.0...v0.9.1) (2026-02-27)
+
+
+### Bug Fixes 🐞
+
+* Add missing version flag ([2bc087c](https://github.com/narnaud/git-loom/commit/2bc087c48d9846ffbd576edb8b8967c8c7f52d8b))
+* **ci:** Fix build on Linux and Mac ([7483944](https://github.com/narnaud/git-loom/commit/7483944d20b57e67e8e61c8ec1ad5138401ce77b))
+* **cli:** Add --files bare option, to match status ([5eba86a](https://github.com/narnaud/git-loom/commit/5eba86a6f6167b34e6dfa98e3cdbc851cdf213a3))
+* **commit:** Preserve working-tree changes on rebase conflict rollback ([db02745](https://github.com/narnaud/git-loom/commit/db027456a5c1ec301e1c94b36a155d31fd7ee49c))
+* **drop:** Add confirmation prompt and preserve inner branches when dropping stacked branches ([1a08451](https://github.com/narnaud/git-loom/commit/1a0845102cca567cb6793b875c58f59a7399cd7f))
+* Fail early in bare repository ([b110efd](https://github.com/narnaud/git-loom/commit/b110efdec3f46c0759a5bfc03492a5acd248a1ab))
+* **fold:** Prevent autostash conflicts when folding files into woven branch commits ([818ac4a](https://github.com/narnaud/git-loom/commit/818ac4af0e3d8e30acd655ead8c2ac1a24ebc618))
+* Strip misleading hint lines from aborted rebase errors ([0e44089](https://github.com/narnaud/git-loom/commit/0e4408906d54610b5b4831fed08960a830a5ada0))
+* **update:** Show clean error on rebase conflict instead of raw git hints ([c0e0fb4](https://github.com/narnaud/git-loom/commit/c0e0fb4aa53f2679bb294a06e7dedb4d8005b091))
+* **weave:** Update merge commit message when commit moves between branches ([56042c8](https://github.com/narnaud/git-loom/commit/56042c8422e92c7bab15bb8346b7af7b7f80168c))
+
+
+### Other
+
+* **ci:** Add dependabot ([2a49ec1](https://github.com/narnaud/git-loom/commit/2a49ec192c1d6eef5d2a8ba7f8f4a4ccee28991d))
+* Update inquire ([7fcb9cc](https://github.com/narnaud/git-loom/commit/7fcb9ccf278a668bed703dc65ac0660f46c5c1bd))
+
 ## [0.9.0](https://github.com/narnaud/git-loom/compare/v0.8.0...v0.9.0) (2026-02-26)
 
 
