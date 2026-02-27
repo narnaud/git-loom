@@ -83,6 +83,9 @@ enum Command {
     Drop {
         /// Commit hash, branch name, or short ID to drop
         target: String,
+        /// Skip confirmation prompt
+        #[arg(short, long)]
+        yes: bool,
     },
     /// Fold source(s) into a target (amend files, fixup commits, move commits)
     Fold {
@@ -149,7 +152,7 @@ fn main() {
             message,
             files,
         }) => commit::run(branch, message, files),
-        Some(Command::Drop { target }) => drop::run(target),
+        Some(Command::Drop { target, yes }) => drop::run(target, yes),
         Some(Command::Push { branch }) => push::run(branch),
         Some(Command::Update) => update::run(),
         Some(Command::Fold { args }) => fold::run(args),

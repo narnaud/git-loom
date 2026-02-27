@@ -108,6 +108,12 @@ pub fn error(message: &str) {
 
 // --- Interactive prompts ---
 
+/// Prompt the user for a yes/no confirmation. Returns `true` if confirmed.
+pub fn confirm(prompt: &str) -> Result<bool> {
+    let answer = inquire::Confirm::new(prompt).with_default(false).prompt()?;
+    Ok(answer)
+}
+
 /// Prompt the user for text input with a validation function.
 ///
 /// The validator receives the input string and returns `Ok(())` if valid,

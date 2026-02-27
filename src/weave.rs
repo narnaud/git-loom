@@ -332,14 +332,59 @@ impl Weave {
 
     /// Remove an entire branch section and its merge entry.
     pub fn drop_branch(&mut self, branch_name: &str) {
-        // Find and remove the section that has this branch name
-        if let Some(idx) = self.branch_sections.iter().position(|s| {
+        // Find the section that has this branch name
+        let Some(idx) = self.branch_sections.iter().position(|s| {
             s.branch_names.contains(&branch_name.to_string()) || s.label == branch_name
-        }) {
-            let label = self.branch_sections[idx].label.clone();
+        }) else {
+            return;
+        };
+
+        let old_label = self.branch_sections[idx].label.clone();
+
+        // Check if an inner branch exists in this section's update_refs.
+        // In a stacked topology (e.g. feat1 stacked under feat2), commits
+        // belonging to the inner branch have update_refs marking their tip.
+        let inner_branch_boundary = self.branch_sections[idx]
+            .commits
+            .iter()
+            .rposition(|c| !c.update_refs.is_empty());
+
+        if let Some(boundary) = inner_branch_boundary {
+            // Keep commits up to and including the inner branch boundary.
+            // The remaining commits (after the boundary) belong to the
+            // dropped branch.
+            let inner_ref = self.branch_sections[idx].commits[boundary]
+                .update_refs
+                .first()
+                .cloned()
+                .unwrap();
+            self.branch_sections[idx].commits.truncate(boundary + 1);
+            self.branch_sections[idx].label = inner_ref.clone();
+            self.branch_sections[idx].branch_names = vec![inner_ref.clone()];
+            // Remove the inner branch from update_refs since it's now the
+            // section's own branch_names (emitted after the label line).
+            self.branch_sections[idx].commits[boundary]
+                .update_refs
+                .clear();
+
+            // Update the merge entry to reference the inner branch
+            for entry in &mut self.integration_line {
+                if let IntegrationEntry::Merge {
+                    label,
+                    original_oid,
+                } = entry
+                    && *label == old_label
+                {
+                    *label = inner_ref.clone();
+                    *original_oid = None;
+                }
+            }
+        } else {
+            // No inner branches — remove the entire section and its merge
             self.branch_sections.remove(idx);
-            self.integration_line
-                .retain(|e| !matches!(e, IntegrationEntry::Merge { label: l, .. } if *l == label));
+            self.integration_line.retain(
+                |e| !matches!(e, IntegrationEntry::Merge { label: l, .. } if *l == old_label),
+            );
         }
     }
 

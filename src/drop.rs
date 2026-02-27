@@ -14,14 +14,14 @@ use crate::weave::{self, Weave};
 /// Dispatches based on the resolved target type:
 /// - Commit → remove the commit via interactive rebase
 /// - Branch → remove all branch commits, unweave merge topology, delete the ref
-pub fn run(target: String) -> Result<()> {
+pub fn run(target: String, skip_confirm: bool) -> Result<()> {
     let repo = git::open_repo()?;
 
     let resolved = git::resolve_target(&repo, &target)?;
 
     match resolved {
-        Target::Commit(hash) => drop_commit(&repo, &hash),
-        Target::Branch(name) => drop_branch(&repo, &name),
+        Target::Commit(hash) => drop_commit(&repo, &hash, skip_confirm),
+        Target::Branch(name) => drop_branch(&repo, &name, skip_confirm),
         Target::File(_) => {
             bail!("Cannot drop a file\nUse `git restore` to discard file changes")
         }
@@ -38,7 +38,7 @@ pub fn run(target: String) -> Result<()> {
 ///
 /// If the commit is the only commit on a branch, delegates to `drop_branch`
 /// to properly remove the entire branch section and merge topology.
-fn drop_commit(repo: &Repository, commit_hash: &str) -> Result<()> {
+fn drop_commit(repo: &Repository, commit_hash: &str, skip_confirm: bool) -> Result<()> {
     let workdir = git::require_workdir(repo, "drop")?;
 
     let commit_oid = git2::Oid::from_str(commit_hash)?;
@@ -60,9 +60,20 @@ fn drop_commit(repo: &Repository, commit_hash: &str) -> Result<()> {
             )?;
             if owned.len() == 1 {
                 // This is the only commit on the branch — drop the whole branch
-                return drop_branch(repo, &branch_name);
+                return drop_branch(repo, &branch_name, skip_confirm);
             }
         }
+    }
+
+    // Confirm with the user
+    let short_hash = git_commands::short_hash(commit_hash);
+    let summary = repo
+        .find_commit(commit_oid)?
+        .summary()
+        .unwrap_or("")
+        .to_string();
+    if !skip_confirm && !msg::confirm(&format!("Drop commit `{}` {}?", short_hash, summary))? {
+        bail!("Cancelled");
     }
 
     // Build weave and drop the commit
@@ -72,13 +83,12 @@ fn drop_commit(repo: &Repository, commit_hash: &str) -> Result<()> {
     let todo = graph.to_todo();
     weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
 
-    let short_hash = git_commands::short_hash(commit_hash);
     msg::success(&format!("Dropped commit `{}`", short_hash));
     Ok(())
 }
 
 /// Drop a branch: remove all its commits, unweave merge topology, delete the ref.
-fn drop_branch(repo: &Repository, branch_name: &str) -> Result<()> {
+fn drop_branch(repo: &Repository, branch_name: &str, skip_confirm: bool) -> Result<()> {
     let workdir = git::require_workdir(repo, "drop")?;
 
     let info = git::gather_repo_info(repo, false)?;
@@ -101,9 +111,35 @@ fn drop_branch(repo: &Repository, branch_name: &str) -> Result<()> {
 
     // Check if branch is at the merge-base with no owned commits
     if branch_info.tip_oid == merge_base_oid {
+        if !skip_confirm && !msg::confirm(&format!("Drop empty branch `{}`?", branch_name))? {
+            bail!("Cancelled");
+        }
         git_branch::delete(workdir, branch_name)?;
         msg::success(&format!("Dropped branch `{}`", branch_name));
         return Ok(());
+    }
+
+    // Count owned commits for the confirmation message
+    let owned = find_owned_commits(
+        repo,
+        branch_info.tip_oid,
+        merge_base_oid,
+        &info.branches,
+        branch_name,
+    )?;
+    let commit_count = owned.len();
+    if !skip_confirm {
+        let prompt = if commit_count == 1 {
+            format!("Drop branch `{}` and its 1 commit?", branch_name)
+        } else {
+            format!(
+                "Drop branch `{}` and its {} commits?",
+                branch_name, commit_count
+            )
+        };
+        if !msg::confirm(&prompt)? {
+            bail!("Cancelled");
+        }
     }
 
     // Check if another branch shares the same tip (co-located branches)
