@@ -42,26 +42,25 @@ fn drop_commit(repo: &Repository, commit_hash: &str, skip_confirm: bool) -> Resu
     let workdir = git::require_workdir(repo, "drop")?;
 
     let commit_oid = git2::Oid::from_str(commit_hash)?;
+    let info = git::gather_repo_info(repo, false)?;
 
     // Check if this commit is the only commit on a branch.
     // If so, delegate to drop_branch for clean section removal.
-    if let Ok(info) = git::gather_repo_info(repo, false) {
-        let merge_base_oid = info.upstream.merge_base_oid;
+    let merge_base_oid = info.upstream.merge_base_oid;
 
-        if let Some(branch_name) = find_branch_owning_commit_from_info(&info, commit_oid)
-            && let Some(branch_info) = info.branches.iter().find(|b| b.name == branch_name)
-        {
-            let owned = find_owned_commits(
-                repo,
-                branch_info.tip_oid,
-                merge_base_oid,
-                &info.branches,
-                &branch_name,
-            )?;
-            if owned.len() == 1 {
-                // This is the only commit on the branch — drop the whole branch
-                return drop_branch(repo, &branch_name, skip_confirm);
-            }
+    if let Some(branch_name) = find_branch_owning_commit_from_info(&info, commit_oid)
+        && let Some(branch_info) = info.branches.iter().find(|b| b.name == branch_name)
+    {
+        let owned = find_owned_commits(
+            repo,
+            branch_info.tip_oid,
+            merge_base_oid,
+            &info.branches,
+            &branch_name,
+        )?;
+        if owned.len() == 1 {
+            // This is the only commit on the branch — drop the whole branch
+            return drop_branch_with_info(repo, &info, &branch_name, skip_confirm);
         }
     }
 
@@ -77,7 +76,7 @@ fn drop_commit(repo: &Repository, commit_hash: &str, skip_confirm: bool) -> Resu
     }
 
     // Build weave and drop the commit
-    let mut graph = Weave::from_repo(repo)?;
+    let mut graph = Weave::from_repo_with_info(repo, &info)?;
     graph.drop_commit(commit_oid);
 
     let todo = graph.to_todo();
@@ -89,9 +88,18 @@ fn drop_commit(repo: &Repository, commit_hash: &str, skip_confirm: bool) -> Resu
 
 /// Drop a branch: remove all its commits, unweave merge topology, delete the ref.
 fn drop_branch(repo: &Repository, branch_name: &str, skip_confirm: bool) -> Result<()> {
-    let workdir = git::require_workdir(repo, "drop")?;
-
     let info = git::gather_repo_info(repo, false)?;
+    drop_branch_with_info(repo, &info, branch_name, skip_confirm)
+}
+
+/// Drop a branch using pre-gathered `RepoInfo`.
+fn drop_branch_with_info(
+    repo: &Repository,
+    info: &git::RepoInfo,
+    branch_name: &str,
+    skip_confirm: bool,
+) -> Result<()> {
+    let workdir = git::require_workdir(repo, "drop")?;
 
     // Verify the branch is in the integration range
     let branch_info = info
@@ -153,7 +161,7 @@ fn drop_branch(repo: &Repository, branch_name: &str, skip_confirm: bool) -> Resu
         && !is_on_first_parent_line(repo, head_oid, merge_base_oid, branch_info.tip_oid)?;
 
     // Build weave and apply the appropriate mutation
-    let mut graph = Weave::from_repo(repo)?;
+    let mut graph = Weave::from_repo_with_info(repo, info)?;
 
     if is_woven {
         if let Some(keep) = colocated_branch {

@@ -40,7 +40,11 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
 
     git::ensure_branch_not_exists(&repo, &name)?;
 
-    let commit_hash = resolve_commit(&repo, target.as_deref())?;
+    // Gather repo info once (needed for merge-base default and weave check).
+    // May fail if not on an integration branch — that's OK for plain branch creation.
+    let info = git::gather_repo_info(&repo, false).ok();
+
+    let commit_hash = resolve_commit(&repo, &info, target.as_deref())?;
 
     git_branch::create(workdir, &name, &commit_hash)?;
 
@@ -50,8 +54,12 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
         git_commands::short_hash(&commit_hash)
     ));
 
-    // Check if weaving is needed
-    if should_weave(&repo, &commit_hash)? {
+    // Check if weaving is needed (only possible when repo info is available)
+    if let Some(ref info) = info
+        && should_weave(info, &repo, &commit_hash)?
+    {
+        // Use from_repo (not from_repo_with_info) because the branch list
+        // is stale — the new branch was just created after info was gathered.
         let mut graph = Weave::from_repo(&repo)?;
         graph.weave_branch(&name);
 
@@ -73,12 +81,7 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
 /// from HEAD to the merge-base (i.e., it's a loose commit on the integration
 /// line, not already on a side branch). Commits at HEAD or the merge-base
 /// are excluded since no topology change is needed for those.
-fn should_weave(repo: &Repository, commit_hash: &str) -> Result<bool> {
-    let info = match git::gather_repo_info(repo, false) {
-        Ok(info) => info,
-        Err(_) => return Ok(false), // No upstream info available, skip weave
-    };
-
+fn should_weave(info: &git::RepoInfo, repo: &Repository, commit_hash: &str) -> Result<bool> {
     let head_oid = git::head_oid(repo)?;
     let branch_oid = git2::Oid::from_str(commit_hash)?;
 
@@ -128,11 +131,17 @@ pub fn is_on_first_parent_line(
 
 /// Resolve an optional target to a full commit hash.
 /// If no target, defaults to the merge-base (upstream base).
-fn resolve_commit(repo: &Repository, target: Option<&str>) -> Result<String> {
+fn resolve_commit(
+    repo: &Repository,
+    info: &Option<git::RepoInfo>,
+    target: Option<&str>,
+) -> Result<String> {
     match target {
         None => {
             // Default: merge-base commit
-            let info = git::gather_repo_info(repo, false)?;
+            let info = info
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("No upstream tracking branch — cannot determine merge-base\nSpecify an explicit target commit"))?;
             Ok(info.upstream.merge_base_oid.to_string())
         }
         Some(t) => {

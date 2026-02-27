@@ -183,7 +183,11 @@ fn resolve_branch_accepts_woven_branch() {
     test_repo.commit("Int", "int.txt");
     crate::git_commands::git_merge::merge_no_ff(workdir.as_path(), "feature-a").unwrap();
 
-    let result = super::resolve_branch(&test_repo.repo, "feature-a");
+    let result = super::resolve_branch(
+        &test_repo.repo,
+        &crate::git::gather_repo_info(&test_repo.repo, false).unwrap(),
+        "feature-a",
+    );
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), "feature-a");
 }
@@ -200,7 +204,11 @@ fn resolve_branch_rejects_non_woven() {
     test_repo.switch_branch("integration");
     test_repo.commit("C1", "c1.txt");
 
-    let result = super::resolve_branch(&test_repo.repo, "stray-branch");
+    let result = super::resolve_branch(
+        &test_repo.repo,
+        &crate::git::gather_repo_info(&test_repo.repo, false).unwrap(),
+        "stray-branch",
+    );
     assert!(result.is_err());
     assert!(
         result
@@ -215,7 +223,11 @@ fn resolve_branch_rejects_commit_target() {
     let test_repo = TestRepo::new_with_remote();
     let c1_oid = test_repo.commit("C1", "c1.txt");
 
-    let result = super::resolve_branch(&test_repo.repo, &c1_oid.to_string());
+    let result = super::resolve_branch(
+        &test_repo.repo,
+        &crate::git::gather_repo_info(&test_repo.repo, false).unwrap(),
+        &c1_oid.to_string(),
+    );
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("not a commit"));
 }

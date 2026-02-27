@@ -31,8 +31,8 @@ pub fn run(branch: Option<String>) -> Result<()> {
     }
 
     let branch_name = match branch {
-        Some(b) => resolve_branch(&repo, &b)?,
-        None => pick_branch(&repo)?,
+        Some(b) => resolve_branch(&repo, &info, &b)?,
+        None => pick_branch(&info)?,
     };
 
     let remote_type = detect_remote_type(&repo, &workdir, &info.upstream.label)?;
@@ -48,9 +48,7 @@ pub fn run(branch: Option<String>) -> Result<()> {
 }
 
 /// Resolve an explicit branch argument to a woven branch name.
-fn resolve_branch(repo: &Repository, branch_arg: &str) -> Result<String> {
-    let info = git::gather_repo_info(repo, false)?;
-
+fn resolve_branch(repo: &Repository, info: &git::RepoInfo, branch_arg: &str) -> Result<String> {
     match git::resolve_target(repo, branch_arg) {
         Ok(Target::Branch(name)) => {
             if info.branches.iter().any(|b| b.name == name) {
@@ -68,8 +66,7 @@ fn resolve_branch(repo: &Repository, branch_arg: &str) -> Result<String> {
 }
 
 /// Interactive branch picker: list woven branches.
-fn pick_branch(repo: &Repository) -> Result<String> {
-    let info = git::gather_repo_info(repo, false)?;
+fn pick_branch(info: &git::RepoInfo) -> Result<String> {
     let items: Vec<String> = info.branches.iter().map(|b| b.name.clone()).collect();
     msg::select("Select branch to push", items)
 }

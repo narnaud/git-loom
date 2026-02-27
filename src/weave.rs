@@ -165,10 +165,19 @@ impl Weave {
 
     /// Build the weave from the current repository state.
     ///
-    /// Walks the first-parent line from HEAD to the merge-base, collecting
-    /// branch sections (from merge commits) and integration-line entries.
+    /// Convenience wrapper that calls `gather_repo_info` internally.
+    /// When `RepoInfo` is already available, prefer `from_repo_with_info`
+    /// to avoid a redundant graph walk.
     pub fn from_repo(repo: &Repository) -> Result<Self> {
         let info = git::gather_repo_info(repo, false)?;
+        Self::from_repo_with_info(repo, &info)
+    }
+
+    /// Build the weave from a pre-gathered `RepoInfo`.
+    ///
+    /// Walks the first-parent line from HEAD to the merge-base, collecting
+    /// branch sections (from merge commits) and integration-line entries.
+    pub fn from_repo_with_info(repo: &Repository, info: &git::RepoInfo) -> Result<Self> {
         let head_oid = git::head_oid(repo)?;
         let merge_base_oid = info.upstream.merge_base_oid;
 
