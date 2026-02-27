@@ -13,6 +13,7 @@ use crate::msg;
 /// is reported so the user can resolve it manually.
 pub fn run() -> Result<()> {
     let repo = git::open_repo()?;
+    let workdir = git::require_workdir(&repo, "update")?;
 
     // Validate that we're on a branch with an upstream tracking ref
     let head = repo.head().context("Failed to get HEAD reference")?;
@@ -37,8 +38,6 @@ pub fn run() -> Result<()> {
         .name()?
         .context("Upstream branch name is not valid UTF-8")?
         .to_string();
-
-    let workdir = git::require_workdir(&repo, "update")?;
 
     // Fetch with tags, force-update, and prune deleted remote branches
     let spinner = msg::spinner();

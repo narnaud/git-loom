@@ -12,6 +12,7 @@ use crate::msg;
 /// If no upstream is found, the user is prompted to choose one.
 pub fn run(name: Option<String>) -> Result<()> {
     let repo = git::open_repo()?;
+    let workdir = git::require_workdir(&repo, "initialize")?;
 
     let name = name.unwrap_or_else(|| "integration".to_string());
     let name = name.trim().to_string();
@@ -24,8 +25,6 @@ pub fn run(name: Option<String>) -> Result<()> {
     git::ensure_branch_not_exists(&repo, &name)?;
 
     let upstream = detect_upstream(&repo)?;
-
-    let workdir = git::require_workdir(&repo, "create branch")?;
 
     git_branch::switch_create_tracking(workdir, &name, &upstream)?;
 

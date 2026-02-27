@@ -18,6 +18,7 @@ use crate::weave::{self, Weave};
 /// the merge-base, and a merge commit joins them with the branch.
 pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
     let repo = git::open_repo()?;
+    let workdir = git::require_workdir(&repo, "create branch")?;
 
     let name = match name {
         Some(n) => n,
@@ -40,8 +41,6 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
     git::ensure_branch_not_exists(&repo, &name)?;
 
     let commit_hash = resolve_commit(&repo, target.as_deref())?;
-
-    let workdir = git::require_workdir(&repo, "create branch")?;
 
     git_branch::create(workdir, &name, &commit_hash)?;
 
