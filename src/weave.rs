@@ -771,9 +771,8 @@ pub fn run_rebase(workdir: &Path, upstream: Option<&str>, todo_content: &str) ->
 
     let output = cmd.output()?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
         let _ = git_commands::git_rebase::abort(workdir);
-        bail!("Git rebase failed:\n{}", stderr);
+        bail!("Rebase failed with conflicts — aborted");
     }
 
     // Clean up the temp file

@@ -17,14 +17,13 @@ pub fn amend(workdir: &Path, message: Option<&str>) -> Result<()> {
         cmd.args(["-m", msg]);
         let output = cmd.output()?;
         if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("Git commit --amend failed:\n{}", stderr);
+            bail!("Git commit failed - aborted");
         }
     } else {
         // No message provided — open editor with inherited stdio
         let status = cmd.status()?;
         if !status.success() {
-            bail!("Git commit --amend failed (editor aborted or empty message)");
+            bail!("Git commit failed - aborted");
         }
     }
 
@@ -33,17 +32,16 @@ pub fn amend(workdir: &Path, message: Option<&str>) -> Result<()> {
 
 /// Amend the current commit, keeping its message and including staged changes.
 ///
-/// Wraps `git commit --amend --no-edit`.
+/// Wraps `git commit --amend --no-edit --allow-empty`.
 /// Unlike `amend()`, this does NOT use `--only`, so staged changes are included.
 pub fn amend_no_edit(workdir: &Path) -> Result<()> {
     let output = Command::new("git")
         .current_dir(workdir)
-        .args(["commit", "--amend", "--no-edit"])
+        .args(["commit", "--amend", "--no-edit", "--allow-empty"])
         .output()?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("Git commit --amend --no-edit failed:\n{}", stderr);
+        bail!("Git commit failed - aborted");
     }
 
     Ok(())

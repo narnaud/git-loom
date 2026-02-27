@@ -20,8 +20,7 @@ pub fn run_git(workdir: &Path, args: &[&str]) -> Result<()> {
         .output()?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("Git {} failed:\n{}", args.join(" "), stderr);
+        bail!("Git {} failed", args.join(" "));
     }
 
     Ok(())
@@ -70,8 +69,7 @@ pub fn run_git_stdout(workdir: &Path, args: &[&str]) -> Result<String> {
         .output()?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("Git {} failed:\n{}", args.join(" "), stderr);
+        bail!("Git {} failed", args.join(" "));
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
@@ -129,9 +127,8 @@ fn apply_patch_impl(workdir: &Path, patch: &str, reverse: bool) -> Result<()> {
 
     let output = child.wait_with_output()?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
         let flag = if reverse { " --reverse" } else { "" };
-        bail!("Git apply{} failed:\n{}", flag, stderr);
+        bail!("Git apply{} failed", flag);
     }
 
     Ok(())

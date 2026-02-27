@@ -5,9 +5,9 @@ use anyhow::{Result, bail};
 /// Continue an in-progress rebase.
 /// If continuation fails, automatically aborts the rebase.
 pub fn continue_rebase(workdir: &Path) -> Result<()> {
-    if let Err(e) = super::run_git(workdir, &["rebase", "--continue"]) {
+    if super::run_git(workdir, &["rebase", "--continue"]).is_err() {
         let _ = abort(workdir);
-        bail!("Git rebase --continue failed, rebase aborted:\n{}", e);
+        bail!("Rebase failed with conflicts — aborted");
     }
     Ok(())
 }
