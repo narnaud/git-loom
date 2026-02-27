@@ -22,4 +22,7 @@ git2 = "0.20"
 shell-escape = "0.1"
 tempfile = "3"
 
+[features]
+vendored-openssl = ["git2/vendored-openssl"]
+
 [dev-dependencies]
