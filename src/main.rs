@@ -31,6 +31,10 @@ struct Cli {
     #[arg(long)]
     no_color: bool,
 
+    /// Show files changed in each commit
+    #[arg(short = 'f', long = "files")]
+    files: bool,
+
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -135,7 +139,7 @@ fn main() {
     }
 
     let result = match cli.command {
-        None => status::run(false),
+        None => status::run(cli.files),
         Some(Command::Status { files }) => status::run(files),
         Some(Command::Init { name }) => init::run(name),
         Some(Command::Branch { name, target }) => branch::run(name, target),
