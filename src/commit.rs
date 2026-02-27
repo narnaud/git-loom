@@ -70,7 +70,9 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
 
     let todo = graph.to_todo();
     if let Err(e) = weave::run_rebase(&workdir, Some(&graph.base_oid.to_string()), &todo) {
-        let _ = git_commit::reset_hard(&workdir, &saved_head);
+        // Mixed reset preserves working-tree changes (the committed content
+        // stays in the working directory as unstaged modifications).
+        let _ = git_commit::reset_mixed(&workdir, &saved_head);
         if branch_is_empty {
             let _ = git_branch::delete(&workdir, &branch_name);
         }

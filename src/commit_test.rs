@@ -350,6 +350,54 @@ fn commit_moves_to_correct_branch_in_topology() {
     assert_eq!(commit_b.summary().unwrap(), "B1");
 }
 
+/// Bug: committing to a new branch when the file conflicts with an existing
+/// woven branch would lose working-tree changes. The rollback used reset --hard
+/// which discarded the content that had just been committed.
+#[test]
+fn commit_conflict_preserves_working_tree_changes() {
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    // Create feat1 branch with a commit that adds feature1
+    git_branch::create(workdir.as_path(), "feat1", &base_oid.to_string()).unwrap();
+    test_repo.switch_branch("feat1");
+    test_repo.write_file("feature1", "feat 1 content");
+    crate::git_commands::git_commit::stage_files(workdir.as_path(), &["feature1"]).unwrap();
+    crate::git_commands::git_commit::commit(workdir.as_path(), "Feature 1").unwrap();
+    test_repo.switch_branch("integration");
+
+    // Weave feat1 into integration
+    git_merge::merge_no_ff(workdir.as_path(), "feat1").unwrap();
+
+    // Modify feature1 in the working tree (same file as feat1 commit)
+    test_repo.write_file("feature1", "conflicting content");
+
+    let result = test_repo.in_dir(|| {
+        super::run(
+            Some("new-line".to_string()),
+            Some("New line".to_string()),
+            vec!["zz".to_string()],
+        )
+    });
+
+    // The commit should fail (conflict between new-line and feat1 both adding feature1)
+    assert!(result.is_err(), "commit should fail due to merge conflict");
+
+    // Critical: working-tree changes must be preserved
+    assert_eq!(
+        test_repo.read_file("feature1"),
+        "conflicting content",
+        "Working-tree changes should be preserved after failed commit"
+    );
+
+    // The new branch should have been cleaned up
+    assert!(
+        !test_repo.branch_exists("new-line"),
+        "new-line branch should be deleted after rollback"
+    );
+}
+
 // ── Prerequisites ────────────────────────────────────────────────────────
 
 #[test]
