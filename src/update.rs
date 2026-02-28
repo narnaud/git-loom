@@ -59,7 +59,16 @@ pub fn run() -> Result<()> {
     let spinner = msg::spinner();
     spinner.start("Rebasing onto upstream...");
 
-    let result = git_commands::run_git(workdir, &["rebase", "--autostash", &upstream_name]);
+    let result = git_commands::run_git(
+        workdir,
+        &[
+            "rebase",
+            "--autostash",
+            "--rebase-merges",
+            "--update-refs",
+            &upstream_name,
+        ],
+    );
 
     match result {
         Ok(()) => {
@@ -70,7 +79,8 @@ pub fn run() -> Result<()> {
             spinner.error("Rebase failed");
             bail!(
                 "Rebase onto `{}` had conflicts — aborted\n\
-                 Run `git rebase --autostash` to resolve the conflicts manually",
+                 Run `git rebase --rebase-merges --update-refs --autostash {}` to resolve manually",
+                upstream_name,
                 upstream_name
             );
         }

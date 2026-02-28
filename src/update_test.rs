@@ -177,3 +177,65 @@ fn update_prunes_deleted_remote_branches() {
         "Remote-tracking branch should be pruned after update"
     );
 }
+
+#[test]
+fn update_preserves_merge_topology() {
+    let test_repo = TestRepo::new_with_remote();
+
+    // Build a woven topology:
+    //   merge-base (Initial) <- feature commit <- merge commit (HEAD)
+    //                        ^--- on feature-a ---^
+
+    // Create a feature branch at the current HEAD (merge-base)
+    let merge_base_oid = test_repo.head_oid();
+    test_repo.create_branch_at_commit("feature-a", merge_base_oid);
+
+    // Add a commit on the feature branch
+    test_repo.switch_branch("feature-a");
+    test_repo.commit("Feature A work", "feature-a.txt");
+    let feature_tip = test_repo.head_oid();
+
+    // Switch back to integration and create a merge commit
+    test_repo.switch_branch("integration");
+    test_repo.commit_merge("Merge branch 'feature-a'", merge_base_oid, feature_tip);
+
+    // Verify we have a merge commit (2 parents)
+    let head = test_repo.head_commit();
+    assert_eq!(head.parent_count(), 2, "HEAD should be a merge commit");
+
+    // Add upstream commits
+    test_repo.add_remote_commits(&["Upstream change"]);
+
+    // Run update
+    let result = test_repo.in_dir(|| super::run());
+    assert!(result.is_ok(), "update failed: {:?}", result.err());
+
+    // After update, HEAD should still be a merge commit (topology preserved)
+    // Need to re-open since the rebase changed things
+    let log = test_repo.in_dir(|| {
+        let workdir = test_repo.workdir();
+        let output = std::process::Command::new("git")
+            .current_dir(&workdir)
+            .args(["log", "--oneline", "--graph", "--all", "-10"])
+            .output()
+            .unwrap();
+        String::from_utf8(output.stdout).unwrap()
+    });
+
+    // The HEAD commit should still be a merge
+    let repo = &test_repo.repo;
+    // Force re-read of HEAD after rebase
+    let new_head = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(
+        new_head.parent_count(),
+        2,
+        "HEAD should still be a merge commit after update, preserving woven topology.\nGraph:\n{}",
+        log
+    );
+
+    // The merge commit's message should be preserved
+    assert!(
+        new_head.message().unwrap().contains("Merge branch"),
+        "Merge commit message should be preserved"
+    );
+}

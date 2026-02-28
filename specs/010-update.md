@@ -43,6 +43,9 @@ git-loom update
    are force-updated. Deleted remote branches are pruned locally.
 3. **Rebase**: Local commits are replayed on top of the fetched upstream
    changes. Uncommitted working tree changes are preserved automatically.
+   Merge topology is preserved (`--rebase-merges`) and branch refs are
+   kept in sync (`--update-refs`), so woven feature branches survive the
+   rebase intact.
 4. **Submodule update** (conditional): If the project uses submodules, they
    are initialized and updated recursively.
 
