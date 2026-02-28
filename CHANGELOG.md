@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.10.0](https://github.com/narnaud/git-loom/compare/v0.9.1...v0.10.0) (2026-02-28)
+
+
+### Features ✨
+
+* Add absorb command to auto-distribute changes into originating commits ([ec44642](https://github.com/narnaud/git-loom/commit/ec44642f5638f8bd695f757b3b959d7f88c2bb06))
+
+
+### Bug Fixes 🐞
+
+* **ci:** Vendor OpenSSL for aarch64-linux cross-compilation ([39624d4](https://github.com/narnaud/git-loom/commit/39624d41aa78b561bb0fd07fc22ed4d0a4015aae))
+
+
+### Performance Improvements ⚡
+
+* Avoid multiple calls to gather_repo_info ([4a86dfb](https://github.com/narnaud/git-loom/commit/4a86dfbe31c5cd5c6881a8c64135590d434ff468))
+
+
+### Documentation
+
+* Add screencast to README and documentation introduction ([a2c9806](https://github.com/narnaud/git-loom/commit/a2c9806cd2884ae1e8e4abe82a7074bcf977715c))
+
+
+### Other
+
+* **ci:** Remove x86_64 macOS target and suppress brew warning ([d9c85e8](https://github.com/narnaud/git-loom/commit/d9c85e89901cd91daf88fd29c5273942c5f8fea3))
+* Update shell completions for absorb, drop --yes, and status --files ([2165feb](https://github.com/narnaud/git-loom/commit/2165feb0aac21aca740df4b6569cdfd0d491bf85))
+
 ## [0.9.1](https://github.com/narnaud/git-loom/compare/v0.9.0...v0.9.1) (2026-02-27)
 
 
