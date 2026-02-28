@@ -5,7 +5,7 @@ Drop a commit or an entire branch from history.
 ## Usage
 
 ```
-git-loom drop <target>
+git-loom drop [-y] <target>
 ```
 
 ### Arguments
@@ -13,6 +13,12 @@ git-loom drop <target>
 | Argument | Description |
 |----------|-------------|
 | `<target>` | Commit hash, branch name, or short ID |
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `-y, --yes` | Skip confirmation prompt |
 
 ## What It Does
 

@@ -19,6 +19,7 @@
 - [drop](commands/drop.md)
 - [update](commands/update.md)
 - [push](commands/push.md)
+- [absorb](commands/absorb.md)
 
 # Reference
 

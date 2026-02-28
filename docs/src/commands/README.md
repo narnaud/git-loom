@@ -13,6 +13,7 @@ Commands:
   drop         Drop a commit or a branch from history
   update       Pull-rebase the integration branch and update submodules
   push         Push a feature branch to remote
+  absorb       Absorb working tree changes into the commits that introduced them
   completions  Generate shell completions (powershell, clink)
 
 Options:
