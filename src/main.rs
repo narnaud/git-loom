@@ -12,6 +12,7 @@ mod msg;
 mod push;
 mod reword;
 mod shortid;
+mod split;
 mod status;
 mod update;
 mod weave;
@@ -94,6 +95,14 @@ enum Command {
         #[arg(required = true, num_args = 2..)]
         args: Vec<String>,
     },
+    /// Split a commit into two sequential commits
+    Split {
+        /// Commit hash, short ID, or HEAD
+        target: String,
+        /// Message for the first commit (prompts if omitted)
+        #[arg(short, long)]
+        message: Option<String>,
+    },
     /// Push a feature branch to remote
     Push {
         /// Branch name or short ID (if not provided, will prompt interactively)
@@ -163,6 +172,7 @@ fn main() {
         }) => commit::run(branch, message, files),
         Some(Command::Drop { target, yes }) => drop::run(target, yes),
         Some(Command::Absorb { dry_run, files }) => absorb::run(dry_run, files),
+        Some(Command::Split { target, message }) => split::run(target, message),
         Some(Command::Push { branch }) => push::run(branch),
         Some(Command::Update) => update::run(),
         Some(Command::Fold { args }) => fold::run(args),

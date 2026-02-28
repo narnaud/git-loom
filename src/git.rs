@@ -455,6 +455,13 @@ fn walk_commits(
     Ok(commits)
 }
 
+/// Return the file paths changed in a commit.
+pub fn commit_file_paths(repo: &Repository, oid: git2::Oid) -> Result<Vec<String>> {
+    let commit = repo.find_commit(oid)?;
+    let files = get_commit_files(repo, &commit)?;
+    Ok(files.into_iter().map(|f| f.path).collect())
+}
+
 /// Get the files changed in a commit by diffing against its parent tree.
 /// For root commits (no parent), diffs against an empty tree.
 fn get_commit_files(repo: &Repository, commit: &git2::Commit) -> Result<Vec<FileChange>> {
