@@ -161,6 +161,20 @@ pub fn restore_files_to_head(workdir: &Path, files: &[&str]) -> Result<()> {
     run_git(workdir, &args)
 }
 
+/// Get the diff of all tracked files against HEAD (name-only).
+///
+/// Wraps `git diff HEAD --name-only`. Returns one filename per line.
+pub fn diff_head_name_only(workdir: &Path) -> Result<String> {
+    run_git_stdout(workdir, &["diff", "HEAD", "--name-only"])
+}
+
+/// Get the unified diff for a single file against HEAD.
+///
+/// Wraps `git diff HEAD -- <path>`.
+pub fn diff_head_file(workdir: &Path, path: &str) -> Result<String> {
+    run_git_stdout(workdir, &["diff", "HEAD", "--", path])
+}
+
 /// Truncate a full commit hash to a short display form (7 chars).
 pub fn short_hash(hash: &str) -> &str {
     &hash[..7.min(hash.len())]

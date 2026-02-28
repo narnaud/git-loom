@@ -1,3 +1,4 @@
+mod absorb;
 mod branch;
 mod commit;
 mod completions;
@@ -98,6 +99,14 @@ enum Command {
         /// Branch name or short ID (if not provided, will prompt interactively)
         branch: Option<String>,
     },
+    /// Absorb working tree changes into the commits that introduced them
+    Absorb {
+        /// Show what would be absorbed without making changes
+        #[arg(short = 'n', long)]
+        dry_run: bool,
+        /// Files to restrict absorption to (default: all tracked changed files)
+        files: Vec<String>,
+    },
     /// Pull-rebase the integration branch and update submodules
     Update,
     /// Generate shell completions (powershell, clink)
@@ -153,6 +162,7 @@ fn main() {
             files,
         }) => commit::run(branch, message, files),
         Some(Command::Drop { target, yes }) => drop::run(target, yes),
+        Some(Command::Absorb { dry_run, files }) => absorb::run(dry_run, files),
         Some(Command::Push { branch }) => push::run(branch),
         Some(Command::Update) => update::run(),
         Some(Command::Fold { args }) => fold::run(args),
