@@ -125,6 +125,7 @@ Independent branches that are combined into the integration branch. You can mana
 #### `loom.remote-type`
 
 By default, `git loom push` auto-detects the remote type:
+
 - **GitHub** if the remote URL contains `github.com`
 - **Gerrit** if `.git/hooks/commit-msg` contains "gerrit"
 - **Plain Git** otherwise
@@ -153,6 +154,16 @@ git config loom.remote-type gerrit   # Force Gerrit push (refs/for/<branch>)
 
 Contributions are welcome! This project is in early development, so there's plenty of room for new ideas and improvements.
 
+### Pre-commit Setup
+
+This project uses [pre-commit](https://pre-commit.com/) to manage Git hooks. Install the hooks with:
+
+```bash
+pre-commit install --hook-type commit-msg
+```
+
+This ensures commit messages and code quality checks run automatically before each commit.
+
 ## License
 
 MIT License - Copyright (c) Nicolas Arnaud-Cormos
@@ -162,5 +173,6 @@ See [LICENSE](LICENSE) file for details.
 ## Acknowledgments
 
 Inspired by:
+
 - [jujutsu](https://github.com/martinvonz/jj) - A Git-compatible VCS with powerful features for managing complex workflows
 - [Git Butler](https://gitbutler.com/) - A Git client that makes working with virtual branches easy
