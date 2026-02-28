@@ -5,22 +5,24 @@ Register-ArgumentCompleter -Native -CommandName 'git-loom' -ScriptBlock {
     param($wordToComplete, $commandAst, $cursorPosition)
 
     $commands = @(
-        @{ Name = 'status';  Description = 'Show the branch-aware status' },
-        @{ Name = 'init';    Description = 'Initialize a new integration branch tracking a remote' },
-        @{ Name = 'branch';  Description = 'Create a new feature branch' },
-        @{ Name = 'reword';  Description = 'Reword a commit message or rename a branch' },
-        @{ Name = 'commit';  Description = 'Create a commit on a feature branch' },
-        @{ Name = 'drop';    Description = 'Drop a commit or a branch from history' },
-        @{ Name = 'fold';    Description = 'Fold source(s) into a target' },
-        @{ Name = 'update';  Description = 'Pull-rebase the integration branch' },
-        @{ Name = 'completions'; Description = 'Generate shell completions' },
-        @{ Name = 'push';    Description = 'Push the integration branch to the remote' }
+        @{ Name = 'status'; Description = 'Show the branch-aware status' },
+        @{ Name = 'init'; Description = 'Initialize a new integration branch tracking a remote' },
+        @{ Name = 'branch'; Description = 'Create a new feature branch' },
+        @{ Name = 'reword'; Description = 'Reword a commit message or rename a branch' },
+        @{ Name = 'commit'; Description = 'Create a commit on a feature branch' },
+        @{ Name = 'drop'; Description = 'Drop a commit or a branch from history' },
+        @{ Name = 'fold'; Description = 'Fold source(s) into a target' },
+        @{ Name = 'absorb'; Description = 'Absorb working tree changes into originating commits' },
+        @{ Name = 'update'; Description = 'Pull-rebase the integration branch' },
+        @{ Name = 'push'; Description = 'Push the integration branch to the remote' }
     )
 
     $globalFlags = @(
         @{ Name = '--no-color'; Description = 'Disable colored output' },
-        @{ Name = '--help';     Description = 'Show help information' },
-        @{ Name = '-h';         Description = 'Show help information' }
+        @{ Name = '-f'; Description = 'Show files changed in each commit' },
+        @{ Name = '--files'; Description = 'Show files changed in each commit' },
+        @{ Name = '--help'; Description = 'Show help information' },
+        @{ Name = '-h'; Description = 'Show help information' }
     )
 
     $tokens = $commandAst.ToString() -split '\s+'
@@ -40,24 +42,42 @@ Register-ArgumentCompleter -Native -CommandName 'git-loom' -ScriptBlock {
     # Complete flags based on subcommand
     $subFlags = @()
     switch ($subcommand) {
+        'status' {
+            $subFlags = @(
+                @{ Name = '-f'; Description = 'Show files changed in each commit' },
+                @{ Name = '--files'; Description = 'Show files changed in each commit' }
+            )
+        }
         'branch' {
             $subFlags = @(
-                @{ Name = '-t';       Description = 'Target commit, branch, or shortID' },
+                @{ Name = '-t'; Description = 'Target commit, branch, or shortID' },
                 @{ Name = '--target'; Description = 'Target commit, branch, or shortID' }
             )
         }
         'reword' {
             $subFlags = @(
-                @{ Name = '-m';        Description = 'New message or branch name' },
+                @{ Name = '-m'; Description = 'New message or branch name' },
                 @{ Name = '--message'; Description = 'New message or branch name' }
             )
         }
         'commit' {
             $subFlags = @(
-                @{ Name = '-b';       Description = 'Target feature branch' },
+                @{ Name = '-b'; Description = 'Target feature branch' },
                 @{ Name = '--branch'; Description = 'Target feature branch' },
-                @{ Name = '-m';        Description = 'Commit message' },
+                @{ Name = '-m'; Description = 'Commit message' },
                 @{ Name = '--message'; Description = 'Commit message' }
+            )
+        }
+        'drop' {
+            $subFlags = @(
+                @{ Name = '-y'; Description = 'Skip confirmation prompt' },
+                @{ Name = '--yes'; Description = 'Skip confirmation prompt' }
+            )
+        }
+        'absorb' {
+            $subFlags = @(
+                @{ Name = '-n'; Description = 'Show what would be absorbed without making changes' },
+                @{ Name = '--dry-run'; Description = 'Show what would be absorbed without making changes' }
             )
         }
     }

@@ -2,6 +2,9 @@
 -- Setup: save to %LocalAppData%\clink\git-loom.lua
 -- Or load dynamically: load(io.popen('git-loom completions clink'):read("*a"))()
 
+local status_matcher = clink.argmatcher()
+    :addflags("-f", "--files", "--help", "-h")
+
 local branch_matcher = clink.argmatcher()
     :addflags("-t", "--target", "--help", "-h")
 
@@ -11,16 +14,23 @@ local reword_matcher = clink.argmatcher()
 local commit_matcher = clink.argmatcher()
     :addflags("-b", "--branch", "-m", "--message", "--help", "-h")
 
+local drop_matcher = clink.argmatcher()
+    :addflags("-y", "--yes", "--help", "-h")
+
+local absorb_matcher = clink.argmatcher()
+    :addflags("-n", "--dry-run", "--help", "-h")
+
 clink.argmatcher("git-loom")
     :addarg(
-        "status",
+        "status"       .. status_matcher,
         "init",
         "branch"       .. branch_matcher,
         "reword"       .. reword_matcher,
         "commit"       .. commit_matcher,
-        "drop",
+        "drop"         .. drop_matcher,
         "fold",
+        "absorb"       .. absorb_matcher,
         "update",
         "push"
     )
-    :addflags("--no-color", "--help", "-h")
+    :addflags("--no-color", "-f", "--files", "--help", "-h")
