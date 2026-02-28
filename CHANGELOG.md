@@ -152,7 +152,7 @@
 
 ### Documentation
 
-* Remove architecture details from the specificaitons ([75ba39f](https://github.com/narnaud/git-loom/commit/75ba39f33ccc9f3123d6ece4fde2397efbc9192d))
+* Remove architecture details from the specifications ([75ba39f](https://github.com/narnaud/git-loom/commit/75ba39f33ccc9f3123d6ece4fde2397efbc9192d))
 * Update README.md file ([bc4664c](https://github.com/narnaud/git-loom/commit/bc4664c385e5f3ce3f0eef81e9d47d05eeea5898))
 
 
@@ -191,7 +191,7 @@
 * **fold:** Add fold command ([bed1219](https://github.com/narnaud/git-loom/commit/bed1219ea6b0d72b4428eef33b58b786fc54cc91))
 * **init:** Add init command ([b37466a](https://github.com/narnaud/git-loom/commit/b37466a85a8aab12a0387e1199b5da8cce4701a9))
 * **status:** Use different characters for staged/unstaged status ([c5107e6](https://github.com/narnaud/git-loom/commit/c5107e6c337df4ab241d77614ee0417c8fc4f4dc))
-* **update:** Add udpate command ([892322e](https://github.com/narnaud/git-loom/commit/892322e28c90e91d0c99af9a37805ba55d7cb07c))
+* **update:** Add update command ([892322e](https://github.com/narnaud/git-loom/commit/892322e28c90e91d0c99af9a37805ba55d7cb07c))
 
 
 ### Bug Fixes 🐞
@@ -210,7 +210,7 @@
 * Add the drop command ([c13bca2](https://github.com/narnaud/git-loom/commit/c13bca27541243cb83a96e084e67492040631aa6))
 * Add update command ([f751439](https://github.com/narnaud/git-loom/commit/f7514390242f19b0c285470ec6625409c0f9b363))
 * **branch:** Add branch command specification ([cf93149](https://github.com/narnaud/git-loom/commit/cf931491d74ea662e4d11811a213c58e0b444e6b))
-* Upate documentaiton to match code ([8a89878](https://github.com/narnaud/git-loom/commit/8a898785ade47bbb1bba0b8b77692036ba5bfe3d))
+* Update documentation to match code ([8a89878](https://github.com/narnaud/git-loom/commit/8a898785ade47bbb1bba0b8b77692036ba5bfe3d))
 * Update specs following latest changes ([6356138](https://github.com/narnaud/git-loom/commit/6356138cefac2fd2aa46e0ca996e30d2ad6a31d9))
 * Update the rebase editor spec ([ff68624](https://github.com/narnaud/git-loom/commit/ff68624f49d2b2775eefa45c48da320819a5d668))
 
