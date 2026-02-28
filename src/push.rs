@@ -38,9 +38,11 @@ pub fn run(branch: Option<String>) -> Result<()> {
     let remote_type = detect_remote_type(&repo, &workdir, &info.upstream.label)?;
     let remote_name = resolve_push_remote(&repo, &info.upstream.label, &remote_type);
 
+    let target_branch = extract_target_branch(&info.upstream.label);
+
     match remote_type {
         RemoteType::Plain => push_plain(&workdir, &remote_name, &branch_name),
-        RemoteType::GitHub => push_github(&workdir, &remote_name, &branch_name),
+        RemoteType::GitHub => push_github(&workdir, &remote_name, &branch_name, &target_branch),
         RemoteType::Gerrit { target_branch } => {
             push_gerrit(&workdir, &remote_name, &branch_name, &target_branch)
         }
@@ -176,7 +178,15 @@ fn push_plain(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
 }
 
 /// Push to GitHub: push the branch, then open `gh pr create --web`.
-fn push_github(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
+///
+/// If the branch being pushed is the upstream target branch itself (e.g.
+/// pushing `main` when tracking `origin/main`), skip PR creation and fall
+/// back to a plain force-with-lease push.
+fn push_github(workdir: &Path, remote: &str, branch: &str, target_branch: &str) -> Result<()> {
+    if branch == target_branch {
+        return push_plain(workdir, remote, branch);
+    }
+
     git_commands::run_git(workdir, &["push", "-u", remote, branch])?;
 
     msg::success(&format!("Pushed `{}` to `{}`", branch, remote));
