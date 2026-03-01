@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.11.0](https://github.com/narnaud/git-loom/compare/v0.10.0...v0.11.0) (2026-03-01)
+
+
+### Features ✨
+
+* Add context commits before base in `loom status` ([aa9bb99](https://github.com/narnaud/git-loom/commit/aa9bb997d275f5099233ff681321cb59365f91da))
+* Add split command to split a commit into two ([98b8ce6](https://github.com/narnaud/git-loom/commit/98b8ce6a99bea752ff291ea3bcea7105392e67e3))
+* Auto-create loose commit when integration branch matches remote ([8274135](https://github.com/narnaud/git-loom/commit/82741353ae0a75e284c98d35d5837ca37378de27))
+* Drop on a file restores it with confirmation ([a07697d](https://github.com/narnaud/git-loom/commit/a07697d4b6bdcbaaef7d8247ff08898ef6164bd7))
+
+
+### Bug Fixes 🐞
+
+* Preserve woven merge topology during update rebase ([5af65cf](https://github.com/narnaud/git-loom/commit/5af65cfadec7894d805e84b8e13beda9eeb49b18))
+* Skip PR creation when pushing the upstream branch on GitHub ([0a11b3c](https://github.com/narnaud/git-loom/commit/0a11b3cb8c94090c24559b12dac63ed6947b23bb))
+* Use git editor instead of inquire prompt for split commit message ([3d0dc19](https://github.com/narnaud/git-loom/commit/3d0dc198f4f5e437611cf9cd3eee2be0300be8d1))
+
+
+### Documentation
+
+* Add absorb command and missing drop --yes flag ([4b5f0e7](https://github.com/narnaud/git-loom/commit/4b5f0e7af4fa329837e715439972b40fdcf44e54))
+* Add context commits to status spec and documentation ([d76301d](https://github.com/narnaud/git-loom/commit/d76301d36043234ec8d1f6ec8bca2114a3a315cb))
+* Add split command and loose commit documentation ([484ff6b](https://github.com/narnaud/git-loom/commit/484ff6b1e525b33c622f0c5b94d0a6c9e0a3a2a6))
+* Update drop specs and docs ([5546494](https://github.com/narnaud/git-loom/commit/55464940aaf97d383defe3d88e4501877fe3916c))
+
+
+### Other
+
+* Add CODEOWNERS ([148978f](https://github.com/narnaud/git-loom/commit/148978f88ff8730288be5f2f3e0bf94c833b453e))
+* Add release profile for optimized binary size ([d6c10af](https://github.com/narnaud/git-loom/commit/d6c10af7f85cc2accd1b29d93b765edb92b17422))
+* Fix pre-commit codespell skip file ([7fbf725](https://github.com/narnaud/git-loom/commit/7fbf725be4a166ae00395cb6d4dd2cd3d94bc662))
+* Fix spelling ([e25a2d7](https://github.com/narnaud/git-loom/commit/e25a2d745aee7e4fce4854a1bdc5bfccbd8abe10))
+* Update pre-commit hooos ([0afe346](https://github.com/narnaud/git-loom/commit/0afe3467d42145d139879f87d763cde6add9da0e))
+
 ## [0.10.0](https://github.com/narnaud/git-loom/compare/v0.9.1...v0.10.0) (2026-02-28)
 
 
