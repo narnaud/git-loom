@@ -6,6 +6,14 @@ use crate::git_commands::{self, git_commit, git_rebase};
 use crate::msg;
 use crate::weave;
 
+/// Commit with `-m` message or open the editor.
+fn commit_or_editor(workdir: &std::path::Path, message: Option<&str>) -> Result<()> {
+    match message {
+        Some(m) => git_commit::commit(workdir, m),
+        None => git_commit::commit_with_editor(workdir),
+    }
+}
+
 /// Split a commit into two sequential commits.
 ///
 /// Dispatches based on the resolved target type:
@@ -44,18 +52,6 @@ fn split_commit(repo: &Repository, commit_hash: &str, message: Option<String>) -
     // Show interactive file picker
     let selected = pick_files(&files)?;
 
-    // Get the first commit message
-    let msg1 = match message {
-        Some(m) => m,
-        None => msg::input("Message for the first commit", |s| {
-            if s.trim().is_empty() {
-                Err("Message cannot be empty")
-            } else {
-                Ok(())
-            }
-        })?,
-    };
-
     let original_msg = commit.message().unwrap_or("").trim().to_string();
 
     // Compute remaining files
@@ -70,7 +66,7 @@ fn split_commit(repo: &Repository, commit_hash: &str, message: Option<String>) -
         commit_oid,
         &selected,
         &remaining,
-        &msg1,
+        message.as_deref(),
         &original_msg,
     )
 }
@@ -121,7 +117,7 @@ pub fn split_commit_with_selection(
         commit_oid,
         &selected,
         &remaining,
-        &message,
+        Some(message.as_str()),
         &original_msg,
     )
 }
@@ -153,7 +149,7 @@ fn perform_split(
     commit_oid: Oid,
     selected: &[String],
     remaining: &[String],
-    msg1: &str,
+    msg1: Option<&str>,
     msg2: &str,
 ) -> Result<()> {
     let head_oid = git::head_oid(repo)?;
@@ -180,14 +176,14 @@ fn perform_head_split(
     workdir: &std::path::Path,
     selected: &[String],
     remaining: &[String],
-    msg1: &str,
+    msg1: Option<&str>,
     msg2: &str,
 ) -> Result<()> {
     git_commit::reset_mixed(workdir, "HEAD~1")?;
 
     let selected_refs: Vec<&str> = selected.iter().map(|s| s.as_str()).collect();
     git_commit::stage_files(workdir, &selected_refs)?;
-    git_commit::commit(workdir, msg1)?;
+    commit_or_editor(workdir, msg1)?;
 
     let remaining_refs: Vec<&str> = remaining.iter().map(|s| s.as_str()).collect();
     git_commit::stage_files(workdir, &remaining_refs)?;
@@ -210,7 +206,7 @@ fn perform_non_head_split(
     commit_oid: Oid,
     selected: &[String],
     remaining: &[String],
-    msg1: &str,
+    msg1: Option<&str>,
     msg2: &str,
 ) -> Result<()> {
     // Start edit rebase
@@ -233,14 +229,14 @@ fn do_split_at_pause(
     workdir: &std::path::Path,
     selected: &[String],
     remaining: &[String],
-    msg1: &str,
+    msg1: Option<&str>,
     msg2: &str,
 ) -> Result<()> {
     git_commit::reset_mixed(workdir, "HEAD~1")?;
 
     let selected_refs: Vec<&str> = selected.iter().map(|s| s.as_str()).collect();
     git_commit::stage_files(workdir, &selected_refs)?;
-    git_commit::commit(workdir, msg1)?;
+    commit_or_editor(workdir, msg1)?;
 
     let remaining_refs: Vec<&str> = remaining.iter().map(|s| s.as_str()).collect();
     git_commit::stage_files(workdir, &remaining_refs)?;
