@@ -104,6 +104,19 @@ Upstream ahead (upstream has new commits beyond the common base):
 ├╯ 204e309 (common base) 2025-07-06 Merge pull request #10
 ```
 
+Context commits (history before the base):
+
+```
+● ff1b247 (upstream) [origin/main] Initial commit
+· abc1234 2025-07-05 Previous work
+· def5678 2025-07-04 Earlier change
+```
+
+When invoked with a positional argument (`git loom status 3` or `git loom 3`),
+N-1 extra commits before the merge-base are shown below the upstream marker.
+They are rendered dimmed with a `·` prefix and are display-only (no short ID,
+not actionable). The default is 1 (no extra context).
+
 ### Sections (top to bottom)
 
 1. **Local changes** (optional): shown only if the working tree has
@@ -131,6 +144,10 @@ Upstream ahead (upstream has new commits beyond the common base):
    `│●  [<remote>/<branch>] ⏫ N new commits` followed by
    `├╯ <hash> (common base) <date> <message>`.
 
+5. **Context commits** (optional): when a context count > 1 is given, extra
+   commits before the merge-base are shown below the upstream marker, dimmed
+   with a `·` prefix. These are display-only and carry no short ID.
+
 ### Symbols
 
 | Symbol | Meaning |
@@ -143,6 +160,7 @@ Upstream ahead (upstream has new commits beyond the common base):
 | `├╯`   | End of a side branch (or stack), merging back to integration line |
 | `XY`    | 2-char file status (`X`=index, `Y`=worktree), matching `git status --short`. `X` is green, `Y` is red. Values: `M` modified, `A` added, `D` deleted, `R` renamed, `?` untracked, ` ` unchanged |
 | `⏫`  | Upstream has new commits ahead of the common base |
+| `·`    | Context commit before the base (dimmed, display-only) |
 
 ### Commit line format
 
@@ -166,6 +184,8 @@ the same upstream remote as the integration branch (e.g. `main` tracking
 |---------|----------|
 | `git-loom` | Shows the status (default command) |
 | `git-loom status` | Shows the status (explicit) |
+| `git-loom 3` | Shows status with 2 context commits before the base |
+| `git-loom status 3` | Same as above (explicit) |
 
 ## Design Decisions
 

@@ -5,8 +5,14 @@ Show the branch-aware commit graph. This is the default command when running `gi
 ## Usage
 
 ```
-git-loom [status] [-f]
+git-loom [status] [-f] [N]
 ```
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `N` | Number of context commits to show before the base (default: 1) |
 
 ### Options
 
@@ -58,6 +64,7 @@ The graph is rendered top-to-bottom with these sections:
 | `●` | A commit |
 | `├╯` | End of a side branch |
 | `⏫` | Upstream has new commits |
+| `·` | Context commit before the base (dimmed) |
 
 ### Short IDs
 
@@ -115,6 +122,18 @@ When upstream has new commits beyond the common base:
 │●  [origin/main] ⏫ 3 new commits
 ├╯ 204e309 (common base) 2025-07-06 Merge pull request #10
 ```
+
+### Context commits
+
+Show history before the base with a positional argument (`git loom 3` or `git loom status 3`):
+
+```
+● ff1b247 (upstream) [origin/main] Initial commit
+· abc1234 2025-07-05 Previous work
+· def5678 2025-07-04 Earlier change
+```
+
+Context commits are dimmed and display-only (no short ID, not actionable). The default is 1 (no extra context).
 
 ## Prerequisites
 
