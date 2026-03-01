@@ -17,6 +17,9 @@ local commit_matcher = clink.argmatcher()
 local drop_matcher = clink.argmatcher()
     :addflags("-y", "--yes", "--help", "-h")
 
+local split_matcher = clink.argmatcher()
+    :addflags("-m", "--message", "--help", "-h")
+
 local absorb_matcher = clink.argmatcher()
     :addflags("-n", "--dry-run", "--help", "-h")
 
@@ -29,6 +32,7 @@ clink.argmatcher("git-loom")
         "commit"       .. commit_matcher,
         "drop"         .. drop_matcher,
         "fold",
+        "split"        .. split_matcher,
         "absorb"       .. absorb_matcher,
         "update",
         "push"

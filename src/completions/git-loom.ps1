@@ -14,7 +14,8 @@ Register-ArgumentCompleter -Native -CommandName 'git-loom' -ScriptBlock {
         @{ Name = 'fold'; Description = 'Fold source(s) into a target' },
         @{ Name = 'absorb'; Description = 'Absorb working tree changes into originating commits' },
         @{ Name = 'update'; Description = 'Pull-rebase the integration branch' },
-        @{ Name = 'push'; Description = 'Push the integration branch to the remote' }
+        @{ Name = 'push'; Description = 'Push the integration branch to the remote' },
+        @{ Name = 'split'; Description = 'Split a commit into two sequential commits' }
     )
 
     $globalFlags = @(
@@ -72,6 +73,12 @@ Register-ArgumentCompleter -Native -CommandName 'git-loom' -ScriptBlock {
             $subFlags = @(
                 @{ Name = '-y'; Description = 'Skip confirmation prompt' },
                 @{ Name = '--yes'; Description = 'Skip confirmation prompt' }
+            )
+        }
+        'split' {
+            $subFlags = @(
+                @{ Name = '-m'; Description = 'Message for the first commit' },
+                @{ Name = '--message'; Description = 'Message for the first commit' }
             )
         }
         'absorb' {
