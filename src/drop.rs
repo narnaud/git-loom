@@ -42,7 +42,7 @@ fn drop_commit(repo: &Repository, commit_hash: &str, skip_confirm: bool) -> Resu
     let workdir = git::require_workdir(repo, "drop")?;
 
     let commit_oid = git2::Oid::from_str(commit_hash)?;
-    let info = git::gather_repo_info(repo, false)?;
+    let info = git::gather_repo_info(repo, false, 1)?;
 
     // Check if this commit is the only commit on a branch.
     // If so, delegate to drop_branch for clean section removal.
@@ -88,7 +88,7 @@ fn drop_commit(repo: &Repository, commit_hash: &str, skip_confirm: bool) -> Resu
 
 /// Drop a branch: remove all its commits, unweave merge topology, delete the ref.
 fn drop_branch(repo: &Repository, branch_name: &str, skip_confirm: bool) -> Result<()> {
-    let info = git::gather_repo_info(repo, false)?;
+    let info = git::gather_repo_info(repo, false, 1)?;
     drop_branch_with_info(repo, &info, branch_name, skip_confirm)
 }
 

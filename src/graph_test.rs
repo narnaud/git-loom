@@ -1,6 +1,6 @@
 use git2::Oid;
 
-use crate::git::{BranchInfo, CommitInfo, FileChange, RepoInfo, UpstreamInfo};
+use crate::git::{BranchInfo, CommitInfo, ContextCommit, FileChange, RepoInfo, UpstreamInfo};
 use crate::graph;
 
 /// Strip ANSI escape codes so tests can compare plain text.
@@ -72,6 +72,7 @@ fn base_info() -> RepoInfo {
         commits: vec![],
         branches: vec![],
         working_changes: vec![],
+        context_commits: vec![],
     }
 }
 
@@ -637,6 +638,71 @@ fn same_file_in_multiple_commits_gets_unique_ids() {
     assert!(
         output.contains("01:0 M  src/main.rs"),
         "expected 01:0 for commit 1's file, got:\n{}",
+        output
+    );
+}
+
+#[test]
+fn context_commits_shown_below_upstream() {
+    let mut info = base_info();
+    info.context_commits = vec![
+        ContextCommit {
+            short_hash: "bbb0001".to_string(),
+            message: "Earlier commit".to_string(),
+            date: "2025-07-05".to_string(),
+        },
+        ContextCommit {
+            short_hash: "bbb0002".to_string(),
+            message: "Even earlier".to_string(),
+            date: "2025-07-04".to_string(),
+        },
+    ];
+
+    let output = render_plain(info);
+    // Context commits should appear after the upstream line
+    assert!(
+        output.contains("· bbb0001 2025-07-05 Earlier commit\n· bbb0002 2025-07-04 Even earlier\n"),
+        "expected context commits below upstream, got:\n{}",
+        output
+    );
+    // Upstream line should come before context
+    let upstream_pos = output.find("(upstream)").unwrap();
+    let context_pos = output.find("· bbb0001").unwrap();
+    assert!(
+        upstream_pos < context_pos,
+        "upstream should appear before context commits, got:\n{}",
+        output
+    );
+}
+
+#[test]
+fn context_commits_shown_below_diverged_upstream() {
+    let mut info = base_info();
+    info.upstream.commits_ahead = 2;
+    info.context_commits = vec![ContextCommit {
+        short_hash: "ccc0001".to_string(),
+        message: "Before base".to_string(),
+        date: "2025-07-01".to_string(),
+    }];
+
+    let output = render_plain(info);
+    // Context should appear after the common base line
+    let base_pos = output.find("(common base)").unwrap();
+    let context_pos = output.find("· ccc0001").unwrap();
+    assert!(
+        base_pos < context_pos,
+        "context should appear below common base, got:\n{}",
+        output
+    );
+}
+
+#[test]
+fn no_context_when_default() {
+    let info = base_info();
+    let output = render_plain(info);
+    assert!(
+        !output.contains('·'),
+        "no middle-dot lines expected with empty context_commits, got:\n{}",
         output
     );
 }

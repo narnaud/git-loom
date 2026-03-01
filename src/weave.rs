@@ -169,7 +169,7 @@ impl Weave {
     /// When `RepoInfo` is already available, prefer `from_repo_with_info`
     /// to avoid a redundant graph walk.
     pub fn from_repo(repo: &Repository) -> Result<Self> {
-        let info = git::gather_repo_info(repo, false)?;
+        let info = git::gather_repo_info(repo, false, 1)?;
         Self::from_repo_with_info(repo, &info)
     }
 

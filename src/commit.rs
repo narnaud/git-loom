@@ -16,7 +16,7 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
 
     // Gather repo info once — also serves as verification that we're on an
     // integration branch (gather_repo_info requires an upstream).
-    let info = git::gather_repo_info(&repo, false).context(
+    let info = git::gather_repo_info(&repo, false, 1).context(
         "Must be on an integration branch to use commit\n\
          Use `git commit` directly on feature branches",
     )?;

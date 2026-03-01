@@ -695,7 +695,7 @@ fn from_repo_round_trip_preserves_identity() {
 
     // Record state before round-trip
     let messages_before: Vec<String> = {
-        let info = git::gather_repo_info(&test_repo.repo, false).unwrap();
+        let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
         info.commits.iter().map(|c| c.message.clone()).collect()
     };
 
@@ -708,7 +708,7 @@ fn from_repo_round_trip_preserves_identity() {
 
     // Verify identity: same commits after round-trip
     let messages_after: Vec<String> = {
-        let info = git::gather_repo_info(&test_repo.repo, false).unwrap();
+        let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
         info.commits.iter().map(|c| c.message.clone()).collect()
     };
 

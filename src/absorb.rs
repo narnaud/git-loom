@@ -21,7 +21,7 @@ enum FileAnalysis {
 pub fn run(dry_run: bool, user_files: Vec<String>) -> Result<()> {
     let repo = git::open_repo()?;
     let workdir = git::require_workdir(&repo, "absorb")?;
-    let info = git::gather_repo_info(&repo, false)?;
+    let info = git::gather_repo_info(&repo, false, 1)?;
 
     // Build in-scope commit set (non-merge commits between merge-base and HEAD)
     let in_scope: HashMap<Oid, &CommitInfo> = info.commits.iter().map(|c| (c.oid, c)).collect();

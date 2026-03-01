@@ -134,6 +134,8 @@ pub struct RepoInfo {
     pub branches: Vec<BranchInfo>,
     /// Staged and unstaged working tree changes.
     pub working_changes: Vec<FileChange>,
+    /// Context commits before the base (for history context display).
+    pub context_commits: Vec<ContextCommit>,
 }
 
 impl RepoInfo {
@@ -180,6 +182,15 @@ pub struct BranchInfo {
     pub tip_oid: git2::Oid,
 }
 
+/// A context commit shown below the upstream base for history context.
+/// These are display-only (no short ID, not actionable).
+#[derive(Debug)]
+pub struct ContextCommit {
+    pub short_hash: String,
+    pub message: String,
+    pub date: String,
+}
+
 /// A file with staged or unstaged changes in the working tree.
 #[derive(Debug)]
 pub struct FileChange {
@@ -194,7 +205,7 @@ pub struct FileChange {
 /// upstream tracking branch, detect feature branches, and gather working tree status.
 ///
 /// When `show_files` is true, each commit will include the list of files it touches.
-pub fn gather_repo_info(repo: &Repository, show_files: bool) -> Result<RepoInfo> {
+pub fn gather_repo_info(repo: &Repository, show_files: bool, context: usize) -> Result<RepoInfo> {
     let head = repo.head()?;
 
     if !head.is_branch() {
@@ -255,6 +266,8 @@ pub fn gather_repo_info(repo: &Repository, show_files: bool) -> Result<RepoInfo>
     let base_time = base_commit.time();
     let base_date = format_epoch(base_time.seconds());
 
+    let context_commits = walk_context_commits(repo, merge_base_oid, context)?;
+
     Ok(RepoInfo {
         upstream: UpstreamInfo {
             label: upstream_name,
@@ -267,6 +280,7 @@ pub fn gather_repo_info(repo: &Repository, show_files: bool) -> Result<RepoInfo>
         commits,
         branches,
         working_changes,
+        context_commits,
     })
 }
 
@@ -328,7 +342,7 @@ pub fn resolve_target(repo: &Repository, target: &str) -> Result<Target> {
 /// Resolve a shortid to a commit, branch, or file by rebuilding the graph.
 fn resolve_shortid(repo: &Repository, shortid: &str) -> Result<Target> {
     // Gather repo info with files enabled so commit file shortids are resolvable
-    let info = gather_repo_info(repo, true)?;
+    let info = gather_repo_info(repo, true, 1)?;
 
     // Build entities using the shared method
     let entities = info.collect_entities();
@@ -400,6 +414,43 @@ fn count_commits(repo: &Repository, from: git2::Oid, hide: git2::Oid) -> Result<
         count += 1;
     }
     Ok(count)
+}
+
+/// Walk N-1 commits before the merge-base to provide history context.
+/// Returns an empty vec when `count` is 0 or 1 (the base itself is already
+/// shown in the upstream section).
+fn walk_context_commits(
+    repo: &Repository,
+    merge_base_oid: git2::Oid,
+    count: usize,
+) -> Result<Vec<ContextCommit>> {
+    if count <= 1 {
+        return Ok(vec![]);
+    }
+    let base_commit = repo.find_commit(merge_base_oid)?;
+    let mut commits = Vec::new();
+    let mut current = base_commit.parent(0).ok();
+    let remaining = count - 1;
+    while let Some(commit) = current {
+        if commits.len() >= remaining {
+            break;
+        }
+        let short_hash = commit
+            .as_object()
+            .short_id()?
+            .as_str()
+            .context("Context commit short_id is not valid UTF-8")?
+            .to_string();
+        let message = commit.summary().unwrap_or("").to_string();
+        let date = format_epoch(commit.time().seconds());
+        commits.push(ContextCommit {
+            short_hash,
+            message,
+            date,
+        });
+        current = commit.parent(0).ok();
+    }
+    Ok(commits)
 }
 
 /// Format a Unix epoch timestamp as YYYY-MM-DD.

@@ -37,6 +37,10 @@ struct Cli {
     #[arg(short = 'f', long = "files")]
     files: bool,
 
+    /// Number of context commits to show before the base (default: 1)
+    #[arg(default_value = "1")]
+    context: usize,
+
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -48,6 +52,9 @@ enum Command {
         /// Show files changed in each commit
         #[arg(short = 'f', long = "files")]
         files: bool,
+        /// Number of context commits to show before the base (default: 1)
+        #[arg(default_value = "1")]
+        context: usize,
     },
     /// Initialize a new integration branch tracking a remote
     Init {
@@ -160,8 +167,8 @@ fn main() {
     }
 
     let result = match cli.command {
-        None => status::run(cli.files),
-        Some(Command::Status { files }) => status::run(files),
+        None => status::run(cli.files, cli.context),
+        Some(Command::Status { files, context }) => status::run(files, context),
         Some(Command::Init { name }) => init::run(name),
         Some(Command::Branch { name, target }) => branch::run(name, target),
         Some(Command::Reword { target, message }) => reword::run(target, message),

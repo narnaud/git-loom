@@ -124,7 +124,7 @@ fn drop_woven_branch_removes_commits_and_ref() {
     );
 
     // A1, A2 are gone from history, Int should remain
-    let info = git::gather_repo_info(&test_repo.repo, false).unwrap();
+    let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
     let messages: Vec<&str> = info.commits.iter().map(|c| c.message.as_str()).collect();
     assert!(!messages.contains(&"A1"), "A1 should be gone");
     assert!(!messages.contains(&"A2"), "A2 should be gone");
@@ -190,7 +190,7 @@ fn drop_non_woven_branch_removes_commits_and_ref() {
     );
 
     // A1, A2 should be gone, Int should remain
-    let info = git::gather_repo_info(&test_repo.repo, false).unwrap();
+    let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
     let messages: Vec<&str> = info.commits.iter().map(|c| c.message.as_str()).collect();
     assert!(!messages.contains(&"A1"), "A1 should be gone");
     assert!(!messages.contains(&"A2"), "A2 should be gone");
@@ -241,7 +241,7 @@ fn drop_woven_branch_with_two_branches_preserves_other() {
     assert!(test_repo.branch_exists("feature-b"));
 
     // B1 should remain, A1 and A2 should be gone
-    let info = git::gather_repo_info(&test_repo.repo, false).unwrap();
+    let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
     let messages: Vec<&str> = info.commits.iter().map(|c| c.message.as_str()).collect();
     assert!(!messages.contains(&"A1"), "A1 should be gone");
     assert!(!messages.contains(&"A2"), "A2 should be gone");
@@ -290,7 +290,7 @@ fn drop_colocated_non_woven_preserves_other_branch_and_commits() {
     );
 
     // Commits should still be in history (not dropped)
-    let info = git::gather_repo_info(&test_repo.repo, false).unwrap();
+    let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
     let messages: Vec<&str> = info.commits.iter().map(|c| c.message.as_str()).collect();
     assert!(messages.contains(&"A1"), "A1 should still be in history");
     assert!(messages.contains(&"Int"), "Int should still be in history");
@@ -333,7 +333,7 @@ fn drop_colocated_woven_preserves_other_branch_and_commits() {
     );
 
     // A1 should still be in history (feature-b still needs it)
-    let info = git::gather_repo_info(&test_repo.repo, false).unwrap();
+    let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
     let messages: Vec<&str> = info.commits.iter().map(|c| c.message.as_str()).collect();
     assert!(messages.contains(&"A1"), "A1 should still be in history");
     assert!(messages.contains(&"Int"), "Int should still be in history");
@@ -380,7 +380,7 @@ fn drop_stacked_outer_branch_preserves_inner_branch() {
     assert!(test_repo.branch_exists("feat1"), "feat1 should still exist");
 
     // A1 should remain in history, A2 should be gone
-    let info = git::gather_repo_info(&test_repo.repo, false).unwrap();
+    let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
     let messages: Vec<&str> = info.commits.iter().map(|c| c.message.as_str()).collect();
     assert!(messages.contains(&"A1"), "A1 should still be in history");
     assert!(!messages.contains(&"A2"), "A2 should be gone");

@@ -1,4 +1,4 @@
-use crate::git::{CommitInfo, FileChange, RepoInfo, UpstreamInfo};
+use crate::git::{CommitInfo, ContextCommit, FileChange, RepoInfo, UpstreamInfo};
 use crate::shortid::IdAllocator;
 use colored::{Color, Colorize};
 use std::collections::{HashMap, HashSet};
@@ -51,6 +51,8 @@ enum Section {
     Loose(Vec<CommitInfo>),
     /// The upstream tracking branch / common base marker at the bottom of the status.
     Upstream(UpstreamInfo),
+    /// Context commits before the base (display-only, dimmed).
+    Context(Vec<ContextCommit>),
 }
 
 // ── Public API ──────────────────────────────────────────────────────────
@@ -183,6 +185,10 @@ fn build_sections(info: RepoInfo) -> Vec<Section> {
 
     sections.push(Section::Upstream(info.upstream));
 
+    if !info.context_commits.is_empty() {
+        sections.push(Section::Context(info.context_commits));
+    }
+
     sections
 }
 
@@ -247,6 +253,9 @@ fn render_sections(sections: &[Section], ids: &IdAllocator) -> String {
             }
             Section::Upstream(info) => {
                 render_upstream(&mut out, info);
+            }
+            Section::Context(commits) => {
+                render_context(&mut out, commits);
             }
         }
     }
@@ -430,6 +439,20 @@ fn render_upstream(out: &mut String, info: &UpstreamInfo) {
             info.label.color(COLOR_BRANCH).bold(),
             "]".color(COLOR_DIM),
             info.base_message.color(COLOR_DIM)
+        )
+        .unwrap();
+    }
+}
+
+fn render_context(out: &mut String, commits: &[ContextCommit]) {
+    for commit in commits {
+        writeln!(
+            out,
+            "{} {} {} {}",
+            "·".color(COLOR_DIM),
+            commit.short_hash.color(COLOR_DIM),
+            commit.date.color(COLOR_DIM),
+            commit.message.color(COLOR_DIM),
         )
         .unwrap();
     }

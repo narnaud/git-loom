@@ -24,7 +24,7 @@ enum RemoteType {
 pub fn run(branch: Option<String>) -> Result<()> {
     let repo = git::open_repo()?;
     let workdir = git::require_workdir(&repo, "push")?.to_path_buf();
-    let info = git::gather_repo_info(&repo, false)?;
+    let info = git::gather_repo_info(&repo, false, 1)?;
 
     if info.branches.is_empty() {
         bail!("No woven branches to push\nCreate a branch with `git loom branch` first");

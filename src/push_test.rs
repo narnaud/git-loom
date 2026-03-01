@@ -185,7 +185,7 @@ fn resolve_branch_accepts_woven_branch() {
 
     let result = super::resolve_branch(
         &test_repo.repo,
-        &crate::git::gather_repo_info(&test_repo.repo, false).unwrap(),
+        &crate::git::gather_repo_info(&test_repo.repo, false, 1).unwrap(),
         "feature-a",
     );
     assert!(result.is_ok());
@@ -206,7 +206,7 @@ fn resolve_branch_rejects_non_woven() {
 
     let result = super::resolve_branch(
         &test_repo.repo,
-        &crate::git::gather_repo_info(&test_repo.repo, false).unwrap(),
+        &crate::git::gather_repo_info(&test_repo.repo, false, 1).unwrap(),
         "stray-branch",
     );
     assert!(result.is_err());
@@ -225,7 +225,7 @@ fn resolve_branch_rejects_commit_target() {
 
     let result = super::resolve_branch(
         &test_repo.repo,
-        &crate::git::gather_repo_info(&test_repo.repo, false).unwrap(),
+        &crate::git::gather_repo_info(&test_repo.repo, false, 1).unwrap(),
         &c1_oid.to_string(),
     );
     assert!(result.is_err());
