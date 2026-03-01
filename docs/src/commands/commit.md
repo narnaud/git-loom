@@ -33,7 +33,15 @@ When `zz` appears alongside other file arguments, `zz` wins and stages everythin
 4. **Commit** — creates the commit
 5. **Relocate** — moves the commit to the target feature branch, updating all branch refs and integration topology automatically
 
+### Loose Commit
+
+When `-b` is omitted and the integration branch has **not diverged** from the remote (i.e. HEAD equals the merge-base — no woven branches or local commits), the commit is created directly on the integration branch as a **loose commit**. No branch targeting or rebase is needed.
+
+This reduces friction when starting work on a fresh integration branch.
+
 ### Branch Resolution
+
+When the integration branch has diverged (woven branches exist):
 
 - If `-b` matches a woven feature branch: uses it
 - If `-b` matches an unwoven branch: error
@@ -75,6 +83,13 @@ git-loom commit -b feature-auth ar -m "fix auth check"
 ```bash
 git-loom commit -b feature-logging -m "add request logging" zz
 # Creates feature-logging, weaves it, stages all, commits
+```
+
+### Loose commit on a fresh integration branch
+
+```bash
+git-loom commit -m "initial scaffold" zz
+# No -b flag, branch matches remote → creates loose commit directly
 ```
 
 ## Prerequisites

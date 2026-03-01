@@ -20,6 +20,7 @@
 - [update](commands/update.md)
 - [push](commands/push.md)
 - [absorb](commands/absorb.md)
+- [split](commands/split.md)
 
 # Reference
 
