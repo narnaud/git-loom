@@ -22,9 +22,7 @@ pub fn run(target: String, skip_confirm: bool) -> Result<()> {
     match resolved {
         Target::Commit(hash) => drop_commit(&repo, &hash, skip_confirm),
         Target::Branch(name) => drop_branch(&repo, &name, skip_confirm),
-        Target::File(_) => {
-            bail!("Cannot drop a file\nUse `git restore` to discard file changes")
-        }
+        Target::File(path) => drop_file(&repo, &path, skip_confirm),
         Target::Unstaged => {
             bail!("Cannot drop unstaged changes\nUse `git restore` to discard changes")
         }
@@ -32,6 +30,19 @@ pub fn run(target: String, skip_confirm: bool) -> Result<()> {
             bail!("Cannot drop a commit file\nUse `git loom fold <file_id> zz` to uncommit a file")
         }
     }
+}
+
+/// Drop a file's changes by running `git restore`.
+fn drop_file(repo: &Repository, path: &str, skip_confirm: bool) -> Result<()> {
+    let workdir = git::require_workdir(repo, "drop")?;
+
+    if !skip_confirm && !msg::confirm(&format!("Discard changes to `{}`?", path))? {
+        bail!("Cancelled");
+    }
+
+    git_commands::run_git(workdir, &["restore", "--staged", "--worktree", path])?;
+    msg::success(&format!("Restored `{}`", path));
+    Ok(())
 }
 
 /// Drop a single commit from history via interactive rebase.
