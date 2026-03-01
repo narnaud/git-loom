@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/narnaud/git-loom/compare/v0.11.0...v0.11.1) (2026-03-01)
+
+
+### Other
+
+* Add split command to shell completions ([a0bcbcf](https://github.com/narnaud/git-loom/commit/a0bcbcf46435e5a5035c0bd45ab9c3255d24a357))
+
 ## [0.11.0](https://github.com/narnaud/git-loom/compare/v0.10.0...v0.11.0) (2026-03-01)
 
 
