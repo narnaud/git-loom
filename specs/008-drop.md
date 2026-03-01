@@ -39,7 +39,8 @@ git-loom drop <target>
 - If `<target>` resolves to a commit: removes the commit from history
 - If `<target>` resolves to a branch: removes all commits, unweaves merge
   topology, and deletes the branch ref
-- If `<target>` resolves to a file: returns an error
+- If `<target>` resolves to a file: restores the file (discards changes)
+  after a y/n confirmation (skippable with `-y`)
 
 ## What Happens
 
@@ -137,6 +138,22 @@ the sibling branch. No commits are removed — only the branch ref is deleted.
 - Other branch refs
 - Integration line commits (e.g., commits made directly on integration)
 
+### When Target is a File
+
+The file's staged and unstaged changes are discarded by running
+`git restore --staged --worktree <path>`. A confirmation prompt is shown
+first (skippable with `-y`).
+
+**What changes:**
+
+- The file is restored to its committed state (staged and unstaged changes
+  are discarded)
+
+**What stays the same:**
+
+- All commits and branch refs
+- Changes to other files
+
 ## Target Resolution
 
 The `<target>` is interpreted using the shared resolution strategy
@@ -147,8 +164,8 @@ The `<target>` is interpreted using the shared resolution strategy
 3. **Short IDs** — branch short IDs resolve to branches, commit short IDs to
    commits
 
-File targets are rejected with: `"Cannot drop a file. Use 'git restore' to
-discard file changes."`
+File targets restore the file to its committed state (see "When Target is a
+File" above).
 
 ## Prerequisites
 
@@ -209,6 +226,17 @@ git-loom status
 git-loom drop feature-a
 # Removes feature-a ref, reassigns section to feature-b
 # Commits and merge topology are preserved for feature-b
+```
+
+### Drop a file (discard changes)
+
+```bash
+git-loom status
+# Shows: │   ma  M src/main.rs
+
+git-loom drop ma
+# Discard changes to `src/main.rs`? (y/n)
+# Restored `src/main.rs`
 ```
 
 ### Drop the last commit on a branch (auto-deletes branch)

@@ -12,7 +12,7 @@ git-loom drop [-y] <target>
 
 | Argument | Description |
 |----------|-------------|
-| `<target>` | Commit hash, branch name, or short ID |
+| `<target>` | Commit hash, branch name, file short ID, or short ID |
 
 ### Options
 
@@ -38,13 +38,17 @@ Removes the entire branch in a single operation:
 
 **Co-located branches** (sharing the same tip commit with another branch): only the branch ref is deleted. Commits are preserved for the surviving sibling branch, and the merge topology is reassigned.
 
+### When Target is a File
+
+Discards the file's staged and unstaged changes by running `git restore --staged --worktree`. A confirmation prompt is shown first (skippable with `-y`).
+
 ## Target Resolution
 
 1. **Branch names** — exact match resolves to a branch (drops the branch)
 2. **Git references** — full/partial hashes resolve to commits
 3. **Short IDs** — branch short IDs resolve to branches, commit short IDs to commits
 
-File targets are rejected.
+File short IDs resolve to files (restores the file).
 
 ## Examples
 
@@ -74,6 +78,13 @@ git-loom drop feature-a
 ```bash
 git-loom drop fa
 # Same as above, using the short ID
+```
+
+### Drop a file (discard changes)
+
+```bash
+git-loom drop ma
+# Discards staged and unstaged changes to src/main.rs
 ```
 
 ### Drop a co-located branch
