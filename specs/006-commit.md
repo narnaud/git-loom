@@ -6,6 +6,10 @@
 integration branch. It stages files, creates the commit, and automatically
 relocates it to the target feature branch, updating the integration topology.
 
+When the integration branch has not diverged from the remote (no woven branches
+or local commits) and `-b` is omitted, the commit is created directly on the
+integration branch as a **loose commit** — no branch targeting or rebase needed.
+
 ## Why Commit?
 
 Creating a commit on a feature branch within an integration workflow has friction:
@@ -56,10 +60,13 @@ git-loom commit [-b <branch>] [-m <message>] [files...]
 ### Flow
 
 1. **Stage resolution**: Apply the staging rules (see CLI section above).
-2. **Branch resolution**: Determine the target feature branch.
-3. **Message resolution**: Get the commit message.
-4. **Commit creation**: Create the commit.
-5. **Relocation**: Move the commit to the target feature branch, updating all
+2. **Loose commit check**: If `-b` is omitted and the local branch has not
+   diverged from the remote (HEAD == merge-base), create the commit directly
+   on the integration branch and stop — no branch resolution or rebase needed.
+3. **Branch resolution**: Determine the target feature branch.
+4. **Message resolution**: Get the commit message.
+5. **Commit creation**: Create the commit.
+6. **Relocation**: Move the commit to the target feature branch, updating all
    branch refs and the integration topology automatically.
 
 ### Branch Resolution
@@ -74,7 +81,10 @@ When `-b` is provided:
 
 When `-b` is omitted:
 
-- Present an interactive picker listing all woven feature branches.
+- **If HEAD == merge-base** (local branch matches the remote — no woven
+  branches, no local commits): create a loose commit directly on the
+  integration branch. No branch picker is shown.
+- Otherwise, present an interactive picker listing all woven feature branches.
 - Include an option to create a new branch (prompts for name).
 - If there are no woven feature branches: prompt to create a new one.
 
@@ -139,6 +149,26 @@ unstaged changes are staged regardless of other arguments.
 
 ## Examples
 
+### Loose commit (no woven branches)
+
+```bash
+git-loom status
+# Integration branch matches remote — no woven branches, no local commits
+
+git-loom commit zz -m "quick fix"
+# HEAD == merge-base, no -b flag
+# Creates commit directly on the integration branch (loose)
+# No branch picker, no rebase
+```
+
+### Loose commit skipped when -b is provided
+
+```bash
+git-loom commit -b feature-new zz -m "start feature"
+# Even though HEAD == merge-base, -b is provided
+# Creates branch, commits, weaves — normal flow
+```
+
 ### Commit to existing branch interactively
 
 ```bash
@@ -201,14 +231,19 @@ git-loom commit zz
 
 ## Design Decisions
 
-### No Loose Commits
+### Automatic Loose Commits
 
-The commit command always targets a feature branch. Committing directly on the
-integration branch (a "loose" commit) is not allowed because:
+When the integration branch has not diverged from the remote (HEAD == merge-base)
+and `-b` is omitted, the command creates a loose commit directly on the
+integration branch. This was chosen because:
 
-- **Clarity**: Every commit belongs to a feature branch, making the graph clean
-- **Consistency**: The integration branch is purely a merge of feature branches
-- **Reversibility**: Features can be unwoven cleanly when every commit is owned
+- **Low friction start**: When you first set up an integration branch, requiring
+  a branch name for every commit adds unnecessary ceremony
+- **Natural escalation**: Once you weave branches or have local commits, the
+  command switches back to requiring a branch target — the workflow scales with
+  complexity
+- **Explicit override**: Providing `-b` always forces branch-targeted mode, so
+  the user retains full control
 
 ### `zz` as Reserved Token
 

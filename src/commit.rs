@@ -27,6 +27,24 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
     // Step 2: Verify index has changes
     verify_has_staged_changes(&repo)?;
 
+    // Loose commit: when no -b flag and local branch == remote branch
+    // (no woven branches, no local divergence), commit directly on the
+    // integration branch without targeting a feature branch.
+    let current_head = git::head_oid(&repo)?;
+    if branch.is_none() && current_head == info.upstream.merge_base_oid {
+        if let Some(msg) = &message {
+            git_commit::commit(&workdir, msg)?;
+        } else {
+            git_commit::commit_with_editor(&workdir)?;
+        }
+        let new_head = git::head_oid(&repo)?;
+        msg::success(&format!(
+            "Created commit `{}`",
+            git_commands::short_hash(&new_head.to_string())
+        ));
+        return Ok(());
+    }
+
     // Step 3: Save HEAD for rollback
     let saved_head = git::head_oid(&repo)?.to_string();
 

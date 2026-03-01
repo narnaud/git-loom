@@ -398,6 +398,65 @@ fn commit_conflict_preserves_working_tree_changes() {
     );
 }
 
+// ── Loose commits ────────────────────────────────────────────────────────
+
+#[test]
+fn commit_loose_when_no_branch_and_at_remote() {
+    // When HEAD == merge-base (no local divergence) and no -b flag,
+    // the commit should land directly on the integration branch (loose).
+    let test_repo = TestRepo::new_with_remote();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    test_repo.write_file("loose.txt", "content");
+
+    let result = test_repo.in_dir(|| {
+        super::run(
+            None, // no -b flag
+            Some("Loose commit".to_string()),
+            vec!["loose.txt".to_string()],
+        )
+    });
+
+    assert!(result.is_ok(), "loose commit failed: {:?}", result);
+
+    // HEAD should be a regular (non-merge) commit
+    let head = test_repo.head_commit();
+    assert_eq!(head.parent_count(), 1, "Loose commit should have 1 parent");
+    assert_eq!(head.summary().unwrap(), "Loose commit");
+
+    // Parent should be the merge-base (the remote tip)
+    let parent = head.parent(0).unwrap();
+    assert_eq!(parent.id(), base_oid);
+}
+
+#[test]
+fn commit_with_branch_flag_does_not_create_loose() {
+    // When -b is provided, even if HEAD == merge-base, a branch-targeted
+    // commit should be created (not loose).
+    let test_repo = TestRepo::new_with_remote();
+
+    test_repo.write_file("file.txt", "content");
+
+    let result = test_repo.in_dir(|| {
+        super::run(
+            Some("feature-new".to_string()), // explicit -b flag
+            Some("Branch commit".to_string()),
+            vec!["file.txt".to_string()],
+        )
+    });
+
+    assert!(result.is_ok(), "commit failed: {:?}", result);
+
+    // Should have created the branch and woven it
+    assert!(test_repo.branch_exists("feature-new"));
+    let head = test_repo.head_commit();
+    assert_eq!(
+        head.parent_count(),
+        2,
+        "HEAD should be a merge commit (branch woven)"
+    );
+}
+
 // ── Prerequisites ────────────────────────────────────────────────────────
 
 #[test]
