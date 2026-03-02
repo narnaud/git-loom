@@ -88,6 +88,17 @@ pub fn ensure_branch_not_exists(repo: &Repository, name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Extract the local branch name from a remote tracking ref.
+///
+/// e.g. `"origin/main"` → `"main"`, `"origin/feat/foo"` → `"feat/foo"`.
+pub fn upstream_local_branch(upstream_ref: &str) -> String {
+    upstream_ref
+        .split('/')
+        .skip(1)
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 /// What a target identifier resolved to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Target {
@@ -124,6 +135,8 @@ pub struct UpstreamInfo {
 /// tracking branch, detected feature branches, and working tree status.
 #[derive(Debug)]
 pub struct RepoInfo {
+    /// Name of the current (integration) branch.
+    pub branch_name: String,
     /// Upstream tracking branch info (merge-base, ahead count, etc.).
     pub upstream: UpstreamInfo,
     /// Non-merge commits in topological order (newest first) between HEAD
@@ -269,6 +282,7 @@ pub fn gather_repo_info(repo: &Repository, show_files: bool, context: usize) -> 
     let context_commits = walk_context_commits(repo, merge_base_oid, context)?;
 
     Ok(RepoInfo {
+        branch_name,
         upstream: UpstreamInfo {
             label: upstream_name,
             merge_base_oid,
@@ -584,12 +598,7 @@ fn find_branches_in_range(
             // (e.g. local "main" when upstream is "origin/main", even if it
             // tracks a different remote)
             if tip_oid == merge_base_oid {
-                let upstream_local = upstream_name
-                    .split('/')
-                    .skip(1)
-                    .collect::<Vec<_>>()
-                    .join("/");
-                if name == upstream_local {
+                if name == upstream_local_branch(upstream_name) {
                     continue;
                 }
             }

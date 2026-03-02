@@ -402,9 +402,10 @@ fn commit_conflict_preserves_working_tree_changes() {
 
 #[test]
 fn commit_loose_when_no_branch_and_at_remote() {
-    // When HEAD == merge-base (no local divergence) and no -b flag,
-    // the commit should land directly on the integration branch (loose).
-    let test_repo = TestRepo::new_with_remote();
+    // When HEAD == merge-base, no -b flag, and branch name matches the
+    // upstream's local name (e.g. "main" tracking "origin/main"), the
+    // commit should land directly on the integration branch (loose).
+    let test_repo = TestRepo::new_on_main_with_remote();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
     test_repo.write_file("loose.txt", "content");

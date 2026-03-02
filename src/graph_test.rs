@@ -61,6 +61,7 @@ fn commit_with_files(
 
 fn base_info() -> RepoInfo {
     RepoInfo {
+        branch_name: "main".to_string(),
         upstream: UpstreamInfo {
             label: "origin/main".to_string(),
             base_short_id: "aaa0000".to_string(),

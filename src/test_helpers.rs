@@ -93,6 +93,35 @@ impl TestRepo {
         TestRepo { repo, _dir: dir }
     }
 
+    /// Like `new_with_remote`, but stays on the `main` branch instead of
+    /// creating a separate `integration` branch. Useful for testing the
+    /// loose-commit path where the branch name must match the upstream's
+    /// local name.
+    pub fn new_on_main_with_remote() -> Self {
+        let dir = tempfile::tempdir().unwrap();
+
+        let remote_path = dir.path().join("remote.git");
+        let remote_repo = Repository::init_bare(&remote_path).unwrap();
+
+        {
+            let sig = Self::sig();
+            let tree_id = {
+                let mut index = remote_repo.index().unwrap();
+                index.write_tree().unwrap()
+            };
+            let tree = remote_repo.find_tree(tree_id).unwrap();
+            remote_repo
+                .commit(Some("refs/heads/main"), &sig, &sig, "Initial", &tree, &[])
+                .unwrap();
+        }
+
+        let work_path = dir.path().join("work");
+        let repo = Repository::clone(remote_path.to_str().unwrap(), &work_path).unwrap();
+        // After clone, HEAD is already on `main` tracking `origin/main`.
+
+        TestRepo { repo, _dir: dir }
+    }
+
     /// Get the signature used for commits.
     fn sig() -> Signature<'static> {
         Signature::now("Test", "test@test.com").unwrap()

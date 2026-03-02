@@ -27,11 +27,15 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
     // Step 2: Verify index has changes
     verify_has_staged_changes(&repo)?;
 
-    // Loose commit: when no -b flag and local branch == remote branch
-    // (no woven branches, no local divergence), commit directly on the
-    // integration branch without targeting a feature branch.
+    // Loose commit: when no -b flag, local branch name matches the upstream's
+    // local counterpart (e.g. "main" tracking "origin/main"), and HEAD has not
+    // diverged from the remote — commit directly on the integration branch
+    // without targeting a feature branch.
     let current_head = git::head_oid(&repo)?;
-    if branch.is_none() && current_head == info.upstream.merge_base_oid {
+    if branch.is_none()
+        && current_head == info.upstream.merge_base_oid
+        && info.branch_name == git::upstream_local_branch(&info.upstream.label)
+    {
         if let Some(msg) = &message {
             git_commit::commit(&workdir, msg)?;
         } else {
