@@ -30,6 +30,9 @@ pub fn run(target: String, message: Option<String>) -> Result<()> {
                 }
             };
             let new_name = new_name.trim().to_string();
+            if new_name == name {
+                return Ok(());
+            }
             git_branch::validate_name(&new_name)?;
             reword_branch(&repo, &name, &new_name)
         }
