@@ -597,10 +597,8 @@ fn find_branches_in_range(
             // Skip the upstream's local counterpart sitting at merge-base
             // (e.g. local "main" when upstream is "origin/main", even if it
             // tracks a different remote)
-            if tip_oid == merge_base_oid {
-                if name == upstream_local_branch(upstream_name) {
-                    continue;
-                }
+            if tip_oid == merge_base_oid && name == upstream_local_branch(upstream_name) {
+                continue;
             }
             if commit_set.contains(&tip_oid) || tip_oid == merge_base_oid {
                 branches.push(BranchInfo { name, tip_oid });
