@@ -579,10 +579,23 @@ fn find_branches_in_range(
         {
             continue;
         }
-        if let Some(tip_oid) = branch.get().target()
-            && (commit_set.contains(&tip_oid) || tip_oid == merge_base_oid)
-        {
-            branches.push(BranchInfo { name, tip_oid });
+        if let Some(tip_oid) = branch.get().target() {
+            // Skip the upstream's local counterpart sitting at merge-base
+            // (e.g. local "main" when upstream is "origin/main", even if it
+            // tracks a different remote)
+            if tip_oid == merge_base_oid {
+                let upstream_local = upstream_name
+                    .split('/')
+                    .skip(1)
+                    .collect::<Vec<_>>()
+                    .join("/");
+                if name == upstream_local {
+                    continue;
+                }
+            }
+            if commit_set.contains(&tip_oid) || tip_oid == merge_base_oid {
+                branches.push(BranchInfo { name, tip_oid });
+            }
         }
     }
 
