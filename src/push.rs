@@ -42,7 +42,9 @@ pub fn run(branch: Option<String>) -> Result<()> {
 
     match remote_type {
         RemoteType::Plain => push_plain(&workdir, &remote_name, &branch_name),
-        RemoteType::GitHub => push_github(&workdir, &remote_name, &branch_name, &target_branch),
+        RemoteType::GitHub => {
+            push_github(&repo, &workdir, &remote_name, &branch_name, &target_branch)
+        }
         RemoteType::Gerrit { target_branch } => {
             push_gerrit(&workdir, &remote_name, &branch_name, &target_branch)
         }
@@ -129,6 +131,30 @@ fn extract_remote_name(upstream_label: &str) -> String {
         .to_string()
 }
 
+/// Extract `owner/repo` from a git remote URL for use with `gh --repo`.
+///
+/// Handles both SSH (`git@github.com:owner/repo.git`) and HTTPS
+/// (`https://github.com/owner/repo.git`) URLs. Returns `None` if the
+/// remote doesn't exist or the URL can't be parsed.
+fn extract_gh_repo(repo: &Repository, remote: &str) -> Option<String> {
+    let remote = repo.find_remote(remote).ok()?;
+    let url = remote.url()?;
+
+    // SSH: git@github.com:owner/repo.git
+    if let Some(path) = url.strip_prefix("git@github.com:") {
+        return Some(path.trim_end_matches(".git").to_string());
+    }
+    // HTTPS: https://github.com/owner/repo.git
+    if let Some(path) = url
+        .strip_prefix("https://github.com/")
+        .or_else(|| url.strip_prefix("http://github.com/"))
+    {
+        return Some(path.trim_end_matches(".git").to_string());
+    }
+
+    None
+}
+
 /// Extract the target branch from an upstream label like "origin/main" → "main".
 fn extract_target_branch(upstream_label: &str) -> String {
     upstream_label
@@ -182,7 +208,13 @@ fn push_plain(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
 /// If the branch being pushed is the upstream target branch itself (e.g.
 /// pushing `main` when tracking `origin/main`), skip PR creation and fall
 /// back to a plain force-with-lease push.
-fn push_github(workdir: &Path, remote: &str, branch: &str, target_branch: &str) -> Result<()> {
+fn push_github(
+    repo: &Repository,
+    workdir: &Path,
+    remote: &str,
+    branch: &str,
+    target_branch: &str,
+) -> Result<()> {
     if branch == target_branch {
         return push_plain(workdir, remote, branch);
     }
@@ -202,10 +234,45 @@ fn push_github(workdir: &Path, remote: &str, branch: &str, target_branch: &str) 
         return Ok(());
     }
 
+    // Determine PR target repo: prefer "upstream" remote (fork workflow),
+    // fall back to push remote (non-fork).
+    let (pr_target_remote, gh_repo) = extract_gh_repo(repo, "upstream")
+        .map(|r| ("upstream", r))
+        .or_else(|| extract_gh_repo(repo, remote).map(|r| (remote, r)))
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Could not determine target repository for PR creation\n\
+                 Run `gh repo set-default` to select a default remote repository"
+            )
+        })?;
+
+    let is_fork = remote != pr_target_remote;
+
+    // In fork workflow, --head needs "fork-owner:branch" prefix
+    let head_arg = if is_fork {
+        extract_gh_repo(repo, remote)
+            .and_then(|r| r.split('/').next().map(|s| format!("{}:{}", s, branch)))
+            .unwrap_or_else(|| branch.to_string())
+    } else {
+        branch.to_string()
+    };
+
     // Open PR creation in browser (inherits stdio so browser opens)
+    let args = vec![
+        "pr",
+        "create",
+        "--web",
+        "--head",
+        &head_arg,
+        "--base",
+        target_branch,
+        "--repo",
+        &gh_repo,
+    ];
+
     let status = Command::new("gh")
         .current_dir(workdir)
-        .args(["pr", "create", "--web", "--head", branch])
+        .args(&args)
         .status()?;
 
     if !status.success() {
