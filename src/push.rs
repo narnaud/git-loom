@@ -150,11 +150,12 @@ fn extract_gh_repo(repo: &Repository, remote: &str) -> Option<String> {
 
 /// Extract the target branch from an upstream label like "origin/main" → "main".
 fn extract_target_branch(upstream_label: &str) -> String {
-    upstream_label
-        .split_once('/')
-        .map(|x| x.1)
-        .unwrap_or("main")
-        .to_string()
+    let branch = git::upstream_local_branch(upstream_label);
+    if branch.is_empty() {
+        "main".to_string()
+    } else {
+        branch
+    }
 }
 
 /// Determine the push remote for the given upstream label and remote type.
