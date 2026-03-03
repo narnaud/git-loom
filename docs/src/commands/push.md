@@ -36,11 +36,15 @@ Uses `--force-with-lease` because woven branches are frequently rebased. `--forc
 ### GitHub
 
 ```bash
-git push -u <remote> <branch>
-gh pr create --web --head <branch>
+git push --force-with-lease --force-if-includes -u <remote> <branch>
+gh pr create --web --head <head> --base <target> --repo <owner/repo>
 ```
 
-Pushes the branch, then opens the GitHub PR creation page in the browser. If `gh` is not installed, the push succeeds with a message suggesting to install it.
+Pushes the branch with `--force-with-lease`, then opens the GitHub PR creation page in the browser. If `gh` is not installed, the push succeeds with a message suggesting to install it.
+
+In a **fork workflow** (tracking `upstream/main`), pushes go to `origin` (your fork) and the PR targets the upstream repository automatically.
+
+If the branch being pushed is the upstream target branch itself, PR creation is skipped.
 
 ### Gerrit
 

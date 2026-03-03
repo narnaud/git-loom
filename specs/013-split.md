@@ -13,7 +13,7 @@ git-loom split <target> [-m <message>]
 ```
 
 - **`<target>`** — Commit hash, short ID, or `HEAD`.
-- **`-m <message>`** — Message for the **first** (new) commit. If omitted, prompts interactively via `msg::input()`.
+- **`-m <message>`** — Message for the **first** (new) commit. If omitted, opens the git editor.
 
 The **second** commit keeps the original commit message.
 

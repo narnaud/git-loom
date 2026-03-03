@@ -74,6 +74,9 @@ The branch is renamed using `git branch -m`. When the `-m` flag is not provided,
 an interactive prompt asks for the new branch name, showing the current name as
 a placeholder for convenience.
 
+If the new name is the same as the current name (the user confirms without
+changing), the command is a no-op — no rename is performed.
+
 ## Target Resolution
 
 The `<target>` is interpreted using the shared resolution strategy (see Spec 002):

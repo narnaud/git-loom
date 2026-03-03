@@ -158,11 +158,13 @@ Key behaviors:
 | `branch` (Spec 005) | Weave branch |
 | `commit` (Spec 006) | Add branch section + merge (empty branch), move commit |
 | `drop` (Spec 008) | Drop commit, drop branch, reassign branch |
-| `fold` (Spec 007) | Fixup commit, move commit |
+| `fold` (Spec 007) | Fixup commit, move commit, edit commit, add branch section + merge |
 | `reword` (Spec 003) | Edit commit |
+| `split` (Spec 013) | Edit commit |
+| `absorb` (Spec 012) | Fixup commit |
 
-Commands that don't modify history (`status`, `init`, `update`, `reword`
-for branch rename) do not use the Weave.
+Commands that don't modify history (`status`, `init`, `update`, `push`,
+`reword` for branch rename) do not use the Weave.
 
 ## Design Decisions
 
