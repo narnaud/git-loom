@@ -26,6 +26,17 @@ pub fn run(args: Vec<String>) -> Result<()> {
     let (source_args, target_arg) = args.split_at(args.len() - 1);
     let target_arg = &target_arg[0];
 
+    // If any source is "zz", expand to all changed files (zz takes precedence)
+    let source_args = if source_args.iter().any(|s| s == "zz") {
+        let files = collect_changed_files(&repo)?;
+        if files.is_empty() {
+            bail!("No changes to fold — working tree is clean");
+        }
+        files
+    } else {
+        source_args.to_vec()
+    };
+
     // Resolve all arguments
     let resolved_sources: Vec<Target> = source_args
         .iter()
@@ -87,17 +98,8 @@ enum FoldOp {
 fn classify(sources: &[Target], target: &Target) -> Result<FoldOp> {
     // Check for invalid source types
     for source in sources {
-        match source {
-            Target::Branch(_) => {
-                bail!("Cannot fold a branch\nUse `git loom branch` for branch operations");
-            }
-            Target::Unstaged => {
-                bail!(
-                    "Cannot fold unstaged changes\n\
-                     Stage files first, or use `git loom fold <file> <commit>` to amend specific files"
-                );
-            }
-            _ => {}
+        if matches!(source, Target::Branch(_)) {
+            bail!("Cannot fold a branch\nUse `git loom branch` for branch operations");
         }
     }
 
@@ -218,6 +220,20 @@ fn classify(sources: &[Target], target: &Target) -> Result<FoldOp> {
     }
 }
 
+/// Collect all file paths with staged or unstaged changes.
+fn collect_changed_files(repo: &Repository) -> Result<Vec<String>> {
+    let mut opts = StatusOptions::new();
+    opts.include_untracked(true).recurse_untracked_dirs(false);
+    let statuses = repo.statuses(Some(&mut opts))?;
+    let mut paths = Vec::new();
+    for entry in statuses.iter() {
+        if let Some(path) = entry.path() {
+            paths.push(path.to_string());
+        }
+    }
+    Ok(paths)
+}
+
 /// Resolve an argument for the fold command.
 ///
 /// Tries `resolve_target()` first (handles branches, git refs, short IDs).
@@ -274,42 +290,34 @@ fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str
             return Err(e);
         }
     } else {
-        // Edit+continue: stage files, save patch, unstage, clean working tree,
-        // then rebase with edit at target.
+        // Create a fixup commit on HEAD with only the changed files, then
+        // use the weave machinery to squash it into the target commit.
+        // This avoids fragile file-restoration that can fail on Windows
+        // (os error 5) when files are locked by editors or indexers.
+        let target_commit = repo.find_commit(target_oid)?;
+        let subject = target_commit.summary().unwrap_or("fixup");
+        let message = format!("fixup! {}", subject);
+
         git_commit::stage_files(workdir, &file_refs)?;
-        let patch = git_commands::diff_cached(workdir)?;
-        git_commands::unstage_files(workdir, &file_refs)?;
+        if let Err(e) = git_commit::commit(workdir, &message) {
+            let _ = git_commands::unstage_files(workdir, &file_refs);
+            return Err(e);
+        }
 
-        // Discard working-tree changes for the folded files. Their diff is
-        // captured in `patch` and will be amended into the target commit.
-        // Without this, --autostash stashes (then pops) these changes after
-        // the rebase rewrites history, causing spurious merge conflicts.
-        git_commands::restore_files_to_head(workdir, &file_refs)?;
+        // Re-read state after creating the fixup commit
+        let fixup_hash = git_commands::run_git_stdout(workdir, &["rev-parse", "HEAD"])?;
+        let fixup_oid = git2::Oid::from_str(fixup_hash.trim())?;
 
-        let mut graph = Weave::from_repo(repo)?;
-        graph.edit_commit(target_oid);
+        let repo = git2::Repository::discover(workdir)?;
+        let mut graph = Weave::from_repo(&repo)?;
+        graph.fixup_commit(fixup_oid, target_oid);
 
         let todo = graph.to_todo();
         if let Err(e) = weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo) {
-            // Rebase failed before we could amend — restore working-tree changes.
-            let _ = git_commands::apply_patch(workdir, &patch);
-            return Err(e);
-        }
-
-        // Now paused at the target commit — apply patch, stage, amend
-        if let Err(e) = git_commands::apply_patch(workdir, &patch)
-            .and_then(|()| git_commit::stage_files(workdir, &file_refs))
-            .and_then(|()| git_commit::amend_no_edit(workdir))
-        {
-            let _ = git_rebase::abort(workdir);
-            let _ = git_commands::apply_patch(workdir, &patch);
-            return Err(e);
-        }
-
-        if let Err(e) = git_rebase::continue_rebase(workdir) {
-            // continue_rebase already aborts on failure — restore changes.
-            let _ = git_commands::apply_patch(workdir, &patch);
-            return Err(e);
+            bail!(
+                "{}\nThe fixup commit has been kept — you can retry with `git rebase --autosquash`",
+                e
+            );
         }
     }
 

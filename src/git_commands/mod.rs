@@ -134,14 +134,6 @@ fn apply_patch_impl(workdir: &Path, patch: &str, reverse: bool) -> Result<()> {
     Ok(())
 }
 
-/// Get the diff of currently staged (cached) changes.
-///
-/// Wraps `git diff --cached`. Returns the patch text, or empty string if
-/// nothing is staged.
-pub fn diff_cached(workdir: &Path) -> Result<String> {
-    run_git_stdout(workdir, &["diff", "--cached"])
-}
-
 /// Unstage specific files (remove from index without touching the working tree).
 ///
 /// Wraps `git reset HEAD -- <files>`.
@@ -151,10 +143,9 @@ pub fn unstage_files(workdir: &Path, files: &[&str]) -> Result<()> {
     run_git(workdir, &args)
 }
 
-/// Restore files in the working tree to their HEAD state.
+/// Restore tracked files in the working tree to their HEAD state.
 ///
-/// Wraps `git checkout HEAD -- <files>`. Discards working-tree changes for the
-/// specified files without affecting other files or the index.
+/// Wraps `git checkout HEAD -- <files>`.
 pub fn restore_files_to_head(workdir: &Path, files: &[&str]) -> Result<()> {
     let mut args = vec!["checkout", "HEAD", "--"];
     args.extend(files);

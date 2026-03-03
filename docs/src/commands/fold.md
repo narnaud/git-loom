@@ -17,6 +17,7 @@ The action depends on the types of the arguments, detected automatically:
 | Source | Target | Action |
 |--------|--------|--------|
 | File(s) | Commit | **Amend**: stage files into the commit |
+| `zz` | Commit | **Amend all**: stage all changed files into the commit |
 | Commit | Commit | **Fixup**: absorb source commit into target |
 | Commit | Branch | **Move**: relocate commit to the branch |
 | Commit | `zz` | **Uncommit**: remove commit, put changes in working directory |
@@ -40,6 +41,15 @@ Multiple files can be folded at once:
 git-loom fold src/main.rs src/lib.rs HEAD
 # Amends both files into the HEAD commit
 ```
+
+Use `zz` to fold all working tree changes at once (staged and unstaged):
+
+```bash
+git-loom fold zz ab
+# Stages all changed files and amends them into commit ab
+```
+
+If `zz` is mixed with individual file arguments, `zz` takes precedence and all changed files are folded.
 
 ### Fixup a commit into another
 
