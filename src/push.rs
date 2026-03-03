@@ -108,7 +108,8 @@ fn detect_remote_type(
     }
 
     // 3. Check for Gerrit commit-msg hook
-    if let Some(git_dir) = workdir.join(".git").is_dir().then(|| workdir.join(".git")) {
+    let git_dir = workdir.join(".git");
+    if git_dir.is_dir() {
         let hook_path = git_dir.join("hooks").join("commit-msg");
         if let Ok(content) = std::fs::read_to_string(&hook_path)
             && content.to_lowercase().contains("gerrit")
