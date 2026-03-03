@@ -402,9 +402,9 @@ fn commit_conflict_preserves_working_tree_changes() {
 
 #[test]
 fn commit_loose_when_no_branch_and_at_remote() {
-    // When HEAD == merge-base, no -b flag, and branch name matches the
-    // upstream's local name (e.g. "main" tracking "origin/main"), the
-    // commit should land directly on the integration branch (loose).
+    // When no -b flag and branch name matches the upstream's local name
+    // (e.g. "main" tracking "origin/main"), the commit should land
+    // directly on the integration branch (loose).
     let test_repo = TestRepo::new_on_main_with_remote();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
@@ -428,6 +428,49 @@ fn commit_loose_when_no_branch_and_at_remote() {
     // Parent should be the merge-base (the remote tip)
     let parent = head.parent(0).unwrap();
     assert_eq!(parent.id(), base_oid);
+}
+
+#[test]
+fn commit_loose_works_with_existing_local_commits() {
+    // Loose commits should work even when local commits already exist
+    // on the integration branch (HEAD != merge-base).
+    let test_repo = TestRepo::new_on_main_with_remote();
+
+    // Create a first loose commit so HEAD diverges from merge-base
+    test_repo.write_file("first.txt", "first");
+    test_repo
+        .in_dir(|| {
+            super::run(
+                None,
+                Some("First loose commit".to_string()),
+                vec!["first.txt".to_string()],
+            )
+        })
+        .unwrap();
+
+    // Now create a second loose commit — should still work
+    test_repo.write_file("second.txt", "second");
+    let result = test_repo.in_dir(|| {
+        super::run(
+            None,
+            Some("Second loose commit".to_string()),
+            vec!["second.txt".to_string()],
+        )
+    });
+
+    assert!(
+        result.is_ok(),
+        "loose commit with existing local commits failed: {:?}",
+        result
+    );
+
+    let head = test_repo.head_commit();
+    assert_eq!(head.summary().unwrap(), "Second loose commit");
+    assert_eq!(head.parent_count(), 1);
+    assert_eq!(
+        head.parent(0).unwrap().summary().unwrap(),
+        "First loose commit"
+    );
 }
 
 #[test]
