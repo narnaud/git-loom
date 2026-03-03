@@ -138,7 +138,7 @@ fn drop_branch_with_info(
         return Ok(());
     }
 
-    // Count owned commits for the confirmation message
+    // Count owned commits for the confirmation message and for the non-woven drop path
     let owned = find_owned_commits(
         repo,
         branch_info.tip_oid,
@@ -182,14 +182,6 @@ fn drop_branch_with_info(
         }
     } else {
         // Non-woven branch: drop each uniquely owned commit individually
-        let owned = find_owned_commits(
-            repo,
-            branch_info.tip_oid,
-            merge_base_oid,
-            &info.branches,
-            branch_name,
-        )?;
-
         for oid in &owned {
             graph.drop_commit(*oid);
         }
