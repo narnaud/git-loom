@@ -141,14 +141,13 @@ fn split_merge_commit_fails() {
     let c1_oid = test_repo.commit("First", "file1.txt");
 
     // Create a branch with a different commit
+    let default_branch = test_repo.current_branch_name();
     test_repo.create_branch("side");
     test_repo.switch_branch("side");
     let c2_oid = test_repo.commit("Side", "side.txt");
 
     // Switch back and create a merge
-    test_repo.switch_branch(&test_repo.current_branch_name().replace("side", "main"));
-    // Back to main which may be named "main" or "master"
-    // Try using commit_merge directly
+    test_repo.switch_branch(&default_branch);
     let merge_oid = test_repo.commit_merge("Merge", c1_oid, c2_oid);
 
     let result = super::split_commit_with_selection(

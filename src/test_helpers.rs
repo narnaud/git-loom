@@ -26,6 +26,7 @@ impl TestRepo {
     pub fn new() -> Self {
         let dir = tempfile::tempdir().unwrap();
         let repo = Repository::init(dir.path()).unwrap();
+        Self::configure_identity(&repo);
 
         // Create an initial commit
         {
@@ -43,6 +44,7 @@ impl TestRepo {
     pub fn new_empty() -> Self {
         let dir = tempfile::tempdir().unwrap();
         let repo = Repository::init(dir.path()).unwrap();
+        Self::configure_identity(&repo);
         TestRepo { repo, _dir: dir }
     }
 
@@ -61,6 +63,8 @@ impl TestRepo {
         // Create a bare "remote"
         let remote_path = dir.path().join("remote.git");
         let remote_repo = Repository::init_bare(&remote_path).unwrap();
+        // Ensure HEAD points to main regardless of system default
+        remote_repo.set_head("refs/heads/main").unwrap();
 
         // Create initial commit in the bare repo so it has a main branch
         {
@@ -78,6 +82,7 @@ impl TestRepo {
         // Clone it
         let work_path = dir.path().join("work");
         let repo = Repository::clone(remote_path.to_str().unwrap(), &work_path).unwrap();
+        Self::configure_identity(&repo);
 
         // Create integration branch pointing at main, tracking origin/main
         {
@@ -102,6 +107,7 @@ impl TestRepo {
 
         let remote_path = dir.path().join("remote.git");
         let remote_repo = Repository::init_bare(&remote_path).unwrap();
+        remote_repo.set_head("refs/heads/main").unwrap();
 
         {
             let sig = Self::sig();
@@ -117,9 +123,18 @@ impl TestRepo {
 
         let work_path = dir.path().join("work");
         let repo = Repository::clone(remote_path.to_str().unwrap(), &work_path).unwrap();
+        Self::configure_identity(&repo);
         // After clone, HEAD is already on `main` tracking `origin/main`.
 
         TestRepo { repo, _dir: dir }
+    }
+
+    /// Configure user identity in a repo so shell-invoked git commands work
+    /// even when no global git config is present.
+    fn configure_identity(repo: &Repository) {
+        let mut config = repo.config().unwrap();
+        config.set_str("user.name", "Test").unwrap();
+        config.set_str("user.email", "test@test.com").unwrap();
     }
 
     /// Get the signature used for commits.
