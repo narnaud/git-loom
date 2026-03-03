@@ -218,8 +218,8 @@ fn branch_weave_creates_merge_topology() {
 }
 
 #[test]
-fn branch_at_head_no_weave() {
-    // Branch at HEAD should NOT create a merge
+fn branch_at_head_weaves() {
+    // Branch at HEAD should weave all first-parent commits into the branch
     let test_repo = TestRepo::new_with_remote();
     test_repo.commit("A1", "a1.txt");
     test_repo.commit("A2", "a2.txt");
@@ -229,14 +229,24 @@ fn branch_at_head_no_weave() {
         .in_dir(|| super::run(Some("feature-a".to_string()), Some(head_before.to_string())));
 
     assert!(result.is_ok(), "branch::run failed: {:?}", result.err());
+    assert!(test_repo.branch_exists("feature-a"));
 
-    // HEAD should be unchanged (no merge commit)
-    assert_eq!(test_repo.head_oid(), head_before);
+    // HEAD should now be a merge commit (weaving happened)
     let head = test_repo.head_commit();
     assert_eq!(
         head.parent_count(),
-        1,
-        "HEAD should NOT be a merge commit when branching at HEAD"
+        2,
+        "HEAD should be a merge commit when branching at HEAD"
+    );
+
+    // One parent should be the feature-a branch tip
+    let parent_oids: Vec<git2::Oid> = (0..head.parent_count())
+        .map(|i| head.parent_id(i).unwrap())
+        .collect();
+    let feature_a_oid = test_repo.get_branch_target("feature-a");
+    assert!(
+        parent_oids.contains(&feature_a_oid),
+        "merge commit should have feature-a as a parent"
     );
 }
 

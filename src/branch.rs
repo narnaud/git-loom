@@ -79,16 +79,22 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
 ///
 /// Weaving is needed when the branch target is on the first-parent line
 /// from HEAD to the merge-base (i.e., it's a loose commit on the integration
-/// line, not already on a side branch). Commits at HEAD or the merge-base
-/// are excluded since no topology change is needed for those.
+/// line, not already on a side branch). Commits at the merge-base are excluded
+/// since no topology change is needed. Branching at HEAD weaves all first-parent
+/// commits into the new branch section with a merge commit.
 fn should_weave(info: &git::RepoInfo, repo: &Repository, commit_hash: &str) -> Result<bool> {
     let head_oid = git::head_oid(repo)?;
     let branch_oid = git2::Oid::from_str(commit_hash)?;
 
     let merge_base_oid = info.upstream.merge_base_oid;
 
-    if branch_oid == head_oid || branch_oid == merge_base_oid {
+    if branch_oid == merge_base_oid {
         return Ok(false);
+    }
+
+    // HEAD is on the first-parent line by definition
+    if branch_oid == head_oid {
+        return Ok(true);
     }
 
     // Only weave if the target commit is on the first-parent line.
