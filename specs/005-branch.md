@@ -79,11 +79,13 @@ origin/main → A1 → A2 (feature-a)
 
 **When weaving triggers:**
 
-Weaving occurs only when the branch target is on the **first-parent line** from
-HEAD to the merge-base (i.e., a loose commit on the integration line). These
-cases are no-ops:
+Weaving occurs when the branch target is on the **first-parent line** from HEAD
+to the merge-base (i.e., a loose commit on the integration line), including HEAD
+itself. Branching at HEAD moves all first-parent commits into the new branch
+section with a merge commit.
 
-- **Branch at HEAD**: No commits to split off, topology stays linear.
+These cases are no-ops:
+
 - **Branch at merge-base**: Branch has no owned commits in the range, no topology
   change needed.
 - **Branch inside an existing side branch**: The commit is already part of a
