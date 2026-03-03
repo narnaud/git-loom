@@ -4,7 +4,7 @@ use std::process::Command;
 use anyhow::{Result, bail};
 use git2::Repository;
 
-use crate::git::{self, Target};
+use crate::git;
 use crate::git_commands;
 use crate::msg;
 
@@ -53,19 +53,11 @@ pub fn run(branch: Option<String>) -> Result<()> {
 
 /// Resolve an explicit branch argument to a woven branch name.
 fn resolve_branch(repo: &Repository, info: &git::RepoInfo, branch_arg: &str) -> Result<String> {
-    match git::resolve_target(repo, branch_arg) {
-        Ok(Target::Branch(name)) => {
-            if info.branches.iter().any(|b| b.name == name) {
-                Ok(name)
-            } else {
-                bail!("Branch '{}' is not woven into the integration branch", name)
-            }
-        }
-        Ok(Target::Commit(_)) => bail!("Target must be a branch, not a commit"),
-        Ok(Target::File(_)) => bail!("Target must be a branch, not a file"),
-        Ok(Target::Unstaged) => bail!("Target must be a branch"),
-        Ok(Target::CommitFile { .. }) => bail!("Target must be a branch, not a commit file"),
-        Err(e) => Err(e),
+    let name = git::resolve_target(repo, branch_arg)?.expect_branch()?;
+    if info.branches.iter().any(|b| b.name == name) {
+        Ok(name)
+    } else {
+        bail!("Branch '{}' is not woven into the integration branch", name)
     }
 }
 
