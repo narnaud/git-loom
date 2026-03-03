@@ -59,13 +59,24 @@ local ref includes the remote ref.
 ### GitHub
 
 ```bash
-git push -u <remote> <branch>
-gh pr create --web --head <branch>
+git push --force-with-lease --force-if-includes -u <remote> <branch>
+gh pr create --web --head <head> --base <target> --repo <owner/repo>
 ```
 
-Pushes the branch, then opens the GitHub PR creation page in the browser via
-the `gh` CLI. If `gh` is not installed, prints a helpful message with a link
-to install it. If a PR already exists, `gh` handles that gracefully.
+Pushes the branch with `--force-with-lease` (same safety as plain), then
+opens the GitHub PR creation page in the browser via the `gh` CLI. If `gh`
+is not installed, prints a helpful message with a link to install it. If a
+PR already exists, `gh` handles that gracefully.
+
+**Fork workflow:** When the integration branch tracks `upstream/main` (a fork
+setup), feature branches are pushed to `origin` (the user's fork) instead.
+The `--head` argument is prefixed with the fork owner (e.g. `user:branch`)
+and `--repo` points to the upstream repository so the PR targets the correct
+repo.
+
+**Upstream branch skip:** If the branch being pushed is the upstream target
+branch itself (e.g. pushing `main` when tracking `origin/main`), PR creation
+is skipped and the push falls back to the plain force-with-lease strategy.
 
 ### Gerrit
 
@@ -166,23 +177,25 @@ git-loom push feature-a
 
 ## Design Decisions
 
-### Force-with-lease for plain pushes
+### Force-with-lease for all pushes
 
 Woven branches are rebased as part of normal loom operations (fold, drop,
 commit). Force pushing is expected, but `--force-with-lease` prevents
-accidentally overwriting changes pushed from another machine.
-
-### No force push for GitHub
-
-GitHub PRs track force pushes and display them in the PR timeline. A simple
-push (without `--force-with-lease`) is sufficient because GitHub handles
-the branch update detection on its own. If the push is rejected because
-the remote has diverged, the user gets a clear error from git.
+accidentally overwriting changes pushed from another machine. This applies
+to all remote types (plain, GitHub, and Gerrit's underlying push).
 
 ### gh CLI as optional dependency
 
 The `gh` CLI is not required. When absent, the push still succeeds — only
 the PR creation step is skipped with a helpful installation message.
+
+### GitHub Fork Workflow
+
+In a fork setup where the integration branch tracks `upstream/main`, the push
+remote is automatically switched to `origin` (the user's fork). PR creation
+targets the upstream repository by resolving the `upstream` remote URL. The
+`--head` argument includes the fork owner prefix so GitHub can match the PR
+source correctly.
 
 ### Single branch only
 

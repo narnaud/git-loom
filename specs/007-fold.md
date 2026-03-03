@@ -138,6 +138,9 @@ operation.
 - The commit is removed from its source branch and appended to the target
   branch's tip in a single atomic operation.
 - Both source and target branch refs are updated automatically.
+- If the target branch has no section in the Weave graph (e.g. it sits at
+  the merge-base with no commits of its own), a branch section and merge
+  entry are created automatically before moving the commit.
 - If the target branch shares its tip with other co-located branches, only
   the target branch advances; co-located branches remain unaffected.
 - Uncommitted changes are preserved automatically.

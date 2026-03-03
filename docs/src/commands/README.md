@@ -10,6 +10,7 @@ Commands:
   commit       Create a commit on a feature branch without leaving integration
   reword       Reword a commit message or rename a branch
   fold         Fold source(s) into a target (amend files, fixup commits, move commits)
+  split        Split a commit into two sequential commits
   drop         Drop a commit or a branch from history
   update       Pull-rebase the integration branch and update submodules
   push         Push a feature branch to remote

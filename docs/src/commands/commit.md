@@ -35,9 +35,9 @@ When `zz` appears alongside other file arguments, `zz` wins and stages everythin
 
 ### Loose Commit
 
-When `-b` is omitted and the integration branch has **not diverged** from the remote (i.e. HEAD equals the merge-base — no woven branches or local commits), the commit is created directly on the integration branch as a **loose commit**. No branch targeting or rebase is needed.
+When `-b` is omitted and the integration branch name matches the upstream's local counterpart (e.g. `main` tracking `origin/main`), the commit is created directly on the integration branch as a **loose commit**. No branch targeting or rebase is needed. This works regardless of whether local commits or woven branches already exist.
 
-This reduces friction when starting work on a fresh integration branch.
+Branches with names that differ from their upstream (e.g. `integration` tracking `origin/main`) always require an explicit `-b` flag.
 
 ### Branch Resolution
 

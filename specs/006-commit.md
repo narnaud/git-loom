@@ -6,9 +6,11 @@
 integration branch. It stages files, creates the commit, and automatically
 relocates it to the target feature branch, updating the integration topology.
 
-When the integration branch has not diverged from the remote (no woven branches
-or local commits) and `-b` is omitted, the commit is created directly on the
-integration branch as a **loose commit** — no branch targeting or rebase needed.
+When the integration branch name matches the upstream's local counterpart
+(e.g. `main` tracking `origin/main`) and `-b` is omitted, the commit is
+created directly on the integration branch as a **loose commit** — no branch
+targeting or rebase needed. This works regardless of whether local commits
+or woven branches already exist.
 
 ## Why Commit?
 
@@ -60,9 +62,10 @@ git-loom commit [-b <branch>] [-m <message>] [files...]
 ### Flow
 
 1. **Stage resolution**: Apply the staging rules (see CLI section above).
-2. **Loose commit check**: If `-b` is omitted and the local branch has not
-   diverged from the remote (HEAD == merge-base), create the commit directly
-   on the integration branch and stop — no branch resolution or rebase needed.
+2. **Loose commit check**: If `-b` is omitted and the integration branch
+   name matches the upstream's local counterpart (e.g. `main` tracking
+   `origin/main`), create the commit directly on the integration branch
+   and stop — no branch resolution or rebase needed.
 3. **Branch resolution**: Determine the target feature branch.
 4. **Message resolution**: Get the commit message.
 5. **Commit creation**: Create the commit.
@@ -81,9 +84,9 @@ When `-b` is provided:
 
 When `-b` is omitted:
 
-- **If HEAD == merge-base** (local branch matches the remote — no woven
-  branches, no local commits): create a loose commit directly on the
-  integration branch. No branch picker is shown.
+- **If the integration branch name matches the upstream's local counterpart**
+  (e.g. `main` tracking `origin/main`): create a loose commit directly on
+  the integration branch. No branch picker is shown.
 - Otherwise, present an interactive picker listing all woven feature branches.
 - Include an option to create a new branch (prompts for name).
 - If there are no woven feature branches: prompt to create a new one.
@@ -149,16 +152,17 @@ unstaged changes are staged regardless of other arguments.
 
 ## Examples
 
-### Loose commit (no woven branches)
+### Loose commit (branch name matches upstream)
 
 ```bash
 git-loom status
-# Integration branch matches remote — no woven branches, no local commits
+# On "main" tracking "origin/main"
 
 git-loom commit zz -m "quick fix"
-# HEAD == merge-base, no -b flag
+# Branch name matches upstream, no -b flag
 # Creates commit directly on the integration branch (loose)
 # No branch picker, no rebase
+# Works even if local commits or woven branches already exist
 ```
 
 ### Loose commit skipped when -b is provided
@@ -233,17 +237,19 @@ git-loom commit zz
 
 ### Automatic Loose Commits
 
-When the integration branch has not diverged from the remote (HEAD == merge-base)
-and `-b` is omitted, the command creates a loose commit directly on the
-integration branch. This was chosen because:
+When the integration branch name matches the upstream's local counterpart
+(e.g. `main` tracking `origin/main`) and `-b` is omitted, the command creates
+a loose commit directly on the integration branch. This was chosen because:
 
-- **Low friction start**: When you first set up an integration branch, requiring
-  a branch name for every commit adds unnecessary ceremony
-- **Natural escalation**: Once you weave branches or have local commits, the
-  command switches back to requiring a branch target — the workflow scales with
-  complexity
+- **Low friction**: When working directly on `main`, requiring a branch name
+  for every commit adds unnecessary ceremony — loose commits keep things simple
+- **Always available**: Loose commits work regardless of whether local commits
+  or woven branches exist, so the workflow is consistent
 - **Explicit override**: Providing `-b` always forces branch-targeted mode, so
   the user retains full control
+- **Name-gated**: Only branches whose name matches the upstream (e.g. `main`
+  tracking `origin/main`) get loose commits. Custom integration branch names
+  (e.g. `integration` tracking `origin/main`) always require `-b`
 
 ### `zz` as Reserved Token
 
