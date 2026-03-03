@@ -1,6 +1,7 @@
 use crate::git;
 use crate::git_commands::{self, git_branch, git_commit, git_merge};
 use crate::test_helpers::TestRepo;
+use crate::weave::Weave;
 
 // ── Case 1: File(s) + Commit (Amend) ────────────────────────────────────
 
@@ -466,6 +467,75 @@ fn fold_commit_to_colocated_branch_only_affects_target() {
         head.summary().unwrap_or("").contains("feat3"),
         "HEAD merge message should reference 'feat3', got: {:?}",
         head.summary()
+    );
+}
+
+#[test]
+fn fold_commit_to_empty_branch() {
+    // Reproduce: a branch at the merge-base (no commits, no merge in the
+    // integration line) and another branch with commits. Moving a commit to
+    // the empty branch should create a section+merge and update the ref.
+    //
+    // This is the real-world scenario: create feat-a with a commit, move it
+    // away (leaving feat-a at base with no merge), then move another commit
+    // back to feat-a.
+    //
+    // Before:
+    //   ╭─ [feature-b]
+    //   ●  B1
+    //   ●  A1
+    //   ╯
+    //   ● [feature-a]   ← at base, no merge in topology
+    //
+    // After fold A1 → feature-a:
+    //   ╭─ [feature-a]
+    //   ●  A1
+    //   ╯
+    //   ╭─ [feature-b]
+    //   ●  B1
+    //   ╯
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    // Create feature-a at base (empty branch, not woven)
+    git_branch::create(workdir.as_path(), "feature-a", &base_oid.to_string()).unwrap();
+
+    // Create feature-b with two commits
+    git_branch::create(workdir.as_path(), "feature-b", &base_oid.to_string()).unwrap();
+    test_repo.switch_branch("feature-b");
+    test_repo.commit("A1", "a1.txt");
+    let a1_oid = test_repo.head_oid();
+    test_repo.commit("B1", "b1.txt");
+    test_repo.switch_branch("integration");
+
+    // Weave feature-b into the integration line
+    git_merge::merge_no_ff(workdir.as_path(), "feature-b").unwrap();
+
+    // Verify feature-a has no section in the graph (it's at base, not woven)
+    let graph = Weave::from_repo(&test_repo.repo).unwrap();
+    assert!(
+        !graph.branch_sections.iter().any(|s| s.label == "feature-a"),
+        "feature-a should NOT have a section before the fold"
+    );
+
+    // Move A1 from feature-b to feature-a
+    let result = super::fold_commit_to_branch(&test_repo.repo, &a1_oid.to_string(), "feature-a");
+    assert!(result.is_ok(), "fold_commit_to_branch failed: {:?}", result);
+
+    // feature-a should now point to a commit with message "A1"
+    let feature_a_tip = test_repo.get_branch_target("feature-a");
+    let feature_a_commit = test_repo.find_commit(feature_a_tip);
+    assert_eq!(
+        feature_a_commit.summary().unwrap_or(""),
+        "A1",
+        "feature-a tip should be A1, but branch was not updated (still at base)"
+    );
+
+    // feature-a should NOT still be at the base
+    assert_ne!(
+        feature_a_tip, base_oid,
+        "feature-a should have moved from the base commit"
     );
 }
 

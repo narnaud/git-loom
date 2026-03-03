@@ -390,6 +390,26 @@ pub fn move_commit_to_branch(
     let commit_oid = git2::Oid::from_str(commit_hash)?;
 
     let mut graph = Weave::from_repo(repo)?;
+
+    // If the target branch has no section in the Weave graph, create one.
+    // This happens when the branch is at the merge-base (no commits of its
+    // own) — either it was never woven, or a previous rebase dropped the
+    // degenerate merge (merging two identical commits is a no-op for git).
+    // Same pattern as commit.rs for empty branches.
+    let has_section = graph
+        .branch_sections
+        .iter()
+        .any(|s| s.label == branch_name || s.branch_names.contains(&branch_name.to_string()));
+    if !has_section {
+        graph.add_branch_section(
+            branch_name.to_string(),
+            vec![branch_name.to_string()],
+            vec![],
+            "onto".to_string(),
+        );
+        graph.add_merge(branch_name.to_string(), None, None);
+    }
+
     graph.move_commit(commit_oid, branch_name);
 
     let todo = graph.to_todo();
