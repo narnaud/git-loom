@@ -368,8 +368,9 @@ pub fn resolve_target(repo: &Repository, target: &str) -> Result<Target> {
 
 /// Resolve a shortid to a commit, branch, or file by rebuilding the graph.
 fn resolve_shortid(repo: &Repository, shortid: &str) -> Result<Target> {
-    // Gather repo info with files enabled so commit file shortids are resolvable
-    let info = gather_repo_info(repo, true, 1)?;
+    // Only gather file info when the shortid looks like a commit-file reference (contains ':')
+    let needs_files = shortid.contains(':');
+    let info = gather_repo_info(repo, needs_files, 1)?;
 
     // Build entities using the shared method
     let entities = info.collect_entities();
