@@ -212,35 +212,15 @@ fn perform_non_head_split(
     // Start edit rebase
     weave::start_edit_rebase(repo, workdir, commit_oid)?;
 
-    // Now paused at the target commit — split it
-    if let Err(e) = do_split_at_pause(workdir, selected, remaining, msg1, msg2) {
+    // Now paused at the target commit — split it (same as HEAD split since
+    // the rebase has made the target commit HEAD).
+    if let Err(e) = perform_head_split(workdir, selected, remaining, msg1, msg2) {
         let _ = git_rebase::abort(workdir);
         return Err(e);
     }
 
     // Continue the rebase
     git_rebase::continue_rebase(workdir)?;
-
-    Ok(())
-}
-
-/// Perform the actual split while paused during a rebase.
-fn do_split_at_pause(
-    workdir: &std::path::Path,
-    selected: &[String],
-    remaining: &[String],
-    msg1: Option<&str>,
-    msg2: &str,
-) -> Result<()> {
-    git_commit::reset_mixed(workdir, "HEAD~1")?;
-
-    let selected_refs: Vec<&str> = selected.iter().map(|s| s.as_str()).collect();
-    git_commit::stage_files(workdir, &selected_refs)?;
-    commit_or_editor(workdir, msg1)?;
-
-    let remaining_refs: Vec<&str> = remaining.iter().map(|s| s.as_str()).collect();
-    git_commit::stage_files(workdir, &remaining_refs)?;
-    git_commit::commit(workdir, msg2)?;
 
     Ok(())
 }
