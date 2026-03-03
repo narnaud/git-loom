@@ -114,6 +114,19 @@ pub enum Target {
     Unstaged,
 }
 
+impl Target {
+    /// Unwrap a `Branch` variant, or bail with a descriptive error.
+    pub fn expect_branch(self) -> Result<String> {
+        match self {
+            Target::Branch(name) => Ok(name),
+            Target::Commit(_) => bail!("Target must be a branch, not a commit"),
+            Target::File(_) => bail!("Target must be a branch, not a file"),
+            Target::Unstaged => bail!("Target must be a branch"),
+            Target::CommitFile { .. } => bail!("Target must be a branch, not a commit file"),
+        }
+    }
+}
+
 /// Info about the upstream tracking branch and the merge-base with HEAD.
 #[derive(Debug)]
 pub struct UpstreamInfo {

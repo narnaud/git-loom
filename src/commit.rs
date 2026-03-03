@@ -193,17 +193,14 @@ fn resolve_explicit_branch(
     branch: &str,
 ) -> Result<String> {
     match git::resolve_target(repo, branch) {
-        Ok(Target::Branch(name)) => {
+        Ok(target) => {
+            let name = target.expect_branch()?;
             if info.branches.iter().any(|b| b.name == name) {
                 Ok(name)
             } else {
                 bail!("Branch '{}' is not woven into the integration branch", name)
             }
         }
-        Ok(Target::Commit(_)) => bail!("Target must be a branch, not a commit"),
-        Ok(Target::File(_)) => bail!("Target must be a branch, not a file"),
-        Ok(Target::Unstaged) => bail!("Target must be a branch"),
-        Ok(Target::CommitFile { .. }) => bail!("Target must be a branch, not a commit file"),
         Err(_) => {
             // Treat as new branch name
             let name = branch.trim().to_string();
