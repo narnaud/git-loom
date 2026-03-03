@@ -185,8 +185,8 @@ fn resolve_push_remote(
     }
 }
 
-/// Push using plain git with force-with-lease.
-fn push_plain(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
+/// Force-with-lease push a branch to remote.
+fn git_push(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
     git_commands::run_git(
         workdir,
         &[
@@ -197,8 +197,12 @@ fn push_plain(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
             remote,
             branch,
         ],
-    )?;
+    )
+}
 
+/// Push using plain git with force-with-lease.
+fn push_plain(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
+    git_push(workdir, remote, branch)?;
     msg::success(&format!("Pushed `{}` to `{}`", branch, remote));
     Ok(())
 }
@@ -219,9 +223,7 @@ fn push_github(
         return push_plain(workdir, remote, branch);
     }
 
-    git_commands::run_git(workdir, &["push", "-u", remote, branch])?;
-
-    msg::success(&format!("Pushed `{}` to `{}`", branch, remote));
+    git_push(workdir, remote, branch)?;
 
     // Check if gh CLI is available
     let gh_available = Command::new("gh")
