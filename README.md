@@ -159,7 +159,7 @@ Contributions are welcome! This project is in early development, so there's plen
 This project uses [pre-commit](https://pre-commit.com/) to manage Git hooks. Install the hooks with:
 
 ```bash
-pre-commit install --hook-type commit-msg
+pre-commit install --install-hooks
 ```
 
 This ensures commit messages and code quality checks run automatically before each commit.
