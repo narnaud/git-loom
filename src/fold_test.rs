@@ -652,16 +652,39 @@ fn classify_files_into_unstaged_rejected() {
 }
 
 #[test]
-fn classify_unstaged_source_rejected() {
-    let sources = vec![git::Target::Unstaged];
-    let target = git::Target::Commit("abc123".into());
-    let result = super::classify(&sources, &target);
+fn fold_unstaged_into_commit() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("First commit", "file1.txt");
+    test_repo.commit("Second commit", "file2.txt");
+
+    // Modify files without staging
+    test_repo.write_file("file1.txt", "modified 1");
+    test_repo.write_file("file2.txt", "modified 2");
+
+    let head_oid = test_repo.head_oid();
+
+    // fold zz HEAD — should amend all changed files into HEAD
+    let result = test_repo.in_dir(|| super::run(vec!["zz".into(), "HEAD".into()]));
+    assert!(result.is_ok(), "fold zz HEAD failed: {:?}", result);
+
+    assert_ne!(test_repo.head_oid(), head_oid, "Hash should have changed");
+    assert_eq!(test_repo.read_file("file1.txt"), "modified 1");
+    assert_eq!(test_repo.read_file("file2.txt"), "modified 2");
+}
+
+#[test]
+fn fold_unstaged_clean_tree_fails() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("First commit", "file1.txt");
+
+    let result = test_repo.in_dir(|| super::run(vec!["zz".into(), "HEAD".into()]));
     assert!(result.is_err());
     assert!(
         result
             .unwrap_err()
             .to_string()
-            .contains("Cannot fold unstaged changes")
+            .contains("working tree is clean"),
+        "Expected clean-tree error"
     );
 }
 

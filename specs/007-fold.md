@@ -46,6 +46,7 @@ combination:
 | Source(s) | Target | Action | Multi-source? |
 |-----------|--------|--------|---------------|
 | File(s) | Commit | Amend: stage files into the commit | Yes |
+| Unstaged (`zz`) | Commit | Amend all: stage all changed files into the commit | No |
 | Commit | Commit | Fixup: absorb source into target | No |
 | Commit | Branch | Move: relocate commit to the branch | No |
 | Commit | Unstaged (`zz`) | Uncommit: remove commit, put changes in working directory | No |
@@ -59,8 +60,8 @@ CommitFile sources use the `commit_sid:index` format shown by `git loom status -
 
 - File + Branch: `"Cannot fold files into a branch. Target a specific commit."`
 - Branch + anything: `"Cannot fold a branch. Use 'git loom branch' for branch operations."`
-- Unstaged + anything: `"Cannot fold unstaged changes. Stage files first, or use 'git loom fold <file> <commit>' to amend specific files."`
-- File + Unstaged: `"Cannot fold files into unstaged — files are already in the working directory."`
+- Unstaged (`zz`) + non-Commit target: `"Cannot fold files into unstaged — files are already in the working directory."` / `"Cannot fold files into a branch. Target a specific commit."`
+- Unstaged (`zz`) with clean working tree: `"No changes to fold — working tree is clean"`
 - Mixed files and commits as sources: `"Cannot mix file and commit sources."`
 - Multiple commit sources: `"Only one commit source is allowed."`
 - CommitFile + Branch: `"Cannot fold a commit file into a branch. Target a specific commit or use 'zz' to uncommit."`
@@ -83,6 +84,22 @@ to include the current working tree changes for the specified files.
 
 - The target commit absorbs the file changes (new hash)
 - All descendant commits get new hashes (same content/messages)
+
+### Case 1b: Unstaged (`zz`) + Commit (Amend All)
+
+Shorthand for folding all working tree changes into a commit. Equivalent to
+listing every changed file individually. If `zz` appears alongside individual
+file arguments, `zz` takes precedence and all changed files are folded.
+
+**Behavior:**
+
+- The working tree must have at least one changed file (staged or unstaged).
+  Error if clean: `"No changes to fold — working tree is clean"`
+- Works for any commit in history, including HEAD.
+
+**What changes:**
+
+- Same as Case 1 — the target commit absorbs all file changes.
 
 ### Case 2: Commit + Commit (Fixup)
 
@@ -263,6 +280,17 @@ git-loom status
 
 git-loom fold src/auth.rs ab
 # Stages src/auth.rs and amends it into commit ab
+```
+
+### Amend all working tree changes into a commit
+
+```bash
+git-loom status
+# Shows: │●  ab  72f9d3 Fix login bug
+# Working tree has changes to src/auth.rs, src/main.rs
+
+git-loom fold zz ab
+# Stages all changed files and amends them into commit ab
 ```
 
 ### Amend multiple files into HEAD
