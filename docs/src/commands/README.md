@@ -15,6 +15,7 @@ Commands:
   branch  Create a new feature branch, or a stacked branch
   push    Push a feature branch to remote
   update  Pull-rebase the integration branch and update submodules
+  trace   Show the latest command trace
   help    Print this message or the help of the given subcommand(s)
 
 Arguments:

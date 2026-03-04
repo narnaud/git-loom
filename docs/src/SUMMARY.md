@@ -21,6 +21,7 @@
 - [branch](commands/branch.md)
 - [update](commands/update.md)
 - [push](commands/push.md)
+- [trace](commands/trace.md)
 
 # Reference
 
