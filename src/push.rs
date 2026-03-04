@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::process::Command;
+use std::time::Instant;
 
 use anyhow::{Result, bail};
 use git2::Repository;
@@ -7,6 +8,7 @@ use git2::Repository;
 use crate::git;
 use crate::git_commands;
 use crate::msg;
+use crate::trace as loom_trace;
 
 /// Remote type detected for the push operation.
 #[derive(Debug, PartialEq, Eq)]
@@ -220,10 +222,11 @@ fn push_github(
     git_push(workdir, remote, branch)?;
 
     // Check if gh CLI is available
-    let gh_available = Command::new("gh")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
+    let start = Instant::now();
+    let gh_check = Command::new("gh").arg("--version").output();
+    let gh_available = gh_check.as_ref().is_ok_and(|o| o.status.success());
+    let duration_ms = start.elapsed().as_millis();
+    loom_trace::log_command("gh", "--version", duration_ms, gh_available, "");
 
     if !gh_available {
         println!("Install 'gh' CLI to create pull requests: https://cli.github.com");
@@ -266,10 +269,14 @@ fn push_github(
         &gh_repo,
     ];
 
+    let start = Instant::now();
     let status = Command::new("gh")
         .current_dir(workdir)
         .args(&args)
         .status()?;
+
+    let duration_ms = start.elapsed().as_millis();
+    loom_trace::log_command("gh", &args.join(" "), duration_ms, status.success(), "");
 
     if !status.success() {
         // gh prints its own messages (e.g., PR already exists) — not fatal

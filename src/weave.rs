@@ -866,6 +866,9 @@ fn build_and_run_linear_edit(repo: &Repository, workdir: &Path, commit_oid: Oid)
 pub fn run_rebase(workdir: &Path, upstream: Option<&str>, todo_content: &str) -> Result<()> {
     use std::io::Write;
     use std::process::Command;
+    use std::time::Instant;
+
+    use crate::trace as loom_trace;
 
     let self_exe = git_commands::loom_exe_path()?;
 
@@ -883,6 +886,13 @@ pub fn run_rebase(workdir: &Path, upstream: Option<&str>, todo_content: &str) ->
         "{} internal-write-todo --source {} ",
         shell_escape::unix::escape(exe_str.into()),
         shell_escape::unix::escape(source_path.into()),
+    );
+
+    // Build args string for logging
+    let upstream_arg = upstream.unwrap_or("--root");
+    let log_args = format!(
+        "rebase --interactive --autostash --keep-empty --no-autosquash --rebase-merges --update-refs {}",
+        upstream_arg
     );
 
     let mut cmd = Command::new("git");
@@ -912,7 +922,31 @@ pub fn run_rebase(workdir: &Path, upstream: Option<&str>, todo_content: &str) ->
         }
     }
 
+    let start = Instant::now();
     let output = cmd.output()?;
+    let duration_ms = start.elapsed().as_millis();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    loom_trace::log_command(
+        "git",
+        &log_args,
+        duration_ms,
+        output.status.success(),
+        &stderr,
+    );
+    // Read the original git todo from sidecar file (if handle_write_todo saved it)
+    let sidecar = temp_path.with_extension("original");
+    if let Ok(original_todo) = std::fs::read_to_string(&sidecar) {
+        let filtered: String = original_todo
+            .lines()
+            .filter(|line| !line.starts_with('#'))
+            .collect::<Vec<_>>()
+            .join("\n");
+        loom_trace::annotate("original git todo", &filtered);
+        let _ = std::fs::remove_file(&sidecar);
+    }
+
+    loom_trace::annotate("generated todo", todo_content);
+
     if !output.status.success() {
         let _ = git_commands::git_rebase::abort(workdir);
         bail!("Rebase failed with conflicts — aborted");

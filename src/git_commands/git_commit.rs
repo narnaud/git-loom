@@ -1,7 +1,10 @@
 use std::path::Path;
 use std::process::Command;
+use std::time::Instant;
 
 use anyhow::{Result, bail};
+
+use crate::trace as loom_trace;
 
 /// Amend the current commit, optionally replacing its message.
 ///
@@ -9,25 +12,31 @@ use anyhow::{Result, bail};
 /// Uses `--only` so that staged changes are not accidentally included.
 /// When `message` is `None`, inherits stdio so git can open the user's editor.
 pub fn amend(workdir: &Path, message: Option<&str>) -> Result<()> {
-    let mut cmd = Command::new("git");
-    cmd.current_dir(workdir)
-        .args(["commit", "--allow-empty", "--amend", "--only"]);
-
     if let Some(msg) = message {
-        cmd.args(["-m", msg]);
-        let output = cmd.output()?;
-        if !output.status.success() {
-            bail!("Git commit failed - aborted");
-        }
+        super::run_git(
+            workdir,
+            &["commit", "--allow-empty", "--amend", "--only", "-m", msg],
+        )
     } else {
         // No message provided — open editor with inherited stdio
-        let status = cmd.status()?;
+        let start = Instant::now();
+        let status = Command::new("git")
+            .current_dir(workdir)
+            .args(["commit", "--allow-empty", "--amend", "--only"])
+            .status()?;
+        let duration_ms = start.elapsed().as_millis();
+        loom_trace::log_command(
+            "git",
+            "commit --allow-empty --amend --only",
+            duration_ms,
+            status.success(),
+            "",
+        );
         if !status.success() {
             bail!("Git commit failed - aborted");
         }
+        Ok(())
     }
-
-    Ok(())
 }
 
 /// Amend the current commit, keeping its message and including staged changes.
@@ -35,16 +44,10 @@ pub fn amend(workdir: &Path, message: Option<&str>) -> Result<()> {
 /// Wraps `git commit --amend --no-edit --allow-empty`.
 /// Unlike `amend()`, this does NOT use `--only`, so staged changes are included.
 pub fn amend_no_edit(workdir: &Path) -> Result<()> {
-    let output = Command::new("git")
-        .current_dir(workdir)
-        .args(["commit", "--amend", "--no-edit", "--allow-empty"])
-        .output()?;
-
-    if !output.status.success() {
-        bail!("Git commit failed - aborted");
-    }
-
-    Ok(())
+    super::run_git(
+        workdir,
+        &["commit", "--amend", "--no-edit", "--allow-empty"],
+    )
 }
 
 /// Stage specific files.
@@ -105,10 +108,14 @@ pub fn stage_all(workdir: &Path) -> Result<()> {
 /// Wraps `git commit` (no -m flag). Inherits stdin/stdout so the editor
 /// can interact with the terminal.
 pub fn commit_with_editor(workdir: &Path) -> Result<()> {
+    let start = Instant::now();
     let status = Command::new("git")
         .current_dir(workdir)
         .arg("commit")
         .status()?;
+
+    let duration_ms = start.elapsed().as_millis();
+    loom_trace::log_command("git", "commit", duration_ms, status.success(), "");
 
     if !status.success() {
         bail!("Git commit failed (editor aborted or empty message)");

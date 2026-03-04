@@ -14,6 +14,7 @@ mod reword;
 mod shortid;
 mod split;
 mod status;
+mod trace;
 mod update;
 mod weave;
 
@@ -131,6 +132,8 @@ enum Command {
         /// Shell to generate completions for (powershell, clink)
         shell: String,
     },
+    /// Show the latest command trace
+    Trace,
     /// Internal: used as GIT_SEQUENCE_EDITOR to write a pre-generated todo file
     #[command(hide = true)]
     InternalWriteTodo {
@@ -167,6 +170,20 @@ fn main() {
         std::process::exit(1);
     }
 
+    // Initialize logger for commands that modify the repo (skip for
+    // InternalWriteTodo — it runs as a subprocess — and Log/Status which are read-only).
+    let should_log = !matches!(
+        cli.command,
+        Some(Command::InternalWriteTodo { .. }) | Some(Command::Trace)
+    );
+    if should_log
+        && let Ok(repo) = git::open_repo()
+        && let Some(git_dir) = repo.workdir().map(|w| w.join(".git"))
+    {
+        let cmd_line = std::env::args().collect::<Vec<_>>().join(" ");
+        trace::init(&git_dir, &cmd_line);
+    }
+
     let result = match cli.command {
         None => status::run(cli.files, cli.context),
         Some(Command::Status { files, context }) => status::run(files, context),
@@ -184,11 +201,14 @@ fn main() {
         Some(Command::Push { branch }) => push::run(branch),
         Some(Command::Update) => update::run(),
         Some(Command::Fold { args }) => fold::run(args),
+        Some(Command::Trace) => handle_trace(),
         Some(Command::Completions { .. }) => unreachable!(),
         Some(Command::InternalWriteTodo { source, todo_file }) => {
             handle_write_todo(&source, &todo_file)
         }
     };
+
+    trace::finalize();
 
     if let Err(e) = result {
         msg::error(&e.to_string());
@@ -196,7 +216,23 @@ fn main() {
     }
 }
 
+fn handle_trace() -> anyhow::Result<()> {
+    let repo = git::open_repo()?;
+    let git_dir = repo
+        .workdir()
+        .map(|w| w.join(".git"))
+        .ok_or_else(|| anyhow::anyhow!("Not a working directory"))?;
+
+    trace::print_latest_log(&git_dir)
+}
+
 fn handle_write_todo(source: &str, todo_file: &str) -> anyhow::Result<()> {
+    // Save the original git todo to a sidecar file (for logging)
+    if let Ok(original) = std::fs::read_to_string(todo_file) {
+        let sidecar = format!("{}.original", source);
+        let _ = std::fs::write(sidecar, original);
+    }
+
     let content = std::fs::read_to_string(source)
         .with_context(|| format!("Failed to read source file '{}'", source))?;
     std::fs::write(todo_file, content)
