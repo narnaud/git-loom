@@ -23,10 +23,13 @@ You create an integration branch with [`git loom init`](commands/init.md). It tr
 
 Feature branches are independent branches combined into the integration branch. You can manage them — reorder, amend, split — without leaving the integration context:
 
-- Create feature branches with [`git loom branch`](commands/branch.md)
-- Commit to them from the integration branch with [`git loom commit`](commands/commit.md)
+- Commit to the feature branch from the integration branch with [`git loom commit`](commands/commit.md)
 - Move commits between branches with [`git loom fold`](commands/fold.md)
 - Remove branches cleanly with [`git loom drop`](commands/drop.md)
+- Create feature branches with [`git loom branch`](commands/branch.md)
+
+> [!TIP]
+> [`git loom commit`](commands/commit.md) is the primary way to create branches — it will prompt you for the branch name, or let you create a new one on the fly. Use [`git loom branch`](commands/branch.md) only for advanced cases where you need to create an empty branch ahead of time or for branching out loose commits.
 
 ### Weaving
 
@@ -45,12 +48,11 @@ git checkout main
 # Create an integration branch
 git loom init
 
-# Create feature branches
-git loom branch feature-auth
-git loom branch feature-ui
-
-# Make changes and commit to a feature branch
+# Create a commit on a feature branch (the branch `feature-auth` is automatically created)
 git loom commit -b feature-auth -m "add login form" zz
+
+# Create a second commit on the branch
+git loom commit -b feature-auth -m "improve login form" zz
 
 # See the branch-aware status
 git loom status

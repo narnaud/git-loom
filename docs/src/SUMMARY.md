@@ -10,17 +10,17 @@
 # Commands
 
 - [Overview](commands/README.md)
-- [status](commands/status.md)
 - [init](commands/init.md)
-- [branch](commands/branch.md)
+- [status](commands/status.md)
 - [commit](commands/commit.md)
-- [reword](commands/reword.md)
 - [fold](commands/fold.md)
+- [reword](commands/reword.md)
 - [drop](commands/drop.md)
+- [split](commands/split.md)
+- [absorb](commands/absorb.md)
+- [branch](commands/branch.md)
 - [update](commands/update.md)
 - [push](commands/push.md)
-- [absorb](commands/absorb.md)
-- [split](commands/split.md)
 
 # Reference
 

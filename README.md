@@ -63,23 +63,30 @@ cargo install --path .
 ## Usage
 
 ```
-Usage: git-loom [OPTIONS] [COMMAND]
+Usage: git-loom.exe [OPTIONS] [CONTEXT] [COMMAND]
 
 Commands:
-  status       Show the branch-aware status (default)
-  init         Initialize a new integration branch tracking a remote
-  branch       Create a new feature branch
-  reword       Reword a commit message or rename a branch
-  commit       Create a commit on a feature branch without leaving integration
-  drop         Drop a commit or a branch from history
-  fold         Fold source(s) into a target (amend files, fixup commits, move commits)
-  update       Pull-rebase the integration branch and update submodules
-  completions  Generate shell completions (powershell, clink)
-  help         Print this message or the help of the given subcommand(s)
+  init    Initialize a new integration branch tracking a remote
+  status  Show the branch-aware status
+  commit  Create a commit on a feature branch without leaving integration
+  fold    Fold source(s) into a target (amend files, fixup commits, move commits)
+  reword  Reword a commit message or rename a branch
+  drop    Drop a commit or a branch from history
+  split   Split a commit into two sequential commits
+  absorb  Absorb working tree changes into the commits that introduced them
+  branch  Create a new feature branch, or a stacked branch
+  push    Push a feature branch to remote
+  update  Pull-rebase the integration branch and update submodules
+  help    Print this message or the help of the given subcommand(s)
+
+Arguments:
+  [CONTEXT]  Number of context commits to show before the base [default: 1]
 
 Options:
       --no-color  Disable colored output
+  -f, --files     Show files changed in each commit
   -h, --help      Print help
+  -V, --version   Print version
 ```
 
 ## Set Up Your Shell
