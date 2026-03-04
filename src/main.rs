@@ -37,7 +37,7 @@ struct Cli {
     #[arg(short = 'f', long = "files")]
     files: bool,
 
-    /// Number of context commits to show before the base (default: 1)
+    /// Number of context commits to show before the base
     #[arg(default_value = "1")]
     context: usize,
 
@@ -47,35 +47,19 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Show the branch-aware status
-    Status {
-        /// Show files changed in each commit
-        #[arg(short = 'f', long = "files")]
-        files: bool,
-        /// Number of context commits to show before the base (default: 1)
-        #[arg(default_value = "1")]
-        context: usize,
-    },
     /// Initialize a new integration branch tracking a remote
     Init {
         /// Branch name (defaults to "integration")
         name: Option<String>,
     },
-    /// Create a new feature branch
-    Branch {
-        /// Branch name (if not provided, will prompt interactively)
-        name: Option<String>,
-        /// Target commit, branch, or shortID (defaults to upstream base)
-        #[arg(short = 't', long = "target")]
-        target: Option<String>,
-    },
-    /// Reword a commit message or rename a branch
-    Reword {
-        /// Branch name, shortID, or commit hash
-        target: String,
-        /// New message or branch name (if not provided, opens editor for commits)
-        #[arg(short, long)]
-        message: Option<String>,
+    /// Show the branch-aware status
+    Status {
+        /// Show files changed in each commit
+        #[arg(short = 'f', long = "files")]
+        files: bool,
+        /// Number of context commits to show before the base
+        #[arg(default_value = "1")]
+        context: usize,
     },
     /// Create a commit on a feature branch without leaving integration
     Commit {
@@ -88,6 +72,20 @@ enum Command {
         /// Files to stage (short IDs, filenames, or 'zz' for all)
         files: Vec<String>,
     },
+    /// Fold source(s) into a target (amend files, fixup commits, move commits)
+    Fold {
+        /// Source(s) and target: files, commits, or branches (last arg is the target)
+        #[arg(required = true, num_args = 2..)]
+        args: Vec<String>,
+    },
+    /// Reword a commit message or rename a branch
+    Reword {
+        /// Branch name, shortID, or commit hash
+        target: String,
+        /// New message or branch name (if not provided, opens editor for commits)
+        #[arg(short, long)]
+        message: Option<String>,
+    },
     /// Drop a commit or a branch from history
     Drop {
         /// Commit hash, branch name, or short ID to drop
@@ -95,12 +93,6 @@ enum Command {
         /// Skip confirmation prompt
         #[arg(short, long)]
         yes: bool,
-    },
-    /// Fold source(s) into a target (amend files, fixup commits, move commits)
-    Fold {
-        /// Source(s) and target: files, commits, or branches (last arg is the target)
-        #[arg(required = true, num_args = 2..)]
-        args: Vec<String>,
     },
     /// Split a commit into two sequential commits
     Split {
@@ -110,11 +102,6 @@ enum Command {
         #[arg(short, long)]
         message: Option<String>,
     },
-    /// Push a feature branch to remote
-    Push {
-        /// Branch name or short ID (if not provided, will prompt interactively)
-        branch: Option<String>,
-    },
     /// Absorb working tree changes into the commits that introduced them
     Absorb {
         /// Show what would be absorbed without making changes
@@ -123,9 +110,23 @@ enum Command {
         /// Files to restrict absorption to (default: all tracked changed files)
         files: Vec<String>,
     },
+    /// Create a new feature branch, or a stacked branch
+    Branch {
+        /// Branch name (if not provided, will prompt interactively)
+        name: Option<String>,
+        /// Target commit, branch, or shortID (defaults to upstream base)
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+    },
+    /// Push a feature branch to remote
+    Push {
+        /// Branch name or short ID (if not provided, will prompt interactively)
+        branch: Option<String>,
+    },
     /// Pull-rebase the integration branch and update submodules
     Update,
     /// Generate shell completions (powershell, clink)
+    #[command(hide = true)]
     Completions {
         /// Shell to generate completions for (powershell, clink)
         shell: String,
