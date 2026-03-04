@@ -70,13 +70,13 @@ fn serialize_single_branch_section() {
     assert_eq!(lines[0], "label onto");
     assert_eq!(lines[1], "");
     assert_eq!(lines[2], "reset onto");
-    assert_eq!(lines[3], &format!("pick {} A1", OID_A1));
-    assert_eq!(lines[4], &format!("pick {} A2", OID_A2));
+    assert_eq!(lines[3], &format!("pick {} # A1", OID_A1));
+    assert_eq!(lines[4], &format!("pick {} # A2", OID_A2));
     assert_eq!(lines[5], "label feature-a");
     assert_eq!(lines[6], "update-ref refs/heads/feature-a");
     assert_eq!(lines[7], "");
     assert_eq!(lines[8], "reset onto");
-    assert_eq!(lines[9], &format!("pick {} Int", OID_INT));
+    assert_eq!(lines[9], &format!("pick {} # Int", OID_INT));
     assert!(lines[10].starts_with(&format!("merge -C {} feature-a", OID_MERGE1)));
 }
 
@@ -176,7 +176,7 @@ fn serialize_update_refs_on_integration_line() {
     };
 
     let todo = graph.to_todo();
-    assert!(todo.contains(&format!("pick {} C1\n", OID_C1)));
+    assert!(todo.contains(&format!("pick {} # C1\n", OID_C1)));
     assert!(todo.contains("update-ref refs/heads/non-woven\n"));
 }
 

@@ -105,7 +105,7 @@ impl Weave {
                         pending_refs.clear();
                     }
                     out.push_str(&format!(
-                        "{} {} {}\n",
+                        "{} {} # {}\n",
                         commit.command.as_str(),
                         commit.short_hash,
                         commit.message
@@ -656,7 +656,7 @@ fn emit_commits_with_refs(out: &mut String, commits: &[CommitEntry]) -> Vec<Stri
             pending_refs.clear();
         }
         out.push_str(&format!(
-            "{} {} {}\n",
+            "{} {} # {}\n",
             commit.command.as_str(),
             commit.short_hash,
             commit.message
@@ -834,7 +834,7 @@ fn build_and_run_linear_edit(repo: &Repository, workdir: &Path, commit_oid: Oid)
         } else {
             "pick"
         };
-        entries.push(format!("{} {} {}", cmd, short, msg));
+        entries.push(format!("{} {} # {}", cmd, short, msg));
 
         if c.parent_count() == 0 {
             break;
