@@ -129,7 +129,7 @@ pub fn print_latest_log(git_dir: &Path) -> anyhow::Result<()> {
     })?;
     let content = std::fs::read_to_string(&path)?;
     print_log_colored(&content);
-    let display_path = path.display().to_string().replace('/', "\\");
+    let display_path = path.display().to_string().replace('\\', "/");
     println!("\nLog path: {}", display_path);
     Ok(())
 }
