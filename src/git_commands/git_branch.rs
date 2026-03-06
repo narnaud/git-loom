@@ -27,6 +27,16 @@ pub fn create(workdir: &Path, name: &str, commit_hash: &str) -> Result<()> {
     Ok(())
 }
 
+/// Create or move a branch to a specific commit (force).
+///
+/// Wraps `git branch -f <name> <commit_hash>`.
+pub fn force_create(workdir: &Path, name: &str, commit_hash: &str) -> Result<()> {
+    run_git(workdir, &["branch", "-f", name, commit_hash])
+        .context("Failed to force-create branch")?;
+
+    Ok(())
+}
+
 /// Delete a local branch (force, to handle branches whose commits were dropped).
 ///
 /// Wraps `git branch -D <name>`.

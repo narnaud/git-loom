@@ -202,6 +202,14 @@ pub fn diff_head_file(workdir: &Path, path: &str) -> Result<String> {
     run_git_stdout(workdir, &["diff", "HEAD", "--", path])
 }
 
+/// Resolve a git ref to its full commit hash.
+///
+/// Wraps `git rev-parse <ref>` and trims the output.
+pub fn rev_parse(workdir: &Path, reference: &str) -> Result<String> {
+    let out = run_git_stdout(workdir, &["rev-parse", reference])?;
+    Ok(out.trim().to_string())
+}
+
 /// Truncate a full commit hash to a short display form (7 chars).
 pub fn short_hash(hash: &str) -> &str {
     &hash[..7.min(hash.len())]

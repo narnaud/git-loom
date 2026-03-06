@@ -622,6 +622,29 @@ impl Weave {
         None
     }
 
+    /// Add a branch name to a commit's `update_refs` so that `--update-refs`
+    /// keeps the ref in sync through the rebase.  Used to track a commit's new
+    /// OID after a fixup rebase (where the commit is rewritten).
+    pub fn track_commit(&mut self, oid: Oid, ref_name: &str) {
+        for section in &mut self.branch_sections {
+            for commit in &mut section.commits {
+                if commit.oid == oid {
+                    commit.update_refs.push(ref_name.to_string());
+                    return;
+                }
+            }
+        }
+
+        for entry in &mut self.integration_line {
+            if let IntegrationEntry::Pick(commit) = entry
+                && commit.oid == oid
+            {
+                commit.update_refs.push(ref_name.to_string());
+                return;
+            }
+        }
+    }
+
     /// Set the command for a commit in the graph.
     fn set_command(&mut self, oid: Oid, command: Command) {
         for section in &mut self.branch_sections {
