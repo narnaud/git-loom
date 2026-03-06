@@ -15,6 +15,7 @@ Register-ArgumentCompleter -Native -CommandName 'git-loom' -ScriptBlock {
         @{ Name = 'absorb'; Description = 'Absorb working tree changes into originating commits' },
         @{ Name = 'update'; Description = 'Pull-rebase the integration branch' },
         @{ Name = 'push'; Description = 'Push the integration branch to the remote' },
+        @{ Name = 'show'; Description = 'Show the diff and metadata for a commit' },
         @{ Name = 'split'; Description = 'Split a commit into two sequential commits' }
     )
 

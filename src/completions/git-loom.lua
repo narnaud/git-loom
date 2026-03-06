@@ -32,6 +32,7 @@ clink.argmatcher("git-loom")
         "commit"       .. commit_matcher,
         "drop"         .. drop_matcher,
         "fold",
+        "show",
         "split"        .. split_matcher,
         "absorb"       .. absorb_matcher,
         "update",
