@@ -1,5 +1,70 @@
 # Changelog
 
+## [0.12.0](https://github.com/narnaud/git-loom/compare/v0.11.0...v0.12.0) (2026-03-06)
+
+
+### Features ✨
+
+* **commit:** allow loose commits even when local commits exist ([c5ee426](https://github.com/narnaud/git-loom/commit/c5ee426f99da22016169c6b8d74aa411283477ae))
+* support `fold zz <commit>` to fold all working tree changes ([f0b76ba](https://github.com/narnaud/git-loom/commit/f0b76ba25a1a004139a82f81f55e265184bfa4dd))
+* **trace:** add per-invocation command audit trail ([667b13e](https://github.com/narnaud/git-loom/commit/667b13eb5bace89905592e5971b638f788f84f3f))
+
+
+### Bug Fixes 🐞
+
+* **branch:** Fix creation of branch on a commit which resolves to HEAD ([6c7e8d9](https://github.com/narnaud/git-loom/commit/6c7e8d933a3cdcc59ccfae00456dabd3d55bb506))
+* detect upstream remote for GitHub PR target repo ([6a0f19e](https://github.com/narnaud/git-loom/commit/6a0f19eb76ce10cde5d373440e42cb9b5bc8b704))
+* don't recurse into untracked dirs (too noisy) ([bdb3cf5](https://github.com/narnaud/git-loom/commit/bdb3cf5ced97a17d3cd51bae2d88af71d376ec87))
+* fold commit to branch without section in Weave graph ([b043cb2](https://github.com/narnaud/git-loom/commit/b043cb2c08e1483c64f4b69dd275cdad6fa30e7e))
+* hide upstream's local counterpart from status when at merge-base ([0715f7d](https://github.com/narnaud/git-loom/commit/0715f7ddd2b5813d4ccf440933a9877dfb13785b))
+* not giving a new name for a branch in git reword is a noop ([be3ae12](https://github.com/narnaud/git-loom/commit/be3ae120aa2ab199c61f8dfdb179b6127cae0d20))
+* only create loose commits when branch name matches upstream ([942cf85](https://github.com/narnaud/git-loom/commit/942cf8599c996ec671a365b2b2696b6039ab29e7))
+* **push:** Fix re-pushing a branch to github ([408e4c2](https://github.com/narnaud/git-loom/commit/408e4c20eecc4f86bd86ddc3188c3b7073d4f1ef))
+* **trace:** Don't show '\' on Linux. Show '/' on Windows instead ;) ([2bb0a26](https://github.com/narnaud/git-loom/commit/2bb0a2697edba90676989cdba912a87b77d3126e))
+* **weave:** add # comment marker before commit messages in todo ([7f9c8e1](https://github.com/narnaud/git-loom/commit/7f9c8e1160668c9a23e0c37b58466c5df2317012))
+
+
+### Performance Improvements ⚡
+
+* skip file gathering in resolve_shortid when not needed ([028c1f5](https://github.com/narnaud/git-loom/commit/028c1f5e90a1815b4d689cde625c5d5057fc61f3))
+
+
+### Documentation
+
+* add trace command documentation ([48cb8f3](https://github.com/narnaud/git-loom/commit/48cb8f310b384a1bd5ac08d9919a33b490640dfe))
+* Fix pre-commit command in README ([c874c5f](https://github.com/narnaud/git-loom/commit/c874c5f4d401a986d331ec76b2a811adedec118a))
+* reorder commands in documentation ([0bfaa7b](https://github.com/narnaud/git-loom/commit/0bfaa7bb138db1ad64d180021f361081af3bc3cc))
+* update all specifications and documentation based on last changes ([74b154e](https://github.com/narnaud/git-loom/commit/74b154e5f5c3af2d416451d68ea931a7a65855ae))
+
+
+### Changes
+
+* add Target::expect_branch() and use it in push and commit ([4b7fdc8](https://github.com/narnaud/git-loom/commit/4b7fdc8b53dcd54d2a5b28b96873ae3e05c47674))
+* avoid double path construction in detect_remote_type ([41518ee](https://github.com/narnaud/git-loom/commit/41518ee3f60bd105e89081ef699e39f4cfce75d9))
+* compute find_owned_commits once in drop_branch_with_info ([403e4a8](https://github.com/narnaud/git-loom/commit/403e4a8cb1575b0a7196f2df17c1229cc918c8f7))
+* extract pending_refs helpers in weave::to_todo ([090533f](https://github.com/narnaud/git-loom/commit/090533fae6c4a47a2529bb0e46eed491c367c061))
+* remove duplicate do_split_at_pause in split.rs ([d675669](https://github.com/narnaud/git-loom/commit/d6756699ce493135ca081c4c2f79ce0138434be0))
+* reuse git::upstream_local_branch in extract_target_branch ([112a21b](https://github.com/narnaud/git-loom/commit/112a21bc4022d7e96c87665cdb0becb1e2d8c91f))
+* Update the help to organize commands ([66147ec](https://github.com/narnaud/git-loom/commit/66147ecdddb27f219000904f19e85f706005339c))
+* use e.to_string() instead of format!("{}", e) ([777ce87](https://github.com/narnaud/git-loom/commit/777ce871ef2cfa90ea4fcbd630e5d7dc0dbd6a6c))
+
+
+### Tests
+
+* Fix tests on Linux ([08ae7f7](https://github.com/narnaud/git-loom/commit/08ae7f79621f4bf653f414ff713a877c17887b35))
+
+
+### Other
+
+* Add split command to shell completions ([a0bcbcf](https://github.com/narnaud/git-loom/commit/a0bcbcf46435e5a5035c0bd45ab9c3255d24a357))
+* **deps:** bump actions/checkout from 4 to 6 ([0990c22](https://github.com/narnaud/git-loom/commit/0990c22d2d1979abe37ff6816d7326e8234ee597))
+* **deps:** bump actions/upload-pages-artifact from 3 to 4 ([c5db278](https://github.com/narnaud/git-loom/commit/c5db278f9b6e630e00fc138299db6e7e2045f940))
+* **deps:** bump chrono from 0.4.43 to 0.4.44 ([124b448](https://github.com/narnaud/git-loom/commit/124b448d14b377f84e84a86a681b23626e58806d))
+* **deps:** bump clap from 4.5.57 to 4.5.60 ([3a7ced9](https://github.com/narnaud/git-loom/commit/3a7ced9061a74504083264ca10bd1594819d6bca))
+* **deps:** bump tempfile from 3.24.0 to 3.26.0 ([dbfc4a4](https://github.com/narnaud/git-loom/commit/dbfc4a48e3eff6c9336d2f681e203300d1f071fe))
+* **deps:** Update all dependencies ([0156d99](https://github.com/narnaud/git-loom/commit/0156d99f9ae20d48f40e1d5ed7f01b564c07282e))
+* fix clippy error (if-let chain) ([f7f0baa](https://github.com/narnaud/git-loom/commit/f7f0baa408e81537cc2e594baebc71ae11a9a3e3))
+
 ## [0.11.0](https://github.com/narnaud/git-loom/compare/v0.10.0...v0.11.0) (2026-03-01)
 
 
