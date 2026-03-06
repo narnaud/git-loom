@@ -289,7 +289,11 @@ fn render_working_changes(out: &mut String, changes: &[FileChange], ids: &IdAllo
                 "{}   {} {}{} {}",
                 "│".color(COLOR_GRAPH),
                 ids.get_file(&change.path).color(COLOR_SHORTID).underline(),
-                change.index.to_string().color(COLOR_STAGED),
+                if change.index.to_string() == "?" {
+                    change.index.to_string().color(COLOR_UNSTAGED)
+                } else {
+                    change.index.to_string().color(COLOR_STAGED)
+                },
                 change.worktree.to_string().color(COLOR_UNSTAGED),
                 change.path.color(COLOR_MESSAGE)
             )
