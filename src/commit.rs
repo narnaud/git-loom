@@ -94,9 +94,11 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
         return Err(e);
     }
 
+    let new_hash = git_commands::rev_parse(&workdir, &branch_name)?;
+
     msg::success(&format!(
         "Created commit `{}` on branch `{}`",
-        git_commands::short_hash(&head_oid.to_string()),
+        git_commands::short_hash(&new_hash),
         branch_name
     ));
 

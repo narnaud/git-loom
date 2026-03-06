@@ -157,13 +157,18 @@ fn perform_split(
     let oid_str = commit_oid.to_string();
     let short_hash = git_commands::short_hash(&oid_str);
 
-    if is_head {
-        perform_head_split(workdir, selected, remaining, msg1, msg2)?;
+    let (new_hash1, new_hash2) = if is_head {
+        perform_head_split(workdir, selected, remaining, msg1, msg2)?
     } else {
-        perform_non_head_split(repo, workdir, commit_oid, selected, remaining, msg1, msg2)?;
-    }
+        perform_non_head_split(repo, workdir, commit_oid, selected, remaining, msg1, msg2)?
+    };
 
-    msg::success(&format!("Split `{}` into 2 commits", short_hash));
+    msg::success(&format!(
+        "Split `{}` into `{}` and `{}`",
+        short_hash,
+        git_commands::short_hash(&new_hash1),
+        git_commands::short_hash(&new_hash2)
+    ));
     Ok(())
 }
 
@@ -172,13 +177,15 @@ fn perform_split(
 /// ```text
 /// reset_mixed(HEAD~1) → stage selected → commit(msg1) → stage remaining → commit(msg2)
 /// ```
+///
+/// Returns `(hash1, hash2)` — the two new commit hashes.
 fn perform_head_split(
     workdir: &std::path::Path,
     selected: &[String],
     remaining: &[String],
     msg1: Option<&str>,
     msg2: &str,
-) -> Result<()> {
+) -> Result<(String, String)> {
     git_commit::reset_mixed(workdir, "HEAD~1")?;
 
     let selected_refs: Vec<&str> = selected.iter().map(|s| s.as_str()).collect();
@@ -189,7 +196,11 @@ fn perform_head_split(
     git_commit::stage_files(workdir, &remaining_refs)?;
     git_commit::commit(workdir, msg2)?;
 
-    Ok(())
+    // HEAD is the second commit, HEAD~1 is the first
+    let hash2 = git_commands::rev_parse(workdir, "HEAD")?;
+    let hash1 = git_commands::rev_parse(workdir, "HEAD~1")?;
+
+    Ok((hash1, hash2))
 }
 
 /// Split a non-HEAD commit using edit-and-continue rebase.
@@ -200,6 +211,8 @@ fn perform_head_split(
 /// → stage remaining → commit(msg2)
 /// → continue_rebase
 /// ```
+///
+/// Returns `(hash1, hash2)` — the two new commit hashes.
 fn perform_non_head_split(
     repo: &Repository,
     workdir: &std::path::Path,
@@ -208,21 +221,25 @@ fn perform_non_head_split(
     remaining: &[String],
     msg1: Option<&str>,
     msg2: &str,
-) -> Result<()> {
+) -> Result<(String, String)> {
     // Start edit rebase
     weave::start_edit_rebase(repo, workdir, commit_oid)?;
 
     // Now paused at the target commit — split it (same as HEAD split since
     // the rebase has made the target commit HEAD).
-    if let Err(e) = perform_head_split(workdir, selected, remaining, msg1, msg2) {
-        let _ = git_rebase::abort(workdir);
-        return Err(e);
-    }
+    let (hash1, hash2) = match perform_head_split(workdir, selected, remaining, msg1, msg2) {
+        Ok(hashes) => hashes,
+        Err(e) => {
+            let _ = git_rebase::abort(workdir);
+            return Err(e);
+        }
+    };
 
-    // Continue the rebase
+    // Continue the rebase — later commits are replayed on top of the split
+    // commits, so hash1 and hash2 remain valid (they are ancestors).
     git_rebase::continue_rebase(workdir)?;
 
-    Ok(())
+    Ok((hash1, hash2))
 }
 
 #[cfg(test)]
