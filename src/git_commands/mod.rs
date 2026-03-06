@@ -14,9 +14,8 @@ use crate::trace as loom_trace;
 /// Minimum Git version required (--update-refs was added in 2.38).
 const MIN_GIT_VERSION: (u32, u32) = (2, 38);
 
-/// Run a git command in the given working directory.
-/// On failure, returns an error containing stderr output.
-pub fn run_git(workdir: &Path, args: &[&str]) -> Result<()> {
+/// Run a git command, capture output, trace-log it, and bail on failure.
+fn run_git_captured(workdir: &Path, args: &[&str]) -> Result<std::process::Output> {
     let start = Instant::now();
     let output = Command::new("git")
         .current_dir(workdir)
@@ -25,19 +24,27 @@ pub fn run_git(workdir: &Path, args: &[&str]) -> Result<()> {
 
     let duration_ms = start.elapsed().as_millis();
     let stderr = String::from_utf8_lossy(&output.stderr);
-    loom_trace::log_command(
-        "git",
-        &args.join(" "),
-        duration_ms,
-        output.status.success(),
-        &stderr,
-    );
+    let cmd = args.join(" ");
+    loom_trace::log_command("git", &cmd, duration_ms, output.status.success(), &stderr);
 
     if !output.status.success() {
-        bail!("Git {} failed", args.join(" "));
+        bail!("Git {} failed", cmd);
     }
 
-    Ok(())
+    Ok(output)
+}
+
+/// Run a git command in the given working directory.
+/// On failure, returns an error containing stderr output.
+pub fn run_git(workdir: &Path, args: &[&str]) -> Result<()> {
+    run_git_captured(workdir, args).map(|_| ())
+}
+
+/// Run a git command and return its stdout as a string.
+/// On failure, returns an error containing stderr output.
+pub fn run_git_stdout(workdir: &Path, args: &[&str]) -> Result<String> {
+    let output = run_git_captured(workdir, args)?;
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// Check that the installed Git version meets the minimum requirement.
@@ -74,32 +81,6 @@ fn parse_git_version(version_str: &str) -> Option<(u32, u32)> {
     Some((major, minor))
 }
 
-/// Run a git command and return its stdout as a string.
-/// On failure, returns an error containing stderr output.
-pub fn run_git_stdout(workdir: &Path, args: &[&str]) -> Result<String> {
-    let start = Instant::now();
-    let output = Command::new("git")
-        .current_dir(workdir)
-        .args(args)
-        .output()?;
-
-    let duration_ms = start.elapsed().as_millis();
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    loom_trace::log_command(
-        "git",
-        &args.join(" "),
-        duration_ms,
-        output.status.success(),
-        &stderr,
-    );
-
-    if !output.status.success() {
-        bail!("Git {} failed", args.join(" "));
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-}
-
 /// Run a git command with inherited stdio (for interactive commands / pager).
 /// On failure, returns an error containing the command that failed.
 ///
@@ -113,10 +94,11 @@ pub fn run_git_interactive(workdir: &Path, args: &[&str]) -> Result<()> {
         .status()?;
 
     let duration_ms = start.elapsed().as_millis();
-    loom_trace::log_command("git", &args.join(" "), duration_ms, status.success(), "");
+    let cmd = args.join(" ");
+    loom_trace::log_command("git", &cmd, duration_ms, status.success(), "");
 
     if !status.success() {
-        bail!("Git {} failed", args.join(" "));
+        bail!("Git {} failed", cmd);
     }
 
     Ok(())
