@@ -63,12 +63,11 @@ pub fn reword_commit(repo: &Repository, commit_hash: &str, message: Option<Strin
         return Err(e);
     }
 
+    // Capture the new hash right after amending (before rebase --continue moves HEAD)
+    let new_hash = repo.head()?.peel_to_commit()?.id().to_string();
+
     // Step 3: Continue the rebase
     git_rebase::continue_rebase(workdir)?;
-
-    // Get the new commit hash after rebase
-    let new_commit = repo.head()?.peel_to_commit()?;
-    let new_hash = new_commit.id().to_string();
 
     msg::success(&format!(
         "Updated commit message for `{}` (now `{}`)",
