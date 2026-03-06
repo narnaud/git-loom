@@ -36,11 +36,11 @@ struct Cli {
     no_color: bool,
 
     /// Show files changed in each commit
-    #[arg(short = 'f', long = "files")]
+    #[arg(short = 'f', long = "files", hide = true)]
     files: bool,
 
     /// Number of context commits to show before the base
-    #[arg(default_value = "1")]
+    #[arg(default_value = "1", hide = true)]
     context: usize,
 
     #[command(subcommand)]
@@ -71,7 +71,7 @@ enum Command {
         /// Commit message (if not provided, opens editor)
         #[arg(short, long)]
         message: Option<String>,
-        /// Files to stage (short IDs, filenames, or 'zz' for all)
+        /// Files to stage (short IDs, filenames, or 'zz' for all), none for all tracked changes
         files: Vec<String>,
     },
     /// Fold source(s) into a target (amend files, fixup commits, move commits)

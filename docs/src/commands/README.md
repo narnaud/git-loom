@@ -1,7 +1,7 @@
 # Commands Overview
 
 ```
-Usage: git-loom.exe [OPTIONS] [CONTEXT] [COMMAND]
+Usage: git-loom.exe [OPTIONS] [COMMAND]
 
 Commands:
   init    Initialize a new integration branch tracking a remote
@@ -19,12 +19,8 @@ Commands:
   trace   Show the latest command trace
   help    Print this message or the help of the given subcommand(s)
 
-Arguments:
-  [CONTEXT]  Number of context commits to show before the base [default: 1]
-
 Options:
       --no-color  Disable colored output
-  -f, --files     Show files changed in each commit
   -h, --help      Print help
   -V, --version   Print version
 ```
