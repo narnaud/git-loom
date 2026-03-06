@@ -14,6 +14,7 @@
 - [status](commands/status.md)
 - [commit](commands/commit.md)
 - [fold](commands/fold.md)
+- [show](commands/show.md)
 - [reword](commands/reword.md)
 - [drop](commands/drop.md)
 - [split](commands/split.md)
