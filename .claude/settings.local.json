@@ -22,7 +22,8 @@
       "Bash(cd:*)",
       "Bash(mdbook build:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(gh issue:*)"
     ]
   }
 }
