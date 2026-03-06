@@ -12,6 +12,7 @@ mod msg;
 mod push;
 mod reword;
 mod shortid;
+mod show;
 mod split;
 mod status;
 mod trace;
@@ -95,6 +96,11 @@ enum Command {
         #[arg(short, long)]
         yes: bool,
     },
+    /// Show the diff and metadata for a commit (like `git show`)
+    Show {
+        /// Commit hash, branch name, or short ID
+        target: String,
+    },
     /// Split a commit into two sequential commits
     Split {
         /// Commit hash, short ID, or HEAD
@@ -174,7 +180,7 @@ fn main() {
     // InternalWriteTodo — it runs as a subprocess — and Log/Status which are read-only).
     let should_log = !matches!(
         cli.command,
-        Some(Command::InternalWriteTodo { .. }) | Some(Command::Trace)
+        Some(Command::InternalWriteTodo { .. }) | Some(Command::Trace) | Some(Command::Show { .. })
     );
     if should_log
         && let Ok(repo) = git::open_repo()
@@ -197,6 +203,7 @@ fn main() {
         }) => commit::run(branch, message, files),
         Some(Command::Drop { target, yes }) => drop::run(target, yes),
         Some(Command::Absorb { dry_run, files }) => absorb::run(dry_run, files),
+        Some(Command::Show { target }) => show::run(target),
         Some(Command::Split { target, message }) => split::run(target, message),
         Some(Command::Push { branch }) => push::run(branch),
         Some(Command::Update) => update::run(),

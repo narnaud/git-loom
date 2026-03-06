@@ -100,6 +100,28 @@ pub fn run_git_stdout(workdir: &Path, args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+/// Run a git command with inherited stdio (for interactive commands / pager).
+/// On failure, returns an error containing the command that failed.
+///
+/// Note: stderr is not captured (it flows to the terminal directly),
+/// so the trace log will record an empty stderr string for these calls.
+pub fn run_git_interactive(workdir: &Path, args: &[&str]) -> Result<()> {
+    let start = Instant::now();
+    let status = Command::new("git")
+        .current_dir(workdir)
+        .args(args)
+        .status()?;
+
+    let duration_ms = start.elapsed().as_millis();
+    loom_trace::log_command("git", &args.join(" "), duration_ms, status.success(), "");
+
+    if !status.success() {
+        bail!("Git {} failed", args.join(" "));
+    }
+
+    Ok(())
+}
+
 /// Get the diff for a single commit (its changes relative to its parent).
 ///
 /// Wraps `git diff <oid>^..<oid>`.
