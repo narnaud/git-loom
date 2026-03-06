@@ -10,6 +10,7 @@ Commands:
   fold    Fold source(s) into a target (amend files, fixup commits, move commits)
   reword  Reword a commit message or rename a branch
   drop    Drop a commit or a branch from history
+  show    Show the diff and metadata for a commit (like git show)
   split   Split a commit into two sequential commits
   absorb  Absorb working tree changes into the commits that introduced them
   branch  Create a new feature branch, or a stacked branch
