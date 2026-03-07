@@ -5,30 +5,68 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use terminal_size::{Width, terminal_size};
 
-// ── Color palette (edit these to change the theme) ──────────────────────
+// ── Theme ────────────────────────────────────────────────────────────────
 
-/// Graph structure: lines, connectors, dots on the integration line.
-const COLOR_GRAPH: Color = Color::BrightBlack;
-/// Branch names in brackets (local and remote).
-const COLOR_BRANCH: Color = Color::Green;
-/// Labels like (upstream) and (common base).
-const COLOR_LABEL: Color = Color::Cyan;
-/// Dimmed secondary text: messages, dates, file changes, "no changes".
-const COLOR_DIM: Color = Color::AnsiColor(240);
-/// Colors for the commit message text
-const COLOR_MESSAGE: Color = Color::AnsiColor(248);
-/// Short ID prefix (blue + underline, applied in rendering).
-const COLOR_SHORTID: Color = Color::Blue;
-/// Staged (index) file status: green, matching git convention.
-const COLOR_STAGED: Color = Color::Green;
-/// Unstaged (worktree) file status: red, matching git convention.
-const COLOR_UNSTAGED: Color = Color::Red;
-/// Untracked file marker and path color.
-const COLOR_UNTRACKED: Color = Color::Magenta;
+/// Color palette for graph output. Use [`Theme::dark`] or [`Theme::light`].
+pub struct Theme {
+    /// Graph structure: lines, connectors, dots on the integration line.
+    pub graph: Color,
+    /// Branch names in brackets (local and remote).
+    pub branch: Color,
+    /// Labels like (upstream) and (common base).
+    pub label: Color,
+    /// Dimmed secondary text: messages, dates, file changes, "no changes".
+    pub dim: Color,
+    /// Commit message text.
+    pub message: Color,
+    /// Short ID prefix (also underlined in rendering).
+    pub shortid: Color,
+    /// Staged (index) file status: green, matching git convention.
+    pub staged: Color,
+    /// Unstaged (worktree) file status: red, matching git convention.
+    pub unstaged: Color,
+    /// Untracked file marker and path color.
+    pub untracked: Color,
+    /// Rotating colors for commit dots on feature branches.
+    pub branch_dots: &'static [Color],
+}
 
-/// Rotating colors for commit dots on feature branches.
-/// Each branch gets the next color in this cycle.
-const BRANCH_DOT_COLORS: &[Color] = &[
+impl Theme {
+    /// Dark terminal background theme (default).
+    pub fn dark() -> Self {
+        Theme {
+            graph: Color::BrightBlack,
+            branch: Color::Green,
+            label: Color::Cyan,
+            dim: Color::AnsiColor(240),
+            message: Color::AnsiColor(248),
+            shortid: Color::Blue,
+            staged: Color::Green,
+            unstaged: Color::Red,
+            untracked: Color::Magenta,
+            branch_dots: BRANCH_DOTS,
+        }
+    }
+
+    /// Light terminal background theme.
+    pub fn light() -> Self {
+        Theme {
+            graph: Color::AnsiColor(248),
+            branch: Color::Green,
+            label: Color::Blue,
+            dim: Color::AnsiColor(248),
+            message: Color::AnsiColor(243),
+            shortid: Color::Blue,
+            staged: Color::Green,
+            unstaged: Color::Red,
+            untracked: Color::Magenta,
+            branch_dots: BRANCH_DOTS,
+        }
+    }
+}
+
+/// Rotating colors for commit dots on feature branches (shared by all themes).
+const BRANCH_DOTS: &[Color] = &[
     Color::Yellow,
     Color::Cyan,
     Color::Magenta,
@@ -50,6 +88,8 @@ pub struct RenderOpts {
     /// Terminal column width, used for multi-column untracked layout.
     /// `None` means non-TTY (e.g. pipe) — fall back to single-column.
     pub terminal_width: Option<u16>,
+    /// Color theme for the graph output.
+    pub theme: Theme,
 }
 
 /// A logical section in the rendered status output. Sections are built from
@@ -80,10 +120,11 @@ pub fn render(info: RepoInfo, opts: &RenderOpts) -> String {
     render_sections(&sections, &ids, opts)
 }
 
-/// Detect terminal width and build default render options.
-pub fn default_render_opts() -> RenderOpts {
+/// Detect terminal width and build render options for the given theme.
+pub fn default_render_opts(theme: Theme) -> RenderOpts {
     RenderOpts {
         terminal_width: terminal_size().map(|(Width(w), _)| w),
+        theme,
     }
 }
 
@@ -254,7 +295,8 @@ fn render_sections(sections: &[Section], ids: &IdAllocator, opts: &RenderOpts) -
                 render_working_changes(&mut out, changes, ids, opts);
             }
             Section::Branch { names, commits } => {
-                let dot_color = BRANCH_DOT_COLORS[branch_color_idx % BRANCH_DOT_COLORS.len()];
+                let dot_color =
+                    opts.theme.branch_dots[branch_color_idx % opts.theme.branch_dots.len()];
                 branch_color_idx += 1;
 
                 let prev_stacked = idx > 0 && is_stacked_with_next(sections, idx - 1);
@@ -269,16 +311,17 @@ fn render_sections(sections: &[Section], ids: &IdAllocator, opts: &RenderOpts) -
                     next_stacked,
                     idx < last_idx,
                     ids,
+                    &opts.theme,
                 );
             }
             Section::Loose(commits) => {
-                render_loose(&mut out, commits, idx < last_idx, ids);
+                render_loose(&mut out, commits, idx < last_idx, ids, &opts.theme);
             }
             Section::Upstream(info) => {
-                render_upstream(&mut out, info);
+                render_upstream(&mut out, info, &opts.theme);
             }
             Section::Context(commits) => {
-                render_context(&mut out, commits);
+                render_context(&mut out, commits, &opts.theme);
             }
         }
     }
@@ -292,14 +335,15 @@ fn render_working_changes(
     ids: &IdAllocator,
     opts: &RenderOpts,
 ) {
+    let theme = &opts.theme;
     writeln!(
         out,
         "{} {} {}{}{}",
-        "╭─".color(COLOR_GRAPH),
-        ids.get_unstaged().color(COLOR_SHORTID).underline(),
-        "[".color(COLOR_DIM),
-        "local changes".color(COLOR_LABEL),
-        "]".color(COLOR_DIM)
+        "╭─".color(theme.graph),
+        ids.get_unstaged().color(theme.shortid).underline(),
+        "[".color(theme.dim),
+        "local changes".color(theme.label),
+        "]".color(theme.dim)
     )
     .unwrap();
 
@@ -316,8 +360,8 @@ fn render_working_changes(
         writeln!(
             out,
             "{}   {}",
-            "│".color(COLOR_GRAPH),
-            "no changes".color(COLOR_DIM)
+            "│".color(theme.graph),
+            "no changes".color(theme.dim)
         )
         .unwrap();
     } else {
@@ -325,11 +369,11 @@ fn render_working_changes(
             writeln!(
                 out,
                 "{}   {} {}{} {}",
-                "│".color(COLOR_GRAPH),
-                ids.get_file(&change.path).color(COLOR_SHORTID).underline(),
-                change.index.to_string().color(COLOR_STAGED),
-                change.worktree.to_string().color(COLOR_UNSTAGED),
-                change.path.color(COLOR_MESSAGE)
+                "│".color(theme.graph),
+                ids.get_file(&change.path).color(theme.shortid).underline(),
+                change.index.to_string().color(theme.staged),
+                change.worktree.to_string().color(theme.unstaged),
+                change.path
             )
             .unwrap();
         }
@@ -338,7 +382,7 @@ fn render_working_changes(
         }
     }
 
-    writeln!(out, "{}", "│".color(COLOR_GRAPH)).unwrap();
+    writeln!(out, "{}", "│".color(theme.graph)).unwrap();
 }
 
 fn render_untracked(
@@ -350,21 +394,26 @@ fn render_untracked(
     if untracked.len() > UNTRACKED_MULTICOLUMN_THRESHOLD
         && let Some(width) = opts.terminal_width
     {
-        render_untracked_multicolumn(out, untracked, ids, width);
+        render_untracked_multicolumn(out, untracked, ids, width, &opts.theme);
         return;
     }
-    render_untracked_single_column(out, untracked, ids);
+    render_untracked_single_column(out, untracked, ids, &opts.theme);
 }
 
-fn render_untracked_single_column(out: &mut String, untracked: &[&FileChange], ids: &IdAllocator) {
+fn render_untracked_single_column(
+    out: &mut String,
+    untracked: &[&FileChange],
+    ids: &IdAllocator,
+    theme: &Theme,
+) {
     for change in untracked {
         writeln!(
             out,
             "{}   {} {} {}",
-            "│".color(COLOR_GRAPH),
-            ids.get_file(&change.path).color(COLOR_SHORTID).underline(),
-            " ⁕".color(COLOR_UNTRACKED),
-            change.path.color(COLOR_MESSAGE)
+            "│".color(theme.graph),
+            ids.get_file(&change.path).color(theme.shortid).underline(),
+            " ⁕".color(theme.untracked),
+            change.path
         )
         .unwrap();
     }
@@ -376,6 +425,7 @@ fn render_untracked_multicolumn(
     untracked: &[&FileChange],
     ids: &IdAllocator,
     term_width: u16,
+    theme: &Theme,
 ) {
     let available = (term_width as usize).saturating_sub(GRAPH_PREFIX_WIDTH);
     let separator = "   │ "; // 5 display columns
@@ -397,7 +447,7 @@ fn render_untracked_multicolumn(
     let num_rows = untracked.len().div_ceil(num_cols);
 
     for row in 0..num_rows {
-        write!(out, "{}   ", "│".color(COLOR_GRAPH)).unwrap();
+        write!(out, "{}   ", "│".color(theme.graph)).unwrap();
         for col in 0..num_cols {
             let idx = col * num_rows + row;
             if idx >= untracked.len() {
@@ -409,9 +459,9 @@ fn render_untracked_multicolumn(
             write!(
                 out,
                 "{} {} {}",
-                sid.color(COLOR_SHORTID).underline(),
-                " ⁕".color(COLOR_UNTRACKED),
-                f.path.color(COLOR_MESSAGE)
+                sid.color(theme.shortid).underline(),
+                " ⁕".color(theme.untracked),
+                f.path
             )
             .unwrap();
 
@@ -419,7 +469,7 @@ fn render_untracked_multicolumn(
             let next_idx = (col + 1) * num_rows + row;
             if col + 1 < num_cols && next_idx < untracked.len() {
                 let padding = max_entry_width.saturating_sub(entry_widths[idx]);
-                write!(out, "{}{}", " ".repeat(padding), separator.color(COLOR_DIM)).unwrap();
+                write!(out, "{}{}", " ".repeat(padding), separator.color(theme.dim)).unwrap();
             }
         }
         writeln!(out).unwrap();
@@ -436,6 +486,7 @@ fn render_branch(
     next_stacked: bool,
     more_sections: bool,
     ids: &IdAllocator,
+    theme: &Theme,
 ) {
     for (i, name) in names.iter().enumerate() {
         let branch_id = ids.get_branch(name);
@@ -447,11 +498,11 @@ fn render_branch(
         writeln!(
             out,
             "{} {} {}{}{}",
-            connector.color(COLOR_GRAPH),
-            branch_id.color(COLOR_SHORTID).underline(),
-            "[".color(COLOR_DIM),
-            name.color(COLOR_BRANCH).bold(),
-            "]".color(COLOR_DIM)
+            connector.color(theme.graph),
+            branch_id.color(theme.shortid).underline(),
+            "[".color(theme.dim),
+            name.color(theme.branch).bold(),
+            "]".color(theme.dim)
         )
         .unwrap();
     }
@@ -462,11 +513,11 @@ fn render_branch(
         writeln!(
             out,
             "{}{}    {}{} {}",
-            "│".color(COLOR_GRAPH),
+            "│".color(theme.graph),
             "●".color(dot_color),
-            sid.color(COLOR_SHORTID).underline(),
-            rest.color(COLOR_DIM),
-            commit.message.color(COLOR_MESSAGE)
+            sid.color(theme.shortid).underline(),
+            rest.color(theme.dim),
+            commit.message
         )
         .unwrap();
         for (i, file) in commit.files.iter().enumerate() {
@@ -474,37 +525,43 @@ fn render_branch(
             writeln!(
                 out,
                 "{}{}      {} {}{} {}",
-                "│".color(COLOR_GRAPH),
+                "│".color(theme.graph),
                 "┊".color(dot_color),
-                file_sid.color(COLOR_SHORTID).underline(),
-                file.index.to_string().color(COLOR_STAGED),
-                file.worktree.to_string().color(COLOR_UNSTAGED),
-                file.path.color(COLOR_MESSAGE)
+                file_sid.color(theme.shortid).underline(),
+                file.index.to_string().color(theme.staged),
+                file.worktree.to_string().color(theme.unstaged),
+                file.path
             )
             .unwrap();
         }
     }
     if next_stacked {
-        writeln!(out, "{}", "││".color(COLOR_GRAPH)).unwrap();
+        writeln!(out, "{}", "││".color(theme.graph)).unwrap();
     } else {
-        writeln!(out, "{}", "├╯".color(COLOR_GRAPH)).unwrap();
+        writeln!(out, "{}", "├╯".color(theme.graph)).unwrap();
         if more_sections {
-            writeln!(out, "{}", "│".color(COLOR_GRAPH)).unwrap();
+            writeln!(out, "{}", "│".color(theme.graph)).unwrap();
         }
     }
 }
 
-fn render_loose(out: &mut String, commits: &[CommitInfo], more_sections: bool, ids: &IdAllocator) {
+fn render_loose(
+    out: &mut String,
+    commits: &[CommitInfo],
+    more_sections: bool,
+    ids: &IdAllocator,
+    theme: &Theme,
+) {
     for commit in commits {
         let sid = ids.get_commit(commit.oid);
         let rest: String = commit.short_id.chars().skip(sid.len()).collect();
         writeln!(
             out,
             "{}    {}{} {}",
-            "●".color(COLOR_GRAPH),
-            sid.color(COLOR_SHORTID).underline(),
-            rest.color(COLOR_DIM),
-            commit.message.color(COLOR_MESSAGE)
+            "●".color(theme.graph),
+            sid.color(theme.shortid).underline(),
+            rest.color(theme.dim),
+            commit.message
         )
         .unwrap();
         for (i, file) in commit.files.iter().enumerate() {
@@ -512,74 +569,74 @@ fn render_loose(out: &mut String, commits: &[CommitInfo], more_sections: bool, i
             writeln!(
                 out,
                 "{}       {} {}{} {}",
-                "┊".color(COLOR_GRAPH),
-                file_sid.color(COLOR_SHORTID).underline(),
-                file.index.to_string().color(COLOR_STAGED),
-                file.worktree.to_string().color(COLOR_UNSTAGED),
-                file.path.color(COLOR_MESSAGE)
+                "┊".color(theme.graph),
+                file_sid.color(theme.shortid).underline(),
+                file.index.to_string().color(theme.staged),
+                file.worktree.to_string().color(theme.unstaged),
+                file.path
             )
             .unwrap();
         }
     }
     if more_sections {
-        writeln!(out, "{}", "│".color(COLOR_GRAPH)).unwrap();
+        writeln!(out, "{}", "│".color(theme.graph)).unwrap();
     }
 }
 
-fn render_upstream(out: &mut String, info: &UpstreamInfo) {
+fn render_upstream(out: &mut String, info: &UpstreamInfo, theme: &Theme) {
     if info.commits_ahead > 0 {
         let count_text = format!(
             "\u{23EB} {} new commit{}",
             info.commits_ahead,
             if info.commits_ahead == 1 { "" } else { "s" }
         )
-        .color(COLOR_MESSAGE);
+        .color(theme.message);
         writeln!(
             out,
             "{}{}  {}{}{} {}",
-            "│".color(COLOR_GRAPH),
-            "●".color(COLOR_GRAPH),
-            "[".color(COLOR_DIM),
-            info.label.color(COLOR_BRANCH).bold(),
-            "]".color(COLOR_DIM),
+            "│".color(theme.graph),
+            "●".color(theme.graph),
+            "[".color(theme.dim),
+            info.label.color(theme.branch).bold(),
+            "]".color(theme.dim),
             count_text
         )
         .unwrap();
         writeln!(
             out,
             "{} {} {} {} {}",
-            "├╯".color(COLOR_GRAPH),
-            info.base_short_id.color(COLOR_DIM),
-            "(common base)".color(COLOR_LABEL),
-            info.base_date.color(COLOR_DIM),
-            info.base_message.color(COLOR_DIM)
+            "├╯".color(theme.graph),
+            info.base_short_id.color(theme.dim),
+            "(common base)".color(theme.label),
+            info.base_date.color(theme.dim),
+            info.base_message.color(theme.message)
         )
         .unwrap();
     } else {
         writeln!(
             out,
             "{} {} {} {}{}{} {}",
-            "●".color(COLOR_GRAPH),
-            info.base_short_id.color(COLOR_DIM),
-            "(upstream)".color(COLOR_LABEL),
-            "[".color(COLOR_DIM),
-            info.label.color(COLOR_BRANCH).bold(),
-            "]".color(COLOR_DIM),
-            info.base_message.color(COLOR_DIM)
+            "●".color(theme.graph),
+            info.base_short_id.color(theme.dim),
+            "(upstream)".color(theme.label),
+            "[".color(theme.dim),
+            info.label.color(theme.branch).bold(),
+            "]".color(theme.dim),
+            info.base_message.color(theme.message)
         )
         .unwrap();
     }
 }
 
-fn render_context(out: &mut String, commits: &[ContextCommit]) {
+fn render_context(out: &mut String, commits: &[ContextCommit], theme: &Theme) {
     for commit in commits {
         writeln!(
             out,
             "{} {} {} {}",
-            "·".color(COLOR_DIM),
-            commit.short_hash.color(COLOR_DIM),
-            commit.date.color(COLOR_DIM),
-            commit.message.color(COLOR_DIM),
+            "·".color(theme.dim),
+            commit.short_hash.color(theme.dim),
+            commit.date.color(theme.dim),
+            commit.message.color(theme.message),
         )
         .unwrap();
     }

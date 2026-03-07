@@ -25,8 +25,18 @@ mod test_helpers;
 use std::io::IsTerminal;
 
 use anyhow::Context;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use colored::control;
+
+#[derive(ValueEnum, Clone, Copy)]
+enum ThemeArg {
+    /// Detect from terminal background color (default to dark if undetectable)
+    Auto,
+    /// Dark terminal background
+    Dark,
+    /// Light terminal background
+    Light,
+}
 
 #[derive(Parser)]
 #[command(name = "git-loom", about = "Supercharge your Git workflow", version)]
@@ -34,6 +44,10 @@ struct Cli {
     /// Disable colored output
     #[arg(long)]
     no_color: bool,
+
+    /// Color theme for graph output
+    #[arg(long, default_value = "auto")]
+    theme: ThemeArg,
 
     /// Show files changed in each commit
     #[arg(short = 'f', long = "files", hide = true)]
@@ -190,9 +204,11 @@ fn main() {
         trace::init(&git_dir, &cmd_line);
     }
 
+    let theme = resolve_theme(cli.theme);
+
     let result = match cli.command {
-        None => status::run(cli.files, cli.context),
-        Some(Command::Status { files, context }) => status::run(files, context),
+        None => status::run(cli.files, cli.context, theme),
+        Some(Command::Status { files, context }) => status::run(files, context, theme),
         Some(Command::Init { name }) => init::run(name),
         Some(Command::Branch { name, target }) => branch::run(name, target),
         Some(Command::Reword { target, message }) => reword::run(target, message),
@@ -231,6 +247,23 @@ fn handle_trace() -> anyhow::Result<()> {
         .ok_or_else(|| anyhow::anyhow!("Not a working directory"))?;
 
     trace::print_latest_log(&git_dir)
+}
+
+fn resolve_theme(arg: ThemeArg) -> graph::Theme {
+    match arg {
+        ThemeArg::Dark => graph::Theme::dark(),
+        ThemeArg::Light => graph::Theme::light(),
+        ThemeArg::Auto => {
+            if !std::io::stdout().is_terminal() {
+                return graph::Theme::dark();
+            }
+            use terminal_colorsaurus::{QueryOptions, ThemeMode, theme_mode};
+            match theme_mode(QueryOptions::default()) {
+                Ok(ThemeMode::Light) => graph::Theme::light(),
+                _ => graph::Theme::dark(),
+            }
+        }
+    }
 }
 
 fn handle_write_todo(source: &str, todo_file: &str) -> anyhow::Result<()> {

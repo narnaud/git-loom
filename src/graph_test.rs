@@ -1,7 +1,7 @@
 use git2::Oid;
 
 use crate::git::{BranchInfo, CommitInfo, ContextCommit, FileChange, RepoInfo, UpstreamInfo};
-use crate::graph::{self, RenderOpts};
+use crate::graph::{self, RenderOpts, Theme};
 
 /// Strip ANSI escape codes so tests can compare plain text.
 fn strip_ansi(s: &str) -> String {
@@ -25,6 +25,7 @@ fn strip_ansi(s: &str) -> String {
 fn default_opts() -> RenderOpts {
     RenderOpts {
         terminal_width: None,
+        theme: Theme::dark(),
     }
 }
 
@@ -37,6 +38,7 @@ fn render_plain(info: RepoInfo) -> String {
 fn render_plain_with_width(info: RepoInfo, width: u16) -> String {
     let opts = RenderOpts {
         terminal_width: Some(width),
+        theme: Theme::dark(),
     };
     strip_ansi(&graph::render(info, &opts))
 }
