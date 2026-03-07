@@ -1,5 +1,4 @@
 use crate::git;
-use crate::git_commands::{self, git_branch, git_commit, git_merge};
 use crate::test_helpers::TestRepo;
 use crate::weave::Weave;
 
@@ -138,20 +137,19 @@ fn fold_file_into_non_head_with_other_changes_autostashed() {
 #[test]
 fn fold_file_into_woven_branch_commit() {
     let test_repo = TestRepo::new_with_remote();
-    let workdir = test_repo.workdir();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
     // Create feature branch with a commit that modifies feature1
-    git_branch::create(workdir.as_path(), "feat1", &base_oid.to_string()).unwrap();
+    test_repo.create_branch_at("feat1", &base_oid.to_string());
     test_repo.switch_branch("feat1");
     test_repo.write_file("feature1", "initial feature content");
-    git_commit::stage_files(workdir.as_path(), &["feature1"]).unwrap();
-    git_commit::commit(workdir.as_path(), "Feature 1").unwrap();
+    test_repo.stage_files(&["feature1"]);
+    test_repo.commit_staged("Feature 1");
     let feat1_oid = test_repo.head_oid();
 
     // Merge feat1 into integration branch
     test_repo.switch_branch("integration");
-    git_merge::merge_no_ff(workdir.as_path(), "feat1").unwrap();
+    test_repo.merge_no_ff("feat1");
 
     // Modify feature1 in the working tree (same file as the commit)
     test_repo.write_file("feature1", "updated feature content");
@@ -177,8 +175,7 @@ fn fold_file_into_woven_branch_commit() {
     assert_eq!(test_repo.read_file("feature1"), "updated feature content");
 
     // There should be no unmerged paths
-    let status_output =
-        git_commands::run_git_stdout(workdir.as_path(), &["status", "--porcelain"]).unwrap();
+    let status_output = test_repo.status_porcelain();
     assert!(
         !status_output.contains("UU") && !status_output.contains("AA"),
         "Working tree should have no merge conflicts, but status shows:\n{}",
@@ -302,8 +299,7 @@ fn fold_commit_to_branch() {
     let a1_oid = test_repo.head_oid();
 
     // Create feature-a branch and weave it
-    let workdir = test_repo.workdir();
-    git_branch::create(workdir.as_path(), "feature-a", &a1_oid.to_string()).unwrap();
+    test_repo.create_branch_at("feature-a", &a1_oid.to_string());
 
     let base_oid = test_repo.find_remote_branch_target("origin/main");
     // Add a commit on integration line before merge
@@ -311,13 +307,8 @@ fn fold_commit_to_branch() {
 
     // Manually set up merge topology:
     // Rebase B1 onto merge-base, then merge feature-a
-    git_commands::git_rebase::rebase_onto(
-        workdir.as_path(),
-        &base_oid.to_string(),
-        &a1_oid.to_string(),
-    )
-    .unwrap();
-    git_merge::merge_no_ff(workdir.as_path(), "feature-a").unwrap();
+    test_repo.rebase_onto(&base_oid.to_string(), &a1_oid.to_string());
+    test_repo.merge_no_ff("feature-a");
 
     // Now add a loose commit on the integration line
     test_repo.commit("C1", "c1.txt");
@@ -329,10 +320,8 @@ fn fold_commit_to_branch() {
     assert!(result.is_ok(), "fold_commit_to_branch failed: {:?}", result);
 
     // C1 should now be on feature-a's branch (feature-a tip should have C1's message)
-    let feature_a_oid = test_repo.get_branch_target("feature-a");
-    let feature_a_commit = test_repo.find_commit(feature_a_oid);
     assert_eq!(
-        feature_a_commit.summary().unwrap_or(""),
+        test_repo.branch_commit_summary("feature-a"),
         "C1",
         "C1 should now be at the tip of feature-a"
     );
@@ -342,23 +331,17 @@ fn fold_commit_to_branch() {
 fn fold_commit_to_branch_dirty_autostashed() {
     // Set up an integration branch with a woven feature branch and a loose commit
     let test_repo = TestRepo::new_with_remote();
-    let workdir = test_repo.workdir();
 
     test_repo.commit("A1", "a1.txt");
     let a1_oid = test_repo.head_oid();
 
-    git_branch::create(workdir.as_path(), "feature-a", &a1_oid.to_string()).unwrap();
+    test_repo.create_branch_at("feature-a", &a1_oid.to_string());
 
     let base_oid = test_repo.find_remote_branch_target("origin/main");
     test_repo.commit("B1", "b1.txt");
 
-    git_commands::git_rebase::rebase_onto(
-        workdir.as_path(),
-        &base_oid.to_string(),
-        &a1_oid.to_string(),
-    )
-    .unwrap();
-    git_merge::merge_no_ff(workdir.as_path(), "feature-a").unwrap();
+    test_repo.rebase_onto(&base_oid.to_string(), &a1_oid.to_string());
+    test_repo.merge_no_ff("feature-a");
 
     let loose_oid = test_repo.commit("Loose", "loose.txt");
 
@@ -404,11 +387,10 @@ fn fold_commit_to_colocated_branch_only_affects_target() {
     //   ●  Feat1
     //   ╯
     let test_repo = TestRepo::new_with_remote();
-    let workdir = test_repo.workdir();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
     // Build the 'test' branch with two commits: Feat1 and Feat3
-    git_branch::create(workdir.as_path(), "test", &base_oid.to_string()).unwrap();
+    test_repo.create_branch_at("test", &base_oid.to_string());
     test_repo.switch_branch("test");
     test_repo.commit("Feat1", "feat1.txt");
     test_repo.commit("Feat3", "feat3.txt");
@@ -416,20 +398,20 @@ fn fold_commit_to_colocated_branch_only_affects_target() {
     test_repo.switch_branch("integration");
 
     // Weave the 'test' branch
-    git_merge::merge_no_ff(workdir.as_path(), "test").unwrap();
+    test_repo.merge_no_ff("test");
 
     // Build the 'feat2' branch with one commit: Feat2
-    git_branch::create(workdir.as_path(), "feat2", &base_oid.to_string()).unwrap();
+    test_repo.create_branch_at("feat2", &base_oid.to_string());
     test_repo.switch_branch("feat2");
     test_repo.commit("Feat2", "feat2.txt");
     test_repo.switch_branch("integration");
 
     // Create feat3 as co-located with feat2 (same tip)
     let feat2_tip = test_repo.get_branch_target("feat2");
-    git_branch::create(workdir.as_path(), "feat3", &feat2_tip.to_string()).unwrap();
+    test_repo.create_branch_at("feat3", &feat2_tip.to_string());
 
     // Weave feat2 (which also brings in feat3 since they're co-located)
-    git_merge::merge_no_ff(workdir.as_path(), "feat2").unwrap();
+    test_repo.merge_no_ff("feat2");
 
     // Now move the Feat3 commit from 'test' branch to 'feat3' branch
     let result = super::fold_commit_to_branch(&test_repo.repo, &feat3_oid.to_string(), "feat3");
@@ -437,27 +419,24 @@ fn fold_commit_to_colocated_branch_only_affects_target() {
     assert!(result.is_ok(), "fold_commit_to_branch failed: {:?}", result);
 
     // feat3 should have Feat3 at its tip (above feat2)
-    let feat3_tip = test_repo.get_branch_target("feat3");
-    let feat3_commit = test_repo.find_commit(feat3_tip);
     assert_eq!(
-        feat3_commit.summary().unwrap_or(""),
+        test_repo.branch_commit_summary("feat3"),
         "Feat3",
         "feat3 tip should be Feat3"
     );
 
     // feat2 should still have Feat2 at its tip (NOT Feat3)
-    let feat2_tip = test_repo.get_branch_target("feat2");
-    let feat2_commit = test_repo.find_commit(feat2_tip);
     assert_eq!(
-        feat2_commit.summary().unwrap_or(""),
+        test_repo.branch_commit_summary("feat2"),
         "Feat2",
         "feat2 tip should still be Feat2, not Feat3"
     );
 
     // feat3 should be stacked on feat2: feat3's parent should be feat2's tip
+    let feat3_commit = test_repo.find_commit(test_repo.get_branch_target("feat3"));
     assert_eq!(
         feat3_commit.parent_id(0).unwrap(),
-        feat2_tip,
+        test_repo.get_branch_target("feat2"),
         "feat3 should be stacked on feat2"
     );
 
@@ -495,14 +474,13 @@ fn fold_commit_to_empty_branch() {
     //   ●  B1
     //   ╯
     let test_repo = TestRepo::new_with_remote();
-    let workdir = test_repo.workdir();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
     // Create feature-a at base (empty branch, not woven)
-    git_branch::create(workdir.as_path(), "feature-a", &base_oid.to_string()).unwrap();
+    test_repo.create_branch_at("feature-a", &base_oid.to_string());
 
     // Create feature-b with two commits
-    git_branch::create(workdir.as_path(), "feature-b", &base_oid.to_string()).unwrap();
+    test_repo.create_branch_at("feature-b", &base_oid.to_string());
     test_repo.switch_branch("feature-b");
     test_repo.commit("A1", "a1.txt");
     let a1_oid = test_repo.head_oid();
@@ -510,7 +488,7 @@ fn fold_commit_to_empty_branch() {
     test_repo.switch_branch("integration");
 
     // Weave feature-b into the integration line
-    git_merge::merge_no_ff(workdir.as_path(), "feature-b").unwrap();
+    test_repo.merge_no_ff("feature-b");
 
     // Verify feature-a has no section in the graph (it's at base, not woven)
     let graph = Weave::from_repo(&test_repo.repo).unwrap();
@@ -524,17 +502,16 @@ fn fold_commit_to_empty_branch() {
     assert!(result.is_ok(), "fold_commit_to_branch failed: {:?}", result);
 
     // feature-a should now point to a commit with message "A1"
-    let feature_a_tip = test_repo.get_branch_target("feature-a");
-    let feature_a_commit = test_repo.find_commit(feature_a_tip);
     assert_eq!(
-        feature_a_commit.summary().unwrap_or(""),
+        test_repo.branch_commit_summary("feature-a"),
         "A1",
         "feature-a tip should be A1, but branch was not updated (still at base)"
     );
 
     // feature-a should NOT still be at the base
     assert_ne!(
-        feature_a_tip, base_oid,
+        test_repo.get_branch_target("feature-a"),
+        base_oid,
         "feature-a should have moved from the base commit"
     );
 }
@@ -763,13 +740,12 @@ fn fold_unstaged_clean_tree_fails() {
 #[test]
 fn fold_commit_file_to_unstaged_head() {
     let test_repo = TestRepo::new();
-    let workdir = test_repo.workdir();
 
     // Commit has two files (use CLI for consistent index)
     test_repo.write_file("file1.txt", "content1");
     test_repo.write_file("file2.txt", "content2");
-    git_commit::stage_files(workdir.as_path(), &["file1.txt", "file2.txt"]).unwrap();
-    git_commit::commit(workdir.as_path(), "Two files").unwrap();
+    test_repo.stage_files(&["file1.txt", "file2.txt"]);
+    test_repo.commit_staged("Two files");
 
     let head_oid = test_repo.head_oid();
 
@@ -795,19 +771,18 @@ fn fold_commit_file_to_unstaged_head() {
 #[test]
 fn fold_commit_file_to_unstaged_non_head() {
     let test_repo = TestRepo::new_with_remote();
-    let workdir = test_repo.workdir();
 
     // First commit has two files (use CLI for staging to avoid libgit2 index mismatch)
     test_repo.write_file("file1.txt", "content1");
     test_repo.write_file("file2.txt", "content2");
-    git_commit::stage_files(workdir.as_path(), &["file1.txt", "file2.txt"]).unwrap();
-    git_commit::commit(workdir.as_path(), "Two files").unwrap();
+    test_repo.stage_files(&["file1.txt", "file2.txt"]);
+    test_repo.commit_staged("Two files");
     let c1_oid = test_repo.head_oid();
 
     // Second commit (also via CLI to keep index consistent)
     test_repo.write_file("file3.txt", "content3");
-    git_commit::stage_files(workdir.as_path(), &["file3.txt"]).unwrap();
-    git_commit::commit(workdir.as_path(), "Second commit").unwrap();
+    test_repo.stage_files(&["file3.txt"]);
+    test_repo.commit_staged("Second commit");
 
     let result =
         super::fold_commit_file_to_unstaged(&test_repo.repo, &c1_oid.to_string(), "file1.txt");
@@ -851,19 +826,18 @@ fn fold_commit_file_to_unstaged_no_changes_fails() {
 #[test]
 fn fold_commit_file_to_commit() {
     let test_repo = TestRepo::new_with_remote();
-    let workdir = test_repo.workdir();
 
     // First commit has two files (use CLI for staging)
     test_repo.write_file("file1.txt", "content1");
     test_repo.write_file("file2.txt", "content2");
-    git_commit::stage_files(workdir.as_path(), &["file1.txt", "file2.txt"]).unwrap();
-    git_commit::commit(workdir.as_path(), "Source commit").unwrap();
+    test_repo.stage_files(&["file1.txt", "file2.txt"]);
+    test_repo.commit_staged("Source commit");
     let source_oid = test_repo.head_oid();
 
     // Second commit (target, also via CLI)
     test_repo.write_file("file3.txt", "content3");
-    git_commit::stage_files(workdir.as_path(), &["file3.txt"]).unwrap();
-    git_commit::commit(workdir.as_path(), "Target commit").unwrap();
+    test_repo.stage_files(&["file3.txt"]);
+    test_repo.commit_staged("Target commit");
     let target_oid = test_repo.head_oid();
 
     let result = super::fold_commit_file_to_commit(
@@ -912,19 +886,18 @@ fn fold_commit_file_to_commit_same_commit_fails() {
 #[test]
 fn fold_commit_file_to_older_commit() {
     let test_repo = TestRepo::new_with_remote();
-    let workdir = test_repo.workdir();
 
     // C1 (older, target): adds file_a.txt
     test_repo.write_file("file_a.txt", "aaa");
-    git_commit::stage_files(workdir.as_path(), &["file_a.txt"]).unwrap();
-    git_commit::commit(workdir.as_path(), "Add file_a").unwrap();
+    test_repo.stage_files(&["file_a.txt"]);
+    test_repo.commit_staged("Add file_a");
     let c1_oid = test_repo.head_oid();
 
     // C2 (newer, source): adds file_b.txt and modifies file_a.txt
     test_repo.write_file("file_a.txt", "aaa modified");
     test_repo.write_file("file_b.txt", "bbb");
-    git_commit::stage_files(workdir.as_path(), &["file_a.txt", "file_b.txt"]).unwrap();
-    git_commit::commit(workdir.as_path(), "Add file_b and modify file_a").unwrap();
+    test_repo.stage_files(&["file_a.txt", "file_b.txt"]);
+    test_repo.commit_staged("Add file_b and modify file_a");
     let c2_oid = test_repo.head_oid();
 
     // Move file_a.txt changes from C2 (newer) to C1 (older)
@@ -954,8 +927,7 @@ fn fold_commit_file_to_older_commit() {
 
     // Key assertion: C2's diff should NOT contain a reverse change to file_a.txt.
     // Verify by checking that C2's diff only touches file_b.txt.
-    let c2_diff =
-        git_commands::diff_commit(workdir.as_path(), &test_repo.head_oid().to_string()).unwrap();
+    let c2_diff = test_repo.diff_commit(&test_repo.head_oid().to_string());
     assert!(
         !c2_diff.contains("file_a.txt"),
         "C2 should no longer have any changes to file_a.txt, but diff contains:\n{}",
@@ -969,34 +941,28 @@ fn fold_commit_file_to_older_commit() {
 #[test]
 fn fold_commit_file_to_unstaged_stacked_branch() {
     let test_repo = TestRepo::new_with_remote();
-    let workdir = test_repo.workdir();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
     // Build feature-a on its own branch
-    git_branch::create(workdir.as_path(), "feature-a", &base_oid.to_string()).unwrap();
+    test_repo.create_branch_at("feature-a", &base_oid.to_string());
     test_repo.switch_branch("feature-a");
 
     test_repo.write_file("fa1.txt", "feature-a file 1");
     test_repo.write_file("fa2.txt", "feature-a file 2");
-    git_commit::stage_files(workdir.as_path(), &["fa1.txt", "fa2.txt"]).unwrap();
-    git_commit::commit(workdir.as_path(), "A1: two files").unwrap();
+    test_repo.stage_files(&["fa1.txt", "fa2.txt"]);
+    test_repo.commit_staged("A1: two files");
 
     // Build feature-b stacked on feature-a
-    git_branch::create(
-        workdir.as_path(),
-        "feature-b",
-        &test_repo.head_oid().to_string(),
-    )
-    .unwrap();
+    test_repo.create_branch_at("feature-b", &test_repo.head_oid().to_string());
     test_repo.switch_branch("feature-b");
 
     test_repo.write_file("fb1.txt", "feature-b file 1");
-    git_commit::stage_files(workdir.as_path(), &["fb1.txt"]).unwrap();
-    git_commit::commit(workdir.as_path(), "B1: one file").unwrap();
+    test_repo.stage_files(&["fb1.txt"]);
+    test_repo.commit_staged("B1: one file");
 
     // Switch to integration and merge feature-b (includes A1 and B1)
     test_repo.switch_branch("integration");
-    git_merge::merge_no_ff(workdir.as_path(), "feature-b").unwrap();
+    test_repo.merge_no_ff("feature-b");
 
     // Verify setup: both branches exist, working tree has all files
     assert!(
@@ -1050,31 +1016,30 @@ fn fold_commit_file_to_unstaged_stacked_branch() {
 #[test]
 fn fold_commit_file_to_commit_stacked_branch() {
     let test_repo = TestRepo::new_with_remote();
-    let workdir = test_repo.workdir();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
     // Build feature-a branch
-    git_branch::create(workdir.as_path(), "feature-a", &base_oid.to_string()).unwrap();
+    test_repo.create_branch_at("feature-a", &base_oid.to_string());
     test_repo.switch_branch("feature-a");
 
     test_repo.write_file("fa1.txt", "feature-a file 1");
-    git_commit::stage_files(workdir.as_path(), &["fa1.txt"]).unwrap();
-    git_commit::commit(workdir.as_path(), "A1").unwrap();
+    test_repo.stage_files(&["fa1.txt"]);
+    test_repo.commit_staged("A1");
     let a1_oid = test_repo.head_oid();
 
     // Build feature-b stacked on feature-a
-    git_branch::create(workdir.as_path(), "feature-b", &a1_oid.to_string()).unwrap();
+    test_repo.create_branch_at("feature-b", &a1_oid.to_string());
     test_repo.switch_branch("feature-b");
 
     test_repo.write_file("fb1.txt", "feature-b file 1");
     test_repo.write_file("fb2.txt", "feature-b file 2");
-    git_commit::stage_files(workdir.as_path(), &["fb1.txt", "fb2.txt"]).unwrap();
-    git_commit::commit(workdir.as_path(), "B1").unwrap();
+    test_repo.stage_files(&["fb1.txt", "fb2.txt"]);
+    test_repo.commit_staged("B1");
     let b1_oid = test_repo.head_oid();
 
     // Merge into integration
     test_repo.switch_branch("integration");
-    git_merge::merge_no_ff(workdir.as_path(), "feature-b").unwrap();
+    test_repo.merge_no_ff("feature-b");
 
     // Move fb1.txt from B1 (newer) to A1 (older)
     let result = super::fold_commit_file_to_commit(
@@ -1105,7 +1070,7 @@ fn fold_commit_file_to_commit_stacked_branch() {
 
     // B1 should no longer have fb1.txt changes
     let b_tip = test_repo.get_branch_target("feature-b");
-    let b_diff = git_commands::diff_commit(workdir.as_path(), &b_tip.to_string()).unwrap();
+    let b_diff = test_repo.diff_commit(&b_tip.to_string());
     assert!(
         !b_diff.contains("fb1.txt"),
         "B1 should no longer have fb1.txt changes, but diff contains:\n{}",
@@ -1119,7 +1084,7 @@ fn fold_commit_file_to_commit_stacked_branch() {
     // Key assertion for Bug 1: feature-a's ref should point to the correct
     // commit (the one with fb1.txt included), not the pre-fixup version.
     let a_tip = test_repo.get_branch_target("feature-a");
-    let a_diff = git_commands::diff_commit(workdir.as_path(), &a_tip.to_string()).unwrap();
+    let a_diff = test_repo.diff_commit(&a_tip.to_string());
     assert!(
         a_diff.contains("fb1.txt"),
         "feature-a (A1) should now include fb1.txt, but diff is:\n{}",
@@ -1140,38 +1105,37 @@ fn fold_commit_file_to_commit_stacked_branch() {
 #[test]
 fn fold_commit_file_to_commit_woven_branches() {
     let test_repo = TestRepo::new_with_remote();
-    let workdir = test_repo.workdir();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
     // Build foo1 branch with one commit
-    git_branch::create(workdir.as_path(), "foo1", &base_oid.to_string()).unwrap();
+    test_repo.create_branch_at("foo1", &base_oid.to_string());
     test_repo.switch_branch("foo1");
     test_repo.write_file("feature1", "feat 1");
-    git_commit::stage_files(workdir.as_path(), &["feature1"]).unwrap();
-    git_commit::commit(workdir.as_path(), "Feature 1").unwrap();
+    test_repo.stage_files(&["feature1"]);
+    test_repo.commit_staged("Feature 1");
     test_repo.switch_branch("integration");
-    git_merge::merge_no_ff(workdir.as_path(), "foo1").unwrap();
+    test_repo.merge_no_ff("foo1");
 
     // Build foo2 branch with one commit (on base, not on integration)
-    git_branch::create(workdir.as_path(), "foo2", &base_oid.to_string()).unwrap();
+    test_repo.create_branch_at("foo2", &base_oid.to_string());
     test_repo.switch_branch("foo2");
     test_repo.write_file("feature2", "feat 2");
-    git_commit::stage_files(workdir.as_path(), &["feature2"]).unwrap();
-    git_commit::commit(workdir.as_path(), "Feature 2").unwrap();
+    test_repo.stage_files(&["feature2"]);
+    test_repo.commit_staged("Feature 2");
     let foo2_tip = test_repo.head_oid();
 
     // Build foo3 stacked on foo2 with one commit that modifies feature2 and adds feature7
-    git_branch::create(workdir.as_path(), "foo3", &foo2_tip.to_string()).unwrap();
+    test_repo.create_branch_at("foo3", &foo2_tip.to_string());
     test_repo.switch_branch("foo3");
     test_repo.write_file("feature2", "feat 2 updated");
     test_repo.write_file("feature7", "feat 7");
-    git_commit::stage_files(workdir.as_path(), &["feature2", "feature7"]).unwrap();
-    git_commit::commit(workdir.as_path(), "Feature 2 fixup").unwrap();
+    test_repo.stage_files(&["feature2", "feature7"]);
+    test_repo.commit_staged("Feature 2 fixup");
     let foo3_tip = test_repo.head_oid();
 
     // Only merge foo3 into integration (brings in both foo2 and foo3 commits)
     test_repo.switch_branch("integration");
-    git_merge::merge_no_ff(workdir.as_path(), "foo3").unwrap();
+    test_repo.merge_no_ff("foo3");
 
     // Now move 'feature7' from foo3 tip (newer) to foo2 tip (older)
     let result = super::fold_commit_file_to_commit(
@@ -1197,8 +1161,7 @@ fn fold_commit_file_to_commit_woven_branches() {
 
     // foo2's commit should now include feature7
     let foo2_new_tip = test_repo.get_branch_target("foo2");
-    let foo2_diff =
-        git_commands::diff_commit(workdir.as_path(), &foo2_new_tip.to_string()).unwrap();
+    let foo2_diff = test_repo.diff_commit(&foo2_new_tip.to_string());
     assert!(
         foo2_diff.contains("feature7"),
         "foo2 should now include feature7, but diff is:\n{}",
@@ -1207,8 +1170,7 @@ fn fold_commit_file_to_commit_woven_branches() {
 
     // foo3's commit should no longer include feature7
     let foo3_new_tip = test_repo.get_branch_target("foo3");
-    let foo3_diff =
-        git_commands::diff_commit(workdir.as_path(), &foo3_new_tip.to_string()).unwrap();
+    let foo3_diff = test_repo.diff_commit(&foo3_new_tip.to_string());
     assert!(
         !foo3_diff.contains("feature7"),
         "foo3 should no longer include feature7, but diff contains:\n{}",

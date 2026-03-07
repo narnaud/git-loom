@@ -1,4 +1,3 @@
-use crate::git_commands::git_branch;
 use crate::test_helpers::TestRepo;
 
 // ── extract_remote_name tests ────────────────────────────────────────────
@@ -43,7 +42,7 @@ fn detect_remote_type_gerrit_by_config() {
     test_repo.commit("C1", "c1.txt");
 
     // Set loom.remote-type to gerrit
-    crate::git_commands::run_git(&workdir, &["config", "loom.remote-type", "gerrit"]).unwrap();
+    test_repo.set_config("loom.remote-type", "gerrit");
 
     let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
     assert!(result.is_ok());
@@ -62,7 +61,7 @@ fn detect_remote_type_github_by_config() {
     test_repo.commit("C1", "c1.txt");
 
     // Set loom.remote-type to github
-    crate::git_commands::run_git(&workdir, &["config", "loom.remote-type", "github"]).unwrap();
+    test_repo.set_config("loom.remote-type", "github");
 
     let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
     assert!(result.is_ok());
@@ -77,7 +76,7 @@ fn detect_remote_type_config_overrides_url() {
 
     // Even though remote URL is a local path (not github.com),
     // explicit config should take priority
-    crate::git_commands::run_git(&workdir, &["config", "loom.remote-type", "gerrit"]).unwrap();
+    test_repo.set_config("loom.remote-type", "gerrit");
 
     let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
     assert!(result.is_ok());
@@ -168,11 +167,10 @@ fn resolve_push_remote_plain_upstream_stays_upstream() {
 #[test]
 fn resolve_branch_accepts_woven_branch() {
     let test_repo = TestRepo::new_with_remote();
-    let workdir = test_repo.workdir();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
     // Create feature-a at merge-base
-    git_branch::create(workdir.as_path(), "feature-a", &base_oid.to_string()).unwrap();
+    test_repo.create_branch_at("feature-a", &base_oid.to_string());
 
     // Switch to feature-a, add a commit, switch back
     test_repo.switch_branch("feature-a");
@@ -181,7 +179,7 @@ fn resolve_branch_accepts_woven_branch() {
 
     // Add integration commit + merge to create woven topology
     test_repo.commit("Int", "int.txt");
-    crate::git_commands::git_merge::merge_no_ff(workdir.as_path(), "feature-a").unwrap();
+    test_repo.merge_no_ff("feature-a");
 
     let result = super::resolve_branch(
         &test_repo.repo,

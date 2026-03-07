@@ -1,4 +1,3 @@
-use crate::git_commands::{self, git_branch, git_commit, git_merge};
 use crate::test_helpers::TestRepo;
 
 // ── Unit tests for diff parsing ──────────────────────────────────────
@@ -61,14 +60,7 @@ fn absorb_single_file() {
         assert!(result.is_ok(), "absorb failed: {:?}", result);
 
         // file1.txt should now be clean (absorbed into the commit)
-        let repo = crate::git::open_repo().unwrap();
-        let workdir = repo.workdir().unwrap();
-        let diff = git_commands::diff_head_name_only(workdir).unwrap();
-        assert!(
-            diff.trim().is_empty(),
-            "working tree should be clean after absorb, but has: {}",
-            diff
-        );
+        test_repo.assert_working_tree_clean();
 
         // Commit message should be preserved
         assert_eq!(test_repo.get_message(0), "Add file1");
@@ -91,14 +83,7 @@ fn absorb_multiple_files_different_commits() {
         assert!(result.is_ok(), "absorb failed: {:?}", result);
 
         // Both files should be clean
-        let repo = crate::git::open_repo().unwrap();
-        let workdir = repo.workdir().unwrap();
-        let diff = git_commands::diff_head_name_only(workdir).unwrap();
-        assert!(
-            diff.trim().is_empty(),
-            "working tree should be clean, but has: {}",
-            diff
-        );
+        test_repo.assert_working_tree_clean();
 
         // Commit messages preserved
         assert_eq!(test_repo.get_message(0), "Add file2");
@@ -133,12 +118,10 @@ fn absorb_skips_new_file() {
 #[test]
 fn absorb_skips_pure_addition() {
     let test_repo = TestRepo::new_with_remote();
-    let workdir = test_repo.workdir();
-
     // Write multi-line content and commit it manually (so file content != message)
     test_repo.write_file("file1.txt", "line1\nline2\n");
-    git_commit::stage_files(workdir.as_path(), &["file1.txt"]).unwrap();
-    git_commit::commit(workdir.as_path(), "Add file1").unwrap();
+    test_repo.stage_files(&["file1.txt"]);
+    test_repo.commit_staged("Add file1");
 
     // Add lines without modifying existing ones
     test_repo.write_file("file1.txt", "line1\nline2\nnew line3\n");
@@ -249,17 +232,15 @@ fn absorb_preserves_skipped_changes() {
 #[test]
 fn absorb_skips_multiple_sources() {
     let test_repo = TestRepo::new_with_remote();
-    let workdir = test_repo.workdir();
-
     // Create two commits each introducing content in the same file.
     // Use manual staging to control exact file content per commit.
     test_repo.write_file("shared.txt", "line1 from c1\n");
-    git_commit::stage_files(workdir.as_path(), &["shared.txt"]).unwrap();
-    git_commit::commit(workdir.as_path(), "Commit 1").unwrap();
+    test_repo.stage_files(&["shared.txt"]);
+    test_repo.commit_staged("Commit 1");
 
     test_repo.write_file("shared.txt", "line1 from c1\nline2 from c2\n");
-    git_commit::stage_files(workdir.as_path(), &["shared.txt"]).unwrap();
-    git_commit::commit(workdir.as_path(), "Commit 2").unwrap();
+    test_repo.stage_files(&["shared.txt"]);
+    test_repo.commit_staged("Commit 2");
 
     // Modify lines from both commits
     test_repo.write_file("shared.txt", "MODIFIED line1\nMODIFIED line2\n");
@@ -296,19 +277,18 @@ fn absorb_skips_out_of_scope() {
 #[test]
 fn absorb_with_woven_branches() {
     let test_repo = TestRepo::new_with_remote();
-    let workdir = test_repo.workdir();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
     // Create feature branch off base with a commit
-    git_branch::create(workdir.as_path(), "feat1", &base_oid.to_string()).unwrap();
+    test_repo.create_branch_at("feat1", &base_oid.to_string());
     test_repo.switch_branch("feat1");
     test_repo.write_file("feature.txt", "initial feature content");
-    git_commit::stage_files(workdir.as_path(), &["feature.txt"]).unwrap();
-    git_commit::commit(workdir.as_path(), "Feature 1").unwrap();
+    test_repo.stage_files(&["feature.txt"]);
+    test_repo.commit_staged("Feature 1");
 
     // Merge feat1 into integration branch
     test_repo.switch_branch("integration");
-    git_merge::merge_no_ff(workdir.as_path(), "feat1").unwrap();
+    test_repo.merge_no_ff("feat1");
 
     // Modify the feature file in working tree
     test_repo.write_file("feature.txt", "updated feature content");
@@ -322,13 +302,6 @@ fn absorb_with_woven_branches() {
         );
 
         // Working tree should be clean (feature.txt absorbed)
-        let repo = crate::git::open_repo().unwrap();
-        let wd = repo.workdir().unwrap();
-        let diff = git_commands::diff_head_name_only(wd).unwrap();
-        assert!(
-            diff.trim().is_empty(),
-            "working tree should be clean, but has: {}",
-            diff
-        );
+        test_repo.assert_working_tree_clean();
     });
 }

@@ -592,15 +592,13 @@ fn from_repo_linear_integration() {
 
 #[test]
 fn from_repo_with_woven_branch() {
-    use crate::git_commands::{git_branch, git_merge};
     use crate::test_helpers::TestRepo;
 
     let test_repo = TestRepo::new_with_remote();
-    let workdir = test_repo.workdir();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
     // Create feature-a at merge-base
-    git_branch::create(workdir.as_path(), "feature-a", &base_oid.to_string()).unwrap();
+    test_repo.create_branch_at("feature-a", &base_oid.to_string());
 
     // Switch to feature-a and add commits
     test_repo.switch_branch("feature-a");
@@ -614,7 +612,7 @@ fn from_repo_with_woven_branch() {
     test_repo.commit("Int", "int.txt");
 
     // Merge feature-a
-    git_merge::merge_no_ff(workdir.as_path(), "feature-a").unwrap();
+    test_repo.merge_no_ff("feature-a");
 
     let graph = Weave::from_repo(&test_repo.repo).unwrap();
 
@@ -646,18 +644,16 @@ fn from_repo_with_woven_branch() {
 
 #[test]
 fn from_repo_with_non_woven_branch() {
-    use crate::git_commands::git_branch;
     use crate::test_helpers::TestRepo;
 
     let test_repo = TestRepo::new_with_remote();
-    let workdir = test_repo.workdir();
 
     // Add commits on integration
     test_repo.commit("C1", "c1.txt");
     let c1_oid = test_repo.head_oid();
 
     // Create feature-a at C1 (non-woven, just a branch pointing at a commit)
-    git_branch::create(workdir.as_path(), "feature-a", &c1_oid.to_string()).unwrap();
+    test_repo.create_branch_at("feature-a", &c1_oid.to_string());
 
     test_repo.commit("C2", "c2.txt");
 
@@ -678,7 +674,6 @@ fn from_repo_with_non_woven_branch() {
 
 #[test]
 fn from_repo_round_trip_preserves_identity() {
-    use crate::git_commands::{git_branch, git_merge};
     use crate::test_helpers::TestRepo;
 
     let test_repo = TestRepo::new_with_remote();
@@ -686,12 +681,12 @@ fn from_repo_round_trip_preserves_identity() {
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
     // Build a non-trivial graph
-    git_branch::create(workdir.as_path(), "feature-a", &base_oid.to_string()).unwrap();
+    test_repo.create_branch_at("feature-a", &base_oid.to_string());
     test_repo.switch_branch("feature-a");
     test_repo.commit("A1", "a1.txt");
     test_repo.switch_branch("integration");
     test_repo.commit("Int", "int.txt");
-    git_merge::merge_no_ff(workdir.as_path(), "feature-a").unwrap();
+    test_repo.merge_no_ff("feature-a");
 
     // Record state before round-trip
     let messages_before: Vec<String> = {
