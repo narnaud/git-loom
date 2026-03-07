@@ -39,10 +39,11 @@ git-loom push [branch]
 
 Detection priority (first match wins):
 
-1. **Explicit config**: `git config loom.remote-type` — values: `github`, `gerrit`
+1. **Explicit config**: `git config loom.remote-type` — values: `github`, `azure`, `gerrit`
 2. **URL heuristics**: Remote URL contains `github.com` → GitHub
-3. **Hook inspection**: `.git/hooks/commit-msg` contains "gerrit" (case-insensitive) → Gerrit
-4. **Fallback**: Plain
+3. **URL heuristics**: Remote URL contains `dev.azure.com` → Azure DevOps
+4. **Hook inspection**: `.git/hooks/commit-msg` contains "gerrit" (case-insensitive) → Gerrit
+5. **Fallback**: Plain
 
 ## Push Strategies
 
@@ -77,6 +78,19 @@ repo.
 **Upstream branch skip:** If the branch being pushed is the upstream target
 branch itself (e.g. pushing `main` when tracking `origin/main`), PR creation
 is skipped and the push falls back to the plain force-with-lease strategy.
+
+### Azure DevOps
+
+```bash
+git push --force-with-lease --force-if-includes -u <remote> <branch>
+az repos pr create --open --source-branch <branch> --target-branch <target> --detect
+```
+
+Pushes the branch with `--force-with-lease` (same safety as plain), then opens the
+Azure DevOps PR creation page in the browser via the `az` CLI. `--detect` lets the
+Azure CLI auto-detect the organization and project from the repository's remote URL.
+If `az` is not installed, prints a helpful message with a link to install it. If a
+PR already exists, `az` handles that gracefully.
 
 ### Gerrit
 
@@ -124,6 +138,14 @@ git-loom push feature-a
 # Install 'gh' CLI to create pull requests: https://cli.github.com
 ```
 
+### az CLI not installed (Azure DevOps remote)
+
+```bash
+git-loom push feature-a
+# Pushed 'feature-a' to origin
+# Install 'az' CLI to create pull requests: https://learn.microsoft.com/cli/azure/install-azure-cli
+```
+
 ### Push fails (e.g., no network)
 
 ```bash
@@ -142,6 +164,14 @@ git-loom push feature-a
 ```
 
 ### Push to GitHub (with gh CLI)
+
+```bash
+git-loom push feature-a
+# Pushed 'feature-a' to origin
+# (browser opens to PR creation page)
+```
+
+### Push to Azure DevOps (with az CLI)
 
 ```bash
 git-loom push feature-a
@@ -210,3 +240,4 @@ Each push is explicit and deliberate.
 - Network access to the remote (for `git push`)
 - Git 2.38 or later (checked globally at startup)
 - `gh` CLI (optional, for GitHub PR creation)
+- `az` CLI (optional, for Azure DevOps PR creation)

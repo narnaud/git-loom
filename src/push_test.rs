@@ -229,3 +229,36 @@ fn resolve_branch_rejects_commit_target() {
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("not a commit"));
 }
+
+#[test]
+fn detect_remote_type_azure_by_config() {
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    test_repo.commit("C1", "c1.txt");
+
+    test_repo.set_config("loom.remote-type", "azure");
+
+    let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), super::RemoteType::AzureDevOps);
+}
+
+#[test]
+fn detect_remote_type_azure_by_url() {
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    test_repo.commit("C1", "c1.txt");
+
+    // Set remote URL to a dev.azure.com URL
+    test_repo
+        .repo
+        .remote_set_url(
+            "origin",
+            "https://dev.azure.com/myorg/myproject/_git/myrepo",
+        )
+        .unwrap();
+
+    let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), super::RemoteType::AzureDevOps);
+}
