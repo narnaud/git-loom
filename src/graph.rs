@@ -3,6 +3,7 @@ use crate::shortid::IdAllocator;
 use colored::{Color, Colorize};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
+use terminal_size::{Width, terminal_size};
 
 // ── Color palette (edit these to change the theme) ──────────────────────
 
@@ -22,6 +23,8 @@ const COLOR_SHORTID: Color = Color::Blue;
 const COLOR_STAGED: Color = Color::Green;
 /// Unstaged (worktree) file status: red, matching git convention.
 const COLOR_UNSTAGED: Color = Color::Red;
+/// Untracked file marker and path color.
+const COLOR_UNTRACKED: Color = Color::Magenta;
 
 /// Rotating colors for commit dots on feature branches.
 /// Each branch gets the next color in this cycle.
@@ -34,7 +37,20 @@ const BRANCH_DOT_COLORS: &[Color] = &[
     Color::Green,
 ];
 
+/// Number of untracked files above which the display switches to multi-column layout.
+const UNTRACKED_MULTICOLUMN_THRESHOLD: usize = 5;
+
+/// Width of the graph prefix ("│   ") in visible columns.
+const GRAPH_PREFIX_WIDTH: usize = 4;
+
 // ── Data types ──────────────────────────────────────────────────────────
+
+/// Display configuration for the status graph renderer.
+pub struct RenderOpts {
+    /// Terminal column width, used for multi-column untracked layout.
+    /// `None` means non-TTY (e.g. pipe) — fall back to single-column.
+    pub terminal_width: Option<u16>,
+}
 
 /// A logical section in the rendered status output. Sections are built from
 /// RepoInfo and rendered top-to-bottom with UTF-8 box-drawing characters.
@@ -58,10 +74,17 @@ enum Section {
 // ── Public API ──────────────────────────────────────────────────────────
 
 /// Build sections from repo data and render them as a UTF-8 graph string.
-pub fn render(info: RepoInfo) -> String {
+pub fn render(info: RepoInfo, opts: &RenderOpts) -> String {
     let ids = IdAllocator::new(info.collect_entities());
     let sections = build_sections(info);
-    render_sections(&sections, &ids)
+    render_sections(&sections, &ids, opts)
+}
+
+/// Detect terminal width and build default render options.
+pub fn default_render_opts() -> RenderOpts {
+    RenderOpts {
+        terminal_width: terminal_size().map(|(Width(w), _)| w),
+    }
 }
 
 // ── Section building ────────────────────────────────────────────────────
@@ -220,7 +243,7 @@ fn is_stacked_with_next(sections: &[Section], idx: usize) -> bool {
 /// Render sections as a UTF-8 graph. Stacked branches (where the last commit
 /// of a branch is a parent of the first commit of the next) are connected
 /// with `││` and `│├─`, while independent branches get `├╯` then `│╭─`.
-fn render_sections(sections: &[Section], ids: &IdAllocator) -> String {
+fn render_sections(sections: &[Section], ids: &IdAllocator, opts: &RenderOpts) -> String {
     let mut out = String::new();
     let last_idx = sections.len() - 1;
     let mut branch_color_idx: usize = 0;
@@ -228,7 +251,7 @@ fn render_sections(sections: &[Section], ids: &IdAllocator) -> String {
     for (idx, section) in sections.iter().enumerate() {
         match section {
             Section::WorkingChanges(changes) => {
-                render_working_changes(&mut out, changes, ids);
+                render_working_changes(&mut out, changes, ids, opts);
             }
             Section::Branch { names, commits } => {
                 let dot_color = BRANCH_DOT_COLORS[branch_color_idx % BRANCH_DOT_COLORS.len()];
@@ -263,7 +286,12 @@ fn render_sections(sections: &[Section], ids: &IdAllocator) -> String {
     out
 }
 
-fn render_working_changes(out: &mut String, changes: &[FileChange], ids: &IdAllocator) {
+fn render_working_changes(
+    out: &mut String,
+    changes: &[FileChange],
+    ids: &IdAllocator,
+    opts: &RenderOpts,
+) {
     writeln!(
         out,
         "{} {} {}{}{}",
@@ -305,21 +333,97 @@ fn render_working_changes(out: &mut String, changes: &[FileChange], ids: &IdAllo
             )
             .unwrap();
         }
-        for change in &untracked {
-            writeln!(
-                out,
-                "{}   {} {}{} {}",
-                "│".color(COLOR_GRAPH),
-                ids.get_file(&change.path).color(COLOR_SHORTID).underline(),
-                change.index.to_string().color(COLOR_UNSTAGED),
-                change.worktree.to_string().color(COLOR_UNSTAGED),
-                change.path.color(COLOR_MESSAGE)
-            )
-            .unwrap();
+        if !untracked.is_empty() {
+            render_untracked(out, &untracked, ids, opts);
         }
     }
 
     writeln!(out, "{}", "│".color(COLOR_GRAPH)).unwrap();
+}
+
+fn render_untracked(
+    out: &mut String,
+    untracked: &[&FileChange],
+    ids: &IdAllocator,
+    opts: &RenderOpts,
+) {
+    if untracked.len() > UNTRACKED_MULTICOLUMN_THRESHOLD
+        && let Some(width) = opts.terminal_width
+    {
+        render_untracked_multicolumn(out, untracked, ids, width);
+        return;
+    }
+    render_untracked_single_column(out, untracked, ids);
+}
+
+fn render_untracked_single_column(out: &mut String, untracked: &[&FileChange], ids: &IdAllocator) {
+    for change in untracked {
+        writeln!(
+            out,
+            "{}   {} {} {}",
+            "│".color(COLOR_GRAPH),
+            ids.get_file(&change.path).color(COLOR_SHORTID).underline(),
+            " ⁕".color(COLOR_UNTRACKED),
+            change.path.color(COLOR_MESSAGE)
+        )
+        .unwrap();
+    }
+}
+
+/// Render untracked files in a multi-column grid (top-to-bottom, left-to-right).
+fn render_untracked_multicolumn(
+    out: &mut String,
+    untracked: &[&FileChange],
+    ids: &IdAllocator,
+    term_width: u16,
+) {
+    let available = (term_width as usize).saturating_sub(GRAPH_PREFIX_WIDTH);
+    let separator = "   │ "; // 5 display columns
+    let separator_width: usize = 5;
+
+    // Compute plain-text width of each entry: "{sid}  ⁕ {path}"
+    let entry_widths: Vec<usize> = untracked
+        .iter()
+        .map(|f| {
+            let sid = ids.get_file(&f.path);
+            sid.len() + 1 + 2 + 1 + f.path.len()
+        })
+        .collect();
+
+    let max_entry_width = entry_widths.iter().copied().max().unwrap_or(1);
+    let col_slot = max_entry_width + separator_width;
+
+    let num_cols = (available / col_slot).max(1).min(untracked.len());
+    let num_rows = untracked.len().div_ceil(num_cols);
+
+    for row in 0..num_rows {
+        write!(out, "{}   ", "│".color(COLOR_GRAPH)).unwrap();
+        for col in 0..num_cols {
+            let idx = col * num_rows + row;
+            if idx >= untracked.len() {
+                break;
+            }
+            let f = untracked[idx];
+            let sid = ids.get_file(&f.path);
+
+            write!(
+                out,
+                "{} {} {}",
+                sid.color(COLOR_SHORTID).underline(),
+                " ⁕".color(COLOR_UNTRACKED),
+                f.path.color(COLOR_MESSAGE)
+            )
+            .unwrap();
+
+            // Pad entry to max_entry_width, then add pipe separator
+            let next_idx = (col + 1) * num_rows + row;
+            if col + 1 < num_cols && next_idx < untracked.len() {
+                let padding = max_entry_width.saturating_sub(entry_widths[idx]);
+                write!(out, "{}{}", " ".repeat(padding), separator.color(COLOR_DIM)).unwrap();
+            }
+        }
+        writeln!(out).unwrap();
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
