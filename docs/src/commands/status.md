@@ -19,6 +19,7 @@ git-loom [status] [-f] [N]
 | Option | Description |
 |--------|-------------|
 | `-f, --files` | Show files changed in each commit |
+| `-a, --all` | Show all branches including hidden ones |
 
 ## Output
 
@@ -138,6 +139,19 @@ Show history before the base with a positional argument (`git loom 3` or `git lo
 ```
 
 Context commits are dimmed and display-only (no short ID, not actionable). The default is 1 (no extra context).
+
+## Hidden Branches
+
+Branches whose names start with the configured prefix (default: `local-`) are hidden from the status output by default. Both the branch section and its commits are fully suppressed — they do not appear as loose commits either.
+
+This is useful for keeping local-only branches (personal configuration, secrets) out of the status view without removing them from the integration branch.
+
+```bash
+git-loom --all          # show all branches including hidden
+git-loom status --all   # same, explicit
+```
+
+The hidden prefix is configurable (see [Configuration](../configuration.md#loomhidebranchpattern)).
 
 ## Theming
 

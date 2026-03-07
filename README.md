@@ -127,6 +127,7 @@ Independent branches that are combined into the integration branch. You can mana
 | Setting | Values | Default | Description |
 |---------|--------|---------|-------------|
 | `loom.remote-type` | `github`, `gerrit` | Auto-detected | Override the remote type for `git loom push` |
+| `loom.hideBranchPattern` | Any prefix string | `local-` | Prefix for branches hidden from `loom status` by default |
 
 #### `loom.remote-type`
 
