@@ -80,6 +80,16 @@ git-loom reword feature-a
 git-loom reword fa -m feature-authentication
 ```
 
+### Rename to a hidden branch name
+
+If the new name matches the configured hidden prefix (default: `local-`), git-loom prints a warning before the success message:
+
+```bash
+git-loom reword feature-secrets -m local-secrets
+# ! Branch `local-secrets` is hidden from status by default. Use `--all` to show it.
+# ✓ Renamed branch `feature-secrets` to `local-secrets`
+```
+
 ## Prerequisites
 
 - Any git repository for commit rewording

@@ -88,6 +88,17 @@ git-loom branch feature-b -t feature-a
 # Created branch 'feature-b' at feature-a's tip commit
 ```
 
+## Hidden Branch Warning
+
+If the branch name matches the configured hidden prefix (default: `local-`), git-loom prints a warning before the success message:
+
+```
+! Branch `local-secrets` is hidden from status by default. Use `--all` to show it.
+✓ Created branch `local-secrets` at abc1234
+```
+
+See [Configuration](../configuration.md#loomhidebranchpattern) to customize the prefix.
+
 ## Prerequisites
 
 - Must be in a git repository with a working tree
