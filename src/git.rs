@@ -88,6 +88,15 @@ pub fn ensure_branch_not_exists(repo: &Repository, name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Read the hidden branch prefix from git config `loom.hideBranchPattern`.
+/// Returns `None` if the config key is not set.
+pub fn hide_branch_pattern(repo: &Repository) -> Option<String> {
+    repo.config()
+        .ok()?
+        .get_string("loom.hideBranchPattern")
+        .ok()
+}
+
 /// Extract the local branch name from a remote tracking ref.
 ///
 /// e.g. `"origin/main"` → `"main"`, `"origin/feat/foo"` → `"feat/foo"`.
