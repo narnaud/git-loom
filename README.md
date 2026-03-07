@@ -126,7 +126,7 @@ Independent branches that are combined into the integration branch. You can mana
 
 | Setting | Values | Default | Description |
 |---------|--------|---------|-------------|
-| `loom.remote-type` | `github`, `gerrit` | Auto-detected | Override the remote type for `git loom push` |
+| `loom.remote-type` | `github`, `azure`, `gerrit` | Auto-detected | Override the remote type for `git loom push` |
 | `loom.hideBranchPattern` | Any prefix string | `local-` | Prefix for branches hidden from `loom status` by default |
 
 #### `loom.remote-type`
@@ -134,6 +134,7 @@ Independent branches that are combined into the integration branch. You can mana
 By default, `git loom push` auto-detects the remote type:
 
 - **GitHub** if the remote URL contains `github.com`
+- **Azure DevOps** if the remote URL contains `dev.azure.com`
 - **Gerrit** if `.git/hooks/commit-msg` contains "gerrit"
 - **Plain Git** otherwise
 
@@ -141,6 +142,7 @@ You can override this with:
 
 ```bash
 git config loom.remote-type github   # Force GitHub push (push + open PR)
+git config loom.remote-type azure    # Force Azure DevOps push (push + open PR)
 git config loom.remote-type gerrit   # Force Gerrit push (refs/for/<branch>)
 ```
 
