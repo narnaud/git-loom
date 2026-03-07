@@ -76,6 +76,9 @@ enum Command {
     },
     /// Fold source(s) into a target (amend files, fixup commits, move commits)
     Fold {
+        /// Create a new branch from the source commit and move it there
+        #[arg(short = 'c', long = "create")]
+        create: bool,
         /// Source(s) and target: files, commits, or branches (last arg is the target)
         #[arg(required = true, num_args = 2..)]
         args: Vec<String>,
@@ -207,7 +210,7 @@ fn main() {
         Some(Command::Split { target, message }) => split::run(target, message),
         Some(Command::Push { branch }) => push::run(branch),
         Some(Command::Update) => update::run(),
-        Some(Command::Fold { args }) => fold::run(args),
+        Some(Command::Fold { create, args }) => fold::run(create, args),
         Some(Command::Trace) => handle_trace(),
         Some(Command::Completions { .. }) => unreachable!(),
         Some(Command::InternalWriteTodo { source, todo_file }) => {

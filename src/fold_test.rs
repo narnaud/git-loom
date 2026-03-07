@@ -711,7 +711,7 @@ fn fold_unstaged_into_commit() {
     let head_oid = test_repo.head_oid();
 
     // fold zz HEAD — should amend all changed files into HEAD
-    let result = test_repo.in_dir(|| super::run(vec!["zz".into(), "HEAD".into()]));
+    let result = test_repo.in_dir(|| super::run(false, vec!["zz".into(), "HEAD".into()]));
     assert!(result.is_ok(), "fold zz HEAD failed: {:?}", result);
 
     assert_ne!(test_repo.head_oid(), head_oid, "Hash should have changed");
@@ -724,7 +724,7 @@ fn fold_unstaged_clean_tree_fails() {
     let test_repo = TestRepo::new();
     test_repo.commit("First commit", "file1.txt");
 
-    let result = test_repo.in_dir(|| super::run(vec!["zz".into(), "HEAD".into()]));
+    let result = test_repo.in_dir(|| super::run(false, vec!["zz".into(), "HEAD".into()]));
     assert!(result.is_err());
     assert!(
         result
@@ -1292,4 +1292,84 @@ fn resolve_fold_arg_head() {
     let result = super::resolve_fold_arg(&test_repo.repo, "HEAD");
     assert!(result.is_ok());
     assert!(matches!(result.unwrap(), git::Target::Commit(_)));
+}
+
+// ── fold --create ─────────────────────────────────────────────────────────
+
+#[test]
+fn fold_create_moves_commit_on_branch_to_new_branch() {
+    // Set up an integration branch with a woven feature branch.
+    // Move a commit from the feature branch into a brand new branch.
+    //
+    // Before:
+    //   ╭─ [feature-a]
+    //   ●  A1  ← move this to new-branch
+    //   ╯
+    let test_repo = TestRepo::new_with_remote();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    test_repo.create_branch_at("feature-a", &base_oid.to_string());
+    test_repo.switch_branch("feature-a");
+    let a1_oid = test_repo.commit("A1", "a1.txt");
+    test_repo.switch_branch("integration");
+    test_repo.merge_no_ff("feature-a");
+
+    let result = super::run_create(
+        &test_repo.repo,
+        &[a1_oid.to_string(), "new-branch".to_string()],
+    );
+    assert!(result.is_ok(), "fold --create failed: {:?}", result);
+
+    // new-branch should exist and point to A1
+    assert_eq!(
+        test_repo.branch_commit_summary("new-branch"),
+        "A1",
+        "new-branch should have A1 at its tip"
+    );
+}
+
+#[test]
+fn fold_create_warns_and_moves_to_existing_branch() {
+    // When --create is used but the branch already exists, warn and move the commit.
+    // Uses a non-woven feature-a at base and a loose commit on integration.
+    let test_repo = TestRepo::new_with_remote();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    // feature-a exists at base (not woven, no section in the graph)
+    test_repo.create_branch_at("feature-a", &base_oid.to_string());
+
+    // Add a loose commit on integration
+    let loose_oid = test_repo.commit("Loose", "loose.txt");
+
+    // feature-a already exists — should warn and move the commit anyway
+    let result = super::run_create(
+        &test_repo.repo,
+        &[loose_oid.to_string(), "feature-a".to_string()],
+    );
+    assert!(
+        result.is_ok(),
+        "fold --create with existing branch should succeed: {:?}",
+        result
+    );
+    assert_eq!(
+        test_repo.branch_commit_summary("feature-a"),
+        "Loose",
+        "Loose commit should have moved to feature-a"
+    );
+}
+
+#[test]
+fn fold_create_rejects_non_commit_source() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.create_branch("feature-a");
+
+    let result = super::run_create(
+        &test_repo.repo,
+        &["feature-a".to_string(), "new-branch".to_string()],
+    );
+    assert!(result.is_err());
+    assert!(
+        result.unwrap_err().to_string().contains("must be a commit"),
+        "should error when source is a branch"
+    );
 }

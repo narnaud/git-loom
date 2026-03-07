@@ -26,6 +26,7 @@ etc.). `fold` unifies them under one verb: **fold source into target**.
 
 ```bash
 git-loom fold <source>... <target>
+git-loom fold --create <commit> <new-branch>
 ```
 
 **Arguments:**
@@ -37,6 +38,14 @@ git-loom fold <source>... <target>
 
 The last argument is always the target. All preceding arguments are sources.
 There must be at least two arguments total (one source + one target).
+
+**Flags:**
+
+- `--create` / `-c`: Create a new branch from the source commit and move it
+  there. The target must be a branch name that does not yet exist. Requires
+  exactly one commit source. The branch is created at the upstream merge-base
+  and the commit is moved into it — whether the commit was a loose commit on
+  the integration line or already on an existing branch.
 
 ## Type Dispatch
 
@@ -52,6 +61,7 @@ combination:
 | Commit | Unstaged (`zz`) | Uncommit: remove commit, put changes in working directory | No |
 | CommitFile | Unstaged (`zz`) | Uncommit file: remove one file from a commit to working directory | No |
 | CommitFile | Commit | Move file: move one file's changes from one commit to another | No |
+| Commit | New branch (`-c`) | Create: make a new branch and move the commit into it | No |
 
 CommitFile sources use the `commit_sid:index` format shown by `git loom status -f`
 (e.g. `fa:0` for the first file in commit `fa`).
