@@ -158,7 +158,8 @@ fn single_word_candidates(word: &str) -> Vec<String> {
     }
 
     if chars.len() == 1 {
-        candidates.push(chars[0].to_string());
+        // Minimum 2-char ID: double the character.
+        candidates.push(format!("{}{}", chars[0], chars[0]));
         return candidates;
     }
 
@@ -183,22 +184,39 @@ fn single_word_candidates(word: &str) -> Vec<String> {
     candidates
 }
 
+/// Priority for entity allocation. Lower value = allocated first.
+/// Commits are allocated before branches/files because they have the most
+/// constrained candidate set (hex prefixes only), while branches and files
+/// have rich word-based alternatives.
+fn entity_priority(entity: &Entity) -> u8 {
+    match entity {
+        Entity::Unstaged => 0,
+        Entity::Commit(_) => 1,
+        Entity::Branch(_) | Entity::File(_) => 2,
+    }
+}
+
 /// Assign unique IDs using collision-aware candidate selection.
 ///
-/// Each entity is processed in order. For each entity, find a candidate that:
-/// 1. Is not already used
-/// 2. Prefers candidates whose first letter is not already used as a first letter
+/// Entities are processed in priority order: Unstaged, then Commits, then
+/// Branches and Files. Within each priority group, the original ordering is
+/// preserved (stable sort). Each entity receives the first available candidate,
+/// with preference for candidates whose first letter hasn't been used yet.
 ///
 /// This implements the smart collision avoidance where `feature-a` and `feature-b`
 /// get `fa` and `eb` (skipping 'f' for the second since 'f' is already used).
 fn resolve_collisions(entities: Vec<Entity>) -> HashMap<Entity, String> {
-    let items: Vec<(Entity, Vec<String>)> = entities
+    let mut items: Vec<(Entity, Vec<String>)> = entities
         .into_iter()
         .map(|e| {
             let cands = generate_candidates(&e);
             (e, cands)
         })
         .collect();
+
+    // Sort by priority: Unstaged first, then Commits, then Branches/Files.
+    // Stable sort preserves relative order within each priority group.
+    items.sort_by_key(|(e, _)| entity_priority(e));
 
     let mut used: HashSet<String> = HashSet::new();
     let mut used_first_letters: HashSet<char> = HashSet::new();
