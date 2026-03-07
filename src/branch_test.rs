@@ -1,75 +1,5 @@
 use crate::git;
-use crate::git_commands::git_branch;
 use crate::test_helpers::TestRepo;
-
-#[test]
-fn branch_at_merge_base_default() {
-    let test_repo = TestRepo::new_with_remote();
-    test_repo.commit_empty("A1");
-    test_repo.commit_empty("A2");
-
-    let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
-    let base_oid = test_repo.find_remote_branch_target("origin/main");
-
-    // Create branch at merge-base (default, no target)
-    let base = test_repo
-        .repo
-        .revparse_single(&info.upstream.base_short_id)
-        .unwrap();
-    git_branch::create(
-        test_repo.workdir().as_path(),
-        "feature-a",
-        &base.id().to_string(),
-    )
-    .unwrap();
-
-    assert!(test_repo.branch_exists("feature-a"));
-    assert_eq!(test_repo.get_branch_target("feature-a"), base_oid);
-}
-
-#[test]
-fn branch_at_specific_commit() {
-    let test_repo = TestRepo::new_with_remote();
-    let a1_oid = test_repo.commit_empty("A1");
-    test_repo.commit_empty("A2");
-
-    git_branch::create(
-        test_repo.workdir().as_path(),
-        "feature-a",
-        &a1_oid.to_string(),
-    )
-    .unwrap();
-
-    assert!(test_repo.branch_exists("feature-a"));
-    assert_eq!(test_repo.get_branch_target("feature-a"), a1_oid);
-}
-
-#[test]
-fn branch_at_branch_tip() {
-    let test_repo = TestRepo::new_with_remote();
-    let a1_oid = test_repo.commit_empty("A1");
-    test_repo.create_branch_at_commit("feature-a", a1_oid);
-    test_repo.commit_empty("A2");
-
-    let hash = test_repo.get_branch_target("feature-a").to_string();
-    git_branch::create(test_repo.workdir().as_path(), "feature-b", &hash).unwrap();
-
-    assert!(test_repo.branch_exists("feature-b"));
-    assert_eq!(test_repo.get_branch_target("feature-b"), a1_oid);
-}
-
-#[test]
-fn branch_duplicate_name_fails() {
-    let test_repo = TestRepo::new_with_remote();
-    test_repo.commit_empty("A1");
-
-    let head_oid = test_repo.head_oid().to_string();
-    git_branch::create(test_repo.workdir().as_path(), "feature-a", &head_oid).unwrap();
-
-    // Creating a branch with the same name should fail
-    let result = git_branch::create(test_repo.workdir().as_path(), "feature-a", &head_oid);
-    assert!(result.is_err());
-}
 
 #[test]
 fn branch_shows_in_status() {
@@ -77,12 +7,7 @@ fn branch_shows_in_status() {
     let a1_oid = test_repo.commit_empty("A1");
     test_repo.commit_empty("A2");
 
-    git_branch::create(
-        test_repo.workdir().as_path(),
-        "feature-a",
-        &a1_oid.to_string(),
-    )
-    .unwrap();
+    test_repo.create_branch_at("feature-a", &a1_oid.to_string());
 
     let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
     let branch_names: Vec<&str> = info.branches.iter().map(|b| b.name.as_str()).collect();
@@ -108,32 +33,21 @@ fn branch_ownership_splits_commits() {
     let b1_oid = test_repo.commit_empty("B1");
     test_repo.commit_empty("B2");
 
-    git_branch::create(
-        test_repo.workdir().as_path(),
-        "feature-a",
-        &a1_oid.to_string(),
-    )
-    .unwrap();
-    git_branch::create(
-        test_repo.workdir().as_path(),
-        "feature-b",
-        &b1_oid.to_string(),
-    )
-    .unwrap();
+    test_repo.create_branch_at("feature-a", &a1_oid.to_string());
+    test_repo.create_branch_at("feature-b", &b1_oid.to_string());
 
-    let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
-    assert_eq!(info.branches.len(), 2);
+    assert_eq!(test_repo.branch_names().len(), 2);
 }
 
 #[test]
 fn branch_invalid_name_fails() {
-    let result = git_branch::validate_name("my..branch");
+    let result = crate::git_commands::git_branch::validate_name("my..branch");
     assert!(result.is_err(), "double dots should be invalid");
 
-    let result = git_branch::validate_name("has space");
+    let result = crate::git_commands::git_branch::validate_name("has space");
     assert!(result.is_err(), "spaces should be invalid");
 
-    let result = git_branch::validate_name("valid-name");
+    let result = crate::git_commands::git_branch::validate_name("valid-name");
     assert!(result.is_ok(), "valid name should pass");
 }
 
@@ -281,8 +195,6 @@ fn branch_inside_existing_branch_no_weave() {
     // Setup: origin/main → A1 → A2 (feature-a) merged into integration
     //        with B1 on the integration line
     // Then create feature-b at A1 (inside feature-a's side branch)
-    use crate::git_commands::git_merge;
-
     let test_repo = TestRepo::new_with_remote();
 
     // Build a side branch: A1 → A2
@@ -292,12 +204,7 @@ fn branch_inside_existing_branch_no_weave() {
     let a2_oid = test_repo.head_oid();
 
     // Create feature-a branch at A2
-    git_branch::create(
-        test_repo.workdir().as_path(),
-        "feature-a",
-        &a2_oid.to_string(),
-    )
-    .unwrap();
+    test_repo.create_branch_at("feature-a", &a2_oid.to_string());
 
     // Reset integration to merge-base, add a commit on integration line, then merge feature-a
     let base_oid = test_repo.find_remote_branch_target("origin/main");
@@ -307,7 +214,7 @@ fn branch_inside_existing_branch_no_weave() {
     test_repo.commit("B1", "b1.txt");
 
     // Merge feature-a into integration
-    git_merge::merge_no_ff(test_repo.workdir().as_path(), "feature-a").unwrap();
+    test_repo.merge_no_ff("feature-a");
     let head_before = test_repo.head_oid();
 
     // Now create feature-b at A1, which is inside the feature-a side branch

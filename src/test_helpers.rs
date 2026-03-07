@@ -509,6 +509,117 @@ impl TestRepo {
             .fetch(&["main"], None, None)
             .unwrap();
     }
+
+    /// Create a branch at a specific commit hash.
+    pub fn create_branch_at(&self, name: &str, commit_hash: &str) {
+        crate::git_commands::git_branch::create(self.workdir().as_path(), name, commit_hash)
+            .unwrap();
+    }
+
+    /// Merge a branch into the current branch with --no-ff.
+    pub fn merge_no_ff(&self, branch: &str) {
+        crate::git_commands::git_merge::merge_no_ff(self.workdir().as_path(), branch).unwrap();
+    }
+
+    /// Stage files in the working directory.
+    pub fn stage_files(&self, files: &[&str]) {
+        crate::git_commands::git_commit::stage_files(self.workdir().as_path(), files).unwrap();
+    }
+
+    /// Commit already-staged files with a message.
+    pub fn commit_staged(&self, message: &str) {
+        crate::git_commands::git_commit::commit(self.workdir().as_path(), message).unwrap();
+    }
+
+    /// Get the names of files that differ from HEAD.
+    pub fn diff_head_name_only(&self) -> String {
+        crate::git_commands::diff_head_name_only(self.workdir().as_path()).unwrap()
+    }
+
+    /// Get the diff of a single commit.
+    pub fn diff_commit(&self, oid: &str) -> String {
+        crate::git_commands::diff_commit(self.workdir().as_path(), oid).unwrap()
+    }
+
+    /// Set a git config value.
+    pub fn set_config(&self, key: &str, value: &str) {
+        crate::git_commands::run_git(self.workdir().as_path(), &["config", key, value]).unwrap();
+    }
+
+    /// Get porcelain status output.
+    pub fn status_porcelain(&self) -> String {
+        crate::git_commands::run_git_stdout(self.workdir().as_path(), &["status", "--porcelain"])
+            .unwrap()
+    }
+
+    /// Rebase commits between `upstream` and HEAD onto `newbase` with --update-refs.
+    pub fn rebase_onto(&self, newbase: &str, upstream: &str) {
+        crate::git_commands::git_rebase::rebase_onto(self.workdir().as_path(), newbase, upstream)
+            .unwrap();
+    }
+
+    /// Get all non-merge commit messages between HEAD and merge-base.
+    pub fn commit_messages(&self) -> Vec<String> {
+        let info = crate::git::gather_repo_info(&self.repo, false, 1).unwrap();
+        info.commits.iter().map(|c| c.message.clone()).collect()
+    }
+
+    /// Get all branch names in the commit range.
+    pub fn branch_names(&self) -> Vec<String> {
+        let info = crate::git::gather_repo_info(&self.repo, false, 1).unwrap();
+        info.branches.iter().map(|b| b.name.clone()).collect()
+    }
+
+    /// Get the commit summary at the tip of a branch.
+    pub fn branch_commit_summary(&self, name: &str) -> String {
+        let oid = self.get_branch_target(name);
+        let commit = self.find_commit(oid);
+        commit.summary().unwrap_or("").to_string()
+    }
+
+    /// Get the file paths changed in a commit.
+    pub fn commit_file_paths(&self, oid: git2::Oid) -> Vec<String> {
+        crate::git::commit_file_paths(&self.repo, oid).unwrap()
+    }
+
+    /// Create a commit touching multiple files at once.
+    ///
+    /// Each entry is a `(filename, content)` pair.  Uses the git2 API
+    /// directly so it stays consistent with the single-file `commit()`.
+    pub fn commit_multi(&self, files: &[(&str, &str)], message: &str) -> git2::Oid {
+        for (filename, content) in files {
+            self.write_file(filename, content);
+        }
+        let mut index = self.repo.index().unwrap();
+        for (filename, _) in files {
+            index.add_path(Path::new(filename)).unwrap();
+        }
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = self.repo.find_tree(tree_id).unwrap();
+        let sig = Self::sig();
+
+        if let Ok(head) = self.repo.head() {
+            let parent = self.repo.find_commit(head.target().unwrap()).unwrap();
+            self.repo
+                .commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])
+                .unwrap()
+        } else {
+            self.repo
+                .commit(Some("HEAD"), &sig, &sig, message, &tree, &[])
+                .unwrap()
+        }
+    }
+
+    /// Assert that the working tree is clean (no diff from HEAD).
+    pub fn assert_working_tree_clean(&self) {
+        let diff = self.diff_head_name_only();
+        assert!(
+            diff.trim().is_empty(),
+            "working tree should be clean, but has: {}",
+            diff
+        );
+    }
 }
 
 /// Builder for creating test repositories with a fluent API.

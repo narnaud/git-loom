@@ -1,5 +1,3 @@
-use crate::git;
-use crate::git_commands::{git_branch, git_merge};
 use crate::test_helpers::TestRepo;
 
 // ── HEAD split tests ──────────────────────────────────────────────────
@@ -11,31 +9,10 @@ fn split_head_commit() {
     test_repo.commit("Add files", "file1.txt");
 
     // Create a commit that touches two files
-    test_repo.write_file("file_a.txt", "content a");
-    test_repo.write_file("file_b.txt", "content b");
-    {
-        let mut index = test_repo.repo.index().unwrap();
-        index.add_path(std::path::Path::new("file_a.txt")).unwrap();
-        index.add_path(std::path::Path::new("file_b.txt")).unwrap();
-        index.write().unwrap();
-        let tree_id = index.write_tree().unwrap();
-        let tree = test_repo.repo.find_tree(tree_id).unwrap();
-        let sig = git2::Signature::now("Test", "test@test.com").unwrap();
-        let parent = test_repo.head_commit();
-        test_repo
-            .repo
-            .commit(
-                Some("HEAD"),
-                &sig,
-                &sig,
-                "Two files commit",
-                &tree,
-                &[&parent],
-            )
-            .unwrap();
-    }
-
-    let target_oid = test_repo.head_oid();
+    let target_oid = test_repo.commit_multi(
+        &[("file_a.txt", "content a"), ("file_b.txt", "content b")],
+        "Two files commit",
+    );
 
     let result = super::split_commit_with_selection(
         &test_repo.repo,
@@ -52,11 +29,14 @@ fn split_head_commit() {
     assert_eq!(test_repo.get_message(1), "First part");
 
     // Verify files are in the right commits
-    let head_files = git::commit_file_paths(&test_repo.repo, test_repo.get_oid(0)).unwrap();
-    assert_eq!(head_files, vec!["file_b.txt"]);
-
-    let first_files = git::commit_file_paths(&test_repo.repo, test_repo.get_oid(1)).unwrap();
-    assert_eq!(first_files, vec!["file_a.txt"]);
+    assert_eq!(
+        test_repo.commit_file_paths(test_repo.get_oid(0)),
+        vec!["file_b.txt"]
+    );
+    assert_eq!(
+        test_repo.commit_file_paths(test_repo.get_oid(1)),
+        vec!["file_a.txt"]
+    );
 }
 
 // ── Non-HEAD split tests ──────────────────────────────────────────────
@@ -67,30 +47,10 @@ fn split_non_head_commit() {
     let test_repo = TestRepo::new_with_remote();
 
     // Create a commit with two files
-    test_repo.write_file("file_a.txt", "content a");
-    test_repo.write_file("file_b.txt", "content b");
-    {
-        let mut index = test_repo.repo.index().unwrap();
-        index.add_path(std::path::Path::new("file_a.txt")).unwrap();
-        index.add_path(std::path::Path::new("file_b.txt")).unwrap();
-        index.write().unwrap();
-        let tree_id = index.write_tree().unwrap();
-        let tree = test_repo.repo.find_tree(tree_id).unwrap();
-        let sig = git2::Signature::now("Test", "test@test.com").unwrap();
-        let parent = test_repo.head_commit();
-        test_repo
-            .repo
-            .commit(
-                Some("HEAD"),
-                &sig,
-                &sig,
-                "Two files commit",
-                &tree,
-                &[&parent],
-            )
-            .unwrap();
-    }
-    let target_oid = test_repo.head_oid();
+    let target_oid = test_repo.commit_multi(
+        &[("file_a.txt", "content a"), ("file_b.txt", "content b")],
+        "Two files commit",
+    );
 
     // Add another commit on top
     test_repo.commit("Later commit", "later.txt");
@@ -176,23 +136,10 @@ fn split_preserves_other_commits() {
     let c1_oid = test_repo.commit("Before", "before.txt");
 
     // Create a commit with two files
-    test_repo.write_file("file_a.txt", "content a");
-    test_repo.write_file("file_b.txt", "content b");
-    {
-        let mut index = test_repo.repo.index().unwrap();
-        index.add_path(std::path::Path::new("file_a.txt")).unwrap();
-        index.add_path(std::path::Path::new("file_b.txt")).unwrap();
-        index.write().unwrap();
-        let tree_id = index.write_tree().unwrap();
-        let tree = test_repo.repo.find_tree(tree_id).unwrap();
-        let sig = git2::Signature::now("Test", "test@test.com").unwrap();
-        let parent = test_repo.head_commit();
-        test_repo
-            .repo
-            .commit(Some("HEAD"), &sig, &sig, "Split me", &tree, &[&parent])
-            .unwrap();
-    }
-    let split_oid = test_repo.head_oid();
+    let split_oid = test_repo.commit_multi(
+        &[("file_a.txt", "content a"), ("file_b.txt", "content b")],
+        "Split me",
+    );
 
     test_repo.commit("After", "after.txt");
 
@@ -223,42 +170,21 @@ fn split_preserves_other_commits() {
 fn split_with_woven_branches() {
     // Verify that split preserves merge topology of woven branches
     let test_repo = TestRepo::new_with_remote();
-    let workdir = test_repo.workdir();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
     // Create feature-a at merge-base with a two-file commit
-    git_branch::create(workdir.as_path(), "feature-a", &base_oid.to_string()).unwrap();
+    test_repo.create_branch_at("feature-a", &base_oid.to_string());
     test_repo.switch_branch("feature-a");
 
-    test_repo.write_file("fa1.txt", "content a1");
-    test_repo.write_file("fa2.txt", "content a2");
-    {
-        let mut index = test_repo.repo.index().unwrap();
-        index.add_path(std::path::Path::new("fa1.txt")).unwrap();
-        index.add_path(std::path::Path::new("fa2.txt")).unwrap();
-        index.write().unwrap();
-        let tree_id = index.write_tree().unwrap();
-        let tree = test_repo.repo.find_tree(tree_id).unwrap();
-        let sig = git2::Signature::now("Test", "test@test.com").unwrap();
-        let parent = test_repo.head_commit();
-        test_repo
-            .repo
-            .commit(
-                Some("HEAD"),
-                &sig,
-                &sig,
-                "Feature A files",
-                &tree,
-                &[&parent],
-            )
-            .unwrap();
-    }
-    let split_oid = test_repo.head_oid();
+    let split_oid = test_repo.commit_multi(
+        &[("fa1.txt", "content a1"), ("fa2.txt", "content a2")],
+        "Feature A files",
+    );
 
     // Switch back to integration, add a commit, then weave
     test_repo.switch_branch("integration");
     test_repo.commit("Int commit", "int.txt");
-    git_merge::merge_no_ff(workdir.as_path(), "feature-a").unwrap();
+    test_repo.merge_no_ff("feature-a");
 
     let result = super::split_commit_with_selection(
         &test_repo.repo,

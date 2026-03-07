@@ -1,4 +1,3 @@
-use crate::git_commands::{git_branch, git_merge};
 use crate::test_helpers::TestRepo;
 
 /// Helper: set up a test repo with an empty feature branch at the merge-base.
@@ -11,12 +10,7 @@ fn setup_with_woven_branch() -> TestRepo {
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
     // Create feature-a at merge-base (no merge — it's empty)
-    git_branch::create(
-        test_repo.workdir().as_path(),
-        "feature-a",
-        &base_oid.to_string(),
-    )
-    .unwrap();
+    test_repo.create_branch_at("feature-a", &base_oid.to_string());
 
     test_repo
 }
@@ -30,24 +24,23 @@ fn setup_with_woven_branch() -> TestRepo {
 ///               (feature-b)       ↗
 fn setup_with_two_branches() -> TestRepo {
     let test_repo = TestRepo::new_with_remote();
-    let workdir = test_repo.workdir();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
     // Create feature-a at merge-base with one commit
-    git_branch::create(workdir.as_path(), "feature-a", &base_oid.to_string()).unwrap();
+    test_repo.create_branch_at("feature-a", &base_oid.to_string());
     test_repo.switch_branch("feature-a");
     test_repo.commit("A1", "a1.txt");
     test_repo.switch_branch("integration");
 
     // Create feature-b at merge-base with one commit
-    git_branch::create(workdir.as_path(), "feature-b", &base_oid.to_string()).unwrap();
+    test_repo.create_branch_at("feature-b", &base_oid.to_string());
     test_repo.switch_branch("feature-b");
     test_repo.commit("B1", "b1.txt");
     test_repo.switch_branch("integration");
 
     // Weave both branches into integration
-    git_merge::merge_no_ff(workdir.as_path(), "feature-a").unwrap();
-    git_merge::merge_no_ff(workdir.as_path(), "feature-b").unwrap();
+    test_repo.merge_no_ff("feature-a");
+    test_repo.merge_no_ff("feature-b");
 
     test_repo
 }
@@ -72,9 +65,7 @@ fn commit_stages_specific_file() {
     assert!(result.is_ok(), "commit failed: {:?}", result);
 
     // feature-a should have the commit
-    let branch_oid = test_repo.get_branch_target("feature-a");
-    let commit = test_repo.find_commit(branch_oid);
-    assert_eq!(commit.summary().unwrap(), "Add new file");
+    assert_eq!(test_repo.branch_commit_summary("feature-a"), "Add new file");
 }
 
 #[test]
@@ -95,9 +86,7 @@ fn commit_stages_zz_all_changes() {
     assert!(result.is_ok(), "commit failed: {:?}", result);
 
     // feature-a should have the commit
-    let branch_oid = test_repo.get_branch_target("feature-a");
-    let commit = test_repo.find_commit(branch_oid);
-    assert_eq!(commit.summary().unwrap(), "Add files");
+    assert_eq!(test_repo.branch_commit_summary("feature-a"), "Add files");
 }
 
 #[test]
@@ -106,8 +95,7 @@ fn commit_uses_already_staged() {
 
     // Stage a file manually
     test_repo.write_file("staged.txt", "content");
-    crate::git_commands::git_commit::stage_files(test_repo.workdir().as_path(), &["staged.txt"])
-        .unwrap();
+    test_repo.stage_files(&["staged.txt"]);
 
     let result = test_repo.in_dir(|| {
         super::run(
@@ -119,9 +107,7 @@ fn commit_uses_already_staged() {
 
     assert!(result.is_ok(), "commit failed: {:?}", result);
 
-    let branch_oid = test_repo.get_branch_target("feature-a");
-    let commit = test_repo.find_commit(branch_oid);
-    assert_eq!(commit.summary().unwrap(), "Use staged");
+    assert_eq!(test_repo.branch_commit_summary("feature-a"), "Use staged");
 }
 
 #[test]
@@ -189,9 +175,7 @@ fn commit_to_new_branch_creates_and_weaves() {
     assert!(test_repo.branch_exists("feature-new"));
 
     // Branch should have the commit
-    let branch_oid = test_repo.get_branch_target("feature-new");
-    let commit = test_repo.find_commit(branch_oid);
-    assert_eq!(commit.summary().unwrap(), "Add file");
+    assert_eq!(test_repo.branch_commit_summary("feature-new"), "Add file");
 
     // Integration HEAD should be a merge commit (proper weave topology)
     let head = test_repo.head_commit();
@@ -251,20 +235,19 @@ fn commit_to_empty_branch_creates_merge_topology() {
 ///   HEAD = integration = Merge feature-a
 fn setup_with_one_woven_one_empty() -> TestRepo {
     let test_repo = TestRepo::new_with_remote();
-    let workdir = test_repo.workdir();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
     // Create feature-a at merge-base with one commit
-    git_branch::create(workdir.as_path(), "feature-a", &base_oid.to_string()).unwrap();
+    test_repo.create_branch_at("feature-a", &base_oid.to_string());
     test_repo.switch_branch("feature-a");
     test_repo.commit("A1", "a1.txt");
     test_repo.switch_branch("integration");
 
     // Weave feature-a into integration
-    git_merge::merge_no_ff(workdir.as_path(), "feature-a").unwrap();
+    test_repo.merge_no_ff("feature-a");
 
     // Create feature-b at merge-base (empty, no commits)
-    git_branch::create(workdir.as_path(), "feature-b", &base_oid.to_string()).unwrap();
+    test_repo.create_branch_at("feature-b", &base_oid.to_string());
 
     test_repo
 }
@@ -345,9 +328,7 @@ fn commit_moves_to_correct_branch_in_topology() {
     assert_eq!(parent.summary().unwrap(), "A1");
 
     // feature-b should still be intact
-    let branch_b_oid = test_repo.get_branch_target("feature-b");
-    let commit_b = test_repo.find_commit(branch_b_oid);
-    assert_eq!(commit_b.summary().unwrap(), "B1");
+    assert_eq!(test_repo.branch_commit_summary("feature-b"), "B1");
 }
 
 /// Bug: committing to a new branch when the file conflicts with an existing
@@ -356,19 +337,18 @@ fn commit_moves_to_correct_branch_in_topology() {
 #[test]
 fn commit_conflict_preserves_working_tree_changes() {
     let test_repo = TestRepo::new_with_remote();
-    let workdir = test_repo.workdir();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
     // Create feat1 branch with a commit that adds feature1
-    git_branch::create(workdir.as_path(), "feat1", &base_oid.to_string()).unwrap();
+    test_repo.create_branch_at("feat1", &base_oid.to_string());
     test_repo.switch_branch("feat1");
     test_repo.write_file("feature1", "feat 1 content");
-    crate::git_commands::git_commit::stage_files(workdir.as_path(), &["feature1"]).unwrap();
-    crate::git_commands::git_commit::commit(workdir.as_path(), "Feature 1").unwrap();
+    test_repo.stage_files(&["feature1"]);
+    test_repo.commit_staged("Feature 1");
     test_repo.switch_branch("integration");
 
     // Weave feat1 into integration
-    git_merge::merge_no_ff(workdir.as_path(), "feat1").unwrap();
+    test_repo.merge_no_ff("feat1");
 
     // Modify feature1 in the working tree (same file as feat1 commit)
     test_repo.write_file("feature1", "conflicting content");

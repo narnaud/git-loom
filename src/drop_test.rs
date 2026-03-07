@@ -1,5 +1,3 @@
-use crate::git;
-use crate::git_commands::{git_branch, git_merge};
 use crate::test_helpers::TestRepo;
 
 // ── Helper: create a woven branch with commits ─────────────────────────
@@ -18,11 +16,10 @@ use crate::test_helpers::TestRepo;
 /// ```
 fn setup_woven_branch(num_commits: usize) -> TestRepo {
     let test_repo = TestRepo::new_with_remote();
-    let workdir = test_repo.workdir();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
     // Create feature-a at merge-base
-    git_branch::create(workdir.as_path(), "feature-a", &base_oid.to_string()).unwrap();
+    test_repo.create_branch_at("feature-a", &base_oid.to_string());
 
     // Switch to feature-a and add commits
     test_repo.switch_branch("feature-a");
@@ -37,7 +34,7 @@ fn setup_woven_branch(num_commits: usize) -> TestRepo {
     test_repo.commit("Int", "int.txt");
 
     // Merge feature-a (creates a real merge commit since integration diverged)
-    git_merge::merge_no_ff(workdir.as_path(), "feature-a").unwrap();
+    test_repo.merge_no_ff("feature-a");
 
     test_repo
 }
@@ -124,11 +121,13 @@ fn drop_woven_branch_removes_commits_and_ref() {
     );
 
     // A1, A2 are gone from history, Int should remain
-    let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
-    let messages: Vec<&str> = info.commits.iter().map(|c| c.message.as_str()).collect();
-    assert!(!messages.contains(&"A1"), "A1 should be gone");
-    assert!(!messages.contains(&"A2"), "A2 should be gone");
-    assert!(messages.contains(&"Int"), "Int commit should remain");
+    let messages = test_repo.commit_messages();
+    assert!(!messages.contains(&"A1".to_string()), "A1 should be gone");
+    assert!(!messages.contains(&"A2".to_string()), "A2 should be gone");
+    assert!(
+        messages.contains(&"Int".to_string()),
+        "Int commit should remain"
+    );
 }
 
 #[test]
@@ -137,12 +136,7 @@ fn drop_branch_at_merge_base_just_deletes_ref() {
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
     // Create a branch at merge-base (no commits, no weaving)
-    git_branch::create(
-        test_repo.workdir().as_path(),
-        "empty-branch",
-        &base_oid.to_string(),
-    )
-    .unwrap();
+    test_repo.create_branch_at("empty-branch", &base_oid.to_string());
 
     // Add a commit on integration so there's something in the range
     test_repo.commit("C1", "c1.txt");
@@ -162,18 +156,17 @@ fn drop_branch_at_merge_base_just_deletes_ref() {
 #[test]
 fn drop_non_woven_branch_removes_commits_and_ref() {
     let test_repo = TestRepo::new_with_remote();
-    let workdir = test_repo.workdir();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
     // Create feature-a at merge-base and add commits
-    git_branch::create(workdir.as_path(), "feature-a", &base_oid.to_string()).unwrap();
+    test_repo.create_branch_at("feature-a", &base_oid.to_string());
     test_repo.switch_branch("feature-a");
     test_repo.commit("A1", "a1.txt");
     test_repo.commit("A2", "a2.txt");
 
     // Switch back to integration and fast-forward merge feature-a
     test_repo.switch_branch("integration");
-    git_merge::merge_no_ff(workdir.as_path(), "feature-a").unwrap();
+    test_repo.merge_no_ff("feature-a");
 
     // Force checkout to sync working tree after merge
     test_repo.force_checkout();
@@ -190,11 +183,13 @@ fn drop_non_woven_branch_removes_commits_and_ref() {
     );
 
     // A1, A2 should be gone, Int should remain
-    let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
-    let messages: Vec<&str> = info.commits.iter().map(|c| c.message.as_str()).collect();
-    assert!(!messages.contains(&"A1"), "A1 should be gone");
-    assert!(!messages.contains(&"A2"), "A2 should be gone");
-    assert!(messages.contains(&"Int"), "Int commit should remain");
+    let messages = test_repo.commit_messages();
+    assert!(!messages.contains(&"A1".to_string()), "A1 should be gone");
+    assert!(!messages.contains(&"A2".to_string()), "A2 should be gone");
+    assert!(
+        messages.contains(&"Int".to_string()),
+        "Int commit should remain"
+    );
 }
 
 #[test]
@@ -211,26 +206,25 @@ fn drop_file_target_fails() {
 #[test]
 fn drop_woven_branch_with_two_branches_preserves_other() {
     let test_repo = TestRepo::new_with_remote();
-    let workdir = test_repo.workdir();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
     // Create feature-a with commits
-    git_branch::create(workdir.as_path(), "feature-a", &base_oid.to_string()).unwrap();
+    test_repo.create_branch_at("feature-a", &base_oid.to_string());
     test_repo.switch_branch("feature-a");
     test_repo.commit("A1", "a1.txt");
     test_repo.commit("A2", "a2.txt");
     test_repo.switch_branch("integration");
 
     // Create feature-b with commits
-    git_branch::create(workdir.as_path(), "feature-b", &base_oid.to_string()).unwrap();
+    test_repo.create_branch_at("feature-b", &base_oid.to_string());
     test_repo.switch_branch("feature-b");
     test_repo.commit("B1", "b1.txt");
     test_repo.switch_branch("integration");
 
     // Add integration commit to prevent fast-forward, then weave both
     test_repo.commit("Int", "int.txt");
-    git_merge::merge_no_ff(workdir.as_path(), "feature-a").unwrap();
-    git_merge::merge_no_ff(workdir.as_path(), "feature-b").unwrap();
+    test_repo.merge_no_ff("feature-a");
+    test_repo.merge_no_ff("feature-b");
 
     // Drop feature-a
     let result = super::drop_branch(&test_repo.repo, "feature-a", true);
@@ -241,11 +235,10 @@ fn drop_woven_branch_with_two_branches_preserves_other() {
     assert!(test_repo.branch_exists("feature-b"));
 
     // B1 should remain, A1 and A2 should be gone
-    let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
-    let messages: Vec<&str> = info.commits.iter().map(|c| c.message.as_str()).collect();
-    assert!(!messages.contains(&"A1"), "A1 should be gone");
-    assert!(!messages.contains(&"A2"), "A2 should be gone");
-    assert!(messages.contains(&"B1"), "B1 should remain");
+    let messages = test_repo.commit_messages();
+    assert!(!messages.contains(&"A1".to_string()), "A1 should be gone");
+    assert!(!messages.contains(&"A2".to_string()), "A2 should be gone");
+    assert!(messages.contains(&"B1".to_string()), "B1 should remain");
 }
 
 // ── Co-located branch tests (same tip) ───────────────────────────────────
@@ -253,22 +246,21 @@ fn drop_woven_branch_with_two_branches_preserves_other() {
 #[test]
 fn drop_colocated_non_woven_preserves_other_branch_and_commits() {
     let test_repo = TestRepo::new_with_remote();
-    let workdir = test_repo.workdir();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
     // Create feature-a with a commit
-    git_branch::create(workdir.as_path(), "feature-a", &base_oid.to_string()).unwrap();
+    test_repo.create_branch_at("feature-a", &base_oid.to_string());
     test_repo.switch_branch("feature-a");
     test_repo.commit("A1", "a1.txt");
     test_repo.switch_branch("integration");
 
     // Fast-forward integration to feature-a
-    git_merge::merge_no_ff(workdir.as_path(), "feature-a").unwrap();
+    test_repo.merge_no_ff("feature-a");
     test_repo.force_checkout();
 
     // Create feature-b at the same tip as feature-a (co-located)
     let fa_tip = test_repo.get_branch_target("feature-a");
-    git_branch::create(workdir.as_path(), "feature-b", &fa_tip.to_string()).unwrap();
+    test_repo.create_branch_at("feature-b", &fa_tip.to_string());
 
     // Add a commit after so branches are not at HEAD
     test_repo.commit("Int", "int.txt");
@@ -290,31 +282,35 @@ fn drop_colocated_non_woven_preserves_other_branch_and_commits() {
     );
 
     // Commits should still be in history (not dropped)
-    let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
-    let messages: Vec<&str> = info.commits.iter().map(|c| c.message.as_str()).collect();
-    assert!(messages.contains(&"A1"), "A1 should still be in history");
-    assert!(messages.contains(&"Int"), "Int should still be in history");
+    let messages = test_repo.commit_messages();
+    assert!(
+        messages.contains(&"A1".to_string()),
+        "A1 should still be in history"
+    );
+    assert!(
+        messages.contains(&"Int".to_string()),
+        "Int should still be in history"
+    );
 }
 
 #[test]
 fn drop_colocated_woven_preserves_other_branch_and_commits() {
     let test_repo = TestRepo::new_with_remote();
-    let workdir = test_repo.workdir();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
     // Create feature-a with a commit
-    git_branch::create(workdir.as_path(), "feature-a", &base_oid.to_string()).unwrap();
+    test_repo.create_branch_at("feature-a", &base_oid.to_string());
     test_repo.switch_branch("feature-a");
     test_repo.commit("A1", "a1.txt");
     test_repo.switch_branch("integration");
 
     // Create feature-b at the same tip as feature-a (co-located)
     let fa_tip = test_repo.get_branch_target("feature-a");
-    git_branch::create(workdir.as_path(), "feature-b", &fa_tip.to_string()).unwrap();
+    test_repo.create_branch_at("feature-b", &fa_tip.to_string());
 
     // Add integration commit and weave feature-a (creates merge topology)
     test_repo.commit("Int", "int.txt");
-    git_merge::merge_no_ff(workdir.as_path(), "feature-a").unwrap();
+    test_repo.merge_no_ff("feature-a");
 
     // Drop feature-a — feature-b shares the same tip
     let result = super::drop_branch(&test_repo.repo, "feature-a", true);
@@ -333,10 +329,15 @@ fn drop_colocated_woven_preserves_other_branch_and_commits() {
     );
 
     // A1 should still be in history (feature-b still needs it)
-    let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
-    let messages: Vec<&str> = info.commits.iter().map(|c| c.message.as_str()).collect();
-    assert!(messages.contains(&"A1"), "A1 should still be in history");
-    assert!(messages.contains(&"Int"), "Int should still be in history");
+    let messages = test_repo.commit_messages();
+    assert!(
+        messages.contains(&"A1".to_string()),
+        "A1 should still be in history"
+    );
+    assert!(
+        messages.contains(&"Int".to_string()),
+        "Int should still be in history"
+    );
 }
 
 // ── Stacked branch tests ─────────────────────────────────────────────────
@@ -350,24 +351,23 @@ fn drop_stacked_outer_branch_preserves_inner_branch() {
     //
     // Dropping feat2 should keep feat1 and its commit A1.
     let test_repo = TestRepo::new_with_remote();
-    let workdir = test_repo.workdir();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
     // Create feat1 at merge-base with one commit
-    git_branch::create(workdir.as_path(), "feat1", &base_oid.to_string()).unwrap();
+    test_repo.create_branch_at("feat1", &base_oid.to_string());
     test_repo.switch_branch("feat1");
     test_repo.commit("A1", "a1.txt");
     let feat1_tip = test_repo.head_oid();
 
     // Create feat2 stacked on feat1 with one commit
-    git_branch::create(workdir.as_path(), "feat2", &feat1_tip.to_string()).unwrap();
+    test_repo.create_branch_at("feat2", &feat1_tip.to_string());
     test_repo.switch_branch("feat2");
     test_repo.commit("A2", "a2.txt");
     test_repo.switch_branch("integration");
 
     // Add integration commit and weave feat2 (which includes feat1)
     test_repo.commit("Int", "int.txt");
-    git_merge::merge_no_ff(workdir.as_path(), "feat2").unwrap();
+    test_repo.merge_no_ff("feat2");
 
     // Drop feat2
     let result = super::drop_branch(&test_repo.repo, "feat2", true);
@@ -380,11 +380,16 @@ fn drop_stacked_outer_branch_preserves_inner_branch() {
     assert!(test_repo.branch_exists("feat1"), "feat1 should still exist");
 
     // A1 should remain in history, A2 should be gone
-    let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
-    let messages: Vec<&str> = info.commits.iter().map(|c| c.message.as_str()).collect();
-    assert!(messages.contains(&"A1"), "A1 should still be in history");
-    assert!(!messages.contains(&"A2"), "A2 should be gone");
-    assert!(messages.contains(&"Int"), "Int should still be in history");
+    let messages = test_repo.commit_messages();
+    assert!(
+        messages.contains(&"A1".to_string()),
+        "A1 should still be in history"
+    );
+    assert!(!messages.contains(&"A2".to_string()), "A2 should be gone");
+    assert!(
+        messages.contains(&"Int".to_string()),
+        "Int should still be in history"
+    );
 }
 
 // ── Drop via run() (end-to-end) ─────────────────────────────────────────
