@@ -9,11 +9,13 @@ use crate::git_commands::{self, git_branch};
 use crate::msg;
 use crate::weave::{self, Weave};
 
-/// Drop a commit or a branch from history.
+/// Drop a commit, branch, or file from history or the working tree.
 ///
 /// Dispatches based on the resolved target type:
 /// - Commit → remove the commit via interactive rebase
 /// - Branch → remove all branch commits, unweave merge topology, delete the ref
+/// - File → restore/delete the file (tracked: restore, new: delete)
+/// - Unstaged (`zz`) → discard all local changes (restore + clean)
 pub fn run(target: String, skip_confirm: bool) -> Result<()> {
     let repo = git::open_repo()?;
 
@@ -23,25 +25,68 @@ pub fn run(target: String, skip_confirm: bool) -> Result<()> {
         Target::Commit(hash) => drop_commit(&repo, &hash, skip_confirm),
         Target::Branch(name) => drop_branch(&repo, &name, skip_confirm),
         Target::File(path) => drop_file(&repo, &path, skip_confirm),
-        Target::Unstaged => {
-            bail!("Cannot drop unstaged changes\nUse `git restore` to discard changes")
-        }
+        Target::Unstaged => drop_all(&repo, skip_confirm),
         Target::CommitFile { .. } => {
             bail!("Cannot drop a commit file\nUse `git loom fold <file_id> zz` to uncommit a file")
         }
     }
 }
 
-/// Drop a file's changes by running `git restore`.
+/// Drop a file: restore tracked changes, or delete new/untracked files.
 fn drop_file(repo: &Repository, path: &str, skip_confirm: bool) -> Result<()> {
     let workdir = git::require_workdir(repo, "drop")?;
 
-    if !skip_confirm && !msg::confirm(&format!("Discard changes to `{}`?", path))? {
+    let status = repo
+        .status_file(std::path::Path::new(path))
+        .with_context(|| format!("'{}' is not tracked by git", path))?;
+
+    if status.is_wt_new() {
+        // Untracked file — delete it
+        if !skip_confirm && !msg::confirm(&format!("Delete `{}`?", path))? {
+            bail!("Cancelled");
+        }
+        std::fs::remove_file(workdir.join(path))
+            .with_context(|| format!("Failed to delete '{}'", path))?;
+        msg::success(&format!("Deleted `{}`", path));
+    } else if status.is_index_new() {
+        // Staged new file — remove from index and disk
+        if !skip_confirm && !msg::confirm(&format!("Delete `{}`?", path))? {
+            bail!("Cancelled");
+        }
+        git_commands::run_git(workdir, &["rm", "--force", path])?;
+        msg::success(&format!("Deleted `{}`", path));
+    } else {
+        // Tracked file with modifications — restore it
+        if !skip_confirm && !msg::confirm(&format!("Discard changes to `{}`?", path))? {
+            bail!("Cancelled");
+        }
+        git_commands::run_git(workdir, &["restore", "--staged", "--worktree", path])?;
+        msg::success(&format!("Restored `{}`", path));
+    }
+
+    Ok(())
+}
+
+/// Drop all local changes: restore tracked files and delete untracked files.
+fn drop_all(repo: &Repository, skip_confirm: bool) -> Result<()> {
+    let workdir = git::require_workdir(repo, "drop")?;
+
+    let mut opts = git2::StatusOptions::new();
+    opts.include_untracked(true).recurse_untracked_dirs(false);
+    let statuses = repo.statuses(Some(&mut opts))?;
+
+    if statuses.is_empty() {
+        bail!("No local changes to discard");
+    }
+
+    if !skip_confirm && !msg::confirm("Discard all local changes?")? {
         bail!("Cancelled");
     }
 
-    git_commands::run_git(workdir, &["restore", "--staged", "--worktree", path])?;
-    msg::success(&format!("Restored `{}`", path));
+    git_commands::run_git(workdir, &["restore", "--staged", "--worktree", "."])?;
+    git_commands::run_git(workdir, &["clean", "-fd"])?;
+
+    msg::success("Discarded all local changes");
     Ok(())
 }
 
