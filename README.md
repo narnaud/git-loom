@@ -82,9 +82,10 @@ Commands:
   help    Print this message or the help of the given subcommand(s)
 
 Options:
-      --no-color  Disable colored output
-  -h, --help      Print help
-  -V, --version   Print version
+      --no-color        Disable colored output
+      --theme <THEME>   Color theme: auto, dark, light [default: auto]
+  -h, --help            Print help
+  -V, --version         Print version
 ```
 
 ## Set Up Your Shell
@@ -154,6 +155,7 @@ git config loom.remote-type gerrit   # Force Gerrit push (refs/for/<branch>)
 | Flag | Description |
 |------|-------------|
 | `--no-color` | Disable colored output |
+| `--theme <auto\|dark\|light>` | Set the graph color theme (default: `auto`) |
 
 ## Contributing
 
