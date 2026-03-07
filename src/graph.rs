@@ -274,7 +274,17 @@ fn render_working_changes(out: &mut String, changes: &[FileChange], ids: &IdAllo
         "]".color(COLOR_DIM)
     )
     .unwrap();
-    if changes.is_empty() {
+
+    let tracked: Vec<&FileChange> = changes
+        .iter()
+        .filter(|f| !(f.index == '?' && f.worktree == '?'))
+        .collect();
+    let untracked: Vec<&FileChange> = changes
+        .iter()
+        .filter(|f| f.index == '?' && f.worktree == '?')
+        .collect();
+
+    if tracked.is_empty() && untracked.is_empty() {
         writeln!(
             out,
             "{}   {}",
@@ -283,23 +293,32 @@ fn render_working_changes(out: &mut String, changes: &[FileChange], ids: &IdAllo
         )
         .unwrap();
     } else {
-        for change in changes {
+        for change in &tracked {
             writeln!(
                 out,
                 "{}   {} {}{} {}",
                 "│".color(COLOR_GRAPH),
                 ids.get_file(&change.path).color(COLOR_SHORTID).underline(),
-                if change.index.to_string() == "?" {
-                    change.index.to_string().color(COLOR_UNSTAGED)
-                } else {
-                    change.index.to_string().color(COLOR_STAGED)
-                },
+                change.index.to_string().color(COLOR_STAGED),
+                change.worktree.to_string().color(COLOR_UNSTAGED),
+                change.path.color(COLOR_MESSAGE)
+            )
+            .unwrap();
+        }
+        for change in &untracked {
+            writeln!(
+                out,
+                "{}   {} {}{} {}",
+                "│".color(COLOR_GRAPH),
+                ids.get_file(&change.path).color(COLOR_SHORTID).underline(),
+                change.index.to_string().color(COLOR_UNSTAGED),
                 change.worktree.to_string().color(COLOR_UNSTAGED),
                 change.path.color(COLOR_MESSAGE)
             )
             .unwrap();
         }
     }
+
     writeln!(out, "{}", "│".color(COLOR_GRAPH)).unwrap();
 }
 
