@@ -48,7 +48,7 @@ git checkout main
 # Create an integration branch
 git loom init
 
-# Create a commit on a feature branch (the branch `feature-auth` is automatically created)
+# Create a commit on a feature branch (branch `feature-auth` is automatically created)
 git loom commit -b feature-auth -m "add login form" zz
 
 # Create a second commit on the branch
