@@ -157,6 +157,33 @@ fn short_source_does_not_hang() {
     let id_branch = alloc.get_branch("a");
     let id_file = alloc.get_file("a");
     assert_ne!(id_branch, id_file);
+    // Single-char names must still produce 2+ char IDs
+    assert!(id_branch.len() >= 2, "branch 'a': got '{}'", id_branch);
+    assert!(id_file.len() >= 2, "file 'a': got '{}'", id_file);
+}
+
+#[test]
+fn single_char_file_gets_two_char_id() {
+    let alloc = IdAllocator::new(vec![Entity::File("a".to_string())]);
+    let id = alloc.get_file("a");
+    assert_eq!(id, "aa");
+}
+
+#[test]
+fn commits_allocated_before_branches() {
+    // Commit eaec… naturally wants "ea". Branch "feat2" also generates "ea"
+    // as a candidate (f+e, e+a, …). Commits should get priority.
+    let commit_oid = Oid::from_str("eaec409000000000000000000000000000000000").unwrap();
+    let alloc = IdAllocator::new(vec![
+        Entity::Branch("feat2".to_string()),
+        Entity::Commit(commit_oid),
+    ]);
+    // Commit keeps its natural 2-char hex prefix
+    assert_eq!(alloc.get_commit(commit_oid), "ea");
+    // Branch gets an alternative that doesn't conflict
+    let branch_id = alloc.get_branch("feat2");
+    assert_ne!(branch_id, "ea");
+    assert_eq!(branch_id.len(), 2, "feat2: got '{}'", branch_id);
 }
 
 #[test]

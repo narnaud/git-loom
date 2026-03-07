@@ -43,6 +43,9 @@ main        → candidates: ma, mi, mn, ai, an, in, …
 master      → candidates: ma, ms, mt, me, mr, as, at, …
 ```
 
+**Single-character names** (e.g. a file named `a`): the character is doubled
+to meet the 2-char minimum: `a` → `aa`.
+
 **Commits**: successive hex prefixes (2, 3, 4, … chars). These are the only
 entities likely to require 3+ character IDs.
 
@@ -51,9 +54,23 @@ entities likely to require 3+ character IDs.
 If all 2-char candidates are exhausted (unlikely for branches and files),
 the algorithm falls back to 3+ character prefixes.
 
+## Allocation Order
+
+Entities are allocated IDs in priority order, not insertion order:
+
+1. **Unstaged** (always `zz`)
+2. **Commits** — allocated first because they have the most constrained
+   candidate set (hex prefixes only). This ensures commits keep their
+   natural 2-char hex prefix unless two commits collide.
+3. **Branches and Files** — allocated last. Their rich word-based candidate
+   sets make it easy to find alternatives around already-assigned commit IDs.
+
+Within each priority group, the original entity order is preserved (stable
+sort) for determinism.
+
 ## Collision Resolution
 
-IDs are assigned greedily in entity order using **first-letter collision
+IDs are assigned greedily in priority order using **first-letter collision
 avoidance**. Each entity receives its highest-priority available candidate,
 with preference for candidates whose first letter hasn't been used yet.
 
@@ -184,9 +201,9 @@ In this example:
 - **Stable across changes:** file IDs use the filename (not path), so moving
   a file between directories preserves its ID. Branch and commit IDs are
   derived from stable sources (name and hash respectively).
-- **Minimal length:** IDs target 2 characters for branches and files,
-  using word structure and greedy candidate selection to avoid unnecessary
-  extension. Only commits (hex hashes) may require 3+ characters.
+- **Minimal length:** IDs are always at least 2 characters. Branches and
+  files target 2 characters using word structure and greedy candidate
+  selection. Only commits (hex hashes) may require 3+ characters.
 
 ## Resolving Short IDs
 
@@ -264,9 +281,13 @@ Git reference resolution has no prerequisites (works in any repository).
 - **Word-based candidates:** splitting on `-`, `_`, `/` and generating
   character combinations from different words produces many 2-char options,
   keeping IDs short even when names share long prefixes.
-- **Greedy assignment with smart ordering:** entities are processed in order,
-  each receiving the first available candidate that prefers unused first
-  letters. This is simple, deterministic, and fast while producing better IDs.
+- **Commit-first allocation:** commits are allocated before branches and
+  files because hex prefixes are the most constrained candidate set. This
+  prevents branches from "stealing" a commit's natural 2-char prefix.
+- **Greedy assignment with smart ordering:** within each priority group,
+  entities are processed in order, each receiving the first available
+  candidate that prefers unused first letters. This is simple, deterministic,
+  and fast while producing better IDs.
 - **File stem over full filename:** using the stem (without extension)
   means IDs reflect meaningful name parts, not `.rs` or `.txt` suffixes.
 - **Filename over full path:** gives shorter, more memorable IDs and
