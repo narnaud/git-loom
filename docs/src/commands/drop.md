@@ -1,6 +1,6 @@
 # drop
 
-Drop a commit or an entire branch from history.
+Drop a commit, branch, file, or all local changes.
 
 ## Usage
 
@@ -40,15 +40,29 @@ Removes the entire branch in a single operation:
 
 ### When Target is a File
 
-Discards the file's staged and unstaged changes by running `git restore --staged --worktree`. A confirmation prompt is shown first (skippable with `-y`).
+Behavior depends on the file's status:
+
+- **Tracked file with modifications** — `git restore --staged --worktree <path>`. Prompt: `"Discard changes to '<path>'?"`. Output: `"Restored '<path>'"`.
+- **Staged new file** (`A` in index) — `git rm --force <path>`. Prompt: `"Delete '<path>'?"`. Output: `"Deleted '<path>'"`.
+- **Untracked file** (`??`) — deleted from disk. Prompt: `"Delete '<path>'?"`. Output: `"Deleted '<path>'"`.
+
+A confirmation prompt is shown first (skippable with `-y`).
+
+### When Target is `zz` (all local changes)
+
+Discards everything in the working tree and index:
+
+1. `git restore --staged --worktree .` — reverts all tracked modifications
+2. `git clean -fd` — deletes all untracked files and directories
+
+If there are no local changes, the command errors with `"No local changes to discard"`.
 
 ## Target Resolution
 
 1. **Branch names** — exact match resolves to a branch (drops the branch)
 2. **Git references** — full/partial hashes resolve to commits
-3. **Short IDs** — branch short IDs resolve to branches, commit short IDs to commits
-
-File short IDs resolve to files (restores the file).
+3. **Short IDs** — branch short IDs resolve to branches, commit short IDs to commits, file short IDs to files
+4. **`zz`** — always resolves to all local changes
 
 ## Examples
 
@@ -84,7 +98,24 @@ git-loom drop fa
 
 ```bash
 git-loom drop ma
-# Discards staged and unstaged changes to src/main.rs
+# Discard changes to `src/main.rs`? (y/n)
+# Restored `src/main.rs`
+```
+
+### Drop a new or untracked file
+
+```bash
+git-loom drop nf
+# Delete `new_feature.rs`? (y/n)
+# Deleted `new_feature.rs`
+```
+
+### Drop all local changes
+
+```bash
+git-loom drop zz
+# Discard all local changes? (y/n)
+# Discarded all local changes
 ```
 
 ### Drop a co-located branch
