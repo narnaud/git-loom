@@ -6,6 +6,7 @@ Fold source(s) into a target — a polymorphic command that amends files into co
 
 ```
 git-loom fold <source>... <target>
+git-loom fold --create <commit> <new-branch>
 ```
 
 The last argument is always the target. All preceding arguments are sources. At least two arguments are required.
@@ -23,6 +24,7 @@ The action depends on the types of the arguments, detected automatically:
 | Commit | `zz` | **Uncommit**: remove commit, put changes in working directory |
 | CommitFile | `zz` | **Uncommit file**: remove one file from a commit to working directory |
 | CommitFile | Commit | **Move file**: move one file's changes between commits |
+| Commit | New branch (`-c`) | **Create**: make a new branch and move the commit into it |
 
 CommitFile sources use the `commit_sid:index` format shown by `git loom status -f` (e.g. `fa:0` for the first file in commit `fa`).
 
@@ -69,6 +71,22 @@ Removes the commit from its current branch and appends it to the target branch's
 ```bash
 git-loom fold d0 feature-b
 # Commit d0 moves to feature-b, removed from its original branch
+```
+
+### Create a new branch and move a commit into it
+
+Use `--create` (`-c`) to create a new branch and move the commit in one step. Works whether the commit is a loose commit on the integration line or already on an existing branch.
+
+```bash
+git-loom fold -c d0 new-feature
+# Creates new-feature and moves commit d0 into it
+```
+
+If the branch already exists, a warning is printed and the commit is moved there anyway — same as a normal `fold <commit> <branch>`.
+
+```bash
+git-loom fold -c d0 existing-branch
+# ! Branch `existing-branch` already exists — moving commit to it
 ```
 
 ### Uncommit to the working directory
