@@ -1,6 +1,7 @@
 use anyhow::{Result, bail};
 use git2::Repository;
 
+use crate::branch;
 use crate::git::{self, Target};
 use crate::git_commands::git_rebase;
 use crate::git_commands::{self, git_branch, git_commit};
@@ -84,6 +85,7 @@ pub fn reword_branch(repo: &Repository, old_name: &str, new_name: &str) -> Resul
 
     git_branch::rename(workdir, old_name, new_name)?;
 
+    branch::warn_if_hidden(repo, new_name);
     msg::success(&format!("Renamed branch `{}` to `{}`", old_name, new_name));
     Ok(())
 }
