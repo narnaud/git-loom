@@ -5,6 +5,7 @@ use crate::git::{self, Target};
 use crate::git_commands::{self, git_branch, git_commit, git_rebase};
 use crate::msg;
 use crate::weave::{self, Weave};
+use std::path::Path;
 
 /// Temporary branch used to track a commit's new OID through a rebase.
 const TRACK_BRANCH: &str = "_loom-track";
@@ -15,7 +16,9 @@ const TRACK_BRANCH: &str = "_loom-track";
 /// - File(s) + Commit → amend files into the commit
 /// - Commit + Commit  → fixup source into target (source disappears)
 /// - Commit + Branch   → move commit to the branch
-pub fn run(args: Vec<String>) -> Result<()> {
+///
+/// With `--create` (`-c`): create a new branch and move the source commit into it.
+pub fn run(create: bool, args: Vec<String>) -> Result<()> {
     if args.len() < 2 {
         bail!(
             "At least two arguments required (one source + one target)\n\
@@ -24,6 +27,10 @@ pub fn run(args: Vec<String>) -> Result<()> {
     }
 
     let repo = git::open_repo()?;
+
+    if create {
+        return run_create(&repo, &args);
+    }
 
     // Last argument is the target, everything else is a source
     let (source_args, target_arg) = args.split_at(args.len() - 1);
@@ -64,6 +71,85 @@ pub fn run(args: Vec<String>) -> Result<()> {
             target_commit,
         } => fold_commit_file_to_commit(&repo, &source_commit, &path, &target_commit),
     }
+}
+
+/// Create a new branch and move the source commit into it.
+///
+/// `args` must be exactly `[<commit>, <new-branch-name>]`.
+/// The branch is created at the merge-base, then the commit is moved to it
+/// using the same Weave machinery as the normal commit-to-branch fold.
+fn run_create(repo: &Repository, args: &[String]) -> Result<()> {
+    if args.len() != 2 {
+        bail!(
+            "fold --create requires exactly one commit and one new branch name\n\
+             Usage: loom fold -c <commit> <new-branch>"
+        );
+    }
+
+    let (source_arg, branch_name) = (&args[0], &args[1]);
+    let workdir = git::require_workdir(repo, "fold")?;
+
+    // Resolve source — must be a commit
+    let source = resolve_fold_arg(repo, source_arg)?;
+    let commit_hash = match source {
+        Target::Commit(hash) => hash,
+        Target::Branch(_) => bail!("Source must be a commit, not a branch"),
+        Target::File(_) => bail!("Source must be a commit, not a file"),
+        _ => bail!("Source must be a commit"),
+    };
+
+    git_branch::validate_name(branch_name)?;
+
+    // If the branch already exists, warn and fall through to a normal move.
+    let branch_exists = repo
+        .find_branch(branch_name, git2::BranchType::Local)
+        .is_ok();
+    if branch_exists {
+        msg::warn(&format!(
+            "Branch `{}` already exists — moving commit to it",
+            branch_name
+        ));
+        return fold_commit_to_branch(repo, &commit_hash, branch_name);
+    }
+
+    // Create the branch at the merge-base so it has no commits of its own yet;
+    // move_commit_to_branch will add a section for it in the Weave graph.
+    let info = git::gather_repo_info(repo, false, 1).ok();
+    let base_hash = match &info {
+        Some(info) => info.upstream.merge_base_oid.to_string(),
+        None => bail!(
+            "Cannot create branch: no upstream tracking branch configured\n\
+             Use 'loom branch <name> -t <commit>' instead"
+        ),
+    };
+
+    create_branch_and_move(workdir, repo, &commit_hash, branch_name, &base_hash)
+}
+
+/// Create a branch at `base_hash`, then move `commit_hash` to it.
+fn create_branch_and_move(
+    workdir: &Path,
+    repo: &Repository,
+    commit_hash: &str,
+    branch_name: &str,
+    base_hash: &str,
+) -> Result<()> {
+    git_branch::create(workdir, branch_name, base_hash)?;
+
+    if let Err(e) = move_commit_to_branch(repo, commit_hash, branch_name) {
+        let _ = git_branch::delete(workdir, branch_name);
+        return Err(e);
+    }
+
+    let new_hash = git_commands::rev_parse(workdir, branch_name)?;
+    msg::success(&format!(
+        "Created branch `{}` and moved `{}` to it (now `{}`)",
+        branch_name,
+        git_commands::short_hash(commit_hash),
+        git_commands::short_hash(&new_hash)
+    ));
+
+    Ok(())
 }
 
 /// The classified fold operation.

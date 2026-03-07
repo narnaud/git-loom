@@ -93,6 +93,12 @@ pub fn success(message: &str) {
     println!("{} {}", "✓".green(), colorize_backticks(message));
 }
 
+/// Print a warning message with a yellow exclamation mark.
+/// Text between backticks is highlighted in yellow.
+pub fn warn(message: &str) {
+    println!("{} {}", "!".yellow(), colorize_backticks(message));
+}
+
 /// Print an error message with a red cross to stderr.
 /// Additional lines are treated as hints and prefixed with a blue arrow.
 /// Text between backticks is highlighted in yellow.
