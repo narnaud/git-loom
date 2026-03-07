@@ -139,6 +139,18 @@ Show history before the base with a positional argument (`git loom 3` or `git lo
 
 Context commits are dimmed and display-only (no short ID, not actionable). The default is 1 (no extra context).
 
+## Theming
+
+The graph colors adapt to the terminal background via the global `--theme` flag:
+
+```bash
+git loom --theme light status   # Light terminal background
+git loom --theme dark status    # Dark terminal background
+git loom --theme auto status    # Auto-detect (default)
+```
+
+See [Configuration](../configuration.md#--theme) for details.
+
 ## Prerequisites
 
 - Must be on a local branch (not detached HEAD)
