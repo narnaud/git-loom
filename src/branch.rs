@@ -48,6 +48,7 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
 
     git_branch::create(workdir, &name, &commit_hash)?;
 
+    warn_if_hidden(&repo, &name);
     msg::success(&format!(
         "Created branch `{}` at `{}`",
         name,
@@ -73,6 +74,18 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Emit a warning if `name` matches the configured hidden branch pattern.
+pub(crate) fn warn_if_hidden(repo: &Repository, name: &str) {
+    let pattern =
+        git::hide_branch_pattern(repo).unwrap_or_else(|| git::DEFAULT_HIDE_PATTERN.to_string());
+    if !pattern.is_empty() && name.starts_with(&pattern) {
+        msg::warn(&format!(
+            "Branch `{}` is hidden from status by default. Use `--all` to show it.",
+            name
+        ));
+    }
 }
 
 /// Determine if weaving is needed after branch creation.

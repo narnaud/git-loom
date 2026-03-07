@@ -88,6 +88,9 @@ pub fn ensure_branch_not_exists(repo: &Repository, name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Default prefix for branches hidden from status display.
+pub(crate) const DEFAULT_HIDE_PATTERN: &str = "local-";
+
 /// Read the hidden branch prefix from git config `loom.hideBranchPattern`.
 /// Returns `None` if the config key is not set.
 pub fn hide_branch_pattern(repo: &Repository) -> Option<String> {

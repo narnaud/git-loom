@@ -4,9 +4,6 @@ use anyhow::Result;
 
 use crate::{git, graph};
 
-/// Branch name prefix used to identify local branches that should be hidden by default in status display.
-const LOCAL_BRANCH: &str = "local-";
-
 pub fn run(show_files: bool, context: usize, show_all: bool, theme: graph::Theme) -> Result<()> {
     let repo = git::open_repo()?;
     let _ = git::require_workdir(&repo, "display status")?;
@@ -14,7 +11,8 @@ pub fn run(show_files: bool, context: usize, show_all: bool, theme: graph::Theme
     let opts = graph::default_render_opts(theme);
     let mut info = git::gather_repo_info(&repo, show_files, context)?;
     if !show_all {
-        let pattern = git::hide_branch_pattern(&repo).unwrap_or_else(|| LOCAL_BRANCH.to_string());
+        let pattern = git::hide_branch_pattern(&repo)
+            .unwrap_or_else(|| git::DEFAULT_HIDE_PATTERN.to_string());
         if !pattern.is_empty() {
             hide_branches(&mut info, &pattern);
         }
