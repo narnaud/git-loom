@@ -18,10 +18,11 @@ git-loom push [branch]
 
 Detection priority (first match wins):
 
-1. **Explicit config** — `git config loom.remote-type` set to `github` or `gerrit`
+1. **Explicit config** — `git config loom.remote-type` set to `github`, `azure`, or `gerrit`
 2. **URL heuristics** — remote URL contains `github.com` → GitHub
-3. **Hook inspection** — `.git/hooks/commit-msg` contains "gerrit" → Gerrit
-4. **Fallback** — Plain Git
+3. **URL heuristics** — remote URL contains `dev.azure.com` → Azure DevOps
+4. **Hook inspection** — `.git/hooks/commit-msg` contains "gerrit" → Gerrit
+5. **Fallback** — Plain Git
 
 ## Push Strategies
 
@@ -46,6 +47,15 @@ In a **fork workflow** (tracking `upstream/main`), pushes go to `origin` (your f
 
 If the branch being pushed is the upstream target branch itself, PR creation is skipped.
 
+### Azure DevOps
+
+```bash
+git push --force-with-lease --force-if-includes -u <remote> <branch>
+az repos pr create --open --source-branch <branch> --target-branch <target> --detect
+```
+
+Pushes the branch with `--force-with-lease`, then opens the Azure DevOps PR creation page in the browser via the `az` CLI. `--detect` auto-detects the organization and project from the remote URL. If `az` is not installed, the push succeeds with a message suggesting to install it.
+
 ### Gerrit
 
 ```bash
@@ -64,6 +74,14 @@ git-loom push feature-a
 ```
 
 ### Push to GitHub
+
+```bash
+git-loom push feature-a
+# Pushed 'feature-a' to origin
+# (browser opens to PR creation page)
+```
+
+### Push to Azure DevOps
 
 ```bash
 git-loom push feature-a
@@ -102,3 +120,4 @@ git-loom push feature-a
 - The target branch must be woven into the integration branch
 - Network access to the remote
 - `gh` CLI (optional, for GitHub PR creation)
+- `az` CLI (optional, for Azure DevOps PR creation)
