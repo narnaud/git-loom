@@ -39,8 +39,9 @@ git-loom drop <target>
 - If `<target>` resolves to a commit: removes the commit from history
 - If `<target>` resolves to a branch: removes all commits, unweaves merge
   topology, and deletes the branch ref
-- If `<target>` resolves to a file: restores the file (discards changes)
-  after a y/n confirmation (skippable with `-y`)
+- If `<target>` resolves to a file: discards changes after a y/n confirmation
+  (skippable with `-y`); see "When Target is a File" below
+- If `<target>` is `zz`: discards all local changes (restore + clean)
 
 ## What Happens
 
@@ -140,19 +141,52 @@ the sibling branch. No commits are removed — only the branch ref is deleted.
 
 ### When Target is a File
 
-The file's staged and unstaged changes are discarded by running
-`git restore --staged --worktree <path>`. A confirmation prompt is shown
-first (skippable with `-y`).
+The behavior depends on the file's status:
+
+- **Tracked file with modifications** (`M`, `D`, `R` in index or worktree):
+  `git restore --staged --worktree <path>` restores it to its committed state.
+  Prompt: `"Discard changes to '<path>'?"`. Success: `"Restored '<path>'"`.
+
+- **Staged new file** (`A` in index): `git rm --force <path>` removes it
+  from the index and deletes the file from disk.
+  Prompt: `"Delete '<path>'?"`. Success: `"Deleted '<path>'"`.
+
+- **Untracked file** (`??`): the file is deleted from disk.
+  Prompt: `"Delete '<path>'?"`. Success: `"Deleted '<path>'"`.
+
+A confirmation prompt is shown first (skippable with `-y`).
 
 **What changes:**
 
-- The file is restored to its committed state (staged and unstaged changes
-  are discarded)
+- The file is removed or restored (staged and unstaged changes are discarded)
 
 **What stays the same:**
 
 - All commits and branch refs
 - Changes to other files
+
+### When Target is `zz` (all local changes)
+
+`zz` is the special short ID for all local changes. Running `drop zz` discards
+everything in the working tree and index:
+
+1. `git restore --staged --worktree .` — restores all tracked modifications
+2. `git clean -fd` — deletes all untracked files and directories
+
+If there are no local changes, the command errors with:
+`"No local changes to discard"`.
+
+Prompt: `"Discard all local changes?"`. Success: `"Discarded all local changes"`.
+
+**What changes:**
+
+- All tracked modifications are reverted
+- All untracked files and directories are deleted
+
+**What stays the same:**
+
+- All commits and branch refs
+- Ignored files
 
 ## Target Resolution
 
@@ -237,6 +271,25 @@ git-loom status
 git-loom drop ma
 # Discard changes to `src/main.rs`? (y/n)
 # Restored `src/main.rs`
+```
+
+### Drop a new/untracked file
+
+```bash
+git-loom status
+# Shows: │   nf  ? new_feature.rs
+
+git-loom drop nf
+# Delete `new_feature.rs`? (y/n)
+# Deleted `new_feature.rs`
+```
+
+### Drop all local changes
+
+```bash
+git-loom drop zz
+# Discard all local changes? (y/n)
+# Discarded all local changes
 ```
 
 ### Drop the last commit on a branch (auto-deletes branch)

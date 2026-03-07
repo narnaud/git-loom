@@ -417,3 +417,101 @@ fn run_drop_branch_by_name() {
     assert!(result.is_ok(), "run failed: {:?}", result);
     assert!(!test_repo.branch_exists("feature-a"));
 }
+
+// ── Drop file tests ─────────────────────────────────────────────────────
+
+#[test]
+fn drop_file_restores_tracked_modifications() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("Base", "base.txt");
+
+    // Modify the tracked file
+    test_repo.write_file("base.txt", "modified content");
+
+    let result = super::drop_file(&test_repo.repo, "base.txt", true);
+    assert!(result.is_ok(), "drop_file failed: {:?}", result);
+
+    // File should be restored to its committed state (content == commit message)
+    assert_eq!(test_repo.read_file("base.txt"), "Base");
+    assert!(
+        test_repo.status_porcelain().is_empty(),
+        "working tree should be clean"
+    );
+}
+
+#[test]
+fn drop_file_deletes_untracked_file() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("Base", "base.txt");
+
+    // Write an untracked file
+    test_repo.write_file("untracked.txt", "new content");
+
+    let result = super::drop_file(&test_repo.repo, "untracked.txt", true);
+    assert!(result.is_ok(), "drop_file failed: {:?}", result);
+
+    // File should be deleted
+    let path = test_repo.workdir().join("untracked.txt");
+    assert!(!path.exists(), "untracked.txt should be deleted");
+    assert!(
+        test_repo.status_porcelain().is_empty(),
+        "working tree should be clean"
+    );
+}
+
+#[test]
+fn drop_file_deletes_staged_new_file() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("Base", "base.txt");
+
+    // Write and stage a new file
+    test_repo.write_file("new.txt", "new content");
+    test_repo.stage_files(&["new.txt"]);
+
+    let result = super::drop_file(&test_repo.repo, "new.txt", true);
+    assert!(result.is_ok(), "drop_file failed: {:?}", result);
+
+    // File should be deleted
+    let path = test_repo.workdir().join("new.txt");
+    assert!(!path.exists(), "new.txt should be deleted");
+    assert!(
+        test_repo.status_porcelain().is_empty(),
+        "working tree should be clean"
+    );
+}
+
+// ── Drop all (zz) tests ─────────────────────────────────────────────────
+
+#[test]
+fn drop_all_discards_tracked_and_untracked_changes() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("Base", "base.txt");
+
+    // Mix of changes: modify tracked file + create untracked file
+    test_repo.write_file("base.txt", "modified");
+    test_repo.write_file("untracked.txt", "new");
+
+    let result = super::drop_all(&test_repo.repo, true);
+    assert!(result.is_ok(), "drop_all failed: {:?}", result);
+
+    assert!(
+        test_repo.status_porcelain().is_empty(),
+        "working tree should be clean"
+    );
+    let path = test_repo.workdir().join("untracked.txt");
+    assert!(!path.exists(), "untracked.txt should be deleted");
+    assert_eq!(test_repo.read_file("base.txt"), "Base");
+}
+
+#[test]
+fn drop_all_fails_when_no_changes() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("Base", "base.txt");
+
+    let result = super::drop_all(&test_repo.repo, true);
+    assert!(result.is_err(), "drop_all should fail with no changes");
+    assert!(
+        result.unwrap_err().to_string().contains("No local changes"),
+        "error should mention no changes"
+    );
+}
