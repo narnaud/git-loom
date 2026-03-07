@@ -1,5 +1,56 @@
 # Changelog
 
+## [0.13.0](https://github.com/narnaud/git-loom/compare/v0.12.0...v0.13.0) (2026-03-07)
+
+
+### Features ✨
+
+* add `show` command for viewing commits by short ID ([#36](https://github.com/narnaud/git-loom/issues/36)) ([fdf954a](https://github.com/narnaud/git-loom/commit/fdf954a7883050a208d57284b8adcba009f62085))
+* **branch,reword:** warn when branch name matches hidden pattern ([54e0b2c](https://github.com/narnaud/git-loom/commit/54e0b2c1ae8dfa28b7b4b05912f6449d1334ddab))
+* **drop:** support dropping files and all local changes ([5c2727d](https://github.com/narnaud/git-loom/commit/5c2727d45efa523bbe58a86a9becfd25d516b576)), closes [#50](https://github.com/narnaud/git-loom/issues/50)
+* **fold:** add --create flag to create and move commits into new branches ([ba6ef5a](https://github.com/narnaud/git-loom/commit/ba6ef5ab1a328c2550ffa4f81209a83533a60a7a)), closes [#37](https://github.com/narnaud/git-loom/issues/37)
+* **push:** add AzureDevOps remote type with az CLI integration ([71dc11d](https://github.com/narnaud/git-loom/commit/71dc11d79f8f989abde1ffa9d81e2e5947017731))
+* show new commit hash after rewrite operations ([23904c5](https://github.com/narnaud/git-loom/commit/23904c5d738c9c43965b8cd66c7b852bac71aa63)), closes [#19](https://github.com/narnaud/git-loom/issues/19) [#40](https://github.com/narnaud/git-loom/issues/40)
+* **status:** group tracked changes before untracked files ([b95e117](https://github.com/narnaud/git-loom/commit/b95e117dc090d889ee111cf0601c17d7d45574cf))
+* **status:** hide local-* branches by default with --all flag ([8664598](https://github.com/narnaud/git-loom/commit/866459890cf856f08832b39fd2b1080f30a18700)), closes [#38](https://github.com/narnaud/git-loom/issues/38)
+* **status:** multi-column layout for untracked files ([0ebc6fa](https://github.com/narnaud/git-loom/commit/0ebc6faafd4a4829b78fcf29e4e685936add9d07)), closes [#41](https://github.com/narnaud/git-loom/issues/41)
+* **theme:** add --theme flag with light/dark/auto support ([edb251c](https://github.com/narnaud/git-loom/commit/edb251c041188c3205635d8c426540cd19e54ac0))
+
+
+### Bug Fixes 🐞
+
+* eliminate TOCTOU race in stage_path ([a9fc62e](https://github.com/narnaud/git-loom/commit/a9fc62e108b385c10d8979331567c400e4500e90))
+* **reword:** show reworded commit hash instead of merge commit hash ([c435705](https://github.com/narnaud/git-loom/commit/c4357058fd3ac55236549cf9f0764300c7ca66dd)), closes [#35](https://github.com/narnaud/git-loom/issues/35)
+* **shortid:** enforce 2-char minimum and commit-first allocation ([5fb0062](https://github.com/narnaud/git-loom/commit/5fb0062e5e8d22f75944381091086411e2305ea6))
+* **status:** New file should appear with red ?? ([0fbbdc5](https://github.com/narnaud/git-loom/commit/0fbbdc5ec99f20c5784e0ef18da808f1ca3be50b))
+
+
+### Documentation
+
+* add show command to README, CLAUDE.md, and docs site ([af6c417](https://github.com/narnaud/git-loom/commit/af6c417b91f16aa2ef900a5afd8bbf4025d8d3bd))
+* **drop:** document file drop and zz drop-all behavior ([0ede693](https://github.com/narnaud/git-loom/commit/0ede69358d5ce9ff6fe601b6b947b9dda4ff5410))
+* fix code to avoid scrollbar ([2d4f5cd](https://github.com/narnaud/git-loom/commit/2d4f5cde6f3446d201d75826c018070fc5d05141))
+* **fold:** document --create flag ([b582ffe](https://github.com/narnaud/git-loom/commit/b582ffe91887178f37a927b923dc33e8489e20fa))
+* **push:** document Azure DevOps support in README and user docs ([d0573ef](https://github.com/narnaud/git-loom/commit/d0573ef05f4ec7d32f231dc9f630729b169e003c))
+* **status,branch,reword:** document hidden branches feature ([240548f](https://github.com/narnaud/git-loom/commit/240548f7effadeeb751b0ebffd3f0ff5daebf03f))
+* **status:** Update the documentation with latest changes ([0c04d6c](https://github.com/narnaud/git-loom/commit/0c04d6c966b75046738b56ccfa370ff6c8fcd295))
+* **theme:** document --theme flag in README and docs ([b98a90a](https://github.com/narnaud/git-loom/commit/b98a90a31cdcc6ac99d56b5a8d869e5ad27d940d))
+* update usage instructions for the no command case ([5e9a3e9](https://github.com/narnaud/git-loom/commit/5e9a3e963bf2bcd21d7a69388368b2486b2f889e))
+
+
+### Changes
+
+* extract shared run_git_captured helper ([69dd5c4](https://github.com/narnaud/git-loom/commit/69dd5c4d6577d15f4d7b55c9b594f803a56ae408))
+* reuse run_git_interactive in git_commit ([9f9532b](https://github.com/narnaud/git-loom/commit/9f9532bbdde78c56fc9d9e8d457c1e91e289fc23))
+* **show:** pass branch name directly to git show ([5dbdbfb](https://github.com/narnaud/git-loom/commit/5dbdbfbc5f38339d1d881f6ac6e1fa1f81aea531))
+* **tests:** extract common git ops into TestRepo helpers ([65af6cd](https://github.com/narnaud/git-loom/commit/65af6cd56d050d38748d1ad3e1f817166db53064))
+
+
+### Other
+
+* add show command to completion scripts ([cd7f32a](https://github.com/narnaud/git-loom/commit/cd7f32a88e821240759e88cda40836de6dd309d3))
+* **claude:** Update permissions ([1c84efe](https://github.com/narnaud/git-loom/commit/1c84efea3314e048948fd65fa35bbc2f6f479bd5))
+
 ## [0.12.0](https://github.com/narnaud/git-loom/compare/v0.11.0...v0.12.0) (2026-03-06)
 
 
