@@ -707,3 +707,82 @@ fn no_context_when_default() {
         output
     );
 }
+
+#[test]
+fn tracked_files_shown_before_untracked() {
+    let mut info = base_info();
+    // Mix tracked and untracked in the input order: untracked first, then tracked
+    info.working_changes = vec![
+        FileChange {
+            path: ".claude/".to_string(),
+            index: '?',
+            worktree: '?',
+        },
+        FileChange {
+            path: "src/main.rs".to_string(),
+            index: ' ',
+            worktree: 'M',
+        },
+        FileChange {
+            path: "todo.md".to_string(),
+            index: '?',
+            worktree: '?',
+        },
+        FileChange {
+            path: "new_file.txt".to_string(),
+            index: 'A',
+            worktree: ' ',
+        },
+    ];
+
+    let output = render_plain(info);
+    // Tracked files should appear before untracked files, regardless of input order
+    let main_pos = output.find("src/main.rs").unwrap();
+    let new_file_pos = output.find("new_file.txt").unwrap();
+    let claude_pos = output.find(".claude/").unwrap();
+    let todo_pos = output.find("todo.md").unwrap();
+    assert!(
+        main_pos < claude_pos && main_pos < todo_pos,
+        "tracked files should appear before untracked, got:\n{}",
+        output
+    );
+    assert!(
+        new_file_pos < claude_pos && new_file_pos < todo_pos,
+        "tracked files should appear before untracked, got:\n{}",
+        output
+    );
+}
+
+#[test]
+fn only_untracked_skips_no_changes() {
+    let mut info = base_info();
+    info.working_changes = vec![
+        FileChange {
+            path: ".claude/".to_string(),
+            index: '?',
+            worktree: '?',
+        },
+        FileChange {
+            path: "todo.md".to_string(),
+            index: '?',
+            worktree: '?',
+        },
+    ];
+
+    let output = render_plain(info);
+    assert!(
+        !output.contains("no changes"),
+        "should not show 'no changes' when untracked files exist, got:\n{}",
+        output
+    );
+    assert!(
+        output.contains("?? .claude/"),
+        "expected untracked file, got:\n{}",
+        output
+    );
+    assert!(
+        output.contains("?? todo.md"),
+        "expected untracked file, got:\n{}",
+        output
+    );
+}
