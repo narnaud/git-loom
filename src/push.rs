@@ -15,6 +15,7 @@ use crate::trace as loom_trace;
 enum RemoteType {
     Plain,
     GitHub,
+    AzureDevOps,
     Gerrit { target_branch: String },
 }
 
@@ -47,6 +48,7 @@ pub fn run(branch: Option<String>) -> Result<()> {
         RemoteType::GitHub => {
             push_github(&repo, &workdir, &remote_name, &branch_name, &target_branch)
         }
+        RemoteType::AzureDevOps => push_azure(&workdir, &remote_name, &branch_name, &target_branch),
         RemoteType::Gerrit { target_branch } => {
             push_gerrit(&workdir, &remote_name, &branch_name, &target_branch)
         }
@@ -86,6 +88,9 @@ fn detect_remote_type(
         if value == "github" {
             return Ok(RemoteType::GitHub);
         }
+        if value == "azure" {
+            return Ok(RemoteType::AzureDevOps);
+        }
         if value == "gerrit" {
             let target_branch = extract_target_branch(upstream_label);
             return Ok(RemoteType::Gerrit { target_branch });
@@ -99,6 +104,14 @@ fn detect_remote_type(
         && url.contains("github.com")
     {
         return Ok(RemoteType::GitHub);
+    }
+
+    // 2b. Check remote URL for dev.azure.com
+    if let Ok(remote) = repo.find_remote(&remote_name)
+        && let Some(url) = remote.url()
+        && url.contains("dev.azure.com")
+    {
+        return Ok(RemoteType::AzureDevOps);
     }
 
     // 3. Check for Gerrit commit-msg hook
@@ -280,6 +293,51 @@ fn push_github(
 
     if !status.success() {
         // gh prints its own messages (e.g., PR already exists) — not fatal
+    }
+
+    Ok(())
+}
+
+/// Push to Azure DevOps: push the branch, then open `az repos pr create --open`.
+fn push_azure(workdir: &Path, remote: &str, branch: &str, target_branch: &str) -> Result<()> {
+    git_push(workdir, remote, branch)?;
+
+    let start = Instant::now();
+    let az_check = Command::new("az").arg("--version").output();
+    let az_available = az_check.as_ref().is_ok_and(|o| o.status.success());
+    let duration_ms = start.elapsed().as_millis();
+    loom_trace::log_command("az", "--version", duration_ms, az_available, "");
+
+    if !az_available {
+        println!(
+            "Install 'az' CLI to create pull requests: \
+             https://learn.microsoft.com/cli/azure/install-azure-cli"
+        );
+        return Ok(());
+    }
+
+    let args = vec![
+        "repos",
+        "pr",
+        "create",
+        "--open",
+        "--source-branch",
+        branch,
+        "--target-branch",
+        target_branch,
+        "--detect",
+    ];
+
+    let start = Instant::now();
+    let status = Command::new("az")
+        .current_dir(workdir)
+        .args(&args)
+        .status()?;
+    let duration_ms = start.elapsed().as_millis();
+    loom_trace::log_command("az", &args.join(" "), duration_ms, status.success(), "");
+
+    if !status.success() {
+        // az prints its own messages (e.g., PR already exists) — not fatal
     }
 
     Ok(())
