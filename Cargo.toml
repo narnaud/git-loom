@@ -21,6 +21,7 @@ inquire = "0.9"
 git2 = "0.20"
 shell-escape = "0.1"
 tempfile = "3"
+terminal_size = "0.4"
 
 [profile.release]
 lto = true

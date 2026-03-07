@@ -1,7 +1,7 @@
 use git2::Oid;
 
 use crate::git::{BranchInfo, CommitInfo, ContextCommit, FileChange, RepoInfo, UpstreamInfo};
-use crate::graph;
+use crate::graph::{self, RenderOpts};
 
 /// Strip ANSI escape codes so tests can compare plain text.
 fn strip_ansi(s: &str) -> String {
@@ -22,9 +22,23 @@ fn strip_ansi(s: &str) -> String {
     out
 }
 
+fn default_opts() -> RenderOpts {
+    RenderOpts {
+        terminal_width: None,
+    }
+}
+
 /// Render and strip ANSI codes for plain-text comparison.
 fn render_plain(info: RepoInfo) -> String {
-    strip_ansi(&graph::render(info))
+    strip_ansi(&graph::render(info, &default_opts()))
+}
+
+/// Render with a specific terminal width for multi-column tests.
+fn render_plain_with_width(info: RepoInfo, width: u16) -> String {
+    let opts = RenderOpts {
+        terminal_width: Some(width),
+    };
+    strip_ansi(&graph::render(info, &opts))
 }
 
 /// Helper to create a fake OID from a single byte (padded to 20 bytes).
@@ -776,13 +790,172 @@ fn only_untracked_skips_no_changes() {
         output
     );
     assert!(
-        output.contains("?? .claude/"),
+        output.contains(" ⁕ .claude/"),
         "expected untracked file, got:\n{}",
         output
     );
     assert!(
-        output.contains("?? todo.md"),
+        output.contains(" ⁕ todo.md"),
         "expected untracked file, got:\n{}",
         output
+    );
+}
+
+#[test]
+fn untracked_below_threshold_stays_single_column() {
+    let mut info = base_info();
+    // 5 untracked files (at threshold, not above) — should stay single-column
+    info.working_changes = (1..=5)
+        .map(|i| FileChange {
+            path: format!("file{}.txt", i),
+            index: '?',
+            worktree: '?',
+        })
+        .collect();
+
+    let output = render_plain_with_width(info, 120);
+    // Each file should be on its own line
+    for i in 1..=5 {
+        let pattern = format!(" ⁕ file{}.txt", i);
+        assert!(
+            output.contains(&pattern),
+            "expected single-column entry for file{}.txt, got:\n{}",
+            i,
+            output
+        );
+    }
+    // Count lines with "⁕" to verify single-column
+    let untracked_lines: Vec<&str> = output.lines().filter(|l| l.contains('⁕')).collect();
+    assert_eq!(
+        untracked_lines.len(),
+        5,
+        "expected 5 single-column lines, got {} in:\n{}",
+        untracked_lines.len(),
+        output
+    );
+}
+
+#[test]
+fn untracked_above_threshold_uses_multicolumn() {
+    let mut info = base_info();
+    // 6 untracked files (above threshold) with short paths — should go multi-column at 80 cols
+    info.working_changes = (1..=6)
+        .map(|i| FileChange {
+            path: format!("f{}.txt", i),
+            index: '?',
+            worktree: '?',
+        })
+        .collect();
+
+    let output = render_plain_with_width(info, 80);
+    // All files should still appear
+    for i in 1..=6 {
+        let pattern = format!("f{}.txt", i);
+        assert!(
+            output.contains(&pattern),
+            "expected f{}.txt in output, got:\n{}",
+            i,
+            output
+        );
+    }
+    // With short paths, multiple entries should fit on one line — fewer lines than entries
+    let untracked_lines: Vec<&str> = output.lines().filter(|l| l.contains('⁕')).collect();
+    assert!(
+        untracked_lines.len() < 6,
+        "expected multi-column (fewer than 6 lines), got {} lines:\n{:?}",
+        untracked_lines.len(),
+        untracked_lines
+    );
+}
+
+#[test]
+fn multicolumn_no_tty_stays_single_column() {
+    let mut info = base_info();
+    // 10 untracked files, but terminal_width is None (piped output)
+    info.working_changes = (1..=10)
+        .map(|i| FileChange {
+            path: format!("file{}.txt", i),
+            index: '?',
+            worktree: '?',
+        })
+        .collect();
+
+    // render_plain uses default_opts() which has terminal_width: None
+    let output = render_plain(info);
+    let untracked_lines: Vec<&str> = output.lines().filter(|l| l.contains('⁕')).collect();
+    assert_eq!(
+        untracked_lines.len(),
+        10,
+        "expected single-column (10 lines) when no TTY, got {} lines:\n{:?}",
+        untracked_lines.len(),
+        untracked_lines
+    );
+}
+
+#[test]
+fn multicolumn_fills_top_to_bottom_left_to_right() {
+    let mut info = base_info();
+    // 6 files with short names.
+    // Entry "xx  ⁕ aa.txt" = 2+1+2+1+6 = 12 chars; col_slot = 12+5 = 17 (entry + "   │ ").
+    // At width 55: available = 55-4 = 51; 51/17 = 3 cols; rows = ceil(6/3) = 2.
+    // Column-major layout:
+    //   Row 0: aa.txt (idx 0), cc.txt (idx 2), ee.txt (idx 4)
+    //   Row 1: bb.txt (idx 1), dd.txt (idx 3), ff.txt (idx 5)
+    info.working_changes = vec!["aa", "bb", "cc", "dd", "ee", "ff"]
+        .into_iter()
+        .map(|name| FileChange {
+            path: format!("{}.txt", name),
+            index: '?',
+            worktree: '?',
+        })
+        .collect();
+
+    let output = render_plain_with_width(info, 55);
+    let untracked_lines: Vec<&str> = output.lines().filter(|l| l.contains('⁕')).collect();
+
+    assert_eq!(
+        untracked_lines.len(),
+        2,
+        "expected 2 rows with 3 columns, got {} lines:\n{:?}",
+        untracked_lines.len(),
+        untracked_lines
+    );
+
+    // Row 0 should contain aa, cc, ee (column-major: indices 0, 2, 4)
+    assert!(
+        untracked_lines[0].contains("aa.txt")
+            && untracked_lines[0].contains("cc.txt")
+            && untracked_lines[0].contains("ee.txt"),
+        "row 0 should be aa, cc, ee (column-major), got: {}",
+        untracked_lines[0]
+    );
+    // Row 1 should contain bb, dd, ff (column-major: indices 1, 3, 5)
+    assert!(
+        untracked_lines[1].contains("bb.txt")
+            && untracked_lines[1].contains("dd.txt")
+            && untracked_lines[1].contains("ff.txt"),
+        "row 1 should be bb, dd, ff (column-major), got: {}",
+        untracked_lines[1]
+    );
+}
+
+#[test]
+fn multicolumn_has_pipe_separators() {
+    let mut info = base_info();
+    info.working_changes = (1..=6)
+        .map(|i| FileChange {
+            path: format!("f{}.txt", i),
+            index: '?',
+            worktree: '?',
+        })
+        .collect();
+
+    let output = render_plain_with_width(info, 80);
+    let untracked_lines: Vec<&str> = output.lines().filter(|l| l.contains('⁕')).collect();
+    // Multi-column lines should contain pipe separators between entries
+    assert!(
+        untracked_lines[0].contains("   │ "),
+        "expected pipe separator between columns, got: {}",
+        untracked_lines[0]
     );
 }
