@@ -57,6 +57,10 @@ struct Cli {
     #[arg(default_value = "1", hide = true)]
     context: usize,
 
+    /// Show all branches including hidden ones (those matching loom.hideBranchPattern)
+    #[arg(short = 'a', long = "all", hide = true)]
+    all: bool,
+
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -76,6 +80,9 @@ enum Command {
         /// Number of context commits to show before the base
         #[arg(default_value = "1")]
         context: usize,
+        /// Show all branches including hidden ones (those matching loom.hideBranchPattern)
+        #[arg(short = 'a', long = "all")]
+        all: bool,
     },
     /// Create a commit on a feature branch without leaving integration
     Commit {
@@ -210,8 +217,12 @@ fn main() {
     let theme = resolve_theme(cli.theme);
 
     let result = match cli.command {
-        None => status::run(cli.files, cli.context, theme),
-        Some(Command::Status { files, context }) => status::run(files, context, theme),
+        None => status::run(cli.files, cli.context, cli.all, theme),
+        Some(Command::Status {
+            files,
+            context,
+            all,
+        }) => status::run(files, context, all, theme),
         Some(Command::Init { name }) => init::run(name),
         Some(Command::Branch { name, target }) => branch::run(name, target),
         Some(Command::Reword { target, message }) => reword::run(target, message),

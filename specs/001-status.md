@@ -188,6 +188,37 @@ integration branch) is excluded from side branches. Branches that track
 the same upstream remote as the integration branch (e.g. `main` tracking
 `origin/main`) are also excluded.
 
+## Hidden Branches
+
+Branches whose names match the configured prefix (default: `local-`) are
+**hidden** from the status display by default. Both the branch section and
+all commits owned by the hidden branch are suppressed — they do not appear
+as loose commits either. This is useful for keeping local-only branches
+(secrets, personal configuration) out of the status view without removing
+them from the integration branch.
+
+The hidden prefix is configurable via:
+
+```
+git config loom.hideBranchPattern "local-"
+```
+
+Set to an empty string to disable hiding:
+
+```
+git config loom.hideBranchPattern ""
+```
+
+Pass `--all` to show all branches regardless of the configured pattern:
+
+```
+git-loom --all
+git-loom status --all
+```
+
+Hidden branches remain fully accessible to all other loom commands (fold,
+drop, commit, push, etc.).
+
 ## CLI
 
 | Command | Behavior |
@@ -196,6 +227,8 @@ the same upstream remote as the integration branch (e.g. `main` tracking
 | `git-loom status` | Shows the status (explicit) |
 | `git-loom 3` | Shows status with 2 context commits before the base |
 | `git-loom status 3` | Same as above (explicit) |
+| `git-loom --all` | Shows all branches including hidden ones |
+| `git-loom status --all` | Same as above (explicit) |
 
 ## Design Decisions
 
