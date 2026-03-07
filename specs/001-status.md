@@ -21,6 +21,7 @@ Independent branches (each forked from integration line):
 ╭─ [local changes]
 │    M file.txt
 │   A  new_file.rs
+│    ⁕ untracked.txt
 │
 │╭─ [feature-b]
 │●   d0472f9 Fix bug in feature B
@@ -121,9 +122,17 @@ not actionable). The default is 1 (no extra context).
 
 1. **Local changes** (optional): shown only if the working tree has
    modifications, new files, or deletions. Introduced with `╭─ [local changes]`.
-   Each file is listed with a 2-char `XY` status (index + worktree), matching
-   `git status --short`. The index char is colored green and the worktree char
-   is colored red.
+   Files are split into two groups, tracked changes first, then untracked files:
+   - **Tracked changes** (staged/unstaged modifications, additions, deletions):
+     each file is listed with a 2-char `XY` status (index + worktree), matching
+     `git status --short`. The index char is colored green and the worktree char
+     is colored red.
+   - **Untracked files** (`??` status): shown after tracked changes with a ` ⁕`
+     marker (magenta) instead of the `XY` status. When there are more than 5
+     untracked files and output is a TTY, they are displayed in a multi-column
+     grid layout (top-to-bottom, left-to-right) sized to the terminal width.
+     Columns are separated by `│`. In non-TTY mode or with 5 or fewer files,
+     single-column layout is used.
 
 2. **Feature branches**: each local branch whose tip is reachable from HEAD
    (or at the merge-base) is rendered as a side branch. The branch name
@@ -158,7 +167,8 @@ not actionable). The default is 1 (no extra context).
 | `││`   | Continuation between stacked branches |
 | `●`    | A commit |
 | `├╯`   | End of a side branch (or stack), merging back to integration line |
-| `XY`    | 2-char file status (`X`=index, `Y`=worktree), matching `git status --short`. `X` is green, `Y` is red. Values: `M` modified, `A` added, `D` deleted, `R` renamed, `?` untracked, ` ` unchanged |
+| `XY`    | 2-char file status (`X`=index, `Y`=worktree) for tracked changes, matching `git status --short`. `X` is green, `Y` is red. Values: `M` modified, `A` added, `D` deleted, `R` renamed, ` ` unchanged |
+| ` ⁕`    | Untracked file marker (magenta). Replaces `??` for untracked files |
 | `⏫`  | Upstream has new commits ahead of the common base |
 | `·`    | Context commit before the base (dimmed, display-only) |
 

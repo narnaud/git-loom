@@ -28,6 +28,7 @@ The status displays a branch-aware commit graph using UTF-8 box-drawing characte
 ╭─ [local changes]
 │    M file.txt
 │   A  new_file.rs
+│    ⁕ untracked.txt
 │
 │╭─ [feature-b]
 │●   d0472f9 Fix bug in feature B
@@ -45,7 +46,9 @@ The status displays a branch-aware commit graph using UTF-8 box-drawing characte
 
 The graph is rendered top-to-bottom with these sections:
 
-1. **Local changes** — shown only if the working tree has modifications, new files, or deletions. Each file is listed with a 2-char `XY` status matching `git status --short`.
+1. **Local changes** — shown only if the working tree has modifications, new files, or deletions. Files are split into two groups:
+   - **Tracked changes** are listed first with a 2-char `XY` status matching `git status --short` (index green, worktree red).
+   - **Untracked files** are listed after with a ` ⁕` marker (magenta). When there are more than 5 untracked files, they are displayed in a multi-column grid layout sized to the terminal width.
 
 2. **Feature branches** — each branch is rendered as a side branch with its name in brackets, followed by its commits, closed with `├╯`.
 
@@ -63,6 +66,7 @@ The graph is rendered top-to-bottom with these sections:
 | `││` | Continuation between stacked branches |
 | `●` | A commit |
 | `├╯` | End of a side branch |
+| ` ⁕` | Untracked file marker (magenta) |
 | `⏫` | Upstream has new commits |
 | `·` | Context commit before the base (dimmed) |
 
