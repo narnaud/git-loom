@@ -67,13 +67,18 @@ local ref includes the remote ref.
 
 ```bash
 git push --force-with-lease --force-if-includes -u <remote> <branch>
+# If PR exists:
+#   Pushed 'feature-a' to origin
+#   PR updated: https://github.com/owner/repo/pull/42
+# If no PR:
 gh pr create --web --head <head> --base <target> --repo <owner/repo>
 ```
 
 Pushes the branch with `--force-with-lease` (same safety as plain), then
+checks whether a PR already exists for the branch using `gh pr list`. If a
+PR exists, prints its URL without opening the browser. If no PR exists,
 opens the GitHub PR creation page in the browser via the `gh` CLI. If `gh`
-is not installed, prints a helpful message with a link to install it. If a
-PR already exists, `gh` handles that gracefully.
+is not installed, prints a helpful message with a link to install it.
 
 **Fork workflow:** When the integration branch tracks `upstream/main` (a fork
 setup), feature branches are pushed to `origin` (the user's fork) instead.
@@ -89,14 +94,19 @@ is skipped and the push falls back to the plain force-with-lease strategy.
 
 ```bash
 git push --force-with-lease --force-if-includes -u <remote> <branch>
+# If PR exists:
+#   Pushed 'feature-a' to origin
+#   PR updated: https://dev.azure.com/org/project/_git/repo/pullrequest/42
+# If no PR:
 az repos pr create --open --source-branch <branch> --target-branch <target> --detect
 ```
 
-Pushes the branch with `--force-with-lease` (same safety as plain), then opens the
-Azure DevOps PR creation page in the browser via the `az` CLI. `--detect` lets the
-Azure CLI auto-detect the organization and project from the repository's remote URL.
-If `az` is not installed, prints a helpful message with a link to install it. If a
-PR already exists, `az` handles that gracefully.
+Pushes the branch with `--force-with-lease` (same safety as plain), then checks
+whether a PR already exists for the branch using `az repos pr list`. If a PR exists,
+prints its URL without opening the browser. If no PR exists, opens the Azure DevOps
+PR creation page in the browser via the `az` CLI. `--detect` lets the Azure CLI
+auto-detect the organization and project from the repository's remote URL. If `az`
+is not installed, prints a helpful message with a link to install it.
 
 ### Gerrit
 
