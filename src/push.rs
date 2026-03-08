@@ -24,7 +24,10 @@ enum RemoteType {
 /// Detects the remote type (plain, GitHub, Gerrit) and dispatches to the
 /// appropriate push strategy. Accepts an optional branch argument (name or
 /// shortID); if omitted, shows an interactive picker.
-pub fn run(branch: Option<String>) -> Result<()> {
+///
+/// When `no_pr` is true, skips PR/review creation for all remote types.
+/// For Gerrit, branches without a `wip/` prefix get a confirmation prompt.
+pub fn run(branch: Option<String>, no_pr: bool) -> Result<()> {
     let repo = git::open_repo()?;
     let workdir = git::require_workdir(&repo, "push")?.to_path_buf();
     let info = git::gather_repo_info(&repo, false, 1)?;
@@ -42,6 +45,13 @@ pub fn run(branch: Option<String>) -> Result<()> {
     let remote_name = resolve_push_remote(&repo, &info.upstream.label, &remote_type);
 
     let target_branch = extract_target_branch(&info.upstream.label);
+
+    if no_pr {
+        return match remote_type {
+            RemoteType::Gerrit { .. } => push_gerrit_no_pr(&workdir, &remote_name, &branch_name),
+            _ => push_plain(&workdir, &remote_name, &branch_name),
+        };
+    }
 
     match remote_type {
         RemoteType::Plain => push_plain(&workdir, &remote_name, &branch_name),
@@ -341,6 +351,56 @@ fn push_azure(workdir: &Path, remote: &str, branch: &str, target_branch: &str) -
     }
 
     Ok(())
+}
+
+/// Push to Gerrit without creating a review (plain force push).
+///
+/// If the branch is already prefixed with `wip/`, pushes directly.
+/// Otherwise, warns the user that a Gerrit admin will be needed to delete
+/// the remote branch later, and asks them to choose:
+///   - Push as-is
+///   - Push as `wip/<branch>` instead (no admin needed to delete)
+///   - Cancel
+fn push_gerrit_no_pr(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
+    if branch.starts_with("wip/") {
+        return push_plain(workdir, remote, branch);
+    }
+
+    let opt_as_is = format!("Push as `{}` (admin required to delete it later)", branch);
+    let opt_wip = format!("Push as `wip/{}` instead", branch);
+    let opt_cancel = "Cancel".to_string();
+
+    let choice = msg::select(
+        &format!(
+            "Branch `{}` is not prefixed with `wip/` — a Gerrit admin will be needed to delete the remote branch later",
+            branch
+        ),
+        vec![opt_as_is.clone(), opt_wip.clone(), opt_cancel],
+    )?;
+
+    if choice == opt_as_is {
+        push_plain(workdir, remote, branch)
+    } else if choice == opt_wip {
+        let wip_name = format!("wip/{}", branch);
+        let refspec = format!("{}:{}", branch, wip_name);
+        git_commands::run_git(
+            workdir,
+            &[
+                "push",
+                "--force-with-lease",
+                "--force-if-includes",
+                remote,
+                &refspec,
+            ],
+        )?;
+        msg::success(&format!(
+            "Pushed `{}` to `{}` as `{}`",
+            branch, remote, wip_name
+        ));
+        Ok(())
+    } else {
+        bail!("Push cancelled")
+    }
 }
 
 /// Push to Gerrit with topic and refs/for/ refspec.

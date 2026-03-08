@@ -153,6 +153,9 @@ enum Command {
     Push {
         /// Branch name or short ID (if not provided, will prompt interactively)
         branch: Option<String>,
+        /// Push branch without creating a PR or Gerrit review
+        #[arg(long)]
+        no_pr: bool,
     },
     /// Pull-rebase the integration branch and update submodules
     Update,
@@ -235,7 +238,7 @@ fn main() {
         Some(Command::Absorb { dry_run, files }) => absorb::run(dry_run, files),
         Some(Command::Show { target }) => show::run(target),
         Some(Command::Split { target, message }) => split::run(target, message),
-        Some(Command::Push { branch }) => push::run(branch),
+        Some(Command::Push { branch, no_pr }) => push::run(branch, no_pr),
         Some(Command::Update) => update::run(),
         Some(Command::Fold { create, args }) => fold::run(create, args),
         Some(Command::Trace) => handle_trace(),

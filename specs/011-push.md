@@ -20,13 +20,19 @@ varies significantly depending on the hosting platform:
 ## CLI
 
 ```bash
-git-loom push [branch]
+git-loom push [branch] [--no-pr]
 ```
 
 **Arguments:**
 
 - `branch` (optional): Branch name or short ID. If omitted, an interactive
   picker is shown.
+
+**Flags:**
+
+- `--no-pr`: Push without creating a PR or Gerrit review. For GitHub and Azure
+  DevOps, skips the `gh pr create` / `az repos pr create` step. For Gerrit,
+  pushes directly to the branch ref instead of `refs/for/` (see below).
 
 **Behavior:**
 
@@ -204,6 +210,30 @@ git config loom.remote-type gerrit
 git-loom push feature-a
 # Pushed 'feature-a' to origin (Gerrit: refs/for/main)
 ```
+
+## Gerrit --no-pr Behavior
+
+When `--no-pr` is used with a Gerrit remote, the push goes directly to the
+branch ref (not `refs/for/`), which creates or updates a remote branch rather
+than a Gerrit change.
+
+**If the branch starts with `wip/`:** pushed directly (no prompt) — Gerrit
+projects typically allow users to delete their own `wip/` branches.
+
+**If the branch does not start with `wip/`:** an interactive prompt is shown,
+since creating a non-`wip/` remote branch in Gerrit requires a project admin
+to delete it later:
+
+```
+? Branch `feature-a` is not prefixed with `wip/` — a Gerrit admin will be needed to delete the remote branch later
+> Push as `feature-a` (admin required to delete it later)
+  Push as `wip/feature-a` instead
+  Cancel
+```
+
+- **Push as-is**: pushes `feature-a` to `remote/feature-a` with `--force-with-lease`
+- **Push as `wip/<branch>`**: pushes with refspec `feature-a:wip/feature-a` — no admin needed to delete it
+- **Cancel**: aborts with `Push cancelled`
 
 ## Design Decisions
 
