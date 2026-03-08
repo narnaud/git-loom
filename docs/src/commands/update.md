@@ -5,16 +5,19 @@ Pull-rebase the integration branch and update submodules.
 ## Usage
 
 ```
-git-loom update
+git-loom update [--yes]
 ```
 
-No arguments.
+**Options:**
+
+- `--yes` / `-y` — skip the confirmation prompt when removing branches with a gone upstream
 
 ## What It Does
 
 1. **Fetch** — fetches all upstream changes, including tags (force-updated) and pruning deleted remote branches
 2. **Rebase** — replays local commits on top of the updated upstream
 3. **Submodule update** (if applicable) — initializes and updates submodules recursively
+4. **Gone upstream cleanup** — lists local branches whose remote tracking branch was deleted, and offers to remove them
 
 Uncommitted working tree changes are automatically preserved during the rebase.
 
@@ -28,6 +31,21 @@ git-loom update
 # > Fetched latest changes
 # > Rebasing onto upstream...
 # > Rebased onto upstream
+```
+
+### With gone upstream branches
+
+```bash
+git-loom update
+# > Fetching latest changes...
+# > Fetched latest changes
+# > Rebasing onto upstream...
+# > Rebased onto upstream
+# > Updated branch `integration` with `origin/main` (abc1234 Some commit)
+# ! 2 local branches with a gone upstream:
+#   · feature-x
+#   · feature-y
+# ? Remove them? [y/N]
 ```
 
 ### With submodules
