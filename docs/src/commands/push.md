@@ -42,12 +42,12 @@ Uses `--force-with-lease` because woven branches are frequently rebased. `--forc
 
 ### GitHub
 
-```bash
-git push --force-with-lease --force-if-includes -u <remote> <branch>
-gh pr create --web --head <head> --base <target> --repo <owner/repo>
-```
+Pushes the branch with `--force-with-lease`, then checks whether a PR already exists for the branch:
 
-Pushes the branch with `--force-with-lease`, then opens the GitHub PR creation page in the browser. If `gh` is not installed, the push succeeds with a message suggesting to install it.
+- **PR exists** — prints the PR URL (`PR updated: https://github.com/owner/repo/pull/42`) without opening the browser
+- **No PR** — opens the GitHub PR creation page in the browser via `gh pr create --web`
+
+If `gh` is not installed, the push succeeds with a message suggesting to install it.
 
 In a **fork workflow** (tracking `upstream/main`), pushes go to `origin` (your fork) and the PR targets the upstream repository automatically.
 
@@ -55,12 +55,12 @@ If the branch being pushed is the upstream target branch itself, PR creation is 
 
 ### Azure DevOps
 
-```bash
-git push --force-with-lease --force-if-includes -u <remote> <branch>
-az repos pr create --open --source-branch <branch> --target-branch <target> --detect
-```
+Pushes the branch with `--force-with-lease`, then checks whether a PR already exists for the branch:
 
-Pushes the branch with `--force-with-lease`, then opens the Azure DevOps PR creation page in the browser via the `az` CLI. `--detect` auto-detects the organization and project from the remote URL. If `az` is not installed, the push succeeds with a message suggesting to install it.
+- **PR exists** — prints the PR URL (`PR updated: https://dev.azure.com/...`) without opening the browser
+- **No PR** — opens the Azure DevOps PR creation page in the browser via `az repos pr create --open`
+
+`--detect` auto-detects the organization and project from the remote URL. If `az` is not installed, the push succeeds with a message suggesting to install it.
 
 ### Gerrit
 
@@ -107,7 +107,7 @@ git-loom push feature-a
 # Pushed 'feature-a' to origin
 ```
 
-### Push to GitHub
+### Push to GitHub (new PR)
 
 ```bash
 git-loom push feature-a
@@ -115,12 +115,28 @@ git-loom push feature-a
 # (browser opens to PR creation page)
 ```
 
-### Push to Azure DevOps
+### Push to GitHub (PR already exists)
+
+```bash
+git-loom push feature-a
+# Pushed 'feature-a' to origin
+# PR updated: https://github.com/owner/repo/pull/42
+```
+
+### Push to Azure DevOps (new PR)
 
 ```bash
 git-loom push feature-a
 # Pushed 'feature-a' to origin
 # (browser opens to PR creation page)
+```
+
+### Push to Azure DevOps (PR already exists)
+
+```bash
+git-loom push feature-a
+# Pushed 'feature-a' to origin
+# PR updated: https://dev.azure.com/org/project/_git/repo/pullrequest/42
 ```
 
 ### Push to Gerrit

@@ -8,8 +8,8 @@ $ git loom push fa
 
 git-loom detects your remote type automatically and runs the appropriate commands:
 
-- **GitHub** — pushes the branch, then runs `gh pr create --web` to open the PR creation page in your browser. Requires the [`gh` CLI](https://cli.github.com/).
-- **Azure DevOps** — pushes the branch, then runs `az repos pr create --open` to open the PR creation page. Requires the [`az` CLI](https://learn.microsoft.com/en-us/cli/azure/).
+- **GitHub** — pushes the branch, then checks if a PR exists. If a PR already exists, prints its URL (`PR updated: https://...`). Otherwise opens the PR creation page in your browser via the [`gh` CLI](https://cli.github.com/).
+- **Azure DevOps** — pushes the branch, then checks if a PR exists. If a PR already exists, prints its URL. Otherwise opens the PR creation page via the [`az` CLI](https://learn.microsoft.com/en-us/cli/azure/).
 - **Gerrit** — pushes to `refs/for/<target>` (where `<target>` is your upstream branch, e.g. `main` or `master`) with the branch name as topic.
 - **Plain Git** — pushes with `--force-with-lease`.
 
