@@ -5,7 +5,7 @@ Show the branch-aware commit graph. This is the default command when running `gi
 ## Usage
 
 ```
-git-loom [status] [-f] [N]
+git-loom [status] [-f [COMMIT...]] [N]
 ```
 
 ### Arguments
@@ -18,7 +18,7 @@ git-loom [status] [-f] [N]
 
 | Option | Description |
 |--------|-------------|
-| `-f, --files` | Show files changed in each commit |
+| `-f, --files [COMMIT...]` | Show files changed in each commit, optionally filtered to specific commits |
 | `-a, --all` | Show all branches including hidden ones |
 
 ## Output
@@ -74,6 +74,32 @@ The graph is rendered top-to-bottom with these sections:
 ### Short IDs
 
 Each branch, commit, and file in the output is assigned a short ID — a compact identifier you can use with other git-loom commands. What you see in the status is what you type.
+
+## Showing Files
+
+Use `-f` to show the files changed in each commit:
+
+```
+git-loom status -f
+```
+
+```
+│╭─ fa [feature-a]
+│●    d0 Add feature A
+│┊      d0:0 M  src/feature.rs
+│┊      d0:1 A  tests/feature_test.rs
+├╯
+```
+
+To show files for specific commits only, pass their short IDs or git hashes after `-f`:
+
+```
+git-loom status -f d0
+git-loom status -f d0 ab
+git-loom status -f abc1234
+```
+
+Only the listed commits display their file list; all other commits are rendered normally. Unknown identifiers are silently ignored.
 
 ## Branch Topologies
 
