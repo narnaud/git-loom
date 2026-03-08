@@ -213,11 +213,23 @@ pub struct CommitInfo {
     pub files: Vec<FileChange>,
 }
 
+/// Remote tracking status for a feature branch.
+#[derive(Debug, Clone)]
+pub enum RemoteStatus {
+    /// Remote tracking ref exists and local tip matches it.
+    Synced,
+    /// Remote tracking ref exists but local is ahead.
+    Ahead,
+    /// Upstream was configured but the remote ref no longer exists.
+    Gone,
+}
+
 /// A local branch whose tip falls within the upstream..HEAD range.
 #[derive(Debug)]
 pub struct BranchInfo {
     pub name: String,
     pub tip_oid: git2::Oid,
+    pub remote: Option<RemoteStatus>,
 }
 
 /// A context commit shown below the upstream base for history context.
@@ -627,12 +639,55 @@ fn find_branches_in_range(
                 continue;
             }
             if commit_set.contains(&tip_oid) || tip_oid == merge_base_oid {
-                branches.push(BranchInfo { name, tip_oid });
+                let remote = detect_remote_status(repo, &branch, &name, tip_oid);
+                branches.push(BranchInfo {
+                    name,
+                    tip_oid,
+                    remote,
+                });
             }
         }
     }
 
     Ok(branches)
+}
+
+/// Determine the remote tracking status of a feature branch.
+///
+/// Returns `None` if the branch has never been pushed (no upstream configured).
+fn detect_remote_status(
+    repo: &Repository,
+    branch: &git2::Branch,
+    name: &str,
+    tip_oid: git2::Oid,
+) -> Option<RemoteStatus> {
+    // Try to access the upstream ref directly via git2.
+    if let Ok(upstream) = branch.upstream() {
+        return Some(match upstream.get().target() {
+            Some(upstream_oid) if upstream_oid == tip_oid => RemoteStatus::Synced,
+            _ => RemoteStatus::Ahead,
+        });
+    }
+
+    // upstream() failed — check if an upstream was ever configured (gone case).
+    // branch.upstream() returns Err for both "no upstream" and "upstream gone",
+    // so we must consult git config to distinguish the two.
+    let config = repo.config().ok()?;
+    let remote_key = format!("branch.{}.remote", name);
+    let Ok(remote) = config.get_string(&remote_key) else {
+        return None; // never had an upstream configured
+    };
+    let merge_key = format!("branch.{}.merge", name);
+    let Ok(merge) = config.get_string(&merge_key) else {
+        return None;
+    };
+    let branch_part = merge.strip_prefix("refs/heads/").unwrap_or(&merge);
+    let tracking_ref = format!("refs/remotes/{}/{}", remote, branch_part);
+    if repo.find_reference(&tracking_ref).is_err() {
+        Some(RemoteStatus::Gone)
+    } else {
+        None
+    }
 }
 
 fn get_working_changes(repo: &Repository) -> Result<Vec<FileChange>> {
