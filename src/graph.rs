@@ -27,8 +27,12 @@ pub struct Theme {
     pub unstaged: Color,
     /// Untracked file marker and path color.
     pub untracked: Color,
-    /// Remote tracking branch is ahead (unpushed commits).
+    /// Branch remote tracking ref exists and is in sync.
+    pub remote_synced: Color,
+    /// Branch has unpushed commits ahead of its remote.
     pub remote_ahead: Color,
+    /// Branch remote tracking ref is gone (deleted on remote).
+    pub remote_gone: Color,
     /// Rotating colors for commit dots on feature branches.
     pub branch_dots: &'static [Color],
 }
@@ -46,7 +50,9 @@ impl Theme {
             staged: Color::Green,
             unstaged: Color::Red,
             untracked: Color::Magenta,
+            remote_synced: Color::Green,
             remote_ahead: Color::Yellow,
+            remote_gone: Color::Red,
             branch_dots: BRANCH_DOTS,
         }
     }
@@ -63,7 +69,9 @@ impl Theme {
             staged: Color::Green,
             unstaged: Color::Red,
             untracked: Color::Magenta,
+            remote_synced: Color::Green,
             remote_ahead: Color::Yellow,
+            remote_gone: Color::Red,
             branch_dots: BRANCH_DOTS,
         }
     }
@@ -502,9 +510,9 @@ fn render_branch(
             "│├─"
         };
         let remote_indicator = match remote {
-            Some(RemoteStatus::Synced) => format!(" {}", "✓".color(theme.staged)),
+            Some(RemoteStatus::Synced) => format!(" {}", "✓".color(theme.remote_synced)),
             Some(RemoteStatus::Ahead) => format!(" {}", "↑".color(theme.remote_ahead)),
-            Some(RemoteStatus::Gone) => format!(" {}", "✗".color(theme.unstaged)),
+            Some(RemoteStatus::Gone) => format!(" {}", "✗".color(theme.remote_gone)),
             None => String::new(),
         };
         writeln!(
