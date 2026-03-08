@@ -158,7 +158,11 @@ enum Command {
         no_pr: bool,
     },
     /// Pull-rebase the integration branch and update submodules
-    Update,
+    Update {
+        /// Remove local branches whose upstream tracking branch was deleted on remote
+        #[arg(short, long)]
+        yes: bool,
+    },
     /// Generate shell completions (powershell, clink)
     #[command(hide = true)]
     Completions {
@@ -239,7 +243,7 @@ fn main() {
         Some(Command::Show { target }) => show::run(target),
         Some(Command::Split { target, message }) => split::run(target, message),
         Some(Command::Push { branch, no_pr }) => push::run(branch, no_pr),
-        Some(Command::Update) => update::run(),
+        Some(Command::Update { yes }) => update::run(yes),
         Some(Command::Fold { create, args }) => fold::run(create, args),
         Some(Command::Trace) => handle_trace(),
         Some(Command::Completions { .. }) => unreachable!(),

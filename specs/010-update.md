@@ -20,10 +20,12 @@ changes into the local integration branch in a single step:
 ## CLI
 
 ```bash
-git-loom update
+git-loom update [--yes]
 ```
 
-**Arguments:** None.
+**Arguments:**
+
+- `--yes` / `-y`: Skip the confirmation prompt when removing branches with gone upstreams.
 
 **Behavior:**
 
@@ -32,6 +34,8 @@ git-loom update
 - Rebases local commits onto the updated upstream
 - Updates submodules if any are configured
 - On conflict, reports the error and lets the user resolve manually
+- After a successful update, proposes to remove local branches whose remote
+  tracking branch was deleted (upstream is gone)
 
 ## What Happens
 
@@ -48,6 +52,9 @@ git-loom update
    rebase intact.
 4. **Submodule update** (conditional): If the project uses submodules, they
    are initialized and updated recursively.
+5. **Gone upstream cleanup**: Any local branches whose configured upstream
+   tracking branch no longer exists (pruned by `--prune`) are listed and the
+   user is prompted once to remove them. Use `--yes` to skip the prompt.
 
 ## Conflict Handling
 
