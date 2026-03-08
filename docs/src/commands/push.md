@@ -5,7 +5,7 @@ Push a feature branch to the remote. Automatically detects the remote type and u
 ## Usage
 
 ```
-git-loom push [branch]
+git-loom push [branch] [--no-pr]
 ```
 
 ### Arguments
@@ -13,6 +13,12 @@ git-loom push [branch]
 | Argument | Description |
 |----------|-------------|
 | `[branch]` | Branch name or short ID (optional; interactive picker if omitted) |
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--no-pr` | Push without creating a PR or Gerrit review (see below) |
 
 ## Remote Type Detection
 
@@ -64,6 +70,34 @@ git push -o topic=<branch> <remote> <branch>:refs/for/<target>
 
 Uses the `refs/for/` refspec and sets the topic to the branch name.
 
+## Pushing Without a PR or Review
+
+Use `--no-pr` when you want to push a branch to the remote without triggering PR or review creation — for example, to back up a branch, share work-in-progress, or push to a staging ref.
+
+| Remote type | `--no-pr` behavior |
+|-------------|-------------------|
+| Plain | Same as normal (force-with-lease push) |
+| GitHub | Skips `gh pr create` |
+| Azure DevOps | Skips `az repos pr create` |
+| Gerrit | Plain push to branch ref instead of `refs/for/` (see below) |
+
+### Gerrit: `wip/` prefix warning
+
+In Gerrit, pushing directly to a branch ref (not `refs/for/`) creates a remote branch that requires a **project admin** to delete. To protect against accidental non-deletable branches, `--no-pr` on Gerrit prompts when the branch name doesn't start with `wip/`:
+
+```
+? Branch `feature-a` is not prefixed with `wip/` — a Gerrit admin will be needed to delete the remote branch later
+> Push as `feature-a` (admin required to delete it later)
+  Push as `wip/feature-a` instead
+  Cancel
+```
+
+- **Push as-is** — pushes to `remote/feature-a`; an admin is needed to delete it later
+- **Push as `wip/<branch>`** — pushes with refspec `feature-a:wip/feature-a`; your local branch name is unchanged
+- **Cancel** — aborts the push
+
+If the branch already starts with `wip/`, no prompt is shown.
+
 ## Examples
 
 ### Push to a plain remote
@@ -104,6 +138,22 @@ git-loom push
 # > feature-a
 #   feature-b
 # Pushed 'feature-a' to origin
+```
+
+### Push without opening a PR (GitHub)
+
+```bash
+git-loom push feature-a --no-pr
+# Pushed 'feature-a' to origin
+```
+
+### Push without a review, renaming to wip/ (Gerrit)
+
+```bash
+git-loom push feature-a --no-pr
+# ? Branch `feature-a` is not prefixed with `wip/`...
+# > Push as `wip/feature-a` instead
+# Pushed 'feature-a' to origin as 'wip/feature-a'
 ```
 
 ### Override remote type
