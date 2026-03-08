@@ -31,12 +31,12 @@ The status displays a branch-aware commit graph using UTF-8 box-drawing characte
 │   A  new_file.rs
 │    ⁕ untracked.txt
 │
-│╭─ [feature-b]
+│╭─ [feature-b] ✓
 │●   d0472f9 Fix bug in feature B
 │●   7a067a9 Start feature B
 ├╯
 │
-│╭─ [feature-a]
+│╭─ [feature-a] ↑
 │●   2ee61e1 Add feature A
 ├╯
 │
@@ -51,7 +51,7 @@ The graph is rendered top-to-bottom with these sections:
    - **Tracked changes** are listed first with a 2-char `XY` status matching `git status --short` (index green, worktree red).
    - **Untracked files** are listed after with a ` ⁕` marker (magenta). When there are more than 5 untracked files, they are displayed in a multi-column grid layout sized to the terminal width.
 
-2. **Feature branches** — each branch is rendered as a side branch with its name in brackets, followed by its commits, closed with `├╯`.
+2. **Feature branches** — each branch is rendered as a side branch with its name in brackets, followed by its commits, closed with `├╯`. A remote tracking indicator appears after the closing `]` when an upstream has been configured for the branch.
 
 3. **Loose commits** — commits not belonging to any feature branch, shown on the main integration line.
 
@@ -70,6 +70,9 @@ The graph is rendered top-to-bottom with these sections:
 | ` ⁕` | Untracked file marker (magenta) |
 | `⏫` | Upstream has new commits |
 | `·` | Context commit before the base (dimmed) |
+| `✓` | Branch remote is in sync (green) |
+| `↑` | Branch has unpushed commits (yellow) |
+| `✗` | Branch remote is gone (red) |
 
 ### Short IDs
 
