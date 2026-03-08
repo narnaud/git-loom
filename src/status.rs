@@ -2,13 +2,19 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 
-use crate::{git, graph};
+use crate::{git, graph, shortid};
 
-pub fn run(show_files: bool, context: usize, show_all: bool, theme: graph::Theme) -> Result<()> {
+pub fn run(
+    file_filter: Option<Vec<String>>,
+    context: usize,
+    show_all: bool,
+    theme: graph::Theme,
+) -> Result<()> {
     let repo = git::open_repo()?;
     let _ = git::require_workdir(&repo, "display status")?;
 
     let opts = graph::default_render_opts(theme);
+    let show_files = file_filter.is_some();
     let mut info = git::gather_repo_info(&repo, show_files, context)?;
     if !show_all {
         let pattern = git::hide_branch_pattern(&repo)
@@ -17,9 +23,60 @@ pub fn run(show_files: bool, context: usize, show_all: bool, theme: graph::Theme
             hide_branches(&mut info, &pattern);
         }
     }
+
+    // When specific commits are requested, clear files from non-matching commits.
+    if let Some(ids) = &file_filter
+        && !ids.is_empty()
+    {
+        let filter_oids = resolve_commit_filter(&repo, ids, &info);
+        for commit in &mut info.commits {
+            if !filter_oids.contains(&commit.oid) {
+                commit.files.clear();
+            }
+        }
+    }
+
     let output = graph::render(info, &opts);
     print!("{}", output);
     Ok(())
+}
+
+/// Resolve a list of user-supplied IDs to a set of commit OIDs whose files
+/// should be shown. Supports git hashes and loom commit short IDs.
+/// Unknown IDs are silently skipped.
+fn resolve_commit_filter(
+    repo: &git2::Repository,
+    ids: &[String],
+    info: &git::RepoInfo,
+) -> HashSet<git2::Oid> {
+    let entities = info.collect_entities();
+    let allocator = shortid::IdAllocator::new(entities);
+
+    let mut filter_oids = HashSet::new();
+
+    for id in ids {
+        // 1. Try git reference (full/short hash, HEAD, etc.)
+        if let Ok(obj) = repo.revparse_single(id)
+            && let Ok(commit) = obj.peel_to_commit()
+        {
+            filter_oids.insert(commit.id());
+            continue;
+        }
+
+        // 2. Try loom short ID for a commit
+        if let Some(commit) = info
+            .commits
+            .iter()
+            .find(|c| allocator.get_commit(c.oid) == id.as_str())
+        {
+            filter_oids.insert(commit.oid);
+            continue;
+        }
+
+        // Not found → skip silently
+    }
+
+    filter_oids
 }
 
 /// Remove branches matching `pattern` (prefix match) and their owned commits

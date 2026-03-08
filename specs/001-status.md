@@ -229,6 +229,22 @@ drop, commit, push, etc.).
 | `git-loom status 3` | Same as above (explicit) |
 | `git-loom --all` | Shows all branches including hidden ones |
 | `git-loom status --all` | Same as above (explicit) |
+| `git-loom status -f` | Shows files changed in each commit |
+| `git-loom status -f <id>…` | Shows files only for the specified commits or branches |
+
+### `-f` / `--files` flag
+
+When `--files` is given without arguments, every commit in the log shows
+its changed files beneath it.
+
+When one or more identifiers follow `--files`, only those commits show their
+files. All other commits are rendered without the file list. Each identifier
+may be:
+
+- A **loom commit short ID** (e.g. `d0`, `ab`) as shown in the status output.
+- A **git hash or short hash** (e.g. `abc1234`) as accepted by `git rev-parse`.
+
+Unknown identifiers are silently ignored.
 
 ## Design Decisions
 

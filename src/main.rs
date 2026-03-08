@@ -49,9 +49,9 @@ struct Cli {
     #[arg(long, default_value = "auto")]
     theme: ThemeArg,
 
-    /// Show files changed in each commit
-    #[arg(short = 'f', long = "files", hide = true)]
-    files: bool,
+    /// Show files changed in each commit (optionally filtered to specific commits)
+    #[arg(short = 'f', long = "files", num_args = 0.., hide = true)]
+    files: Option<Vec<String>>,
 
     /// Number of context commits to show before the base
     #[arg(default_value = "1", hide = true)]
@@ -74,9 +74,9 @@ enum Command {
     },
     /// Show the branch-aware status
     Status {
-        /// Show files changed in each commit
-        #[arg(short = 'f', long = "files")]
-        files: bool,
+        /// Show files changed in each commit (optionally filtered to specific commits)
+        #[arg(short = 'f', long = "files", num_args = 0.., value_name = "COMMIT")]
+        files: Option<Vec<String>>,
         /// Number of context commits to show before the base
         #[arg(default_value = "1")]
         context: usize,
