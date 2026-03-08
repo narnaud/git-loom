@@ -4,22 +4,8 @@
 
 | Setting | Values | Default | Description |
 |---------|--------|---------|-------------|
-| `loom.hideBranchPattern` | Any prefix string | `local-` | Prefix for branches hidden from `loom status` by default |
 | `loom.remote-type` | `github`, `azure`, `gerrit` | Auto-detected | Override the remote type for `git loom push` |
-
-### `loom.hideBranchPattern`
-
-Branches whose names start with this prefix are hidden from `loom status` by default — both the branch section and its commits are suppressed. Pass `--all` to show them.
-
-```bash
-git config loom.hideBranchPattern "local-"   # default: hide local-* branches
-git config loom.hideBranchPattern "secret-"  # hide secret-* branches instead
-git config loom.hideBranchPattern ""         # disable hiding entirely
-```
-
-Hidden branches remain fully accessible to all other loom commands (`fold`, `drop`, `commit`, `push`, etc.).
-
-When creating or renaming a branch to a name that matches this prefix, git-loom prints a warning.
+| `loom.hideBranchPattern` | Any prefix string | `local-` | Prefix for branches hidden from `loom status` by default |
 
 ### `loom.remote-type`
 
@@ -37,6 +23,20 @@ git config loom.remote-type github   # Force GitHub push (push + open PR)
 git config loom.remote-type azure    # Force Azure DevOps push (push + open PR)
 git config loom.remote-type gerrit   # Force Gerrit push (refs/for/<branch>)
 ```
+
+### `loom.hideBranchPattern`
+
+Branches whose names start with this prefix are hidden from `loom status` by default — both the branch section and its commits are suppressed. Pass `--all` to show them.
+
+```bash
+git config loom.hideBranchPattern "local-"   # default: hide local-* branches
+git config loom.hideBranchPattern "secret-"  # hide secret-* branches instead
+git config loom.hideBranchPattern ""         # disable hiding entirely
+```
+
+Hidden branches remain fully accessible to all other loom commands (`fold`, `drop`, `commit`, `push`, etc.).
+
+When creating or renaming a branch to a name that matches this prefix, git-loom prints a warning.
 
 ## Environment Variables
 
