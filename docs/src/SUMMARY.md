@@ -7,6 +7,18 @@
 - [Installation](installation.md)
 - [Shell Setup](shell-setup.md)
 
+# Guides
+
+- [Tutorial](guides/tutorial.md)
+- [Amending a Past Commit](guides/amending.md)
+- [Fixing Up a Commit](guides/fixup.md)
+- [Splitting a Commit](guides/splitting.md)
+- [Moving a Commit Between Branches](guides/moving-commits.md)
+- [Moving Files Between Commits](guides/moving-files.md)
+- [Uncommitting Changes](guides/uncommitting.md)
+- [Auto-absorbing Changes](guides/absorbing.md)
+- [Pushing for Review](guides/pushing.md)
+
 # Commands
 
 - [Overview](commands/README.md)
