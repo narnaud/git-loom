@@ -231,6 +231,9 @@ fn push_plain(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
 /// If the branch being pushed is the upstream target branch itself (e.g.
 /// pushing `main` when tracking `origin/main`), skip PR creation and fall
 /// back to a plain force-with-lease push.
+///
+/// If a PR already exists for the branch, prints the PR URL instead of
+/// opening the browser.
 fn push_github(
     repo: &Repository,
     workdir: &Path,
@@ -279,6 +282,12 @@ fn push_github(
         branch.to_string()
     };
 
+    // If a PR already exists, show its URL instead of opening the browser
+    if let Some(pr_url) = find_existing_github_pr(workdir, &gh_repo, &head_arg) {
+        msg::success(&format!("PR updated: {}", pr_url));
+        return Ok(());
+    }
+
     // Open PR creation in browser (inherits stdio so browser opens)
     let args = vec![
         "pr",
@@ -302,13 +311,43 @@ fn push_github(
     loom_trace::log_command("gh", &args.join(" "), duration_ms, status.success(), "");
 
     if !status.success() {
-        // gh prints its own messages (e.g., PR already exists) — not fatal
+        // gh prints its own messages — not fatal
     }
 
     Ok(())
 }
 
+/// Check if a GitHub PR already exists for the given branch.
+///
+/// Returns the PR URL if found, or `None` if no PR exists or the check fails.
+fn find_existing_github_pr(workdir: &Path, gh_repo: &str, head_arg: &str) -> Option<String> {
+    let output = Command::new("gh")
+        .current_dir(workdir)
+        .args([
+            "pr", "list", "--head", head_arg, "--repo", gh_repo, "--json", "url", "--limit", "1",
+        ])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let trimmed = stdout.trim();
+
+    if trimmed == "[]" {
+        return None;
+    }
+
+    // Extract "url" value from JSON: [{"url":"<URL>"}]
+    extract_json_string_field(trimmed, "url")
+}
+
 /// Push to Azure DevOps: push the branch, then open `az repos pr create --open`.
+///
+/// If a PR already exists for the branch, prints the PR URL instead of
+/// opening the browser.
 fn push_azure(workdir: &Path, remote: &str, branch: &str, target_branch: &str) -> Result<()> {
     git_push(workdir, remote, branch)?;
 
@@ -323,6 +362,12 @@ fn push_azure(workdir: &Path, remote: &str, branch: &str, target_branch: &str) -
             "Install 'az' CLI to create pull requests: \
              https://learn.microsoft.com/cli/azure/install-azure-cli"
         );
+        return Ok(());
+    }
+
+    // If a PR already exists, show its URL instead of opening the browser
+    if let Some(pr_url) = find_existing_azure_pr(workdir, branch) {
+        msg::success(&format!("PR updated: {}", pr_url));
         return Ok(());
     }
 
@@ -347,10 +392,64 @@ fn push_azure(workdir: &Path, remote: &str, branch: &str, target_branch: &str) -
     loom_trace::log_command("az", &args.join(" "), duration_ms, status.success(), "");
 
     if !status.success() {
-        // az prints its own messages (e.g., PR already exists) — not fatal
+        // az prints its own messages — not fatal
     }
 
     Ok(())
+}
+
+/// Check if an Azure DevOps PR already exists for the given source branch.
+///
+/// Returns the PR web URL if found, or `None` if no PR exists or the check fails.
+fn find_existing_azure_pr(workdir: &Path, branch: &str) -> Option<String> {
+    let output = Command::new("az")
+        .current_dir(workdir)
+        .args([
+            "repos",
+            "pr",
+            "list",
+            "--detect",
+            "--source-branch",
+            branch,
+            "--output",
+            "json",
+        ])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let trimmed = stdout.trim();
+
+    if trimmed == "[]" {
+        return None;
+    }
+
+    // Extract web URL: look for a URL containing "/pullrequest/" in the JSON
+    // (from _links.web.href, which is the browser-accessible URL)
+    extract_pullrequest_url(trimmed)
+}
+
+/// Extract a PR web URL containing "/pullrequest/" from a JSON string.
+fn extract_pullrequest_url(json: &str) -> Option<String> {
+    let pos = json.find("/pullrequest/")?;
+    let before = &json[..pos];
+    let start = before.rfind("https://")?;
+    let url_start = &json[start..];
+    let end = url_start.find('"').unwrap_or(url_start.len());
+    Some(url_start[..end].to_string())
+}
+
+/// Extract the first occurrence of `"field":"value"` from a JSON string.
+fn extract_json_string_field(json: &str, field: &str) -> Option<String> {
+    let needle = format!("\"{}\":\"", field);
+    let pos = json.find(&needle)?;
+    let after = &json[pos + needle.len()..];
+    let end = after.find('"')?;
+    Some(after[..end].to_string())
 }
 
 /// Push to Gerrit without creating a review (plain force push).
