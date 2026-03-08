@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use git2::BranchType;
 
 use crate::git;
-use crate::git_commands::{self, git_rebase};
+use crate::git_commands::{self, git_branch, git_rebase};
 use crate::msg;
 
 /// Update the integration branch by fetching and rebasing from upstream.
@@ -11,7 +11,7 @@ use crate::msg;
 /// `git rebase --autostash <upstream>` on the current integration branch,
 /// then updates submodules if any are configured. On merge conflict, the error
 /// is reported so the user can resolve it manually.
-pub fn run() -> Result<()> {
+pub fn run(skip_confirm: bool) -> Result<()> {
     let repo = git::open_repo()?;
     let workdir = git::require_workdir(&repo, "update")?;
 
@@ -122,7 +122,81 @@ pub fn run() -> Result<()> {
         branch_name, upstream_name, upstream_info
     ));
 
+    // Propose removing local branches whose remote tracking branch was pruned
+    let gone = find_branches_with_gone_upstream(&repo, &branch_name)?;
+    if !gone.is_empty() {
+        msg::warn(&format!(
+            "{} local {} with a gone upstream:",
+            gone.len(),
+            if gone.len() == 1 {
+                "branch"
+            } else {
+                "branches"
+            }
+        ));
+        for name in &gone {
+            println!("  · {}", name);
+        }
+        let confirmed = skip_confirm
+            || msg::confirm(if gone.len() == 1 {
+                "Remove it?"
+            } else {
+                "Remove them?"
+            })?;
+        if confirmed {
+            for name in &gone {
+                git_branch::delete(workdir, name)?;
+                msg::success(&format!("Removed branch `{}`", name));
+            }
+        }
+    }
+
     Ok(())
+}
+
+/// Find local branches whose configured upstream tracking ref no longer exists.
+///
+/// After `git fetch --prune`, remote-tracking refs for deleted remote branches
+/// are removed. Any local branch that had an upstream configured pointing to
+/// one of those refs is considered "gone".
+fn find_branches_with_gone_upstream(
+    repo: &git2::Repository,
+    current_branch: &str,
+) -> Result<Vec<String>> {
+    let config = repo.config()?;
+    let mut gone = Vec::new();
+
+    for branch_result in repo.branches(Some(BranchType::Local))? {
+        let (branch, _) = branch_result?;
+        let Some(name) = branch.name()? else {
+            continue;
+        };
+        let name = name.to_string();
+        if name == current_branch {
+            continue;
+        }
+
+        // Check if an upstream remote is configured for this branch
+        let remote_key = format!("branch.{}.remote", name);
+        let Ok(remote) = config.get_string(&remote_key) else {
+            continue;
+        };
+
+        // Check if the merge ref (upstream branch name) is configured
+        let merge_key = format!("branch.{}.merge", name);
+        let Ok(merge) = config.get_string(&merge_key) else {
+            continue;
+        };
+
+        // Construct the remote-tracking ref and check if it still exists
+        let branch_part = merge.strip_prefix("refs/heads/").unwrap_or(&merge);
+        let tracking_ref = format!("refs/remotes/{}/{}", remote, branch_part);
+        if repo.find_reference(&tracking_ref).is_err() {
+            gone.push(name);
+        }
+    }
+
+    Ok(gone)
 }
 
 #[cfg(test)]

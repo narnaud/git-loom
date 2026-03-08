@@ -12,7 +12,7 @@ fn update_pulls_upstream_changes() {
     let before_oid = test_repo.head_oid();
     assert_ne!(before_oid, remote_oid);
 
-    let result = test_repo.in_dir(|| super::run());
+    let result = test_repo.in_dir(|| super::run(false));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     // After update, integration should point at the remote commit
@@ -27,7 +27,7 @@ fn update_pulls_upstream_changes() {
 fn update_works_when_already_up_to_date() {
     let test_repo = TestRepo::new_with_remote();
 
-    let result = test_repo.in_dir(|| super::run());
+    let result = test_repo.in_dir(|| super::run(false));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 }
 
@@ -37,7 +37,7 @@ fn update_fails_on_detached_head() {
     let oid = test_repo.head_oid();
     test_repo.set_detached_head(oid);
 
-    let result = test_repo.in_dir(|| super::run());
+    let result = test_repo.in_dir(|| super::run(false));
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
     assert!(
@@ -52,7 +52,7 @@ fn update_fails_without_upstream() {
     let test_repo = TestRepo::new();
     // new() creates a repo without remote/upstream
 
-    let result = test_repo.in_dir(|| super::run());
+    let result = test_repo.in_dir(|| super::run(false));
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
     assert!(
@@ -72,7 +72,7 @@ fn update_rebases_local_commits_on_top_of_upstream() {
     // Add commits to the remote
     test_repo.add_remote_commits(&["Remote commit"]);
 
-    let result = test_repo.in_dir(|| super::run());
+    let result = test_repo.in_dir(|| super::run(false));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     // Local commit should still be on top
@@ -110,7 +110,7 @@ fn update_fetches_tags_from_remote() {
         "Tag should not exist locally before update"
     );
 
-    let result = test_repo.in_dir(|| super::run());
+    let result = test_repo.in_dir(|| super::run(false));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     // Tag should now exist locally
@@ -165,7 +165,7 @@ fn update_prunes_deleted_remote_branches() {
         branch.delete().unwrap();
     }
 
-    let result = test_repo.in_dir(|| super::run());
+    let result = test_repo.in_dir(|| super::run(false));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     // Remote-tracking branch should be pruned
@@ -207,7 +207,7 @@ fn update_preserves_merge_topology() {
     test_repo.add_remote_commits(&["Upstream change"]);
 
     // Run update
-    let result = test_repo.in_dir(|| super::run());
+    let result = test_repo.in_dir(|| super::run(false));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     // After update, HEAD should still be a merge commit (topology preserved)
@@ -237,5 +237,74 @@ fn update_preserves_merge_topology() {
     assert!(
         new_head.message().unwrap().contains("Merge branch"),
         "Merge commit message should be preserved"
+    );
+}
+
+#[test]
+fn update_removes_branches_with_gone_upstream() {
+    let test_repo = TestRepo::new_with_remote();
+    let remote_path = test_repo.remote_path().unwrap();
+
+    // Create feature-x on the remote and fetch it so origin/feature-x exists locally
+    {
+        let remote_repo = Repository::open_bare(&remote_path).unwrap();
+        let remote_head = remote_repo
+            .find_branch("main", BranchType::Local)
+            .unwrap()
+            .get()
+            .target()
+            .unwrap();
+        let commit = remote_repo.find_commit(remote_head).unwrap();
+        remote_repo.branch("feature-x", &commit, false).unwrap();
+    }
+    test_repo
+        .repo
+        .find_remote("origin")
+        .unwrap()
+        .fetch(&["feature-x"], None, None)
+        .unwrap();
+
+    // Create a local branch tracking origin/feature-x
+    test_repo.create_branch_tracking("feature-x", "origin/feature-x");
+
+    assert!(
+        test_repo.branch_exists("feature-x"),
+        "feature-x should exist before update"
+    );
+
+    // Delete feature-x from the remote (simulates upstream deletion)
+    {
+        let remote_repo = Repository::open_bare(&remote_path).unwrap();
+        let mut branch = remote_repo
+            .find_branch("feature-x", BranchType::Local)
+            .unwrap();
+        branch.delete().unwrap();
+    }
+
+    // Run update with --yes to skip the interactive prompt
+    let result = test_repo.in_dir(|| super::run(true));
+    assert!(result.is_ok(), "update failed: {:?}", result.err());
+
+    // The local branch with gone upstream should be removed
+    assert!(
+        !test_repo.branch_exists("feature-x"),
+        "feature-x should be removed after update (upstream is gone)"
+    );
+}
+
+#[test]
+fn update_keeps_branches_without_tracking_config() {
+    let test_repo = TestRepo::new_with_remote();
+
+    // Create a local branch with no upstream tracking configured
+    test_repo.create_branch("local-only");
+
+    let result = test_repo.in_dir(|| super::run(false));
+    assert!(result.is_ok(), "update failed: {:?}", result.err());
+
+    // Branch without upstream config should not be touched
+    assert!(
+        test_repo.branch_exists("local-only"),
+        "local-only branch should be preserved (no upstream configured)"
     );
 }
