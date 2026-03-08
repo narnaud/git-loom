@@ -1,6 +1,8 @@
 use git2::Oid;
 
-use crate::git::{BranchInfo, CommitInfo, ContextCommit, FileChange, RepoInfo, UpstreamInfo};
+use crate::git::{
+    BranchInfo, CommitInfo, ContextCommit, FileChange, RemoteStatus, RepoInfo, UpstreamInfo,
+};
 use crate::graph::{self, RenderOpts, Theme};
 
 /// Strip ANSI escape codes so tests can compare plain text.
@@ -138,6 +140,7 @@ fn single_branch() {
     info.branches = vec![BranchInfo {
         name: "feature-a".to_string(),
         tip_oid: oid(2),
+        remote: None,
     }];
 
     let output = render_plain(info);
@@ -168,10 +171,12 @@ fn independent_branches() {
         BranchInfo {
             name: "feature-b".to_string(),
             tip_oid: oid(2),
+            remote: None,
         },
         BranchInfo {
             name: "feature-a".to_string(),
             tip_oid: oid(1),
+            remote: None,
         },
     ];
 
@@ -201,10 +206,12 @@ fn stacked_branches() {
         BranchInfo {
             name: "feature-b".to_string(),
             tip_oid: oid(4),
+            remote: None,
         },
         BranchInfo {
             name: "feature-a".to_string(),
             tip_oid: oid(2),
+            remote: None,
         },
     ];
 
@@ -257,6 +264,7 @@ fn mixed_loose_and_branch() {
     info.branches = vec![BranchInfo {
         name: "feature-b".to_string(),
         tip_oid: oid(2),
+        remote: None,
     }];
 
     let output = render_plain(info);
@@ -323,6 +331,7 @@ fn merge_based_integration_branch() {
     info.branches = vec![BranchInfo {
         name: "feature-1".to_string(),
         tip_oid: oid(0x14),
+        remote: None,
     }];
 
     let output = render_plain(info);
@@ -358,10 +367,12 @@ fn co_located_branches_show_all_names() {
         BranchInfo {
             name: "feature-a".to_string(),
             tip_oid: oid(2),
+            remote: None,
         },
         BranchInfo {
             name: "feature-a-v2".to_string(),
             tip_oid: oid(2),
+            remote: None,
         },
     ];
 
@@ -406,6 +417,7 @@ fn branch_at_upstream_shown_as_section() {
     info.branches = vec![BranchInfo {
         name: "feature-4".to_string(),
         tip_oid: oid(0xaa), // same as upstream base_oid
+        remote: None,
     }];
 
     let output = render_plain(info);
@@ -512,6 +524,7 @@ fn files_shown_under_branch_commits() {
     info.branches = vec![BranchInfo {
         name: "feature-a".to_string(),
         tip_oid: oid(2),
+        remote: None,
     }];
 
     let output = render_plain(info);
@@ -576,6 +589,7 @@ fn commit_file_ids_use_commit_sid_colon_index() {
     info.branches = vec![BranchInfo {
         name: "feature-a".to_string(),
         tip_oid: oid(2),
+        remote: None,
     }];
 
     let output = render_plain(info);
@@ -643,6 +657,7 @@ fn same_file_in_multiple_commits_gets_unique_ids() {
     info.branches = vec![BranchInfo {
         name: "feature-a".to_string(),
         tip_oid: oid(2),
+        remote: None,
     }];
 
     let output = render_plain(info);
@@ -959,5 +974,79 @@ fn multicolumn_has_pipe_separators() {
         untracked_lines[0].contains("   │ "),
         "expected pipe separator between columns, got: {}",
         untracked_lines[0]
+    );
+}
+
+#[test]
+fn remote_synced_shows_checkmark() {
+    let mut info = base_info();
+    info.commits = vec![commit(2, "A2", Some(1)), commit(1, "A1", None)];
+    info.branches = vec![BranchInfo {
+        name: "feature-a".to_string(),
+        tip_oid: oid(2),
+        remote: Some(RemoteStatus::Synced),
+    }];
+
+    let output = render_plain(info);
+    assert!(
+        output.contains("[feature-a] ✓"),
+        "expected synced indicator, got:\n{}",
+        output
+    );
+}
+
+#[test]
+fn remote_ahead_shows_up_arrow() {
+    let mut info = base_info();
+    info.commits = vec![commit(2, "A2", Some(1)), commit(1, "A1", None)];
+    info.branches = vec![BranchInfo {
+        name: "feature-a".to_string(),
+        tip_oid: oid(2),
+        remote: Some(RemoteStatus::Ahead),
+    }];
+
+    let output = render_plain(info);
+    assert!(
+        output.contains("[feature-a] ↑"),
+        "expected ahead indicator, got:\n{}",
+        output
+    );
+}
+
+#[test]
+fn remote_gone_shows_cross() {
+    let mut info = base_info();
+    info.commits = vec![commit(2, "A2", Some(1)), commit(1, "A1", None)];
+    info.branches = vec![BranchInfo {
+        name: "feature-a".to_string(),
+        tip_oid: oid(2),
+        remote: Some(RemoteStatus::Gone),
+    }];
+
+    let output = render_plain(info);
+    assert!(
+        output.contains("[feature-a] ✗"),
+        "expected gone indicator, got:\n{}",
+        output
+    );
+}
+
+#[test]
+fn no_remote_shows_no_indicator() {
+    let mut info = base_info();
+    info.commits = vec![commit(2, "A2", Some(1)), commit(1, "A1", None)];
+    info.branches = vec![BranchInfo {
+        name: "feature-a".to_string(),
+        tip_oid: oid(2),
+        remote: None,
+    }];
+
+    let output = render_plain(info);
+    // Branch header line should end with ] and nothing after it
+    let header_line = output.lines().find(|l| l.contains("[feature-a]")).unwrap();
+    assert!(
+        header_line.ends_with("[feature-a]"),
+        "expected no indicator after ], got: {}",
+        header_line
     );
 }

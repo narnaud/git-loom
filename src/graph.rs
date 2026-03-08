@@ -1,4 +1,4 @@
-use crate::git::{CommitInfo, ContextCommit, FileChange, RepoInfo, UpstreamInfo};
+use crate::git::{CommitInfo, ContextCommit, FileChange, RemoteStatus, RepoInfo, UpstreamInfo};
 use crate::shortid::IdAllocator;
 use colored::{Color, Colorize};
 use std::collections::{HashMap, HashSet};
@@ -27,6 +27,8 @@ pub struct Theme {
     pub unstaged: Color,
     /// Untracked file marker and path color.
     pub untracked: Color,
+    /// Remote tracking branch is ahead (unpushed commits).
+    pub remote_ahead: Color,
     /// Rotating colors for commit dots on feature branches.
     pub branch_dots: &'static [Color],
 }
@@ -44,6 +46,7 @@ impl Theme {
             staged: Color::Green,
             unstaged: Color::Red,
             untracked: Color::Magenta,
+            remote_ahead: Color::Yellow,
             branch_dots: BRANCH_DOTS,
         }
     }
@@ -60,6 +63,7 @@ impl Theme {
             staged: Color::Green,
             unstaged: Color::Red,
             untracked: Color::Magenta,
+            remote_ahead: Color::Yellow,
             branch_dots: BRANCH_DOTS,
         }
     }
@@ -99,8 +103,9 @@ enum Section {
     WorkingChanges(Vec<FileChange>),
     /// A feature branch: its name(s) and the commits it owns.
     /// Multiple names occur when several branches point to the same tip commit.
+    /// Each name is paired with its remote tracking status (None = never pushed).
     Branch {
-        names: Vec<String>,
+        names: Vec<(String, Option<RemoteStatus>)>,
         commits: Vec<CommitInfo>,
     },
     /// Commits on the integration line that don't belong to any feature branch.
@@ -139,12 +144,12 @@ fn build_sections(info: RepoInfo) -> Vec<Section> {
 
     // Group branches by tip OID to handle co-located branches (multiple
     // branch names pointing to the same commit).
-    let mut tip_to_names: HashMap<git2::Oid, Vec<String>> = HashMap::new();
+    let mut tip_to_names: HashMap<git2::Oid, Vec<(String, Option<RemoteStatus>)>> = HashMap::new();
     for b in &info.branches {
         tip_to_names
             .entry(b.tip_oid)
             .or_default()
-            .push(b.name.clone());
+            .push((b.name.clone(), b.remote.clone()));
     }
 
     // Build a parent lookup from the commit list so we can walk ancestry chains.
@@ -162,7 +167,7 @@ fn build_sections(info: RepoInfo) -> Vec<Section> {
         if !seen_tips.insert(b.tip_oid) {
             continue; // Already processed commits for this tip
         }
-        let canonical_name = tip_to_names[&b.tip_oid][0].clone();
+        let canonical_name = tip_to_names[&b.tip_oid][0].0.clone();
         let mut current = Some(b.tip_oid);
         let mut is_tip = true;
         while let Some(oid) = current {
@@ -181,11 +186,12 @@ fn build_sections(info: RepoInfo) -> Vec<Section> {
 
     // Map canonical name → all names for that branch group.
     // Reverse so the newest (alphabetically last) branch appears on top.
-    let mut canonical_to_names: HashMap<String, Vec<String>> = HashMap::new();
-    for names in tip_to_names.values() {
-        let mut reversed = names.clone();
+    let mut canonical_to_names: HashMap<String, Vec<(String, Option<RemoteStatus>)>> =
+        HashMap::new();
+    for branches in tip_to_names.values() {
+        let mut reversed = branches.clone();
         reversed.reverse();
-        canonical_to_names.insert(names[0].clone(), reversed);
+        canonical_to_names.insert(branches[0].0.clone(), reversed);
     }
 
     let mut sections: Vec<Section> = Vec::new();
@@ -203,7 +209,7 @@ fn build_sections(info: RepoInfo) -> Vec<Section> {
             let names = canonical_to_names
                 .get(&name)
                 .cloned()
-                .unwrap_or_else(|| vec![name.clone()]);
+                .unwrap_or_else(|| vec![(name.clone(), None)]);
             let mut branch_commits = vec![commit];
 
             // Collect subsequent commits that belong to the same branch.
@@ -231,11 +237,11 @@ fn build_sections(info: RepoInfo) -> Vec<Section> {
 
     // Add empty sections for branches at the merge-base (no commits in range).
     let represented: HashSet<&String> = commit_to_branch.values().collect();
-    for names in canonical_to_names.values() {
+    for branches in canonical_to_names.values() {
         // canonical key is the pre-reversal first name; check if any name is represented
-        if !names.iter().any(|n| represented.contains(n)) {
+        if !branches.iter().any(|(n, _)| represented.contains(n)) {
             branch_sections.push(Section::Branch {
-                names: names.clone(),
+                names: branches.clone(),
                 commits: vec![],
             });
         }
@@ -479,7 +485,7 @@ fn render_untracked_multicolumn(
 #[allow(clippy::too_many_arguments)]
 fn render_branch(
     out: &mut String,
-    names: &[String],
+    names: &[(String, Option<RemoteStatus>)],
     commits: &[CommitInfo],
     dot_color: Color,
     prev_stacked: bool,
@@ -488,21 +494,28 @@ fn render_branch(
     ids: &IdAllocator,
     theme: &Theme,
 ) {
-    for (i, name) in names.iter().enumerate() {
+    for (i, (name, remote)) in names.iter().enumerate() {
         let branch_id = ids.get_branch(name);
         let connector = if i == 0 && !prev_stacked {
             "│╭─"
         } else {
             "│├─"
         };
+        let remote_indicator = match remote {
+            Some(RemoteStatus::Synced) => format!(" {}", "✓".color(theme.staged)),
+            Some(RemoteStatus::Ahead) => format!(" {}", "↑".color(theme.remote_ahead)),
+            Some(RemoteStatus::Gone) => format!(" {}", "✗".color(theme.unstaged)),
+            None => String::new(),
+        };
         writeln!(
             out,
-            "{} {} {}{}{}",
+            "{} {} {}{}{}{}",
             connector.color(theme.graph),
             branch_id.color(theme.shortid).underline(),
             "[".color(theme.dim),
             name.color(theme.branch).bold(),
-            "]".color(theme.dim)
+            "]".color(theme.dim),
+            remote_indicator,
         )
         .unwrap();
     }

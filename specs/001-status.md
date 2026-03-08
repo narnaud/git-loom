@@ -143,6 +143,15 @@ not actionable). The default is 1 (no extra context).
    merge-base with no commits in range are shown as empty sections (header
    and close only).
 
+   A remote tracking indicator is shown after the closing `]` when an
+   upstream has been configured for the branch:
+   - `✓` (green) — remote tracking ref exists and local tip matches it
+   - `↑` (yellow) — remote tracking ref exists but local has unpushed commits
+   - `✗` (red) — upstream was configured but the remote ref no longer exists
+     (e.g. after the remote branch was deleted and `git fetch --prune` ran)
+
+   No indicator is shown for local-only branches that have never been pushed.
+
 3. **Loose commits**: commits not belonging to any detected feature branch are
    shown on the main integration line (`●`).
 
@@ -171,6 +180,9 @@ not actionable). The default is 1 (no extra context).
 | ` ⁕`    | Untracked file marker (magenta). Replaces `??` for untracked files |
 | `⏫`  | Upstream has new commits ahead of the common base |
 | `·`    | Context commit before the base (dimmed, display-only) |
+| `✓`    | Branch remote tracking ref exists and is in sync (green) |
+| `↑`    | Branch has unpushed commits ahead of its remote (yellow) |
+| `✗`    | Branch remote tracking ref is gone (red) |
 
 ### Commit line format
 
