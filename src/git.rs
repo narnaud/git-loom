@@ -247,7 +247,7 @@ pub struct FileChange {
     pub path: String,
     /// Index (staged) status: ' ', 'A', 'M', 'D', 'R', or '?'
     pub index: char,
-    /// Worktree (unstaged) status: ' ', 'M', 'D', 'R', or '?'
+    /// Worktree (unstaged) status: ' ', 'M', 'D', 'R', '?', or '!' (conflict)
     pub worktree: char,
 }
 
@@ -709,6 +709,8 @@ fn get_working_changes(repo: &Repository) -> Result<Vec<FileChange>> {
 
         let index = if status.is_wt_new() {
             '?'
+        } else if status.is_conflicted() {
+            '!'
         } else if status.is_index_new() {
             'A'
         } else if status.is_index_modified() {
@@ -723,6 +725,8 @@ fn get_working_changes(repo: &Repository) -> Result<Vec<FileChange>> {
 
         let worktree = if status.is_wt_new() {
             '?'
+        } else if status.is_conflicted() {
+            '!'
         } else if status.is_wt_modified() {
             'M'
         } else if status.is_wt_deleted() {

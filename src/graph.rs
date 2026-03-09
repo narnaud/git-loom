@@ -33,6 +33,8 @@ pub struct Theme {
     pub remote_ahead: Color,
     /// Branch remote tracking ref is gone (deleted on remote).
     pub remote_gone: Color,
+    /// Conflicted file status: bold red, matching git convention.
+    pub conflict: Color,
     /// Rotating colors for commit dots on feature branches.
     pub branch_dots: &'static [Color],
 }
@@ -53,6 +55,7 @@ impl Theme {
             remote_synced: Color::Green,
             remote_ahead: Color::Yellow,
             remote_gone: Color::Red,
+            conflict: Color::Red,
             branch_dots: BRANCH_DOTS,
         }
     }
@@ -72,6 +75,7 @@ impl Theme {
             remote_synced: Color::Green,
             remote_ahead: Color::Yellow,
             remote_gone: Color::Red,
+            conflict: Color::Red,
             branch_dots: BRANCH_DOTS,
         }
     }
@@ -361,16 +365,20 @@ fn render_working_changes(
     )
     .unwrap();
 
+    let conflicted: Vec<&FileChange> = changes
+        .iter()
+        .filter(|f| f.index == '!' && f.worktree == '!')
+        .collect();
     let tracked: Vec<&FileChange> = changes
         .iter()
-        .filter(|f| !(f.index == '?' && f.worktree == '?'))
+        .filter(|f| f.index != '!' && !(f.index == '?' && f.worktree == '?'))
         .collect();
     let untracked: Vec<&FileChange> = changes
         .iter()
         .filter(|f| f.index == '?' && f.worktree == '?')
         .collect();
 
-    if tracked.is_empty() && untracked.is_empty() {
+    if conflicted.is_empty() && tracked.is_empty() && untracked.is_empty() {
         writeln!(
             out,
             "{}   {}",
@@ -379,6 +387,17 @@ fn render_working_changes(
         )
         .unwrap();
     } else {
+        for change in &conflicted {
+            writeln!(
+                out,
+                "{}   {} {} {}",
+                "│".color(theme.graph),
+                ids.get_file(&change.path).color(theme.shortid).underline(),
+                "!!".color(theme.conflict).bold(),
+                change.path.color(theme.conflict).bold()
+            )
+            .unwrap();
+        }
         for change in &tracked {
             writeln!(
                 out,
