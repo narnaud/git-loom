@@ -117,6 +117,11 @@ git push -o topic=<branch> <remote> <branch>:refs/for/<target>
 Uses the Gerrit `refs/for/` refspec to create or update a change. Sets the
 topic to the branch name for grouping related changes.
 
+After pushing, stderr from the git push command is captured and scanned for
+review URLs. Lines starting with `remote:` that contain `http://` or `https://`
+are extracted and displayed below the success message as indented continuation
+lines.
+
 ## Branch Selection
 
 - **Explicit argument**: Resolved via `resolve_target()`, must be a woven branch
@@ -200,6 +205,7 @@ git-loom push feature-a
 ```bash
 git-loom push feature-a
 # Pushed 'feature-a' to origin (Gerrit: refs/for/main)
+#   › https://gerrit.example.com/c/project/+/12345
 ```
 
 ### Interactive branch selection
@@ -219,6 +225,7 @@ git-loom push
 git config loom.remote-type gerrit
 git-loom push feature-a
 # Pushed 'feature-a' to origin (Gerrit: refs/for/main)
+#   › https://gerrit.example.com/c/project/+/12345
 ```
 
 ## Gerrit --no-pr Behavior
