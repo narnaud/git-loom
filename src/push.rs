@@ -4,7 +4,6 @@ use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 use git2::{BranchType, Repository, Sort};
-use serde_json;
 
 use crate::git;
 use crate::git_commands;
@@ -496,7 +495,7 @@ fn push_azure(
 
     let (title, description) = pr_title_and_description(repo, branch, base_oid)?;
 
-    let args = vec![
+    let mut args: Vec<&str> = vec![
         "repos",
         "pr",
         "create",
@@ -508,17 +507,33 @@ fn push_azure(
         "--detect",
         "--title",
         &title,
-        "--description",
-        &description,
     ];
 
-    let start = Instant::now();
-    let status = az_command().current_dir(workdir).args(&args).status()?;
-    let duration_ms = start.elapsed().as_millis();
-    loom_trace::log_command("az", &args.join(" "), duration_ms, status.success(), "");
+    // az CLI accepts multiple values after --description, one per line.
+    // This avoids passing a single multiline argument which breaks
+    // through cmd /C on Windows.
+    let desc_lines: Vec<&str> = description.lines().collect();
+    if !desc_lines.is_empty() {
+        args.push("--description");
+        for line in &desc_lines {
+            args.push(line);
+        }
+    }
 
-    if !status.success() {
-        // az prints its own messages — not fatal
+    let start = Instant::now();
+    let output = az_command().current_dir(workdir).args(&args).output()?;
+    let duration_ms = start.elapsed().as_millis();
+    loom_trace::log_command(
+        "az",
+        &args.join(" "),
+        duration_ms,
+        output.status.success(),
+        "",
+    );
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        eprintln!("{}", stderr.trim());
     }
 
     Ok(())
