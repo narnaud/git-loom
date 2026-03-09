@@ -344,6 +344,20 @@ fn find_existing_github_pr(workdir: &Path, gh_repo: &str, head_arg: &str) -> Opt
     extract_json_string_field(trimmed, "url")
 }
 
+/// Build a `Command` for the Azure CLI.
+///
+/// On Windows `az` is a `.cmd` batch script which `CreateProcess` cannot
+/// resolve directly, so we run it through `cmd /C`.
+fn az_command() -> Command {
+    if cfg!(windows) {
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/C", "az"]);
+        cmd
+    } else {
+        Command::new("az")
+    }
+}
+
 /// Push to Azure DevOps: push the branch, then open `az repos pr create --open`.
 ///
 /// If a PR already exists for the branch, prints the PR URL instead of
@@ -352,7 +366,7 @@ fn push_azure(workdir: &Path, remote: &str, branch: &str, target_branch: &str) -
     git_push(workdir, remote, branch)?;
 
     let start = Instant::now();
-    let az_check = Command::new("az").arg("--version").output();
+    let az_check = az_command().arg("--version").output();
     let az_available = az_check.as_ref().is_ok_and(|o| o.status.success());
     let duration_ms = start.elapsed().as_millis();
     loom_trace::log_command("az", "--version", duration_ms, az_available, "");
@@ -384,10 +398,7 @@ fn push_azure(workdir: &Path, remote: &str, branch: &str, target_branch: &str) -
     ];
 
     let start = Instant::now();
-    let status = Command::new("az")
-        .current_dir(workdir)
-        .args(&args)
-        .status()?;
+    let status = az_command().current_dir(workdir).args(&args).status()?;
     let duration_ms = start.elapsed().as_millis();
     loom_trace::log_command("az", &args.join(" "), duration_ms, status.success(), "");
 
@@ -402,7 +413,7 @@ fn push_azure(workdir: &Path, remote: &str, branch: &str, target_branch: &str) -
 ///
 /// Returns the PR web URL if found, or `None` if no PR exists or the check fails.
 fn find_existing_azure_pr(workdir: &Path, branch: &str) -> Option<String> {
-    let output = Command::new("az")
+    let output = az_command()
         .current_dir(workdir)
         .args([
             "repos",
