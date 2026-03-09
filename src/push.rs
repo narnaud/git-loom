@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 use git2::{BranchType, Repository, Sort};
+use serde_json;
 
 use crate::git;
 use crate::git_commands;
@@ -441,8 +442,8 @@ fn find_existing_github_pr(workdir: &Path, gh_repo: &str, head_arg: &str) -> Opt
         return None;
     }
 
-    // Extract "url" value from JSON: [{"url":"<URL>"}]
-    extract_json_string_field(trimmed, "url")
+    let prs: serde_json::Value = serde_json::from_str(trimmed).ok()?;
+    prs.get(0)?.get("url")?.as_str().map(str::to_string)
 }
 
 /// Build a `Command` for the Azure CLI.
@@ -549,32 +550,23 @@ fn find_existing_azure_pr(workdir: &Path, branch: &str) -> Option<String> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let trimmed = stdout.trim();
 
-    if trimmed == "[]" {
-        return None;
-    }
+    let prs: serde_json::Value = serde_json::from_str(trimmed).ok()?;
+    let pr = prs.get(0)?;
 
-    // Extract web URL: look for a URL containing "/pullrequest/" in the JSON
-    // (from _links.web.href, which is the browser-accessible URL)
-    extract_pullrequest_url(trimmed)
-}
+    // Construct the web URL from the structured fields, since the API URL
+    // uses GUIDs and does not contain the browser-accessible "/pullrequest/" path.
+    let repo_url = pr["repository"]["url"].as_str()?;
+    let org = repo_url
+        .strip_prefix("https://dev.azure.com/")?
+        .split('/')
+        .next()?;
+    let project = pr["repository"]["project"]["name"].as_str()?;
+    let repo = pr["repository"]["name"].as_str()?;
+    let pr_id = pr["pullRequestId"].as_u64()?;
 
-/// Extract a PR web URL containing "/pullrequest/" from a JSON string.
-fn extract_pullrequest_url(json: &str) -> Option<String> {
-    let pos = json.find("/pullrequest/")?;
-    let before = &json[..pos];
-    let start = before.rfind("https://")?;
-    let url_start = &json[start..];
-    let end = url_start.find('"').unwrap_or(url_start.len());
-    Some(url_start[..end].to_string())
-}
-
-/// Extract the first occurrence of `"field":"value"` from a JSON string.
-fn extract_json_string_field(json: &str, field: &str) -> Option<String> {
-    let needle = format!("\"{}\":\"", field);
-    let pos = json.find(&needle)?;
-    let after = &json[pos + needle.len()..];
-    let end = after.find('"')?;
-    Some(after[..end].to_string())
+    Some(format!(
+        "https://dev.azure.com/{org}/{project}/_git/{repo}/pullrequest/{pr_id}"
+    ))
 }
 
 /// Push to Gerrit without creating a review (plain force push).

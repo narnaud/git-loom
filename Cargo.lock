@@ -348,6 +348,7 @@ dependencies = [
  "colored",
  "git2",
  "inquire",
+ "serde_json",
  "shell-escape",
  "tempfile",
  "terminal-colorsaurus",
