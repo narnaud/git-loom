@@ -68,7 +68,7 @@ Pushes the branch with `--force-with-lease`, then checks whether a PR already ex
 git push -o topic=<branch> <remote> <branch>:refs/for/<target>
 ```
 
-Uses the `refs/for/` refspec and sets the topic to the branch name.
+Uses the `refs/for/` refspec and sets the topic to the branch name. After pushing, any review URLs returned by Gerrit are extracted from the remote output and displayed below the success message.
 
 ## Pushing Without a PR or Review
 
@@ -144,6 +144,7 @@ git-loom push feature-a
 ```bash
 git-loom push feature-a
 # Pushed 'feature-a' to origin (Gerrit: refs/for/main)
+#   › https://gerrit.example.com/c/project/+/12345
 ```
 
 ### Interactive selection
@@ -178,6 +179,7 @@ git-loom push feature-a --no-pr
 git config loom.remote-type gerrit
 git-loom push feature-a
 # Pushed 'feature-a' to origin (Gerrit: refs/for/main)
+#   › https://gerrit.example.com/c/project/+/12345
 ```
 
 ## Prerequisites
