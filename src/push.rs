@@ -635,16 +635,54 @@ fn push_gerrit_no_pr(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
 }
 
 /// Push to Gerrit with topic and refs/for/ refspec.
+///
+/// Captures stderr from the push command and extracts Gerrit review URLs
+/// (lines starting with `remote:` that contain `http://` or `https://`).
 fn push_gerrit(workdir: &Path, remote: &str, branch: &str, target_branch: &str) -> Result<()> {
     let refspec = format!("{}:refs/for/{}", branch, target_branch);
     let topic_opt = format!("topic={}", branch);
 
-    git_commands::run_git(workdir, &["push", "-o", &topic_opt, remote, &refspec])?;
+    let args = ["push", "-o", &topic_opt, remote, &refspec];
+    let start = Instant::now();
+    let output = Command::new("git")
+        .current_dir(workdir)
+        .args(args)
+        .output()?;
 
-    msg::success(&format!(
+    let duration_ms = start.elapsed().as_millis();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let cmd = args.join(" ");
+    loom_trace::log_command("git", &cmd, duration_ms, output.status.success(), &stderr);
+
+    if !output.status.success() {
+        bail!("Git {} failed", cmd);
+    }
+
+    // Extract Gerrit review URLs from remote output
+    let mut message = format!(
         "Pushed `{}` to `{}` (Gerrit: `refs/for/{}`)",
         branch, remote, target_branch
-    ));
+    );
+    for line in stderr.lines() {
+        if let Some(rest) = line.strip_prefix("remote:") {
+            let trimmed = rest.trim();
+            if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+                message.push('\n');
+                if trimmed.ends_with(']') {
+                    if let Some(pos) = trimmed.rfind('[') {
+                        let (before, tag) = trimmed.split_at(pos);
+                        message.push_str(&format!("{}`{}`", before, tag));
+                    } else {
+                        message.push_str(trimmed);
+                    }
+                } else {
+                    message.push_str(trimmed);
+                }
+            }
+        }
+    }
+    msg::success(&message);
+
     Ok(())
 }
 
