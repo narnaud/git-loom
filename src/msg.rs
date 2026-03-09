@@ -90,7 +90,13 @@ fn colorize_backticks(message: &str) -> String {
 /// Print a success message with a green checkmark.
 /// Text between backticks is highlighted in yellow.
 pub fn success(message: &str) {
-    println!("{} {}", "✓".green(), colorize_backticks(message));
+    let mut lines = message.lines();
+    if let Some(first) = lines.next() {
+        println!("{} {}", "✓".green(), colorize_backticks(first));
+        for line in lines {
+            eprintln!("  {} {}", "›".blue(), colorize_backticks(line));
+        }
+    }
 }
 
 /// Print a warning message with a yellow exclamation mark.
