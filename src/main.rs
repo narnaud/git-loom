@@ -95,7 +95,7 @@ enum Command {
         /// Files to stage (short IDs, filenames, or 'zz' for all), none for all tracked changes
         files: Vec<String>,
     },
-    /// Fold source(s) into a target (amend files, fixup commits, move commits)
+    /// Fold source(s) into a target (amend files, fixup commits, move commits, move files between commits)
     Fold {
         /// Create a new branch from the source commit and move it there
         #[arg(short = 'c', long = "create")]
@@ -112,7 +112,7 @@ enum Command {
         #[arg(short, long)]
         message: Option<String>,
     },
-    /// Drop a commit or a branch from history
+    /// Drop a local change, a commit, or a branch from history
     Drop {
         /// Commit hash, branch name, or short ID to drop
         target: String,
@@ -149,7 +149,7 @@ enum Command {
         #[arg(short = 't', long = "target")]
         target: Option<String>,
     },
-    /// Push a feature branch to remote
+    /// Push a feature branch to remote and optionally create a PR or Gerrit review
     Push {
         /// Branch name or short ID (if not provided, will prompt interactively)
         branch: Option<String>,
