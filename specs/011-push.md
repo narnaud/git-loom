@@ -77,8 +77,10 @@ gh pr create --web --head <head> --base <target> --repo <owner/repo>
 Pushes the branch with `--force-with-lease` (same safety as plain), then
 checks whether a PR already exists for the branch using `gh pr list`. If a
 PR exists, prints its URL without opening the browser. If no PR exists,
-opens the GitHub PR creation page in the browser via the `gh` CLI. If `gh`
-is not installed, prints a helpful message with a link to install it.
+creates the PR via the `gh` CLI with an auto-generated title and
+description (see [PR Title and Description](#pr-title-and-description)
+below). If `gh` is not installed, prints a helpful message with a link to
+install it.
 
 **Fork workflow:** When the integration branch tracks `upstream/main` (a fork
 setup), feature branches are pushed to `origin` (the user's fork) instead.
@@ -103,8 +105,10 @@ az repos pr create --open --source-branch <branch> --target-branch <target> --de
 
 Pushes the branch with `--force-with-lease` (same safety as plain), then checks
 whether a PR already exists for the branch using `az repos pr list`. If a PR exists,
-prints its URL without opening the browser. If no PR exists, opens the Azure DevOps
-PR creation page in the browser via the `az` CLI. `--detect` lets the Azure CLI
+prints its URL without opening the browser. If no PR exists, creates the PR
+via the `az` CLI with an auto-generated title and description (see
+[PR Title and Description](#pr-title-and-description) below). `--detect` lets
+the Azure CLI
 auto-detect the organization and project from the repository's remote URL. If `az`
 is not installed, prints a helpful message with a link to install it.
 
@@ -121,6 +125,22 @@ After pushing, stderr from the git push command is captured and scanned for
 review URLs. Lines starting with `remote:` that contain `http://` or `https://`
 are extracted and displayed below the success message as indented continuation
 lines.
+
+## PR Title and Description
+
+When creating a new PR (GitHub or Azure DevOps), git-loom auto-generates
+the title and description from the branch's commits:
+
+- **Single commit**: the commit subject becomes the PR title and the commit
+  body becomes the PR description.
+- **Multiple commits**: the user is prompted for a PR title via an
+  interactive input. The description is built by concatenating all commit
+  messages (oldest to newest), separated by `---` dividers. Each entry
+  includes the commit subject and body.
+- **No commits** (empty branch): the branch name is used as the title with
+  an empty description.
+
+Merge commits in the branch are skipped when gathering commit messages.
 
 ## Branch Selection
 

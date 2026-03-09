@@ -45,7 +45,7 @@ Uses `--force-with-lease` because woven branches are frequently rebased. `--forc
 Pushes the branch with `--force-with-lease`, then checks whether a PR already exists for the branch:
 
 - **PR exists** — prints the PR URL (`PR updated: https://github.com/owner/repo/pull/42`) without opening the browser
-- **No PR** — opens the GitHub PR creation page in the browser via `gh pr create --web`
+- **No PR** — creates the PR via `gh pr create` with an auto-generated title and description (see [PR Title and Description](#pr-title-and-description) below)
 
 If `gh` is not installed, the push succeeds with a message suggesting to install it.
 
@@ -58,7 +58,7 @@ If the branch being pushed is the upstream target branch itself, PR creation is 
 Pushes the branch with `--force-with-lease`, then checks whether a PR already exists for the branch:
 
 - **PR exists** — prints the PR URL (`PR updated: https://dev.azure.com/...`) without opening the browser
-- **No PR** — opens the Azure DevOps PR creation page in the browser via `az repos pr create --open`
+- **No PR** — creates the PR via `az repos pr create` with an auto-generated title and description (see [PR Title and Description](#pr-title-and-description) below)
 
 `--detect` auto-detects the organization and project from the remote URL. If `az` is not installed, the push succeeds with a message suggesting to install it.
 
@@ -69,6 +69,14 @@ git push -o topic=<branch> <remote> <branch>:refs/for/<target>
 ```
 
 Uses the `refs/for/` refspec and sets the topic to the branch name. After pushing, any review URLs returned by Gerrit are extracted from the remote output and displayed below the success message.
+
+## PR Title and Description
+
+When creating a new PR (GitHub or Azure DevOps), git-loom auto-generates the title and description from the branch's commits:
+
+- **Single commit** — the commit subject becomes the PR title and the commit body becomes the description.
+- **Multiple commits** — you are prompted for a PR title. The description is built by concatenating all commit messages (oldest to newest), separated by `---` dividers.
+- **Empty branch** — the branch name is used as the title with an empty description.
 
 ## Pushing Without a PR or Review
 
