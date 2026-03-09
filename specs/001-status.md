@@ -19,6 +19,7 @@ Independent branches (each forked from integration line):
 
 ```
 ╭─ [local changes]
+│   !! conflicted.rs
 │    M file.txt
 │   A  new_file.rs
 │    ⁕ untracked.txt
@@ -122,7 +123,11 @@ not actionable). The default is 1 (no extra context).
 
 1. **Local changes** (optional): shown only if the working tree has
    modifications, new files, or deletions. Introduced with `╭─ [local changes]`.
-   Files are split into two groups, tracked changes first, then untracked files:
+   Files are split into three groups, conflicted first, then tracked changes,
+   then untracked files:
+   - **Conflicted files** (unresolved merge conflicts): shown first with a `!!`
+     marker in bold red, with the filename also in bold red. These are files
+     detected as conflicted by git (e.g. during an in-progress rebase or merge).
    - **Tracked changes** (staged/unstaged modifications, additions, deletions):
      each file is listed with a 2-char `XY` status (index + worktree), matching
      `git status --short`. The index char is colored green and the worktree char
@@ -176,6 +181,7 @@ not actionable). The default is 1 (no extra context).
 | `││`   | Continuation between stacked branches |
 | `●`    | A commit |
 | `├╯`   | End of a side branch (or stack), merging back to integration line |
+| `!!`    | Conflicted file marker (bold red). Shown for files with unresolved merge conflicts |
 | `XY`    | 2-char file status (`X`=index, `Y`=worktree) for tracked changes, matching `git status --short`. `X` is green, `Y` is red. Values: `M` modified, `A` added, `D` deleted, `R` renamed, ` ` unchanged |
 | ` ⁕`    | Untracked file marker (magenta). Replaces `??` for untracked files |
 | `⏫`  | Upstream has new commits ahead of the common base |

@@ -27,6 +27,7 @@ The status displays a branch-aware commit graph using UTF-8 box-drawing characte
 
 ```
 ╭─ [local changes]
+│   !! conflicted.rs
 │    M file.txt
 │   A  new_file.rs
 │    ⁕ untracked.txt
@@ -47,9 +48,10 @@ The status displays a branch-aware commit graph using UTF-8 box-drawing characte
 
 The graph is rendered top-to-bottom with these sections:
 
-1. **Local changes** — shown only if the working tree has modifications, new files, or deletions. Files are split into two groups:
-   - **Tracked changes** are listed first with a 2-char `XY` status matching `git status --short` (index green, worktree red).
-   - **Untracked files** are listed after with a ` ⁕` marker (magenta). When there are more than 5 untracked files, they are displayed in a multi-column grid layout sized to the terminal width.
+1. **Local changes** — shown only if the working tree has modifications, new files, or deletions. Files are split into three groups:
+   - **Conflicted files** are shown first with a `!!` marker in bold red (filename also bold red). These appear during an in-progress rebase or merge.
+   - **Tracked changes** are listed next with a 2-char `XY` status matching `git status --short` (index green, worktree red).
+   - **Untracked files** are listed last with a ` ⁕` marker (magenta). When there are more than 5 untracked files, they are displayed in a multi-column grid layout sized to the terminal width.
 
 2. **Feature branches** — each branch is rendered as a side branch with its name in brackets, followed by its commits, closed with `├╯`. A remote tracking indicator appears after the closing `]` when an upstream has been configured for the branch.
 
@@ -67,6 +69,7 @@ The graph is rendered top-to-bottom with these sections:
 | `││` | Continuation between stacked branches |
 | `●` | A commit |
 | `├╯` | End of a side branch |
+| `!!` | Conflicted file marker (bold red) |
 | ` ⁕` | Untracked file marker (magenta) |
 | `⏫` | Upstream has new commits |
 | `·` | Context commit before the base (dimmed) |
