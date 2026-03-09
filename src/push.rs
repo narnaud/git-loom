@@ -2,8 +2,8 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
 
-use anyhow::{Result, bail};
-use git2::Repository;
+use anyhow::{Context, Result, bail};
+use git2::{BranchType, Repository, Sort};
 
 use crate::git;
 use crate::git_commands;
@@ -53,12 +53,26 @@ pub fn run(branch: Option<String>, no_pr: bool) -> Result<()> {
         };
     }
 
+    let base_oid = info.upstream.merge_base_oid;
+
     match remote_type {
         RemoteType::Plain => push_plain(&workdir, &remote_name, &branch_name),
-        RemoteType::GitHub => {
-            push_github(&repo, &workdir, &remote_name, &branch_name, &target_branch)
-        }
-        RemoteType::AzureDevOps => push_azure(&workdir, &remote_name, &branch_name, &target_branch),
+        RemoteType::GitHub => push_github(
+            &repo,
+            &workdir,
+            &remote_name,
+            &branch_name,
+            &target_branch,
+            base_oid,
+        ),
+        RemoteType::AzureDevOps => push_azure(
+            &repo,
+            &workdir,
+            &remote_name,
+            &branch_name,
+            &target_branch,
+            base_oid,
+        ),
         RemoteType::Gerrit { target_branch } => {
             push_gerrit(&workdir, &remote_name, &branch_name, &target_branch)
         }
@@ -219,6 +233,86 @@ fn git_push(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
     )
 }
 
+/// Collect commits for a branch from oldest to newest, skipping merge commits.
+///
+/// Returns `(subject, body)` pairs where `body` is everything after the first
+/// line of the commit message (may be empty).
+fn gather_branch_commits(
+    repo: &Repository,
+    branch_name: &str,
+    base_oid: git2::Oid,
+) -> Result<Vec<(String, String)>> {
+    let branch = repo.find_branch(branch_name, BranchType::Local)?;
+    let tip_oid = branch
+        .get()
+        .target()
+        .context("Branch does not point to a commit")?;
+
+    let mut revwalk = repo.revwalk()?;
+    revwalk.push(tip_oid)?;
+    revwalk.hide(base_oid)?;
+    revwalk.set_sorting(Sort::TOPOLOGICAL | Sort::REVERSE)?;
+
+    let mut commits = Vec::new();
+    for oid_result in revwalk {
+        let oid = oid_result?;
+        let commit = repo.find_commit(oid)?;
+        if commit.parent_count() > 1 {
+            continue; // skip merge commits
+        }
+        let subject = commit.summary().unwrap_or("").to_string();
+        let body = commit.body().unwrap_or("").to_string();
+        commits.push((subject, body));
+    }
+
+    Ok(commits)
+}
+
+/// Build a PR title and description from the commits in a branch.
+///
+/// - **Single commit**: title = commit subject, description = commit body.
+/// - **Multiple commits**: prompts the user for a title, then concatenates all
+///   commit messages (oldest → newest) as the description.
+fn pr_title_and_description(
+    repo: &Repository,
+    branch_name: &str,
+    base_oid: git2::Oid,
+) -> Result<(String, String)> {
+    let commits = gather_branch_commits(repo, branch_name, base_oid)?;
+
+    if commits.is_empty() {
+        return Ok((branch_name.to_string(), String::new()));
+    }
+
+    if commits.len() == 1 {
+        let (subject, body) = &commits[0];
+        return Ok((subject.clone(), body.clone()));
+    }
+
+    // Multiple commits: ask the user for a title
+    let title = msg::input("PR title", |s| {
+        if s.is_empty() {
+            Err("Title cannot be empty")
+        } else {
+            Ok(())
+        }
+    })?;
+
+    let description = commits
+        .iter()
+        .map(|(subject, body)| {
+            if body.is_empty() {
+                subject.clone()
+            } else {
+                format!("{}\n\n{}", subject, body)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n---\n\n");
+
+    Ok((title, description))
+}
+
 /// Push using plain git with force-with-lease.
 fn push_plain(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
     git_push(workdir, remote, branch)?;
@@ -240,6 +334,7 @@ fn push_github(
     remote: &str,
     branch: &str,
     target_branch: &str,
+    base_oid: git2::Oid,
 ) -> Result<()> {
     if branch == target_branch {
         return push_plain(workdir, remote, branch);
@@ -288,6 +383,8 @@ fn push_github(
         return Ok(());
     }
 
+    let (title, body) = pr_title_and_description(repo, branch, base_oid)?;
+
     // Open PR creation in browser (inherits stdio so browser opens)
     let args = vec![
         "pr",
@@ -299,6 +396,10 @@ fn push_github(
         target_branch,
         "--repo",
         &gh_repo,
+        "--title",
+        &title,
+        "--body",
+        &body,
     ];
 
     let start = Instant::now();
@@ -362,7 +463,14 @@ fn az_command() -> Command {
 ///
 /// If a PR already exists for the branch, prints the PR URL instead of
 /// opening the browser.
-fn push_azure(workdir: &Path, remote: &str, branch: &str, target_branch: &str) -> Result<()> {
+fn push_azure(
+    repo: &Repository,
+    workdir: &Path,
+    remote: &str,
+    branch: &str,
+    target_branch: &str,
+    base_oid: git2::Oid,
+) -> Result<()> {
     git_push(workdir, remote, branch)?;
 
     let start = Instant::now();
@@ -385,6 +493,8 @@ fn push_azure(workdir: &Path, remote: &str, branch: &str, target_branch: &str) -
         return Ok(());
     }
 
+    let (title, description) = pr_title_and_description(repo, branch, base_oid)?;
+
     let args = vec![
         "repos",
         "pr",
@@ -395,6 +505,10 @@ fn push_azure(workdir: &Path, remote: &str, branch: &str, target_branch: &str) -
         "--target-branch",
         target_branch,
         "--detect",
+        "--title",
+        &title,
+        "--description",
+        &description,
     ];
 
     let start = Instant::now();
