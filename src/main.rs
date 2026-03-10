@@ -25,8 +25,15 @@ mod test_helpers;
 use std::io::IsTerminal;
 
 use anyhow::Context;
+use clap::builder::styling::{AnsiColor, Styles};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use colored::control;
+
+const STYLES: Styles = Styles::styled()
+    .header(AnsiColor::Yellow.on_default().bold())
+    .usage(AnsiColor::Yellow.on_default().bold())
+    .literal(AnsiColor::Green.on_default())
+    .placeholder(AnsiColor::Blue.on_default());
 
 #[derive(ValueEnum, Clone, Copy)]
 enum ThemeArg {
@@ -38,8 +45,38 @@ enum ThemeArg {
     Light,
 }
 
+// Grouped command help — ANSI codes match STYLES (yellow bold = headers, green = literals)
+const GROUPED_COMMANDS: &str = "\
+\x1b[1;33mWorkflow:\x1b[0m
+  \x1b[32minit\x1b[0m              Initialize a new integration branch
+  \x1b[32mupdate\x1b[0m, \x1b[32mup\x1b[0m        Pull-rebase and update submodules
+  \x1b[32mpush\x1b[0m, \x1b[32mpr\x1b[0m          Push a branch to remote
+
+\x1b[1;33mCommits:\x1b[0m
+  \x1b[32mcommit\x1b[0m, \x1b[32mci\x1b[0m        Create a commit on a feature branch
+  \x1b[32mfold\x1b[0m              Amend, fixup, or move commits [\x1b[32mamend\x1b[0m, \x1b[32mam\x1b[0m, \x1b[32mfixup\x1b[0m, \x1b[32mmv\x1b[0m, \x1b[32mrub\x1b[0m]
+  \x1b[32mabsorb\x1b[0m            Auto-distribute changes into originating commits
+  \x1b[32msplit\x1b[0m             Split a commit into two
+  \x1b[32mreword\x1b[0m, \x1b[32mrw\x1b[0m        Reword a commit message or rename a branch
+  \x1b[32mdrop\x1b[0m, \x1b[32mrm\x1b[0m          Drop a change, commit, or branch
+
+\x1b[1;33mBranches:\x1b[0m
+  \x1b[32mbranch\x1b[0m, \x1b[32mbr\x1b[0m        Manage feature branches (create, merge, unmerge)
+
+\x1b[1;33mInspection:\x1b[0m
+  \x1b[32mstatus\x1b[0m            Show the branch-aware status (\x1b[34mdefault\x1b[0m command)
+  \x1b[32mshow\x1b[0m, \x1b[32msh\x1b[0m          Show commit details (like git show)
+  \x1b[32mtrace\x1b[0m             Show the latest command trace";
+
 #[derive(Parser)]
-#[command(name = "git-loom", about = "Supercharge your Git workflow", version)]
+#[command(
+    name = "git-loom",
+    about = "\x1b[34mSupercharge your Git workflow\x1b[0m\nCheckout the full docs here: https://narnaud.github.io/git-loom/",
+    styles = STYLES,
+    version,
+    after_help = GROUPED_COMMANDS,
+    help_template = "{about-with-newline}\n{usage-heading} {usage}{after-help}\n\n\x1b[1;33mOptions:\x1b[0m\n{options}\n",
+)]
 struct Cli {
     /// Disable colored output
     #[arg(long)]
@@ -67,23 +104,30 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    // -- Workflow --
     /// Initialize a new integration branch tracking a remote
     Init {
         /// Branch name (defaults to "integration")
         name: Option<String>,
     },
-    /// Show the branch-aware status
-    Status {
-        /// Show files changed in each commit (optionally filtered to specific commits)
-        #[arg(short = 'f', long = "files", num_args = 0.., value_name = "COMMIT")]
-        files: Option<Vec<String>>,
-        /// Number of context commits to show before the base
-        #[arg(default_value = "1")]
-        context: usize,
-        /// Show all branches including hidden ones (those matching loom.hideBranchPattern)
-        #[arg(short = 'a', long = "all")]
-        all: bool,
+    /// Pull-rebase the integration branch and update submodules
+    #[command(visible_alias = "up")]
+    Update {
+        /// Remove local branches whose upstream tracking branch was deleted on remote
+        #[arg(short, long)]
+        yes: bool,
     },
+    /// Push a feature branch to remote and optionally create a PR or Gerrit review
+    #[command(visible_alias = "pr")]
+    Push {
+        /// Branch name or short ID (if not provided, will prompt interactively)
+        branch: Option<String>,
+        /// Push branch without creating a PR or Gerrit review
+        #[arg(long)]
+        no_pr: bool,
+    },
+
+    // -- Commits --
     /// Create a commit on a feature branch without leaving integration
     #[command(visible_alias = "ci")]
     Commit {
@@ -106,6 +150,22 @@ enum Command {
         #[arg(required = true, num_args = 2..)]
         args: Vec<String>,
     },
+    /// Absorb working tree changes into the commits that introduced them
+    Absorb {
+        /// Show what would be absorbed without making changes
+        #[arg(short = 'n', long)]
+        dry_run: bool,
+        /// Files to restrict absorption to (default: all tracked changed files)
+        files: Vec<String>,
+    },
+    /// Split a commit into two sequential commits
+    Split {
+        /// Commit hash, short ID, or HEAD
+        target: String,
+        /// Message for the first commit (prompts if omitted)
+        #[arg(short, long)]
+        message: Option<String>,
+    },
     /// Reword a commit message or rename a branch
     #[command(visible_alias = "rw")]
     Reword {
@@ -124,55 +184,41 @@ enum Command {
         #[arg(short, long)]
         yes: bool,
     },
+
+    // -- Branches --
+    /// Manage feature branches (create, merge, unmerge)
+    #[command(visible_alias = "br")]
+    Branch(BranchCmd),
+
+    // -- Inspection --
+    /// Show the branch-aware status
+    Status {
+        /// Show files changed in each commit (optionally filtered to specific commits)
+        #[arg(short = 'f', long = "files", num_args = 0.., value_name = "COMMIT")]
+        files: Option<Vec<String>>,
+        /// Number of context commits to show before the base
+        #[arg(default_value = "1")]
+        context: usize,
+        /// Show all branches including hidden ones (those matching loom.hideBranchPattern)
+        #[arg(short = 'a', long = "all")]
+        all: bool,
+    },
     /// Show the diff and metadata for a commit (like `git show`)
     #[command(visible_alias = "sh")]
     Show {
         /// Commit hash, branch name, or short ID
         target: String,
     },
-    /// Split a commit into two sequential commits
-    Split {
-        /// Commit hash, short ID, or HEAD
-        target: String,
-        /// Message for the first commit (prompts if omitted)
-        #[arg(short, long)]
-        message: Option<String>,
-    },
-    /// Absorb working tree changes into the commits that introduced them
-    Absorb {
-        /// Show what would be absorbed without making changes
-        #[arg(short = 'n', long)]
-        dry_run: bool,
-        /// Files to restrict absorption to (default: all tracked changed files)
-        files: Vec<String>,
-    },
-    /// Manage feature branches (create, merge, unmerge)
-    #[command(visible_alias = "br")]
-    Branch(BranchCmd),
-    /// Push a feature branch to remote and optionally create a PR or Gerrit review
-    #[command(visible_alias = "pr")]
-    Push {
-        /// Branch name or short ID (if not provided, will prompt interactively)
-        branch: Option<String>,
-        /// Push branch without creating a PR or Gerrit review
-        #[arg(long)]
-        no_pr: bool,
-    },
-    /// Pull-rebase the integration branch and update submodules
-    #[command(visible_alias = "up")]
-    Update {
-        /// Remove local branches whose upstream tracking branch was deleted on remote
-        #[arg(short, long)]
-        yes: bool,
-    },
+    /// Show the latest command trace
+    Trace,
+
+    // -- Hidden --
     /// Generate shell completions (powershell, clink)
     #[command(hide = true)]
     Completions {
         /// Shell to generate completions for (powershell, clink)
         shell: String,
     },
-    /// Show the latest command trace
-    Trace,
     /// Internal: used as GIT_SEQUENCE_EDITOR to write a pre-generated todo file
     #[command(hide = true)]
     InternalWriteTodo {

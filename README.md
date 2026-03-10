@@ -63,29 +63,35 @@ cargo install --path .
 ## Usage
 
 ```
-Usage: git-loom [OPTIONS] [COMMAND]
+Usage: git-loom.exe [OPTIONS] [COMMAND]
 
-Commands:
-  init    Initialize a new integration branch tracking a remote
-  status  Show the branch-aware status
-  commit  Create a commit on a feature branch without leaving integration
-  fold    Fold source(s) into a target (amend files, fixup commits, move commits, move files between commits)
-  reword  Reword a commit message or rename a branch
-  drop    Drop a local change, a commit, or a branch from history
-  show    Show the diff and metadata for a commit (like `git show`)
-  split   Split a commit into two sequential commits
-  absorb  Absorb working tree changes into the commits that introduced them
-  branch  Manage feature branches (create, merge, unmerge)
-  push    Push a feature branch to remote and optionally create a PR or Gerrit review
-  update  Pull-rebase the integration branch and update submodules
-  trace   Show the latest command trace
-  help    Print this message or the help of the given subcommand(s)
+Workflow:
+  init              Initialize a new integration branch
+  update, up        Pull-rebase and update submodules
+  push, pr          Push a branch to remote
+
+Commits:
+  commit, ci        Create a commit on a feature branch
+  fold              Amend, fixup, or move commits [amend, am, fixup, mv, rub]
+  absorb            Auto-distribute changes into originating commits
+  split             Split a commit into two
+  reword, rw        Reword a commit message or rename a branch
+  drop, rm          Drop a change, commit, or branch
+
+Branches:
+  branch, br        Manage feature branches (create, merge, unmerge)
+
+Inspection:
+  status            Show the branch-aware status (default command)
+  show, sh          Show commit details (like git show)
+  trace             Show the latest command trace
 
 Options:
       --no-color       Disable colored output
       --theme <THEME>  Color theme for graph output [default: auto] [possible values: auto, dark, light]
   -h, --help           Print help (see more with '--help')
-  -V, --version        Print version```
+  -V, --version        Print version
+```
 
 ## Set Up Your Shell
 
