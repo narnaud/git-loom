@@ -131,8 +131,12 @@ fn resolve_push_remote_github_fork_uses_origin() {
         .unwrap();
 
     // When tracking upstream/main on GitHub, push should go to origin
-    let result =
-        super::resolve_push_remote(&test_repo.repo, "upstream/main", &super::RemoteType::GitHub);
+    let result = super::resolve_push_remote(
+        &test_repo.repo,
+        &test_repo.workdir(),
+        "upstream/main",
+        &super::RemoteType::GitHub,
+    );
     assert_eq!(result, "origin");
 }
 
@@ -141,8 +145,12 @@ fn resolve_push_remote_github_origin_stays_origin() {
     let test_repo = TestRepo::new_with_remote();
 
     // When tracking origin/main on GitHub, push should stay on origin
-    let result =
-        super::resolve_push_remote(&test_repo.repo, "origin/main", &super::RemoteType::GitHub);
+    let result = super::resolve_push_remote(
+        &test_repo.repo,
+        &test_repo.workdir(),
+        "origin/main",
+        &super::RemoteType::GitHub,
+    );
     assert_eq!(result, "origin");
 }
 
@@ -157,8 +165,12 @@ fn resolve_push_remote_plain_upstream_stays_upstream() {
         .unwrap();
 
     // Plain remote type should NOT redirect, even if "upstream" remote exists
-    let result =
-        super::resolve_push_remote(&test_repo.repo, "upstream/main", &super::RemoteType::Plain);
+    let result = super::resolve_push_remote(
+        &test_repo.repo,
+        &test_repo.workdir(),
+        "upstream/main",
+        &super::RemoteType::Plain,
+    );
     assert_eq!(result, "upstream");
 }
 

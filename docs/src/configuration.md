@@ -5,6 +5,7 @@
 | Setting | Values | Default | Description |
 |---------|--------|---------|-------------|
 | `loom.remote-type` | `github`, `azure`, `gerrit` | Auto-detected | Override the remote type for `git loom push` |
+| `loom.push-remote` | Any remote name | Auto-detected | Override which remote to push to (e.g., `personal` for fork workflows) |
 | `loom.hideBranchPattern` | Any prefix string | `local-` | Prefix for branches hidden from `loom status` by default |
 
 ### `loom.remote-type`
@@ -23,6 +24,22 @@ git config loom.remote-type github   # Force GitHub push (push + open PR)
 git config loom.remote-type azure    # Force Azure DevOps push (push + open PR)
 git config loom.remote-type gerrit   # Force Gerrit push (refs/for/<branch>)
 ```
+
+### `loom.push-remote`
+
+By default, `git loom push` uses the integration branch's remote for pushing. One exception: if the integration branch tracks a remote named `upstream` and a remote named `origin` also exists, pushes go to `origin` automatically (the standard GitHub fork convention).
+
+For non-standard fork setups where your remotes have different names, set this explicitly:
+
+```bash
+git config loom.push-remote personal
+```
+
+For example, with remotes:
+- `origin` → upstream read-only repository
+- `personal` → your fork (where you push)
+
+Now `git loom push` will push to `personal` regardless of remote names.
 
 ### `loom.hideBranchPattern`
 
