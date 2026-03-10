@@ -3,9 +3,24 @@
 -- Or load dynamically: load(io.popen('git-loom completions clink'):read("*a"))()
 
 local status_matcher = clink.argmatcher()
-    :addflags("-f", "--files", "--help", "-h")
+    :addflags("-f", "--files", "-a", "--all", "--help", "-h")
+
+local branch_new_matcher = clink.argmatcher()
+    :addflags("-t", "--target", "--help", "-h")
+
+local branch_merge_matcher = clink.argmatcher()
+    :addflags("-a", "--all", "--help", "-h")
+
+local branch_unmerge_matcher = clink.argmatcher()
+    :addflags("--help", "-h")
 
 local branch_matcher = clink.argmatcher()
+    :addarg(
+        "new"      .. branch_new_matcher,
+        "create"   .. branch_new_matcher,
+        "merge"    .. branch_merge_matcher,
+        "unmerge"  .. branch_unmerge_matcher
+    )
     :addflags("-t", "--target", "--help", "-h")
 
 local reword_matcher = clink.argmatcher()
@@ -38,4 +53,4 @@ clink.argmatcher("git-loom")
         "update",
         "push"
     )
-    :addflags("--no-color", "-f", "--files", "--help", "-h")
+    :addflags("--no-color", "--help", "-h")
