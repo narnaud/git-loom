@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.14.0](https://github.com/narnaud/git-loom/compare/v0.13.0...v0.14.0) (2026-03-10)
+
+
+### Features ✨
+
+* add common aliases to some commands ([1c06ca8](https://github.com/narnaud/git-loom/commit/1c06ca800995380ccb304083ab2500c3660f45e4))
+* **push:** Allow ssh host aliases and non-standard remote names ([cc620e7](https://github.com/narnaud/git-loom/commit/cc620e7c2861576ef386d7f9d34c3a9596706eca))
+* **push:** auto-generate PR title and description from branch commits ([b5d5030](https://github.com/narnaud/git-loom/commit/b5d5030448684ce15a7c54e35f3be5eaa9a7d628))
+* **push:** display Gerrit review URLs after push ([347e337](https://github.com/narnaud/git-loom/commit/347e33736c7ecb285b63cf67c825da3c4ffb4a34)), closes [#69](https://github.com/narnaud/git-loom/issues/69)
+* **status:** show conflicted files with !! marker in bold red ([3a9a31d](https://github.com/narnaud/git-loom/commit/3a9a31d3adb36739dfabf8502124cae97d5a3baa)), closes [#67](https://github.com/narnaud/git-loom/issues/67)
+
+
+### Bug Fixes 🐞
+
+* **push:** fix Azure PR description and JSON output ([291b6d6](https://github.com/narnaud/git-loom/commit/291b6d69107ef6dd4ad712a66d95a3cf959601de))
+* **push:** fix calling `az` on Windows ([b9cc2c7](https://github.com/narnaud/git-loom/commit/b9cc2c735a28f61e042f555049866a5e2ba38a9d))
+* **push:** use serde_json to parse Azure and GitHub CLI output ([1a71d4c](https://github.com/narnaud/git-loom/commit/1a71d4cb4cc953f8350db77e35a274c38c74827d))
+
+
+### Documentation
+
+* **push:** document auto-generated PR title and description ([42dc767](https://github.com/narnaud/git-loom/commit/42dc76765832d3955dd6a71d91d7f83a4c03b155))
+* **push:** document Gerrit review URL display after push ([269c54e](https://github.com/narnaud/git-loom/commit/269c54e92cab6e3249417fcc4f346beff6ecf964))
+* **status:** document conflict display with !! marker ([8280ddd](https://github.com/narnaud/git-loom/commit/8280ddda7f470c0618f1c9ba33962ab12a6df40b))
+* update help to be more complete ([00e61c3](https://github.com/narnaud/git-loom/commit/00e61c33302bb8287461cf751aabfa5c50e73187))
+
+
+### Changes
+
+* update warn message and use it for branch deletion ([9ea9ffc](https://github.com/narnaud/git-loom/commit/9ea9ffcc2f67ada5946231d740c3c23df25b1e78))
+
 ## [0.13.0](https://github.com/narnaud/git-loom/compare/v0.12.0...v0.13.0) (2026-03-08)
 
 
