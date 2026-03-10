@@ -4,14 +4,14 @@
 
 **git-loom** is a Git CLI tool that makes working with integration branches seamless. Inspired by tools like [jujutsu](https://github.com/martinvonz/jj) and [Git Butler](https://gitbutler.com/), git-loom helps you work on multiple features simultaneously while keeping your branches organized and independent.
 
-![git-loom status](docs/src/assets/git-loom-status.png)
+![git-loom status](docs/src/assets/git-loom-status-838.png)
 
 > [!IMPORTANT]
 > `git-loom` has been written with the help of AI, especially [Claude](https://claude.ai/)
 
 ## Documentation
 
-Full documentation is available at **https://narnaud.github.io/git-loom/**
+Full documentation is available at **<https://narnaud.github.io/git-loom/>**
 
 - [Shell setup](https://narnaud.github.io/git-loom/shell-setup.html) (completions for PowerShell, Clink)
 - [Configuration](https://narnaud.github.io/git-loom/configuration.html) (remote type, push remote, hidden branches)
