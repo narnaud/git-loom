@@ -480,6 +480,109 @@ fn drop_file_deletes_staged_new_file() {
     );
 }
 
+// ── Drop directory tests ─────────────────────────────────────────────────
+
+#[test]
+fn drop_dir_with_only_untracked_files() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("Base", "base.txt");
+
+    // Create a directory with only untracked files
+    std::fs::create_dir_all(test_repo.workdir().join("newdir")).unwrap();
+    test_repo.write_file("newdir/a.txt", "aaa");
+    test_repo.write_file("newdir/b.txt", "bbb");
+
+    let result = super::drop_file(&test_repo.repo, "newdir", true);
+    assert!(result.is_ok(), "drop_file (dir) failed: {:?}", result);
+
+    assert!(
+        !test_repo.workdir().join("newdir").exists(),
+        "newdir should be deleted"
+    );
+    assert!(
+        test_repo.status_porcelain().is_empty(),
+        "working tree should be clean"
+    );
+}
+
+#[test]
+fn drop_dir_with_only_tracked_modifications() {
+    let test_repo = TestRepo::new_with_remote();
+
+    // Commit files inside a directory
+    std::fs::create_dir_all(test_repo.workdir().join("src")).unwrap();
+    test_repo.write_file("src/one.txt", "original-one");
+    test_repo.write_file("src/two.txt", "original-two");
+    test_repo.stage_files(&["src/one.txt", "src/two.txt"]);
+    test_repo.commit_staged("Initial src files");
+
+    // Modify both tracked files
+    test_repo.write_file("src/one.txt", "modified-one");
+    test_repo.write_file("src/two.txt", "modified-two");
+
+    let result = super::drop_file(&test_repo.repo, "src", true);
+    assert!(result.is_ok(), "drop_file (dir) failed: {:?}", result);
+
+    assert_eq!(test_repo.read_file("src/one.txt"), "original-one");
+    assert_eq!(test_repo.read_file("src/two.txt"), "original-two");
+    assert!(
+        test_repo.status_porcelain().is_empty(),
+        "working tree should be clean"
+    );
+}
+
+#[test]
+fn drop_dir_with_mixed_tracked_and_untracked() {
+    let test_repo = TestRepo::new_with_remote();
+
+    // Commit a file inside a directory
+    std::fs::create_dir_all(test_repo.workdir().join("mix")).unwrap();
+    test_repo.write_file("mix/tracked.txt", "original");
+    test_repo.stage_files(&["mix/tracked.txt"]);
+    test_repo.commit_staged("Initial mix file");
+
+    // Modify tracked file + add untracked file
+    test_repo.write_file("mix/tracked.txt", "modified");
+    test_repo.write_file("mix/untracked.txt", "new");
+
+    let result = super::drop_file(&test_repo.repo, "mix", true);
+    assert!(result.is_ok(), "drop_file (dir) failed: {:?}", result);
+
+    assert_eq!(test_repo.read_file("mix/tracked.txt"), "original");
+    assert!(
+        !test_repo.workdir().join("mix/untracked.txt").exists(),
+        "untracked file should be deleted"
+    );
+    assert!(
+        test_repo.status_porcelain().is_empty(),
+        "working tree should be clean"
+    );
+}
+
+#[test]
+fn drop_dir_with_staged_new_files() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("Base", "base.txt");
+
+    // Create and stage new files in a directory
+    std::fs::create_dir_all(test_repo.workdir().join("staged")).unwrap();
+    test_repo.write_file("staged/a.txt", "aaa");
+    test_repo.write_file("staged/b.txt", "bbb");
+    test_repo.stage_files(&["staged/a.txt", "staged/b.txt"]);
+
+    let result = super::drop_file(&test_repo.repo, "staged", true);
+    assert!(result.is_ok(), "drop_file (dir) failed: {:?}", result);
+
+    assert!(
+        !test_repo.workdir().join("staged").exists(),
+        "staged dir should be deleted"
+    );
+    assert!(
+        test_repo.status_porcelain().is_empty(),
+        "working tree should be clean"
+    );
+}
+
 // ── Drop all (zz) tests ─────────────────────────────────────────────────
 
 #[test]

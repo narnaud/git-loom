@@ -325,33 +325,10 @@ fn collect_changed_files(repo: &Repository) -> Result<Vec<String>> {
 
 /// Resolve an argument for the fold command.
 ///
-/// Tries `resolve_target()` first (handles branches, git refs, short IDs).
-/// Falls back to checking if the argument is a filesystem path with changes.
+/// Delegates to `resolve_target()` which handles branches, git refs, short IDs,
+/// filenames, and filesystem paths with changes.
 fn resolve_fold_arg(repo: &Repository, arg: &str) -> Result<Target> {
-    match git::resolve_target(repo, arg) {
-        Ok(target) => Ok(target),
-        Err(resolve_err) => {
-            // Try as a filesystem path with changes
-            if let Some(workdir) = repo.workdir() {
-                let full_path = workdir.join(arg);
-                if full_path.exists() && file_has_changes(repo, arg)? {
-                    return Ok(Target::File(arg.to_string()));
-                }
-            }
-            Err(resolve_err)
-        }
-    }
-}
-
-/// Check if a file has staged or unstaged changes.
-fn file_has_changes(repo: &Repository, path: &str) -> Result<bool> {
-    let mut opts = StatusOptions::new();
-    opts.pathspec(path)
-        .include_untracked(true)
-        .recurse_untracked_dirs(true);
-
-    let statuses = repo.statuses(Some(&mut opts))?;
-    Ok(!statuses.is_empty())
+    git::resolve_target(repo, arg)
 }
 
 /// Fold file changes into a commit (Case 1: File(s) + Commit).
@@ -360,7 +337,7 @@ fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str
 
     // Validate all files have changes
     for file in files {
-        if !file_has_changes(repo, file)? {
+        if !git::path_has_changes(repo, file)? {
             bail!("File '{}' has no changes to fold", file);
         }
     }
