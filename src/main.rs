@@ -25,7 +25,7 @@ mod test_helpers;
 use std::io::IsTerminal;
 
 use anyhow::Context;
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use colored::control;
 
 #[derive(ValueEnum, Clone, Copy)]
@@ -146,15 +146,9 @@ enum Command {
         /// Files to restrict absorption to (default: all tracked changed files)
         files: Vec<String>,
     },
-    /// Create a new feature branch, or a stacked branch
+    /// Manage feature branches (create, merge, unmerge)
     #[command(visible_alias = "br")]
-    Branch {
-        /// Branch name (if not provided, will prompt interactively)
-        name: Option<String>,
-        /// Target commit, branch, or shortID (defaults to upstream base)
-        #[arg(short = 't', long = "target")]
-        target: Option<String>,
-    },
+    Branch(BranchCmd),
     /// Push a feature branch to remote and optionally create a PR or Gerrit review
     #[command(visible_alias = "pr")]
     Push {
@@ -188,6 +182,49 @@ enum Command {
         /// Path to the git rebase todo file (provided by git)
         todo_file: String,
     },
+}
+
+#[derive(Args)]
+#[command(args_conflicts_with_subcommands = true)]
+struct BranchCmd {
+    #[command(subcommand)]
+    action: Option<BranchAction>,
+
+    #[command(flatten)]
+    new_args: BranchNewArgs,
+}
+
+#[derive(Subcommand)]
+enum BranchAction {
+    /// Create a new feature branch
+    #[command(visible_alias = "create")]
+    New(BranchNewArgs),
+
+    /// Weave an existing branch into the integration branch
+    Merge {
+        /// Branch name (if not provided, shows interactive picker)
+        branch: Option<String>,
+
+        /// Also show remote branches without a local counterpart
+        #[arg(short = 'a', long = "all")]
+        all: bool,
+    },
+
+    /// Remove a branch from the integration branch (keeps the branch ref)
+    Unmerge {
+        /// Branch name or short ID (if not provided, shows interactive picker)
+        branch: Option<String>,
+    },
+}
+
+#[derive(Args, Clone)]
+struct BranchNewArgs {
+    /// Branch name (if not provided, will prompt interactively)
+    name: Option<String>,
+
+    /// Target commit, branch, or shortID (defaults to upstream base)
+    #[arg(short = 't', long = "target")]
+    target: Option<String>,
 }
 
 fn main() {
@@ -239,7 +276,12 @@ fn main() {
             all,
         }) => status::run(files, context, all, theme),
         Some(Command::Init { name }) => init::run(name),
-        Some(Command::Branch { name, target }) => branch::run(name, target),
+        Some(Command::Branch(cmd)) => match cmd.action {
+            Some(BranchAction::New(args)) => branch::new::run(args.name, args.target),
+            Some(BranchAction::Merge { branch, all }) => branch::merge::run(branch, all),
+            Some(BranchAction::Unmerge { branch }) => branch::unmerge::run(branch),
+            None => branch::new::run(cmd.new_args.name, cmd.new_args.target),
+        },
         Some(Command::Reword { target, message }) => reword::run(target, message),
         Some(Command::Commit {
             branch,

@@ -57,8 +57,8 @@ fn run_with_name_and_target() {
     let a1_oid = test_repo.commit("A1", "a1.txt");
     test_repo.commit("A2", "a2.txt");
 
-    let result =
-        test_repo.in_dir(|| super::run(Some("feature-a".to_string()), Some(a1_oid.to_string())));
+    let result = test_repo
+        .in_dir(|| super::new::run(Some("feature-a".to_string()), Some(a1_oid.to_string())));
 
     assert!(result.is_ok(), "branch::run failed: {:?}", result.err());
     assert!(test_repo.branch_exists("feature-a"));
@@ -70,8 +70,8 @@ fn run_duplicate_name_rejected_early() {
     let a1_oid = test_repo.commit_empty("A1");
     test_repo.create_branch_at_commit("feature-a", a1_oid);
 
-    let result =
-        test_repo.in_dir(|| super::run(Some("feature-a".to_string()), Some(a1_oid.to_string())));
+    let result = test_repo
+        .in_dir(|| super::new::run(Some("feature-a".to_string()), Some(a1_oid.to_string())));
 
     assert!(result.is_err());
     assert!(
@@ -87,7 +87,7 @@ fn run_default_target_is_merge_base() {
 
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
-    let result = test_repo.in_dir(|| super::run(Some("feature-a".to_string()), None));
+    let result = test_repo.in_dir(|| super::new::run(Some("feature-a".to_string()), None));
 
     assert!(result.is_ok(), "branch::run failed: {:?}", result.err());
     assert_eq!(test_repo.get_branch_target("feature-a"), base_oid);
@@ -95,19 +95,19 @@ fn run_default_target_is_merge_base() {
 
 #[test]
 fn branch_weave_creates_merge_topology() {
-    // origin/main → A1 → A2 → A3 (HEAD)
+    // origin/main -> A1 -> A2 -> A3 (HEAD)
     // Branch at A2 should produce:
-    //   origin/main → A1 → A2 (feature-a)
-    //              ↘              ↘
-    //               A3' --------→ merge (HEAD)
+    //   origin/main -> A1 -> A2 (feature-a)
+    //              \              \
+    //               A3' ---------> merge (HEAD)
     let test_repo = TestRepo::new_with_remote();
     test_repo.commit("A1", "a1.txt");
     test_repo.commit("A2", "a2.txt");
     let a2_oid = test_repo.head_oid();
     test_repo.commit("A3", "a3.txt");
 
-    let result =
-        test_repo.in_dir(|| super::run(Some("feature-a".to_string()), Some(a2_oid.to_string())));
+    let result = test_repo
+        .in_dir(|| super::new::run(Some("feature-a".to_string()), Some(a2_oid.to_string())));
 
     assert!(result.is_ok(), "branch::run failed: {:?}", result.err());
     assert!(test_repo.branch_exists("feature-a"));
@@ -140,7 +140,7 @@ fn branch_at_head_weaves() {
     let head_before = test_repo.head_oid();
 
     let result = test_repo
-        .in_dir(|| super::run(Some("feature-a".to_string()), Some(head_before.to_string())));
+        .in_dir(|| super::new::run(Some("feature-a".to_string()), Some(head_before.to_string())));
 
     assert!(result.is_ok(), "branch::run failed: {:?}", result.err());
     assert!(test_repo.branch_exists("feature-a"));
@@ -172,8 +172,8 @@ fn branch_at_merge_base_no_weave() {
     let head_before = test_repo.head_oid();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
-    let result =
-        test_repo.in_dir(|| super::run(Some("feature-a".to_string()), Some(base_oid.to_string())));
+    let result = test_repo
+        .in_dir(|| super::new::run(Some("feature-a".to_string()), Some(base_oid.to_string())));
 
     assert!(result.is_ok(), "branch::run failed: {:?}", result.err());
 
@@ -192,12 +192,12 @@ fn branch_inside_existing_branch_no_weave() {
     // When a branch already exists via merge topology, creating a new branch
     // inside it should NOT trigger weaving — the topology is already correct.
     //
-    // Setup: origin/main → A1 → A2 (feature-a) merged into integration
+    // Setup: origin/main -> A1 -> A2 (feature-a) merged into integration
     //        with B1 on the integration line
     // Then create feature-b at A1 (inside feature-a's side branch)
     let test_repo = TestRepo::new_with_remote();
 
-    // Build a side branch: A1 → A2
+    // Build a side branch: A1 -> A2
     test_repo.commit("A1", "a1.txt");
     let a1_oid = test_repo.head_oid();
     test_repo.commit("A2", "a2.txt");
@@ -218,8 +218,8 @@ fn branch_inside_existing_branch_no_weave() {
     let head_before = test_repo.head_oid();
 
     // Now create feature-b at A1, which is inside the feature-a side branch
-    let result =
-        test_repo.in_dir(|| super::run(Some("feature-b".to_string()), Some(a1_oid.to_string())));
+    let result = test_repo
+        .in_dir(|| super::new::run(Some("feature-b".to_string()), Some(a1_oid.to_string())));
 
     assert!(result.is_ok(), "branch::run failed: {:?}", result.err());
     assert!(test_repo.branch_exists("feature-b"));
