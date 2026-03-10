@@ -2,29 +2,36 @@
 
 ## Overview
 
-`git loom branch` creates a new feature branch at a specified commit. It provides
-a streamlined interface for creating branches that integrates with git-loom's
-short ID system and upstream-aware workflow.
+`git loom branch` manages feature branches in the integration workflow. It
+supports creating new branches, weaving existing branches into the integration
+topology, and removing branches from integration without deleting them.
 
 ## Why Branch?
 
-Creating feature branches in a stacked/integration branch workflow has friction:
+Managing feature branches in a stacked/integration branch workflow has friction:
 
 - Requires knowing the exact commit hash for the branch point
 - `git branch` doesn't validate against the integration context
 - No interactive prompting for quick workflows
+- No easy way to weave/unweave existing branches into/from integration
 
 `git-loom branch` provides:
 
-- Direct: target a commit by short ID, hash, or branch name
+- **Create**: target a commit by short ID, hash, or branch name
+- **Merge**: weave an existing branch into integration with an interactive picker
+- **Unmerge**: remove a branch from integration while keeping it intact
 - Smart defaults: branches at the upstream merge-base when no target is given
-- Interactive: prompts for name when not provided
+- Interactive: prompts for name/selection when not provided
 - Safe: validates names and checks for duplicates before creating
 
 ## CLI
 
+### `branch new` (alias: `create`)
+
 ```bash
-git-loom branch [name] [-t <target>]
+git-loom branch [name] [-t <target>]       # implicit "new"
+git-loom branch new [name] [-t <target>]    # explicit "new"
+git-loom branch create [name] [-t <target>] # alias
 ```
 
 **Arguments:**
@@ -39,6 +46,47 @@ git-loom branch [name] [-t <target>]
 - Without `name`: opens an interactive prompt for the branch name
 - With `-t`: creates the branch at the specified target
 - Without `-t`: creates the branch at the upstream merge-base commit
+
+### `branch merge`
+
+```bash
+git-loom branch merge [branch] [--all]
+```
+
+**Arguments:**
+
+- `[branch]`: Branch name (optional; shows interactive picker if omitted)
+- `-a, --all`: Also show remote branches without a local counterpart
+
+**Behavior:**
+
+- Weaves an existing, non-woven branch into the integration branch
+- Uses `git merge --no-ff` to create the merge topology
+- If a remote branch is selected (with `--all`), a local tracking branch is
+  created automatically before weaving
+- Errors if the branch is already woven or doesn't exist
+
+### `branch unmerge`
+
+```bash
+git-loom branch unmerge [branch]
+```
+
+**Arguments:**
+
+- `[branch]`: Branch name or short ID (optional; shows interactive picker if omitted)
+
+**Behavior:**
+
+- Removes a branch from the integration topology without deleting the branch ref
+- The branch's commits are rebased out of the integration branch
+- The branch ref is preserved, pointing at its original commits
+- Errors if the branch is not woven into the integration branch
+
+### Reserved Names
+
+The subcommand names `new`, `create`, `merge`, and `unmerge` are reserved and
+cannot be used as branch names (clap matches subcommands first).
 
 ## What Happens
 
@@ -187,6 +235,40 @@ git-loom branch feature-b -t feature-a
 ```bash
 git-loom branch feature-auth -t abc123d
 # Created branch 'feature-auth' at abc123d
+```
+
+### Merge an existing branch into integration
+
+```bash
+git-loom branch merge feature-auth
+# ✔ Woven 'feature-auth' into integration branch
+```
+
+### Merge with interactive picker
+
+```bash
+git-loom branch merge
+# ? Select branch to weave ›
+#   feature-auth
+#   feature-logging
+# ✔ Woven 'feature-auth' into integration branch
+```
+
+### Merge including remote branches
+
+```bash
+git-loom branch merge --all
+# ? Select branch to weave ›
+#   feature-auth           (local)
+#   origin/feature-logging (remote, creates local tracking branch)
+```
+
+### Unmerge a branch from integration
+
+```bash
+git-loom branch unmerge feature-auth
+# ✔ Unwoven 'feature-auth' from integration branch
+# Branch ref 'feature-auth' is preserved
 ```
 
 ## Design Decisions
