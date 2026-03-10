@@ -51,6 +51,16 @@ Detection priority (first match wins):
 4. **Hook inspection**: `.git/hooks/commit-msg` contains "gerrit" (case-insensitive) → Gerrit
 5. **Fallback**: Plain
 
+## Push Remote Selection
+
+Detection priority (first match wins):
+
+1. **Explicit config**: `git config loom.push-remote <remote>` — specify the remote name to push to
+2. **GitHub fork convention**: if the integration remote is named `upstream` and `origin` exists, push to `origin`
+3. **Fallback**: integration branch's remote
+
+This allows fork workflows where the integration branch tracks the upstream repository but branches are pushed to a personal fork. For non-standard remote names, set `loom.push-remote` explicitly.
+
 ## Push Strategies
 
 ### Plain (default)

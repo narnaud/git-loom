@@ -42,7 +42,7 @@ pub fn run(branch: Option<String>, no_pr: bool) -> Result<()> {
     };
 
     let remote_type = detect_remote_type(&repo, &workdir, &info.upstream.label)?;
-    let remote_name = resolve_push_remote(&repo, &info.upstream.label, &remote_type);
+    let remote_name = resolve_push_remote(&repo, &workdir, &info.upstream.label, &remote_type);
 
     let target_branch = extract_target_branch(&info.upstream.label);
 
@@ -64,6 +64,7 @@ pub fn run(branch: Option<String>, no_pr: bool) -> Result<()> {
             &branch_name,
             &target_branch,
             base_oid,
+            &info.upstream.label,
         ),
         RemoteType::AzureDevOps => push_azure(
             &repo,
@@ -165,17 +166,32 @@ fn extract_remote_name(upstream_label: &str) -> String {
 
 /// Extract `owner/repo` from a git remote URL for use with `gh --repo`.
 ///
-/// Handles both SSH (`git@github.com:owner/repo.git`) and HTTPS
-/// (`https://github.com/owner/repo.git`) URLs. Returns `None` if the
-/// remote doesn't exist or the URL can't be parsed.
+/// Handles SCP-style SSH URLs (with or without `git@` prefix) and HTTPS URLs:
+/// - `git@github.com:owner/repo.git`
+/// - `git@github-alias:owner/repo.git`
+/// - `github-work:owner/repo` (bare alias, no `git@`)
+/// - `https://github.com/owner/repo.git`
+///
+/// Returns `None` if the remote doesn't exist or the URL can't be parsed.
 fn extract_gh_repo(repo: &Repository, remote: &str) -> Option<String> {
     let remote = repo.find_remote(remote).ok()?;
     let url = remote.url()?;
 
-    // SSH: git@github.com:owner/repo.git
-    if let Some(path) = url.strip_prefix("git@github.com:") {
-        return Some(path.trim_end_matches(".git").to_string());
+    // SCP-style SSH URLs: [git@]<hostname>:owner/repo[.git]
+    // Covers git@github.com:owner/repo.git, git@github-alias:owner/repo.git,
+    // and bare aliases like github-work:owner/repo (no git@ prefix).
+    // Distinguish from URLs by requiring no '://' and no '/' before the ':'.
+    let scp_url = url.strip_prefix("git@").unwrap_or(url);
+    if !scp_url.contains("://")
+        && let Some(colon_idx) = scp_url.find(':')
+    {
+        let host = &scp_url[..colon_idx];
+        if !host.contains('/') {
+            let path = &scp_url[colon_idx + 1..];
+            return Some(path.trim_end_matches(".git").to_string());
+        }
     }
+
     // HTTPS: https://github.com/owner/repo.git
     if let Some(path) = url
         .strip_prefix("https://github.com/")
@@ -199,14 +215,30 @@ fn extract_target_branch(upstream_label: &str) -> String {
 
 /// Determine the push remote for the given upstream label and remote type.
 ///
-/// In the GitHub fork workflow, the integration branch tracks `upstream/main`
-/// but feature branches should be pushed to `origin` (the user's fork) so
-/// they can open a PR from the fork to the original repository.
+/// Priority:
+/// 1. `git config loom.push-remote` — explicit override
+/// 2. GitHub fork convention — if integration remote is `upstream` and `origin` exists, use `origin`
+/// 3. Integration branch's remote — fallback
+///
+/// For non-standard fork setups (e.g., integration tracks `origin`, fork is `personal`),
+/// set `git config loom.push-remote personal`.
 fn resolve_push_remote(
     repo: &Repository,
+    workdir: &Path,
     upstream_label: &str,
     remote_type: &RemoteType,
 ) -> String {
+    // 1. Check explicit config override
+    if let Ok(push_remote) =
+        git_commands::run_git_stdout(workdir, &["config", "--get", "loom.push-remote"])
+    {
+        let remote = push_remote.trim();
+        if !remote.is_empty() && repo.find_remote(remote).is_ok() {
+            return remote.to_string();
+        }
+    }
+
+    // 2. GitHub fork workflow: if upstream is "upstream" and origin exists, push to origin
     let remote_name = extract_remote_name(upstream_label);
     if *remote_type == RemoteType::GitHub
         && remote_name == "upstream"
@@ -322,6 +354,11 @@ fn push_plain(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
 
 /// Push to GitHub: push the branch, then open `gh pr create --web`.
 ///
+/// Supports fork workflow where the integration branch tracks the upstream
+/// repository and the branch is pushed to a fork remote. The PR is created
+/// against the integration branch's remote (usually the upstream/main repo)
+/// with the head pointing to the push remote.
+///
 /// If the branch being pushed is the upstream target branch itself (e.g.
 /// pushing `main` when tracking `origin/main`), skip PR creation and fall
 /// back to a plain force-with-lease push.
@@ -335,11 +372,8 @@ fn push_github(
     branch: &str,
     target_branch: &str,
     base_oid: git2::Oid,
+    upstream_label: &str,
 ) -> Result<()> {
-    if branch == target_branch {
-        return push_plain(workdir, remote, branch);
-    }
-
     git_push(workdir, remote, branch)?;
 
     // Check if gh CLI is available
@@ -354,11 +388,17 @@ fn push_github(
         return Ok(());
     }
 
-    // Determine PR target repo: prefer "upstream" remote (fork workflow),
-    // fall back to push remote (non-fork).
-    let (pr_target_remote, gh_repo) = extract_gh_repo(repo, "upstream")
-        .map(|r| ("upstream", r))
-        .or_else(|| extract_gh_repo(repo, remote).map(|r| (remote, r)))
+    // Determine PR target repo and head:
+    // - For fork workflow: upstream branch's remote is the target (base of PR),
+    //   push remote is the head (where the branch is pushed).
+    // - For non-fork: both are the same.
+    let integration_remote = extract_remote_name(upstream_label);
+    let (pr_target_remote, pr_target_repo) = extract_gh_repo(repo, &integration_remote)
+        .map(|r| (integration_remote.as_str(), r))
+        .or_else(|| {
+            // Fallback: try to extract from push remote if integration remote doesn't exist
+            extract_gh_repo(repo, remote).map(|r| (remote, r))
+        })
         .ok_or_else(|| {
             anyhow::anyhow!(
                 "Could not determine target repository for PR creation\n\
@@ -378,7 +418,7 @@ fn push_github(
     };
 
     // If a PR already exists, show its URL instead of opening the browser
-    if let Some(pr_url) = find_existing_github_pr(workdir, &gh_repo, &head_arg) {
+    if let Some(pr_url) = find_existing_github_pr(workdir, &pr_target_repo, &head_arg) {
         msg::success(&format!("PR updated: {}", pr_url));
         return Ok(());
     }
@@ -395,7 +435,7 @@ fn push_github(
         "--base",
         target_branch,
         "--repo",
-        &gh_repo,
+        &pr_target_repo,
         "--title",
         &title,
         "--body",
