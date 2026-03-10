@@ -4,7 +4,7 @@
 
 **git-loom** is a Git CLI tool that makes working with integration branches seamless. Inspired by tools like [jujutsu](https://github.com/martinvonz/jj) and [Git Butler](https://gitbutler.com/), git-loom helps you work on multiple features simultaneously while keeping your branches organized and independent.
 
-![git-loom screencast](docs/src/assets/git-loom-screencast.gif)
+![git-loom status](docs/src/assets/git-loom-status.png)
 
 > [!IMPORTANT]
 > `git-loom` has been written with the help of AI, especially [Claude](https://claude.ai/)
@@ -163,6 +163,7 @@ git config loom.push-remote personal
 ```
 
 For example, with remotes:
+
 - `origin` → upstream read-only repository
 - `personal` → your fork (where you push)
 
