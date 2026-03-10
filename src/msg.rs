@@ -88,21 +88,29 @@ fn colorize_backticks(message: &str) -> String {
 }
 
 /// Print a success message with a green checkmark.
+/// Additional lines are treated as hints and prefixed with a blue arrow.
 /// Text between backticks is highlighted in yellow.
 pub fn success(message: &str) {
     let mut lines = message.lines();
     if let Some(first) = lines.next() {
         println!("{} {}", "✓".green(), colorize_backticks(first));
         for line in lines {
-            eprintln!("  {} {}", "›".blue(), colorize_backticks(line));
+            println!("  {} {}", "›".blue(), colorize_backticks(line));
         }
     }
 }
 
 /// Print a warning message with a yellow exclamation mark.
+/// Additional lines are treated as hints and prefixed with a blue arrow.
 /// Text between backticks is highlighted in yellow.
 pub fn warn(message: &str) {
-    println!("{} {}", "!".yellow(), colorize_backticks(message));
+    let mut lines = message.lines();
+    if let Some(first) = lines.next() {
+        println!("{} {}", "!".yellow(), colorize_backticks(first));
+        for line in lines {
+            println!("  {} {}", "›".blue(), colorize_backticks(line));
+        }
+    }
 }
 
 /// Print an error message with a red cross to stderr.

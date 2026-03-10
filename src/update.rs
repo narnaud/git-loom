@@ -125,7 +125,7 @@ pub fn run(skip_confirm: bool) -> Result<()> {
     // Propose removing local branches whose remote tracking branch was pruned
     let gone = find_branches_with_gone_upstream(&repo, &branch_name)?;
     if !gone.is_empty() {
-        msg::warn(&format!(
+        let mut warn_msg = format!(
             "{} local {} with a gone upstream:",
             gone.len(),
             if gone.len() == 1 {
@@ -133,10 +133,12 @@ pub fn run(skip_confirm: bool) -> Result<()> {
             } else {
                 "branches"
             }
-        ));
+        );
         for name in &gone {
-            println!("  · {}", name);
+            warn_msg.push('\n');
+            warn_msg.push_str(name);
         }
+        msg::warn(&warn_msg);
         let confirmed = skip_confirm
             || msg::confirm(if gone.len() == 1 {
                 "Remove it?"
