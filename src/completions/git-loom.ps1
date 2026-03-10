@@ -1,13 +1,13 @@
 # git-loom completions for PowerShell
 # Add to your $PROFILE: Invoke-Expression (&git-loom completions powershell | Out-String)
 
-Register-ArgumentCompleter -Native -CommandName 'git-loom' -ScriptBlock {
+$_gitLoomCompleter = {
     param($wordToComplete, $commandAst, $cursorPosition)
 
     $commands = @(
         @{ Name = 'status'; Description = 'Show the branch-aware status' },
         @{ Name = 'init'; Description = 'Initialize a new integration branch tracking a remote' },
-        @{ Name = 'branch'; Description = 'Create a new feature branch' },
+        @{ Name = 'branch'; Description = 'Manage feature branches (create, merge, unmerge)' },
         @{ Name = 'reword'; Description = 'Reword a commit message or rename a branch' },
         @{ Name = 'commit'; Description = 'Create a commit on a feature branch' },
         @{ Name = 'drop'; Description = 'Drop a commit or a branch from history' },
@@ -21,8 +21,6 @@ Register-ArgumentCompleter -Native -CommandName 'git-loom' -ScriptBlock {
 
     $globalFlags = @(
         @{ Name = '--no-color'; Description = 'Disable colored output' },
-        @{ Name = '-f'; Description = 'Show files changed in each commit' },
-        @{ Name = '--files'; Description = 'Show files changed in each commit' },
         @{ Name = '--help'; Description = 'Show help information' },
         @{ Name = '-h'; Description = 'Show help information' }
     )
@@ -33,8 +31,8 @@ Register-ArgumentCompleter -Native -CommandName 'git-loom' -ScriptBlock {
         $subcommand = $tokens[1]
     }
 
-    # Complete subcommands
-    if ($tokens.Count -le 2 -and -not ($wordToComplete -match '^-')) {
+    # Complete subcommands (skip if already on 'branch', which has its own sub-subcommands)
+    if ($tokens.Count -le 2 -and $subcommand -ne 'branch' -and -not ($wordToComplete -match '^-')) {
         $commands | Where-Object { $_.Name -like "$wordToComplete*" } | ForEach-Object {
             [System.Management.Automation.CompletionResult]::new($_.Name, $_.Name, 'ParameterValue', $_.Description)
         }
@@ -47,14 +45,45 @@ Register-ArgumentCompleter -Native -CommandName 'git-loom' -ScriptBlock {
         'status' {
             $subFlags = @(
                 @{ Name = '-f'; Description = 'Show files changed in each commit' },
-                @{ Name = '--files'; Description = 'Show files changed in each commit' }
+                @{ Name = '--files'; Description = 'Show files changed in each commit' },
+                @{ Name = '-a'; Description = 'Show all branches including hidden ones' },
+                @{ Name = '--all'; Description = 'Show all branches including hidden ones' }
             )
         }
         'branch' {
-            $subFlags = @(
-                @{ Name = '-t'; Description = 'Target commit, branch, or shortID' },
-                @{ Name = '--target'; Description = 'Target commit, branch, or shortID' }
-            )
+            $branchSubcommand = if ($tokens.Count -gt 2) { $tokens[2] } else { $null }
+
+            # Complete the branch sub-subcommand itself
+            if ($tokens.Count -le 3 -and -not ($wordToComplete -match '^-') -and $branchSubcommand -notin @('new', 'create', 'merge', 'unmerge')) {
+                $branchSubs = @(
+                    @{ Name = 'new'; Description = 'Create a new feature branch' },
+                    @{ Name = 'create'; Description = 'Create a new feature branch (alias)' },
+                    @{ Name = 'merge'; Description = 'Weave an existing branch into integration' },
+                    @{ Name = 'unmerge'; Description = 'Remove a branch from integration' }
+                )
+                $branchSubs | Where-Object { $_.Name -like "$wordToComplete*" } | ForEach-Object {
+                    [System.Management.Automation.CompletionResult]::new($_.Name, $_.Name, 'ParameterValue', $_.Description)
+                }
+                return
+            }
+
+            switch ($branchSubcommand) {
+                { $_ -in 'new', 'create' } {
+                    $subFlags = @(
+                        @{ Name = '-t'; Description = 'Target commit, branch, or shortID' },
+                        @{ Name = '--target'; Description = 'Target commit, branch, or shortID' }
+                    )
+                }
+                'merge' {
+                    $subFlags = @(
+                        @{ Name = '-a'; Description = 'Also show remote branches' },
+                        @{ Name = '--all'; Description = 'Also show remote branches' }
+                    )
+                }
+                'unmerge' {
+                    $subFlags = @()
+                }
+            }
         }
         'reword' {
             $subFlags = @(
@@ -95,3 +124,6 @@ Register-ArgumentCompleter -Native -CommandName 'git-loom' -ScriptBlock {
         [System.Management.Automation.CompletionResult]::new($_.Name, $_.Name, 'ParameterValue', $_.Description)
     }
 }
+
+$_gitLoomNames = @('git-loom') + @(Get-Alias -ErrorAction SilentlyContinue | Where-Object { $_.Definition -eq 'git-loom' } | Select-Object -ExpandProperty Name)
+Register-ArgumentCompleter -Native -CommandName $_gitLoomNames -ScriptBlock $_gitLoomCompleter
