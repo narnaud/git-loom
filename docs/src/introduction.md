@@ -4,7 +4,7 @@
 
 Think of it as a loom that weaves multiple threads (feature branches) into a single fabric (integration branch).
 
-![git-loom screencast](assets/git-loom-screencast.gif)
+![git-loom status](assets/git-loom-status.png)
 
 ## Core Concepts
 
