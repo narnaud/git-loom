@@ -85,6 +85,7 @@ enum Command {
         all: bool,
     },
     /// Create a commit on a feature branch without leaving integration
+    #[command(visible_alias = "ci")]
     Commit {
         /// Target feature branch (name or short ID)
         #[arg(short = 'b', long = "branch")]
@@ -96,6 +97,7 @@ enum Command {
         files: Vec<String>,
     },
     /// Fold source(s) into a target (amend files, fixup commits, move commits, move files between commits)
+    #[command(visible_aliases = ["amend", "am", "fixup", "mv", "rub"])]
     Fold {
         /// Create a new branch from the source commit and move it there
         #[arg(short = 'c', long = "create")]
@@ -105,6 +107,7 @@ enum Command {
         args: Vec<String>,
     },
     /// Reword a commit message or rename a branch
+    #[command(visible_alias = "rw")]
     Reword {
         /// Branch name, shortID, or commit hash
         target: String,
@@ -113,6 +116,7 @@ enum Command {
         message: Option<String>,
     },
     /// Drop a local change, a commit, or a branch from history
+    #[command(visible_alias = "rm")]
     Drop {
         /// Commit hash, branch name, or short ID to drop
         target: String,
@@ -121,6 +125,7 @@ enum Command {
         yes: bool,
     },
     /// Show the diff and metadata for a commit (like `git show`)
+    #[command(visible_alias = "sh")]
     Show {
         /// Commit hash, branch name, or short ID
         target: String,
@@ -142,6 +147,7 @@ enum Command {
         files: Vec<String>,
     },
     /// Create a new feature branch, or a stacked branch
+    #[command(visible_alias = "br")]
     Branch {
         /// Branch name (if not provided, will prompt interactively)
         name: Option<String>,
@@ -150,6 +156,7 @@ enum Command {
         target: Option<String>,
     },
     /// Push a feature branch to remote and optionally create a PR or Gerrit review
+    #[command(visible_alias = "pr")]
     Push {
         /// Branch name or short ID (if not provided, will prompt interactively)
         branch: Option<String>,
@@ -158,6 +165,7 @@ enum Command {
         no_pr: bool,
     },
     /// Pull-rebase the integration branch and update submodules
+    #[command(visible_alias = "up")]
     Update {
         /// Remove local branches whose upstream tracking branch was deleted on remote
         #[arg(short, long)]
