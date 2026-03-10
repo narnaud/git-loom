@@ -32,9 +32,38 @@ pub fn run(target: String, skip_confirm: bool) -> Result<()> {
     }
 }
 
-/// Drop a file: restore tracked changes, or delete new/untracked files.
+/// Drop a file or directory: restore tracked changes, or delete new/untracked entries.
 fn drop_file(repo: &Repository, path: &str, skip_confirm: bool) -> Result<()> {
     let workdir = git::require_workdir(repo, "drop")?;
+    let full_path = workdir.join(path);
+
+    // Directory — restore tracked changes and clean untracked files inside
+    if full_path.is_dir() {
+        // Check for tracked changes first to pick the right prompt and message
+        let has_tracked = {
+            let mut opts = git2::StatusOptions::new();
+            opts.pathspec(path)
+                .include_untracked(false)
+                .recurse_untracked_dirs(false);
+            let statuses = repo.statuses(Some(&mut opts))?;
+            !statuses.is_empty()
+        };
+        if has_tracked {
+            if !skip_confirm && !msg::confirm(&format!("Discard all changes in `{}`?", path))? {
+                bail!("Cancelled");
+            }
+            git_commands::run_git(workdir, &["restore", "--staged", "--worktree", path])?;
+            git_commands::run_git(workdir, &["clean", "-fd", "--", path])?;
+            msg::success(&format!("Restored `{}`", path));
+        } else {
+            if !skip_confirm && !msg::confirm(&format!("Delete `{}`?", path))? {
+                bail!("Cancelled");
+            }
+            git_commands::run_git(workdir, &["clean", "-fd", "--", path])?;
+            msg::success(&format!("Deleted `{}`", path));
+        }
+        return Ok(());
+    }
 
     let status = repo
         .status_file(std::path::Path::new(path))

@@ -387,7 +387,30 @@ pub fn resolve_target(repo: &Repository, target: &str) -> Result<Target> {
 
     // Not a valid git reference - try as shortid
     // This requires building the full graph (needs upstream)
-    resolve_shortid(repo, target)
+    match resolve_shortid(repo, target) {
+        Ok(resolved) => Ok(resolved),
+        Err(shortid_err) => {
+            // Fall back to filesystem path with changes (file or directory)
+            if let Some(workdir) = repo.workdir() {
+                let full_path = workdir.join(target);
+                if full_path.exists() && path_has_changes(repo, target)? {
+                    return Ok(Target::File(target.to_string()));
+                }
+            }
+            Err(shortid_err)
+        }
+    }
+}
+
+/// Check if a path (file or directory) has staged or unstaged changes.
+pub fn path_has_changes(repo: &Repository, path: &str) -> Result<bool> {
+    let mut opts = StatusOptions::new();
+    opts.pathspec(path)
+        .include_untracked(true)
+        .recurse_untracked_dirs(true);
+
+    let statuses = repo.statuses(Some(&mut opts))?;
+    Ok(!statuses.is_empty())
 }
 
 /// Resolve a shortid to a commit, branch, or file by rebuilding the graph.
@@ -419,9 +442,9 @@ fn resolve_shortid(repo: &Repository, shortid: &str) -> Result<Target> {
         }
     }
 
-    // Search for matching shortid in working change files
+    // Search for matching shortid or filename in working change files
     for file in &info.working_changes {
-        if allocator.get_file(&file.path) == shortid {
+        if allocator.get_file(&file.path) == shortid || file.path == shortid {
             return Ok(Target::File(file.path.clone()));
         }
     }
