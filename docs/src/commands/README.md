@@ -13,7 +13,7 @@ Commands:
   show    Show the diff and metadata for a commit (like `git show`)
   split   Split a commit into two sequential commits
   absorb  Absorb working tree changes into the commits that introduced them
-  branch  Create a new feature branch, or a stacked branch
+  branch  Manage feature branches (create, merge, unmerge)
   push    Push a feature branch to remote and optionally create a PR or Gerrit review
   update  Pull-rebase the integration branch and update submodules
   trace   Show the latest command trace
