@@ -1,6 +1,6 @@
 # git-loom
 
-> Supercharge your Git workflow by weaving together multiple feature branches
+> Weave your branches together
 
 **git-loom** is a Git CLI tool that makes working with integration branches seamless. Inspired by tools like [jujutsu](https://github.com/martinvonz/jj) and [Git Butler](https://gitbutler.com/), git-loom helps you work on multiple features simultaneously while keeping your branches organized and independent.
 

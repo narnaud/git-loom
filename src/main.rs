@@ -71,7 +71,7 @@ const GROUPED_COMMANDS: &str = "\
 #[derive(Parser)]
 #[command(
     name = "git-loom",
-    about = "\x1b[34mSupercharge your Git workflow\x1b[0m\nCheckout the full docs here: https://narnaud.github.io/git-loom/",
+    about = "\x1b[34mWeave your branches together\x1b[0m\nCheckout the full docs here: https://narnaud.github.io/git-loom/",
     styles = STYLES,
     version,
     after_help = GROUPED_COMMANDS,

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-git-loom is a Git CLI tool written in Rust (edition 2024) that supercharges the Git workflow. Inspired by tools like jujutsu and Git Butler, it focuses on making integration branches seamless by weaving together multiple feature branches.
+git-loom is a Git CLI tool written in Rust (edition 2024) that weaves your branches together. Inspired by tools like jujutsu and Git Butler, it focuses on making integration branches seamless by weaving together multiple feature branches.
 
 ### Core Concepts
 
