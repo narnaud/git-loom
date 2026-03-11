@@ -1,6 +1,6 @@
 [book]
 title = "git-loom"
-authors = ["Nicolas Arnaud-Cormos"]
+authors = [ "Nicolas Arnaud-Cormos" ]
 language = "en"
 src = "src"
 
