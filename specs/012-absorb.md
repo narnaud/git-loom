@@ -4,7 +4,7 @@
 
 `git loom absorb` automatically distributes working tree changes into the
 commits that last touched the affected lines. It uses blame to determine the
-correct target for each file, then amends those commits — all in a single
+correct target for each hunk, then amends those commits — all in a single
 operation.
 
 ## Why Absorb?
@@ -45,20 +45,31 @@ git-loom absorb [--dry-run] [files...]
 
 For each file with uncommitted changes:
 
-1. Parse the unified diff (`git diff HEAD -- <file>`) to find which original
-   lines are modified or deleted. Original lines are the `-` lines in the
-   diff — the lines that existed in HEAD and are being changed.
+1. Parse the unified diff (`git diff HEAD -- <file>`) into individual hunks.
+   Each hunk starts at an `@@ -start,count +start,count @@` header.
 
-2. Blame the file at HEAD to determine which commit last touched each
-   original line.
+2. For each hunk, extract the original (pre-image) line numbers of
+   modified/deleted lines — the `-` lines in the diff.
 
-3. If all modified/deleted original lines trace to the **same commit** and
-   that commit is **in scope** (between merge-base and HEAD), the file is
-   assigned to that commit.
+3. Blame the file at HEAD to determine which commit last touched each
+   modified line in each hunk.
 
-4. Otherwise, the file is **skipped** with an explanation.
+4. Per-hunk assignment:
+   - If all modified lines in a hunk trace to a single **in-scope** commit,
+     the hunk is assigned to that commit.
+   - Otherwise the hunk is **skipped** (pure addition, out of scope,
+     or lines from multiple commits within the hunk).
 
-After analysis, all assigned files are staged and committed as fixup commits,
+5. Per-file result:
+   - If all hunks are assigned to the **same commit**, the entire file is
+     absorbed as a whole (whole-file assignment).
+   - If hunks are assigned to **different commits** (or some are skipped),
+     each assigned hunk is absorbed independently into its target commit.
+     Skipped hunks remain in the working tree.
+   - If **no hunks** can be assigned, the file is skipped entirely.
+
+After analysis, assigned hunks are committed as fixup commits (whole-file
+assignments via `git add`, per-hunk assignments via `git apply --cached`),
 then a single Weave-based rebase folds each fixup into its target.
 
 ### In-Scope Commits
@@ -67,15 +78,15 @@ A commit is "in scope" if it is a non-merge commit between the upstream
 merge-base and HEAD. Commits before the merge-base (from upstream history)
 are out of scope — they cannot be amended via rebase.
 
-### Per-File Assignment
+### Per-Hunk Granularity
 
-In the current version, absorption works at the file level: if all hunks
-in a file trace to the same commit, the entire file is absorbed. If hunks
-trace to different commits, the entire file is skipped.
+Absorption operates at the hunk level. When a file has hunks tracing to
+different commits, each hunk is independently analyzed and absorbed into its
+target commit. Only hunks that cannot be attributed (pure additions, out of
+scope, ambiguous within a single hunk) are left in the working tree.
 
-This handles the vast majority of real-world cases (a file's working-tree
-changes usually relate to a single earlier commit). Per-hunk splitting may
-be added in a future version.
+When all hunks in a file trace to the same commit, the file is absorbed as
+a whole (same as the simpler file-level case).
 
 ## What Happens
 
@@ -99,17 +110,23 @@ are absorbed in a single rebase.
 - Skipped files remain as uncommitted changes in the working tree
 - Other branches not in the ancestry chain
 
-### Skipped Files
+### Skipped Hunks and Files
 
-Files are skipped (left as uncommitted changes) for any of these reasons:
+Individual hunks are skipped (left as uncommitted changes) for these reasons:
+
+| Reason | Description |
+|--------|-------------|
+| Pure addition | Hunk contains only additions (no modified/deleted lines from HEAD) |
+| Multiple sources | Modified lines within a single hunk trace to different commits |
+| Out of scope | Modified lines trace to commits before the merge-base |
+
+Entire files are skipped for these reasons:
 
 | Reason | Description |
 |--------|-------------|
 | New file | File does not exist in HEAD (no blame possible) |
 | Binary file | Binary files cannot be blamed at line level |
-| Multiple sources | Modified lines trace to different commits |
-| Out of scope | Modified lines trace to commits before the merge-base |
-| Pure addition | Diff contains only additions (no modified/deleted lines from HEAD) |
+| All hunks skipped | Every hunk in the file was individually skipped |
 
 ### Dry-Run Mode
 
@@ -118,15 +135,25 @@ commits or running any rebase. The working tree is left unchanged.
 
 ## Output Format
 
-The command prints one line per analyzed file, then a summary:
+The command prints one line per analyzed file (or per hunk for split files),
+then a summary:
 
 ```
   src/auth.rs -> abc1234 "Add login form" (feature-auth)
   src/utils.rs -> def5678 "Add helper functions"
   src/new.rs -- skipped (new file)
-  src/mixed.rs -- skipped (lines from multiple commits)
 
-Absorbed 2 file(s) into 2 commit(s)
+Absorbed 2 hunk(s) from 2 file(s) into 2 commit(s)
+```
+
+For split files (hunks going to different commits):
+
+```
+  src/shared.rs [hunk 1/3] -> abc1234 "Add login form" (feature-auth)
+  src/shared.rs [hunk 2/3] -> def5678 "Add dashboard" (feature-dashboard)
+  src/shared.rs [hunk 3/3] -- skipped (pure addition)
+
+Absorbed 2 hunk(s) from 1 file(s) into 2 commit(s)
 ```
 
 For dry-run:
@@ -135,7 +162,7 @@ For dry-run:
   src/auth.rs -> abc1234 "Add login form" (feature-auth)
   src/utils.rs -> def5678 "Add helper functions"
 
-Dry run: would absorb 2 file(s) into 2 commit(s)
+Dry run: would absorb 2 hunk(s) from 2 file(s) into 2 commit(s)
 ```
 
 When a file's target commit belongs to a feature branch, the branch name is
@@ -173,7 +200,7 @@ git-loom status
 git-loom absorb
 #   src/login.rs -> abc1234 "Add login form" (feature-auth)
 #
-# Absorbed 1 file(s) into 1 commit(s)
+# Absorbed 1 hunk(s) from 1 file(s) into 1 commit(s)
 ```
 
 ### Absorb multiple files into different commits
@@ -187,7 +214,7 @@ git-loom absorb
 #   src/auth.rs -> abc1234 "Add login form"
 #   src/dashboard.rs -> def5678 "Add dashboard"
 #
-# Absorbed 2 file(s) into 2 commit(s)
+# Absorbed 2 hunk(s) from 2 file(s) into 2 commit(s)
 ```
 
 ### Preview with dry-run
@@ -208,23 +235,38 @@ git-loom absorb --dry-run
 git-loom absorb src/auth.rs
 #   src/auth.rs -> abc1234 "Add login form"
 #
-# Absorbed 1 file(s) into 1 commit(s)
+# Absorbed 1 hunk(s) from 1 file(s) into 1 commit(s)
 
 # src/dashboard.rs changes are still in the working tree
 ```
 
-### Skip ambiguous files
+### Absorb hunks from same file into different commits
 
 ```bash
-# src/shared.rs has lines modified by two different commits
+# src/shared.rs has two hunks — one from each commit
+
+git-loom absorb
+#   src/shared.rs [hunk 1/2] -> abc1234 "Add login form"
+#   src/shared.rs [hunk 2/2] -> def5678 "Add dashboard"
+#
+# Absorbed 2 hunk(s) from 1 file(s) into 2 commit(s)
+
+# Each hunk was absorbed into its originating commit
+```
+
+### Skip ambiguous hunks
+
+```bash
+# src/shared.rs has a hunk where lines come from two different commits
 
 git-loom absorb
 #   src/auth.rs -> abc1234 "Add login form"
-#   src/shared.rs -- skipped (lines from multiple commits)
+#   src/shared.rs [hunk 1/2] -> def5678 "Add dashboard"
+#   src/shared.rs [hunk 2/2] -- skipped (lines from multiple commits)
 #
-# Absorbed 1 file(s) into 1 commit(s)
+# Absorbed 2 hunk(s) from 2 file(s) into 2 commit(s)
 
-# src/shared.rs changes remain in the working tree
+# The skipped hunk remains in the working tree
 # Use 'git loom fold src/shared.rs <commit>' to handle manually
 ```
 
@@ -247,7 +289,7 @@ git-loom absorb
 #   src/login.rs -> abc1234 "Add login form" (feature-auth)
 #   src/dashboard.rs -> def5678 "Add dashboard" (feature-dashboard)
 #
-# Absorbed 2 file(s) into 2 commit(s)
+# Absorbed 2 hunk(s) from 2 file(s) into 2 commit(s)
 
 # Branch topology is preserved — merges and branch structure unchanged
 ```
@@ -266,16 +308,20 @@ patch-commutation approach (used by `git-absorb`) because:
 - It integrates cleanly with git2's API (no external dependencies)
 - The per-file simplification makes blame efficient (one blame per file)
 
-### Per-File Granularity (v1)
+### Per-Hunk Granularity
 
-Absorption operates at the file level: either all of a file's changes go to
-one commit, or the file is skipped entirely. This was chosen because:
+Absorption operates at the hunk level: each hunk in a file is independently
+blamed and assigned to its originating commit. This was chosen because:
 
-- It covers the common case (file changes usually trace to one commit)
-- It avoids the complexity of constructing per-hunk patches and handling
-  line-number shifts when applying them sequentially
-- It is safe: no risk of partial or incorrect patch application
-- Per-hunk splitting can be added later as an enhancement
+- It handles the common case where a file has changes spanning multiple
+  earlier commits (e.g. a fix near the top and a fix near the bottom)
+- It follows the approach used by `jj absorb` (Jujutsu)
+- Hunks that cannot be assigned (pure additions, ambiguous) are left in the
+  working tree for the user to handle manually
+
+When all hunks in a file trace to the same commit, the file is absorbed as
+a whole (using `git add` + commit). When hunks trace to different commits,
+per-hunk patches are applied to the index via `git apply --cached`.
 
 ### Fixup Commits + Single Rebase
 
@@ -290,9 +336,9 @@ rebase stops), absorb creates fixup commits at HEAD and uses
 
 ### Automatic Working Tree Preservation
 
-Files that cannot be absorbed remain as uncommitted changes in the working
-tree. The user can then handle them manually with `fold` or address them
-in a subsequent `absorb` after further commits.
+Hunks and files that cannot be absorbed remain as uncommitted changes in the
+working tree. The user can then handle them manually with `fold` or address
+them in a subsequent `absorb` after further commits.
 
 ### Atomic Operations
 

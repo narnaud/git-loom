@@ -1,6 +1,6 @@
 # absorb
 
-Automatically distribute working tree changes into the commits that last touched the affected lines. Uses blame to determine the correct target for each file, then amends those commits — all in a single operation.
+Automatically distribute working tree changes into the commits that last touched the affected lines. Uses blame to determine the correct target for each hunk, then amends those commits — all in a single operation.
 
 ## Usage
 
@@ -24,12 +24,13 @@ git-loom absorb [-n] [files...]
 
 For each file with uncommitted changes:
 
-1. Parses the unified diff to find which original lines are modified or deleted
-2. Blames the file at HEAD to determine which commit last touched each original line
-3. If all modified/deleted lines trace to the **same in-scope commit**, the file is assigned to that commit
-4. Otherwise the file is **skipped** with an explanation
+1. Parses the unified diff into individual hunks
+2. For each hunk, blames the modified/deleted lines to find their originating commit
+3. If all hunks trace to the **same in-scope commit**, the whole file is absorbed
+4. If hunks trace to **different commits**, each hunk is independently absorbed into its target
+5. Hunks that can't be attributed (pure additions, ambiguous) are **skipped** and left in the working tree
 
-After analysis, all assigned files are folded into their target commits in a single rebase operation.
+After analysis, all assigned hunks are folded into their target commits in a single rebase operation.
 
 ## Examples
 
@@ -37,25 +38,39 @@ After analysis, all assigned files are folded into their target commits in a sin
 
 ```bash
 git-loom absorb
-# Absorbed 3 files into 2 commits
+#   src/auth.rs -> a1b2c3d "Add authentication"
+#   src/utils.rs -> d4e5f6a "Add utility helpers"
+# Absorbed 2 hunk(s) from 2 file(s) into 2 commit(s)
+```
+
+### Absorb hunks into different commits
+
+```bash
+# src/shared.rs has changes in two separate regions,
+# each originating from a different commit
+git-loom absorb
+#   src/shared.rs [hunk 1/2] -> a1b2c3d "Add login form"
+#   src/shared.rs [hunk 2/2] -> d4e5f6a "Add dashboard"
+# Absorbed 2 hunk(s) from 1 file(s) into 2 commit(s)
 ```
 
 ### Dry run
 
 ```bash
 git-loom absorb --dry-run
-# Would absorb:
-#   src/auth.rs → a1b2c3d "Add authentication"
-#   src/utils.rs → d4e5f6a "Add utility helpers"
-# Skipped:
-#   src/main.rs — modified lines span multiple commits
+#   src/auth.rs -> a1b2c3d "Add authentication"
+#   src/shared.rs [hunk 1/2] -> d4e5f6a "Add utility helpers"
+#   src/shared.rs [hunk 2/2] -- skipped (pure addition)
+# Dry run: would absorb 2 hunk(s) from 2 file(s) into 2 commit(s)
 ```
 
 ### Restrict to specific files
 
 ```bash
 git-loom absorb src/auth.rs src/utils.rs
-# Absorbed 2 files into 1 commit
+#   src/auth.rs -> a1b2c3d "Add authentication"
+#   src/utils.rs -> d4e5f6a "Add utility helpers"
+# Absorbed 2 hunk(s) from 2 file(s) into 2 commit(s)
 ```
 
 ## Prerequisites
