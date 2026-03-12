@@ -25,19 +25,24 @@ etc.). `fold` unifies them under one verb: **fold source into target**.
 ## CLI
 
 ```bash
+git-loom fold <target>
 git-loom fold <source>... <target>
 git-loom fold --create <commit> <new-branch>
 ```
 
 **Arguments:**
 
-- `<source>...`: One or more sources to fold into the target. Sources can be
-  filenames, commit hashes, partial hashes, short IDs, or branch names.
 - `<target>`: The target to fold into. Can be a commit (hash, partial hash,
   short ID) or a branch name (full name or short ID).
+- `<source>...`: One or more sources to fold into the target. Sources can be
+  filenames, commit hashes, partial hashes, short IDs, or branch names.
 
-The last argument is always the target. All preceding arguments are sources.
-There must be at least two arguments total (one source + one target).
+When only a target is provided (single argument), the currently staged files
+are folded into the target commit. If nothing is staged, an error is returned:
+`"Nothing to commit"`.
+
+When two or more arguments are provided, the last argument is the target and
+all preceding arguments are sources.
 
 **Flags:**
 
@@ -54,6 +59,7 @@ combination:
 
 | Source(s) | Target | Action | Multi-source? |
 |-----------|--------|--------|---------------|
+| *(staged)* | Commit | Amend staged: fold currently staged files into the commit | No |
 | File(s) | Commit | Amend: stage files into the commit | Yes |
 | Unstaged (`zz`) | Commit | Amend all: stage all changed files into the commit | No |
 | Commit | Commit | Fixup: absorb source into target | No |
@@ -68,6 +74,8 @@ CommitFile sources use the `commit_sid:index` format shown by `git loom status -
 
 **Invalid combinations** produce an error:
 
+- Single-arg with nothing staged: `"Nothing to commit"`
+- Single-arg with non-commit target: `"Target must be a commit when folding staged files"`
 - File + Branch: `"Cannot fold files into a branch. Target a specific commit."`
 - Branch + anything: `"Cannot fold a branch. Use 'git loom branch' for branch operations."`
 - Unstaged (`zz`) + non-Commit target: `"Cannot fold files into unstaged — files are already in the working directory."` / `"Cannot fold files into a branch. Target a specific commit."`
@@ -77,6 +85,26 @@ CommitFile sources use the `commit_sid:index` format shown by `git loom status -
 - CommitFile + Branch: `"Cannot fold a commit file into a branch. Target a specific commit or use 'zz' to uncommit."`
 
 ## What Happens
+
+### Case 0: Staged Files + Commit (Single-Argument)
+
+Folds currently staged files into an existing commit. This is the single-argument
+form: `git-loom fold <target>`. Only files in the git index (staged) are folded;
+unstaged changes to the same files are preserved.
+
+**Behavior:**
+
+- The git index must have at least one staged change.
+  Error if nothing staged: `"Nothing to commit"`
+- The target must resolve to a commit.
+  Error if not: `"Target must be a commit when folding staged files"`
+- Works for any commit in history, including HEAD.
+- Unstaged changes (including to the same files) are preserved automatically.
+
+**What changes:**
+
+- The target commit absorbs the staged file changes (new hash)
+- All descendant commits get new hashes (same content/messages)
 
 ### Case 1: File(s) + Commit (Amend)
 
@@ -283,6 +311,14 @@ argument is target).
 - For short ID arguments: must have upstream tracking configured
 
 ## Examples
+
+### Fold staged files into a commit
+
+```bash
+git add src/auth.rs
+git-loom fold ab
+# Folds the staged changes in src/auth.rs into commit ab
+```
 
 ### Amend a file into a commit
 

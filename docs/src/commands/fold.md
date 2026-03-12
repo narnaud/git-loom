@@ -5,11 +5,12 @@ Fold source(s) into a target — a polymorphic command that amends files into co
 ## Usage
 
 ```
+git-loom fold <target>
 git-loom fold <source>... <target>
 git-loom fold --create <commit> <new-branch>
 ```
 
-The last argument is always the target. All preceding arguments are sources. At least two arguments are required.
+When only a target is given, currently staged files are folded into the target commit. When two or more arguments are provided, the last argument is the target and all preceding arguments are sources.
 
 ## Type Dispatch
 
@@ -17,6 +18,7 @@ The action depends on the types of the arguments, detected automatically:
 
 | Source | Target | Action |
 |--------|--------|--------|
+| *(staged)* | Commit | **Amend staged**: fold currently staged files into the commit |
 | File(s) | Commit | **Amend**: stage files into the commit |
 | `zz` | Commit | **Amend all**: stage all changed files into the commit |
 | Commit | Commit | **Fixup**: absorb source commit into target |
@@ -29,6 +31,18 @@ The action depends on the types of the arguments, detected automatically:
 CommitFile sources use the `commit_sid:index` format shown by `git loom status -f` (e.g. `fa:0` for the first file in commit `fa`).
 
 ## Actions
+
+### Fold staged files into a commit
+
+When only a target is given, staged files are folded into the commit:
+
+```bash
+git add src/auth.rs
+git-loom fold ab
+# Folds staged changes into commit ab
+```
+
+Only files in the git index are folded — unstaged changes to the same files are preserved. Errors with `"Nothing to commit"` if nothing is staged.
 
 ### Amend files into a commit
 

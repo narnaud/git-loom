@@ -22,6 +22,15 @@ $ git loom fold src/auth.rs d0
 
 This stages `src/auth.rs` and amends it into commit `d0`. The branch topology stays the same — the commit just gains the new changes.
 
+If you've already staged the files you want to amend, you can use the single-argument form:
+
+```bash
+$ git add src/auth.rs
+$ git loom fold d0
+```
+
+This folds only the staged changes — any unstaged modifications to the same files are preserved.
+
 To amend **all** working tree changes into a commit at once:
 
 ```bash

@@ -1373,3 +1373,85 @@ fn fold_create_rejects_non_commit_source() {
         "should error when source is a branch"
     );
 }
+
+// ── Single-arg: Staged files into commit ──────────────────────────────
+
+#[test]
+fn fold_staged_into_head() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("First commit", "file1.txt");
+    test_repo.commit("Second commit", "file2.txt");
+
+    // Modify and stage a file
+    test_repo.write_file("file1.txt", "staged content");
+    test_repo.stage_files(&["file1.txt"]);
+
+    let head_oid = test_repo.head_oid();
+
+    let result = super::run_staged(&test_repo.repo, &head_oid.to_string());
+    assert!(result.is_ok(), "run_staged failed: {:?}", result);
+
+    // HEAD should have been amended
+    assert_eq!(test_repo.get_message(0), "Second commit");
+    assert_ne!(test_repo.head_oid(), head_oid);
+    assert_eq!(test_repo.read_file("file1.txt"), "staged content");
+}
+
+#[test]
+fn fold_staged_nothing_staged_fails() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("First commit", "file1.txt");
+
+    let head_oid = test_repo.head_oid();
+
+    let result = super::run_staged(&test_repo.repo, &head_oid.to_string());
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Nothing to commit"),
+        "should error when nothing is staged"
+    );
+}
+
+#[test]
+fn fold_staged_only_uses_staged_not_unstaged() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("First commit", "file1.txt");
+    test_repo.commit("Second commit", "file2.txt");
+
+    // Stage one file, leave another unstaged
+    test_repo.write_file("file1.txt", "staged content");
+    test_repo.write_file("file2.txt", "unstaged content");
+    test_repo.stage_files(&["file1.txt"]);
+
+    let head_oid = test_repo.head_oid();
+
+    let result = super::run_staged(&test_repo.repo, &head_oid.to_string());
+    assert!(result.is_ok(), "run_staged failed: {:?}", result);
+
+    // Only file1.txt should be in the commit; file2.txt should remain as unstaged
+    assert_eq!(test_repo.read_file("file1.txt"), "staged content");
+    // file2.txt should still have working tree changes (not committed)
+    assert_eq!(test_repo.read_file("file2.txt"), "unstaged content");
+}
+
+#[test]
+fn fold_staged_non_commit_target_fails() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("First commit", "file1.txt");
+
+    test_repo.write_file("file1.txt", "staged content");
+    test_repo.stage_files(&["file1.txt"]);
+
+    // The default branch resolves as a Branch, not a commit
+    let branch_name = test_repo.current_branch_name();
+    let result = super::run_staged(&test_repo.repo, &branch_name);
+    assert!(result.is_err(), "should have failed");
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("must be a commit"),
+        "should error when target is not a commit, got: {err_msg}"
+    );
+}
