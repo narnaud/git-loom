@@ -149,7 +149,7 @@ fn resolve_file_arg(repo: &Repository, workdir: &std::path::Path, arg: &str) -> 
 }
 
 /// Verify that the index has staged changes.
-fn verify_has_staged_changes(repo: &Repository) -> Result<()> {
+pub fn verify_has_staged_changes(repo: &Repository) -> Result<()> {
     let mut opts = StatusOptions::new();
     opts.include_untracked(false);
 

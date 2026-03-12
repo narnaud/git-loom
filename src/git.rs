@@ -413,6 +413,27 @@ pub fn path_has_changes(repo: &Repository, path: &str) -> Result<bool> {
     Ok(!statuses.is_empty())
 }
 
+/// Collect file paths that have staged (index) changes.
+pub fn get_staged_files(repo: &Repository) -> Result<Vec<String>> {
+    let mut opts = StatusOptions::new();
+    opts.include_untracked(false);
+    let statuses = repo.statuses(Some(&mut opts))?;
+    let mut paths = Vec::new();
+    for entry in statuses.iter() {
+        let status = entry.status();
+        if (status.is_index_new()
+            || status.is_index_modified()
+            || status.is_index_deleted()
+            || status.is_index_renamed()
+            || status.is_index_typechange())
+            && let Some(path) = entry.path()
+        {
+            paths.push(path.to_string());
+        }
+    }
+    Ok(paths)
+}
+
 /// Resolve a shortid to a commit, branch, or file by rebuilding the graph.
 fn resolve_shortid(repo: &Repository, shortid: &str) -> Result<Target> {
     // Only gather file info when the shortid looks like a commit-file reference (contains ':')

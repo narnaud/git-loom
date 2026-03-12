@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, bail};
 use git2::{Repository, StatusOptions};
 
+use crate::commit;
 use crate::git::{self, Target};
 use crate::git_commands::{self, git_branch, git_commit, git_rebase};
 use crate::msg;
@@ -19,10 +20,10 @@ const TRACK_BRANCH: &str = "_loom-track";
 ///
 /// With `--create` (`-c`): create a new branch and move the source commit into it.
 pub fn run(create: bool, args: Vec<String>) -> Result<()> {
-    if args.len() < 2 {
+    if args.is_empty() {
         bail!(
-            "At least two arguments required (one source + one target)\n\
-             Usage: git-loom fold <source>... <target>"
+            "At least one argument required\n\
+             Usage: git-loom fold [<source>...] <target>"
         );
     }
 
@@ -30,6 +31,11 @@ pub fn run(create: bool, args: Vec<String>) -> Result<()> {
 
     if create {
         return run_create(&repo, &args);
+    }
+
+    // Single argument: fold staged files into the target commit
+    if args.len() == 1 {
+        return run_staged(&repo, &args[0]);
     }
 
     // Last argument is the target, everything else is a source
@@ -150,6 +156,23 @@ fn create_branch_and_move(
     ));
 
     Ok(())
+}
+
+/// Fold currently staged files into a target commit.
+///
+/// Single-argument form: `loom fold <target>`. The target must resolve to a
+/// commit. If nothing is staged, bails with the same message as `loom commit`.
+fn run_staged(repo: &Repository, target_arg: &str) -> Result<()> {
+    let resolved = resolve_fold_arg(repo, target_arg)?;
+    let commit_hash = match resolved {
+        Target::Commit(hash) => hash,
+        _ => bail!("Target must be a commit when folding staged files"),
+    };
+
+    commit::verify_has_staged_changes(repo)?;
+
+    let staged = git::get_staged_files(repo)?;
+    fold_files_into_commit(repo, &staged, &commit_hash)
 }
 
 /// The classified fold operation.

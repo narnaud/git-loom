@@ -147,7 +147,7 @@ enum Command {
         #[arg(short = 'c', long = "create")]
         create: bool,
         /// Source(s) and target: files, commits, or branches (last arg is the target)
-        #[arg(required = true, num_args = 2..)]
+        #[arg(required = true, num_args = 1..)]
         args: Vec<String>,
     },
     /// Absorb working tree changes into the commits that introduced them
