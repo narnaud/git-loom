@@ -125,21 +125,26 @@ pub fn diff_commit_file(workdir: &Path, oid: &str, path: &str) -> Result<String>
 ///
 /// Wraps `git apply` with the patch passed via stdin.
 pub fn apply_patch(workdir: &Path, patch: &str) -> Result<()> {
-    apply_patch_impl(workdir, patch, false)
+    apply_patch_with_flags(workdir, patch, &[])
 }
 
 /// Apply a patch in reverse from stdin.
 ///
 /// Wraps `git apply --reverse` with the patch passed via stdin.
 pub fn apply_patch_reverse(workdir: &Path, patch: &str) -> Result<()> {
-    apply_patch_impl(workdir, patch, true)
+    apply_patch_with_flags(workdir, patch, &["--reverse"])
 }
 
-fn apply_patch_impl(workdir: &Path, patch: &str, reverse: bool) -> Result<()> {
+/// Apply a patch to the index only (not the working tree).
+///
+/// Wraps `git apply --cached` with the patch passed via stdin.
+pub fn apply_cached_patch(workdir: &Path, patch: &str) -> Result<()> {
+    apply_patch_with_flags(workdir, patch, &["--cached"])
+}
+
+fn apply_patch_with_flags(workdir: &Path, patch: &str, flags: &[&str]) -> Result<()> {
     let mut args = vec!["apply"];
-    if reverse {
-        args.push("--reverse");
-    }
+    args.extend(flags);
 
     let start = Instant::now();
     let mut child = Command::new("git")
@@ -167,8 +172,8 @@ fn apply_patch_impl(workdir: &Path, patch: &str, reverse: bool) -> Result<()> {
     );
 
     if !output.status.success() {
-        let flag = if reverse { " --reverse" } else { "" };
-        bail!("Git apply{} failed", flag);
+        let flag = args[1..].join(" ");
+        bail!("Git apply {} failed", flag);
     }
 
     Ok(())

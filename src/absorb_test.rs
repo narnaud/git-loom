@@ -3,15 +3,7 @@ use crate::test_helpers::TestRepo;
 // ── Unit tests for diff parsing ──────────────────────────────────────
 
 #[test]
-fn parse_hunk_header_basic() {
-    assert_eq!(super::parse_hunk_header("@@ -10,5 +10,7 @@"), Some(10));
-    assert_eq!(super::parse_hunk_header("@@ -1,3 +1,3 @@"), Some(1));
-    assert_eq!(super::parse_hunk_header("@@ -42 +42 @@"), Some(42));
-    assert_eq!(super::parse_hunk_header("not a header"), None);
-}
-
-#[test]
-fn parse_modified_lines_basic() {
+fn parse_hunks_single_hunk() {
     let diff = "\
 --- a/file.txt
 +++ b/file.txt
@@ -21,12 +13,37 @@ fn parse_modified_lines_basic() {
 +new line
  context
 ";
-    let lines = super::parse_modified_lines(diff);
-    assert_eq!(lines, vec![4]); // line 4 in the original was modified
+    let hunks = super::parse_hunks(diff);
+    assert_eq!(hunks.len(), 1);
+    assert_eq!(hunks[0].modified_lines, vec![4]);
+    assert!(hunks[0].text.contains("@@ -3,4 +3,4 @@"));
+    assert!(hunks[0].text.contains("-old line"));
 }
 
 #[test]
-fn parse_modified_lines_pure_addition() {
+fn parse_hunks_multiple_hunks() {
+    let diff = "\
+--- a/file.txt
++++ b/file.txt
+@@ -3,4 +3,4 @@
+ context
+-old line 1
++new line 1
+ context
+@@ -20,4 +20,4 @@
+ context
+-old line 2
++new line 2
+ context
+";
+    let hunks = super::parse_hunks(diff);
+    assert_eq!(hunks.len(), 2);
+    assert_eq!(hunks[0].modified_lines, vec![4]);
+    assert_eq!(hunks[1].modified_lines, vec![21]);
+}
+
+#[test]
+fn parse_hunks_pure_addition() {
     let diff = "\
 --- a/file.txt
 +++ b/file.txt
@@ -36,10 +53,62 @@ fn parse_modified_lines_pure_addition() {
 +added line 2
  context
 ";
-    let lines = super::parse_modified_lines(diff);
+    let hunks = super::parse_hunks(diff);
+    assert_eq!(hunks.len(), 1);
     assert!(
-        lines.is_empty(),
+        hunks[0].modified_lines.is_empty(),
         "pure additions should produce no modified original lines"
+    );
+}
+
+// ── Unit tests for patch construction ────────────────────────────────
+
+#[test]
+fn build_hunk_patch_single_hunk() {
+    let hunk = super::DiffHunk {
+        text: "@@ -3,4 +3,4 @@\n context\n-old line\n+new line\n context\n".to_string(),
+        modified_lines: vec![4],
+    };
+    let patch = super::build_hunk_patch("src/file.txt", &[hunk]);
+    assert!(patch.starts_with("--- a/src/file.txt\n+++ b/src/file.txt\n"));
+    assert!(patch.contains("@@ -3,4 +3,4 @@"));
+    assert!(patch.contains("-old line"));
+    assert!(patch.contains("+new line"));
+}
+
+#[test]
+fn build_hunk_patch_multiple_hunks() {
+    let hunk1 = super::DiffHunk {
+        text: "@@ -3,4 +3,4 @@\n context\n-old1\n+new1\n context\n".to_string(),
+        modified_lines: vec![4],
+    };
+    let hunk2 = super::DiffHunk {
+        text: "@@ -20,4 +20,4 @@\n context\n-old2\n+new2\n context\n".to_string(),
+        modified_lines: vec![21],
+    };
+    let patch = super::build_hunk_patch("src/file.txt", &[hunk1, hunk2]);
+    // Should have one file header and both hunks
+    assert_eq!(patch.matches("--- a/").count(), 1);
+    assert_eq!(patch.matches("@@ -").count(), 2);
+}
+
+#[test]
+fn parse_hunks_sql_comment_lines() {
+    let diff = "\
+--- a/query.sql
++++ b/query.sql
+@@ -1,3 +1,3 @@
+ SELECT *
+--- main query
++-- updated query
+ FROM users
+";
+    let hunks = super::parse_hunks(diff);
+    assert_eq!(hunks.len(), 1);
+    assert_eq!(
+        hunks[0].modified_lines,
+        vec![2],
+        "SQL comment line starting with '-- ' must be tracked as a modified line"
     );
 }
 
@@ -302,6 +371,180 @@ fn absorb_with_woven_branches() {
         );
 
         // Working tree should be clean (feature.txt absorbed)
+        test_repo.assert_working_tree_clean();
+    });
+}
+
+#[test]
+fn absorb_split_hunks_to_different_commits() {
+    let test_repo = TestRepo::new_with_remote();
+
+    // Create two commits with content in distant regions of the same file.
+    // Need enough gap (>6 lines) between regions so git diff produces separate hunks.
+    // Commit 1: lines 1-3 plus padding
+    test_repo.write_file(
+        "shared.txt",
+        "line1 from c1\nline2 from c1\nline3 from c1\n\
+         pad1\npad2\npad3\npad4\npad5\npad6\npad7\npad8\n",
+    );
+    test_repo.stage_files(&["shared.txt"]);
+    test_repo.commit_staged("Commit 1");
+
+    // Commit 2: appends lines far away from commit 1's region
+    test_repo.write_file(
+        "shared.txt",
+        "line1 from c1\nline2 from c1\nline3 from c1\n\
+         pad1\npad2\npad3\npad4\npad5\npad6\npad7\npad8\n\
+         line12 from c2\nline13 from c2\nline14 from c2\n",
+    );
+    test_repo.stage_files(&["shared.txt"]);
+    test_repo.commit_staged("Commit 2");
+
+    // Modify lines from both commits — separate hunks due to distance
+    test_repo.write_file(
+        "shared.txt",
+        "MODIFIED line1\nline2 from c1\nline3 from c1\n\
+         pad1\npad2\npad3\npad4\npad5\npad6\npad7\npad8\n\
+         MODIFIED line12\nline13 from c2\nline14 from c2\n",
+    );
+
+    test_repo.in_dir(|| {
+        let result = super::run(false, vec![]);
+        assert!(
+            result.is_ok(),
+            "hunk-level absorb should succeed: {:?}",
+            result
+        );
+
+        // Working tree should be clean — both hunks absorbed
+        test_repo.assert_working_tree_clean();
+
+        // Commit messages preserved
+        assert_eq!(test_repo.get_message(0), "Commit 2");
+        assert_eq!(test_repo.get_message(1), "Commit 1");
+    });
+}
+
+#[test]
+fn absorb_split_with_pure_addition_hunk() {
+    let test_repo = TestRepo::new_with_remote();
+
+    test_repo.write_file("file.txt", "line1\nline2\nline3\n");
+    test_repo.stage_files(&["file.txt"]);
+    test_repo.commit_staged("Add file");
+
+    // Modify line1 (absorbable) and append new lines (pure addition)
+    test_repo.write_file(
+        "file.txt",
+        "MODIFIED line1\nline2\nline3\nnew line4\nnew line5\n",
+    );
+
+    test_repo.in_dir(|| {
+        let result = super::run(false, vec![]);
+        assert!(
+            result.is_ok(),
+            "mixed split absorb should succeed: {:?}",
+            result
+        );
+
+        // The modified hunk should be absorbed, but pure addition stays in working tree
+        let content = test_repo.read_file("file.txt");
+        assert!(
+            content.contains("new line4"),
+            "pure addition hunk should remain in working tree"
+        );
+    });
+}
+
+#[test]
+fn absorb_skipped_patch_only_contains_skipped_files() {
+    let test_repo = TestRepo::new_with_remote();
+
+    // Create two commits with separate files
+    test_repo.write_file("absorbable.txt", "original content\n");
+    test_repo.stage_files(&["absorbable.txt"]);
+    test_repo.commit_staged("Add absorbable");
+
+    test_repo.write_file("skippable.txt", "line1\nline2\n");
+    test_repo.stage_files(&["skippable.txt"]);
+    test_repo.commit_staged("Add skippable");
+
+    // Modify absorbable.txt (will be absorbed into its commit)
+    test_repo.write_file("absorbable.txt", "modified content\n");
+
+    // Append pure-addition lines to skippable.txt (will be skipped)
+    test_repo.write_file("skippable.txt", "line1\nline2\nnew line3\n");
+
+    test_repo.in_dir(|| {
+        let result = super::run(
+            false,
+            vec!["absorbable.txt".to_string(), "skippable.txt".to_string()],
+        );
+        assert!(result.is_ok(), "absorb failed: {:?}", result);
+
+        // absorbable.txt should be clean (absorbed into its commit)
+        let abs_diff =
+            crate::git_commands::diff_head_file(&std::path::PathBuf::from("."), "absorbable.txt")
+                .unwrap();
+        assert!(
+            abs_diff.is_empty(),
+            "absorbable.txt should be clean after absorb, but has diff:\n{}",
+            abs_diff
+        );
+
+        // skippable.txt should still have the pure-addition leftover
+        let content = test_repo.read_file("skippable.txt");
+        assert!(
+            content.contains("new line3"),
+            "skippable.txt should retain its skipped changes"
+        );
+    });
+}
+
+#[test]
+fn absorb_file_with_sql_comment_lines() {
+    let test_repo = TestRepo::new_with_remote();
+    // Create a SQL file with comment lines
+    test_repo.write_file("query.sql", "SELECT *\n-- main query\nFROM users\n");
+    test_repo.stage_files(&["query.sql"]);
+    test_repo.commit_staged("Add SQL query");
+
+    // Modify the comment line
+    test_repo.write_file("query.sql", "SELECT *\n-- updated query\nFROM users\n");
+
+    test_repo.in_dir(|| {
+        let result = super::run(false, vec![]);
+        assert!(
+            result.is_ok(),
+            "absorb should handle -- lines: {:?}",
+            result.err()
+        );
+        test_repo.assert_working_tree_clean();
+        // Verify the change was absorbed
+        let content = test_repo.read_file("query.sql");
+        assert!(
+            content.contains("-- updated query"),
+            "absorbed content should contain the updated SQL comment"
+        );
+    });
+}
+
+#[test]
+fn absorb_staged_only_changes() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("Add file", "target.txt");
+
+    // Stage a change without leaving unstaged modifications
+    test_repo.write_file("target.txt", "staged content\n");
+    test_repo.stage_files(&["target.txt"]);
+
+    test_repo.in_dir(|| {
+        let result = super::run(false, vec![]);
+        assert!(
+            result.is_ok(),
+            "absorb should handle staged-only changes: {:?}",
+            result.err()
+        );
         test_repo.assert_working_tree_clean();
     });
 }
