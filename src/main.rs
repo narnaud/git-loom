@@ -299,7 +299,7 @@ fn main() {
     }
 
     // Initialize logger for commands that modify the repo (skip for
-    // InternalWriteTodo — it runs as a subprocess — and Log/Status which are read-only).
+    // InternalWriteTodo — it runs as a subprocess — and Status/Trace/Show which are read-only).
     let should_log = !matches!(
         cli.command,
         Some(Command::InternalWriteTodo { .. }) | Some(Command::Trace) | Some(Command::Show { .. })
