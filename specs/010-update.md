@@ -66,6 +66,10 @@ When the rebase encounters a merge conflict:
 
 The user then resolves the conflict using standard git commands.
 
+> **Implementation note:** git-loom auto-aborts the rebase on conflict and
+> instructs the user to re-run manually. This prevents a half-finished rebase
+> from confusing other loom commands that assume a clean repo state.
+
 ## Prerequisites
 
 - Must be in a git repository with a working tree (not bare)
