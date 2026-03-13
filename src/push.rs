@@ -395,7 +395,7 @@ fn push_github(
     loom_trace::log_command("gh", "--version", duration_ms, gh_available, "");
 
     if !gh_available {
-        println!("Install 'gh' CLI to create pull requests: https://cli.github.com");
+        msg::warn("Install 'gh' CLI to create pull requests: https://cli.github.com");
         return Ok(());
     }
 
@@ -532,9 +532,9 @@ fn push_azure(
     loom_trace::log_command("az", "--version", duration_ms, az_available, "");
 
     if !az_available {
-        println!(
+        msg::warn(
             "Install 'az' CLI to create pull requests: \
-             https://learn.microsoft.com/cli/azure/install-azure-cli"
+             https://learn.microsoft.com/cli/azure/install-azure-cli",
         );
         return Ok(());
     }
