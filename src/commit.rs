@@ -50,7 +50,15 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
     let saved_head = git::head_oid(&repo)?.to_string();
 
     // Step 4: Resolve branch target (may create a new branch at merge-base)
+    // Snapshot existing branch names so we can detect newly-created branches.
+    // Only delete newly-created branches on rollback (not pre-existing empty ones).
+    let branches_before: Vec<String> = repo
+        .branches(Some(git2::BranchType::Local))?
+        .filter_map(|b| b.ok())
+        .filter_map(|(b, _)| b.name().ok().flatten().map(String::from))
+        .collect();
     let branch_name = resolve_branch_target(&repo, &info, &workdir, branch.as_deref())?;
+    let branch_is_new = !branches_before.contains(&branch_name);
 
     // Check if the branch is at the merge-base (no commits of its own).
     // Empty branches need to have a branch section and merge entry created
@@ -88,7 +96,7 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
         // Mixed reset preserves working-tree changes (the committed content
         // stays in the working directory as unstaged modifications).
         let _ = git_commit::reset_mixed(&workdir, &saved_head);
-        if branch_is_empty {
+        if branch_is_new {
             let _ = git_branch::delete(&workdir, &branch_name);
         }
         return Err(e);

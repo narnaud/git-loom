@@ -378,6 +378,44 @@ fn commit_conflict_preserves_working_tree_changes() {
     );
 }
 
+#[test]
+fn commit_conflict_preserves_existing_empty_branch() {
+    let test_repo = TestRepo::new_with_remote();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    // Create feat1 with a commit (will cause conflict)
+    test_repo.create_branch_at("feat1", &base_oid.to_string());
+    test_repo.switch_branch("feat1");
+    test_repo.write_file("shared.txt", "feat1 content");
+    test_repo.stage_files(&["shared.txt"]);
+    test_repo.commit_staged("Feature 1");
+    test_repo.switch_branch("integration");
+    test_repo.merge_no_ff("feat1");
+
+    // Create an empty branch at merge-base (pre-existing, not created by commit)
+    test_repo.create_branch_at("empty-branch", &base_oid.to_string());
+
+    // Stage a conflicting change and try to commit to the empty branch
+    test_repo.write_file("shared.txt", "conflicting content");
+
+    let result = test_repo.in_dir(|| {
+        super::run(
+            Some("empty-branch".to_string()),
+            Some("Should conflict".to_string()),
+            vec!["zz".to_string()],
+        )
+    });
+
+    // The commit should fail due to merge conflict
+    assert!(result.is_err(), "commit should fail due to merge conflict");
+
+    // Critical: the pre-existing empty branch must NOT be deleted
+    assert!(
+        test_repo.branch_exists("empty-branch"),
+        "Pre-existing empty branch should be preserved after rollback"
+    );
+}
+
 // ── Loose commits ────────────────────────────────────────────────────────
 
 #[test]
