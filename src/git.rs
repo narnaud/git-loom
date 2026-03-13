@@ -766,9 +766,7 @@ fn get_working_changes(repo: &Repository) -> Result<Vec<FileChange>> {
         };
         let status = entry.status();
 
-        let index = if status.is_wt_new() {
-            '?'
-        } else if status.is_conflicted() {
+        let index = if status.is_conflicted() {
             '!'
         } else if status.is_index_new() {
             'A'
@@ -778,6 +776,8 @@ fn get_working_changes(repo: &Repository) -> Result<Vec<FileChange>> {
             'D'
         } else if status.is_index_renamed() {
             'R'
+        } else if status.is_wt_new() {
+            '?'
         } else {
             ' '
         };
