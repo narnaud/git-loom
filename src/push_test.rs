@@ -256,6 +256,50 @@ fn detect_remote_type_azure_by_config() {
 }
 
 #[test]
+fn detect_remote_type_gerrit_in_worktree() {
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    test_repo.commit("C1", "c1.txt");
+
+    // Install a Gerrit hook in the main repo's hooks dir
+    let hooks_dir = workdir.join(".git").join("hooks");
+    std::fs::create_dir_all(&hooks_dir).unwrap();
+    std::fs::write(
+        hooks_dir.join("commit-msg"),
+        "#!/bin/sh\n# Gerrit Change-Id hook\n",
+    )
+    .unwrap();
+
+    // Create a worktree — .git is a file there, not a directory
+    let wt_path = workdir.parent().unwrap().join("worktree-test");
+    std::process::Command::new("git")
+        .current_dir(&workdir)
+        .args(["worktree", "add", wt_path.to_str().unwrap(), "HEAD"])
+        .output()
+        .unwrap();
+
+    // Open the worktree as a Repository
+    let wt_repo = git2::Repository::open(&wt_path).unwrap();
+
+    // .git should be a file in the worktree, not a directory
+    assert!(
+        !wt_path.join(".git").is_dir(),
+        ".git in worktree should not be a directory"
+    );
+
+    // detect_remote_type should still find the Gerrit hook via repo.path()
+    let result = super::detect_remote_type(&wt_repo, &wt_path, "origin/main");
+    assert!(result.is_ok(), "detect_remote_type failed: {:?}", result);
+    assert_eq!(
+        result.unwrap(),
+        super::RemoteType::Gerrit {
+            target_branch: "main".to_string()
+        },
+        "Should detect Gerrit via hook even in a worktree"
+    );
+}
+
+#[test]
 fn detect_remote_type_azure_by_url() {
     let test_repo = TestRepo::new_with_remote();
     let workdir = test_repo.workdir();
