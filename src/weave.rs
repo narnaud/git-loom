@@ -293,7 +293,15 @@ impl Weave {
                 .iter()
                 .position(|c| c.oid == oid)
             {
-                self.branch_sections[i].commits.remove(pos);
+                let removed = self.branch_sections[i].commits.remove(pos);
+
+                // Transfer update_refs to an adjacent commit
+                if !removed.update_refs.is_empty() && !self.branch_sections[i].commits.is_empty() {
+                    let target_pos = if pos > 0 { pos - 1 } else { 0 };
+                    self.branch_sections[i].commits[target_pos]
+                        .update_refs
+                        .extend(removed.update_refs);
+                }
 
                 // If section is now empty, remove it and its merge
                 if self.branch_sections[i].commits.is_empty() {
@@ -308,8 +316,23 @@ impl Weave {
         }
 
         // Check integration line
-        self.integration_line
-            .retain(|e| !matches!(e, IntegrationEntry::Pick(c) if c.oid == oid));
+        if let Some(pos) = self
+            .integration_line
+            .iter()
+            .position(|e| matches!(e, IntegrationEntry::Pick(c) if c.oid == oid))
+            && let IntegrationEntry::Pick(removed) = self.integration_line.remove(pos)
+            && !removed.update_refs.is_empty()
+        {
+            // Find the nearest adjacent Pick to transfer refs to
+            let target = (pos..self.integration_line.len())
+                .chain((0..pos).rev())
+                .find(|&j| matches!(self.integration_line[j], IntegrationEntry::Pick(_)));
+            if let Some(j) = target
+                && let IntegrationEntry::Pick(ref mut c) = self.integration_line[j]
+            {
+                c.update_refs.extend(removed.update_refs);
+            }
+        }
     }
 
     /// Remove an entire branch section and its merge entry.
