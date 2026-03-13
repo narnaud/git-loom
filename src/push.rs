@@ -424,7 +424,7 @@ fn push_github(
     };
 
     // If a PR already exists, show its URL instead of opening the browser
-    if let Some(pr_url) = find_existing_github_pr(workdir, &pr_target_repo, &head_arg) {
+    if let Some(pr_url) = find_existing_github_pr(workdir, &pr_target_repo, branch) {
         msg::success(&format!("PR updated: {}", pr_url));
         return Ok(());
     }
