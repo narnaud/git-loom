@@ -885,3 +885,54 @@ fn drop_branch_preserves_colocated_update_refs_at_boundary() {
         "co-located inner refs must be preserved"
     );
 }
+
+// ── weave_branch unit tests ──────────────────────────────────────────────
+
+#[test]
+fn weave_branch_moves_picks_into_section() {
+    let mut graph = Weave {
+        base_oid: oid("aaa"),
+        branch_sections: vec![],
+        integration_line: vec![
+            IntegrationEntry::Pick(make_commit("111", "C1")),
+            IntegrationEntry::Pick(make_commit_with_refs("222", "C2", vec!["feature-x"])),
+            IntegrationEntry::Pick(make_commit("333", "C3")),
+        ],
+    };
+
+    graph.weave_branch("feature-x");
+
+    // C1 and C2 should be in a new branch section
+    assert_eq!(graph.branch_sections.len(), 1);
+    assert_eq!(graph.branch_sections[0].label, "feature-x");
+    assert_eq!(graph.branch_sections[0].commits.len(), 2);
+
+    // C3 should remain on the integration line as a Pick
+    let picks: Vec<&CommitEntry> = graph
+        .integration_line
+        .iter()
+        .filter_map(|e| {
+            if let IntegrationEntry::Pick(c) = e {
+                Some(c)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(picks.len(), 1);
+    assert_eq!(picks[0].message, "C3");
+
+    // A merge entry for feature-x should exist
+    let merges: Vec<&String> = graph
+        .integration_line
+        .iter()
+        .filter_map(|e| {
+            if let IntegrationEntry::Merge { label, .. } = e {
+                Some(label)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert!(merges.contains(&&"feature-x".to_string()));
+}
