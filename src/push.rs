@@ -376,6 +376,12 @@ fn push_github(
 ) -> Result<()> {
     git_push(workdir, remote, branch)?;
 
+    // Skip PR creation when pushing the upstream target branch itself
+    if branch == target_branch {
+        msg::success(&format!("Pushed `{}` to `{}`", branch, remote));
+        return Ok(());
+    }
+
     // Check if gh CLI is available
     let start = Instant::now();
     let gh_check = Command::new("gh").arg("--version").output();

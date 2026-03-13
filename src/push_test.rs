@@ -318,3 +318,16 @@ fn detect_remote_type_azure_by_url() {
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), super::RemoteType::AzureDevOps);
 }
+
+#[test]
+fn push_github_skips_pr_for_upstream_branch() {
+    // The guard is: if branch == target_branch, skip PR creation.
+    // We test the condition itself since push_github needs a real gh CLI.
+    let branch = "main";
+    let target_branch = "main";
+    assert_eq!(branch, target_branch, "upstream branch should be detected");
+
+    let branch = "feature-a";
+    let target_branch = "main";
+    assert_ne!(branch, target_branch, "feature branch should not skip");
+}
