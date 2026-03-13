@@ -376,22 +376,30 @@ impl Weave {
     /// names in the same section), the section is split: original commits stay
     /// with the remaining branches, and a new stacked section is created for the
     /// target branch containing the moved commit.
-    pub fn move_commit(&mut self, oid: Oid, to_branch: &str) {
-        // Find and remove the commit from its current location
-        let commit = self.remove_commit(oid);
-        let Some(mut commit) = commit else { return };
-
-        // Ensure command is Pick (not Fixup etc.)
-        commit.command = Command::Pick;
-
-        // Find the target branch section
+    pub fn move_commit(&mut self, oid: Oid, to_branch: &str) -> anyhow::Result<()> {
+        // Validate target section exists BEFORE removing the source
         let section_idx = self
             .branch_sections
             .iter()
             .position(|s| s.label == to_branch || s.branch_names.contains(&to_branch.to_string()));
         let Some(section_idx) = section_idx else {
-            return;
+            anyhow::bail!(
+                "Cannot move commit: target branch section '{}' not found in weave graph",
+                to_branch
+            );
         };
+
+        // Find and remove the commit from its current location
+        let commit = self.remove_commit(oid);
+        let Some(mut commit) = commit else {
+            anyhow::bail!(
+                "Cannot move commit: source commit {} not found in weave graph",
+                oid
+            );
+        };
+
+        // Ensure command is Pick (not Fixup etc.)
+        commit.command = Command::Pick;
 
         // If the target branch is co-located with others, split the section
         if self.branch_sections[section_idx].branch_names.len() > 1
@@ -443,19 +451,41 @@ impl Weave {
             // Simple case: only one branch in the section, just append
             self.branch_sections[section_idx].commits.push(commit);
         }
+        Ok(())
     }
 
     /// Change the source commit to Fixup and move it right after the target.
-    pub fn fixup_commit(&mut self, source_oid: Oid, target_oid: Oid) {
+    pub fn fixup_commit(&mut self, source_oid: Oid, target_oid: Oid) -> anyhow::Result<()> {
+        // Validate target exists BEFORE removing the source
+        let target_in_sections = self
+            .branch_sections
+            .iter()
+            .any(|s| s.commits.iter().any(|c| c.oid == target_oid));
+        let target_in_integration = self
+            .integration_line
+            .iter()
+            .any(|entry| matches!(entry, IntegrationEntry::Pick(c) if c.oid == target_oid));
+        if !target_in_sections && !target_in_integration {
+            anyhow::bail!(
+                "Cannot fixup commit: target commit {} not found in weave graph",
+                target_oid
+            );
+        }
+
         let commit = self.remove_commit(source_oid);
-        let Some(mut commit) = commit else { return };
+        let Some(mut commit) = commit else {
+            anyhow::bail!(
+                "Cannot fixup commit: source commit {} not found in weave graph",
+                source_oid
+            );
+        };
         commit.command = Command::Fixup;
 
         // Find the target commit and insert the fixup after it
         for section in &mut self.branch_sections {
             if let Some(pos) = section.commits.iter().position(|c| c.oid == target_oid) {
                 section.commits.insert(pos + 1, commit);
-                return;
+                return Ok(());
             }
         }
 
@@ -466,9 +496,15 @@ impl Weave {
             {
                 self.integration_line
                     .insert(i + 1, IntegrationEntry::Pick(commit));
-                return;
+                return Ok(());
             }
         }
+
+        // Should be unreachable given the pre-validation, but be safe
+        anyhow::bail!(
+            "Cannot fixup commit: target commit {} disappeared during operation",
+            target_oid
+        )
     }
 
     /// Change a commit's command to Edit.

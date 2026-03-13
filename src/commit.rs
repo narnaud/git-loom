@@ -81,7 +81,7 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
         graph.add_merge(branch_name.clone(), None, None);
     }
 
-    graph.move_commit(head_oid, &branch_name);
+    graph.move_commit(head_oid, &branch_name)?;
 
     let todo = graph.to_todo();
     if let Err(e) = weave::run_rebase(&workdir, Some(&graph.base_oid.to_string()), &todo) {

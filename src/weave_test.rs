@@ -320,7 +320,7 @@ fn move_commit_to_branch() {
         ],
     };
 
-    graph.move_commit(oid(OID_C1), "feature-a");
+    graph.move_commit(oid(OID_C1), "feature-a").unwrap();
 
     // C1 should now be at the end of feature-a's section
     assert_eq!(graph.branch_sections[0].commits.len(), 2);
@@ -363,7 +363,7 @@ fn move_commit_to_colocated_branch_splits_section() {
         ],
     };
 
-    graph.move_commit(oid(OID_C1), "feature-b");
+    graph.move_commit(oid(OID_C1), "feature-b").unwrap();
 
     // Should now have 3 sections: feature-a, feature-b (stacked on a), feature-c
     assert_eq!(graph.branch_sections.len(), 3);
@@ -428,7 +428,7 @@ fn move_commit_to_colocated_branch_when_target_is_label() {
         ],
     };
 
-    graph.move_commit(oid(OID_C1), "feature-a");
+    graph.move_commit(oid(OID_C1), "feature-a").unwrap();
 
     // Should have 2 sections now
     assert_eq!(graph.branch_sections.len(), 2);
@@ -470,7 +470,7 @@ fn fixup_commit_moves_and_changes_command() {
         ],
     };
 
-    graph.fixup_commit(oid(OID_FIX), oid(OID_C1));
+    graph.fixup_commit(oid(OID_FIX), oid(OID_C1)).unwrap();
 
     assert_eq!(graph.integration_line.len(), 3);
 
@@ -485,6 +485,48 @@ fn fixup_commit_moves_and_changes_command() {
     if let IntegrationEntry::Pick(c) = &graph.integration_line[2] {
         assert_eq!(c.message, "C2");
     }
+}
+
+#[test]
+fn move_commit_to_missing_section_errors() {
+    let mut graph = Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![],
+        integration_line: vec![IntegrationEntry::Pick(make_commit(OID_C1, "C1"))],
+    };
+
+    let result = graph.move_commit(oid(OID_C1), "nonexistent-branch");
+    assert!(result.is_err());
+    assert!(
+        result.unwrap_err().to_string().contains("not found"),
+        "should mention target not found"
+    );
+
+    // C1 should still be in the integration line (not lost)
+    assert_eq!(graph.integration_line.len(), 1);
+}
+
+#[test]
+fn fixup_commit_to_missing_target_errors() {
+    let mut graph = Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![],
+        integration_line: vec![
+            IntegrationEntry::Pick(make_commit(OID_C1, "C1")),
+            IntegrationEntry::Pick(make_commit(OID_FIX, "Fixup")),
+        ],
+    };
+
+    // Try to fixup to a non-existent target
+    let result = graph.fixup_commit(oid(OID_FIX), oid(OID_C2));
+    assert!(result.is_err());
+    assert!(
+        result.unwrap_err().to_string().contains("not found"),
+        "should mention target not found"
+    );
+
+    // Both commits should still be in the graph (not lost)
+    assert_eq!(graph.integration_line.len(), 2);
 }
 
 #[test]
