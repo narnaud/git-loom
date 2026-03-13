@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 use git2::{BranchType, Repository, StatusOptions};
 
 use crate::git_commands;
+use crate::msg;
 
 /// Open a `Repository` by discovering it from the current working directory.
 pub fn open_repo() -> Result<Repository> {
@@ -61,10 +62,15 @@ pub fn restore_branch_refs(workdir: &Path, snapshot: &HashMap<String, git2::Oid>
         .ok()
         .and_then(|h| h.shorthand().map(|s| s.to_string()));
 
+    let mut failures: Vec<String> = Vec::new();
+
     // Delete branches that weren't in the snapshot
     for name in current_branches.keys() {
-        if !snapshot.contains_key(name) && Some(name.as_str()) != head_branch.as_deref() {
-            let _ = git_commands::run_git(workdir, &["branch", "-D", name]);
+        if !snapshot.contains_key(name)
+            && Some(name.as_str()) != head_branch.as_deref()
+            && let Err(e) = git_commands::run_git(workdir, &["branch", "-D", name])
+        {
+            failures.push(format!("delete '{}': {}", name, e));
         }
     }
 
@@ -74,7 +80,16 @@ pub fn restore_branch_refs(workdir: &Path, snapshot: &HashMap<String, git2::Oid>
             continue; // HEAD's branch is handled by reset --hard
         }
         let oid_str = oid.to_string();
-        let _ = git_commands::run_git(workdir, &["branch", "-f", name, &oid_str]);
+        if let Err(e) = git_commands::run_git(workdir, &["branch", "-f", name, &oid_str]) {
+            failures.push(format!("restore '{}': {}", name, e));
+        }
+    }
+
+    if !failures.is_empty() {
+        msg::warn(&format!(
+            "Partial rollback — some branch refs could not be restored:\n{}",
+            failures.join("\n")
+        ));
     }
 
     Ok(())
