@@ -165,7 +165,11 @@ pub fn verify_has_staged_changes(repo: &Repository) -> Result<()> {
 
     let has_staged = statuses.iter().any(|entry| {
         let status = entry.status();
-        status.is_index_new() || status.is_index_modified() || status.is_index_deleted()
+        status.is_index_new()
+            || status.is_index_modified()
+            || status.is_index_deleted()
+            || status.is_index_renamed()
+            || status.is_index_typechange()
     });
 
     if !has_staged {
