@@ -402,7 +402,7 @@ fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str
 
         let repo = git2::Repository::discover(workdir)?;
         let mut graph = Weave::from_repo(&repo)?;
-        graph.fixup_commit(fixup_oid, target_oid);
+        graph.fixup_commit(fixup_oid, target_oid)?;
 
         // Track target commit through the rebase via a temp branch.
         // The branch must exist before the rebase AND have an update-ref
@@ -450,7 +450,7 @@ fn fold_commit_into_commit(repo: &Repository, source_hash: &str, target_hash: &s
     }
 
     let mut graph = Weave::from_repo(repo)?;
-    graph.fixup_commit(source_oid, target_oid);
+    graph.fixup_commit(source_oid, target_oid)?;
 
     // Track target commit through the rebase via a temp branch.
     git_branch::force_create(workdir, TRACK_BRANCH, target_hash)?;
@@ -528,7 +528,7 @@ pub fn move_commit_to_branch(
         graph.add_merge(branch_name.to_string(), None, None);
     }
 
-    graph.move_commit(commit_oid, branch_name);
+    graph.move_commit(commit_oid, branch_name)?;
 
     let todo = graph.to_todo();
     weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;

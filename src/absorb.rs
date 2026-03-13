@@ -232,7 +232,7 @@ pub fn run(dry_run: bool, user_files: Vec<String>) -> Result<()> {
     let repo2 = Repository::discover(workdir)?;
     let mut graph = Weave::from_repo(&repo2)?;
     for (fixup_oid, target_oid) in &fixup_pairs {
-        graph.fixup_commit(*fixup_oid, *target_oid);
+        graph.fixup_commit(*fixup_oid, *target_oid)?;
     }
 
     let todo = graph.to_todo();
