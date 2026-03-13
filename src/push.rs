@@ -375,10 +375,10 @@ fn push_github(
     upstream_label: &str,
 ) -> Result<()> {
     git_push(workdir, remote, branch)?;
+    msg::success(&format!("Pushed `{}` to `{}`", branch, remote));
 
     // Skip PR creation when pushing the upstream target branch itself
     if branch == target_branch {
-        msg::success(&format!("Pushed `{}` to `{}`", branch, remote));
         return Ok(());
     }
 
@@ -518,6 +518,7 @@ fn push_azure(
     base_oid: git2::Oid,
 ) -> Result<()> {
     git_push(workdir, remote, branch)?;
+    msg::success(&format!("Pushed `{}` to `{}`", branch, remote));
 
     let start = Instant::now();
     let az_check = az_command().arg("--version").output();
