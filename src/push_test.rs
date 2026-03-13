@@ -331,3 +331,45 @@ fn push_github_skips_pr_for_upstream_branch() {
     let target_branch = "main";
     assert_ne!(branch, target_branch, "feature branch should not skip");
 }
+
+// ── extract_gh_repo tests ─────────────────────────────────────────────────
+
+#[test]
+fn extract_gh_repo_scp_style() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo
+        .repo
+        .remote_set_url("origin", "git@github.com:owner/repo.git")
+        .unwrap();
+    let result = super::extract_gh_repo(&test_repo.repo, "origin");
+    assert_eq!(result, Some("owner/repo".to_string()));
+}
+
+#[test]
+fn extract_gh_repo_https() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo
+        .repo
+        .remote_set_url("origin", "https://github.com/owner/repo.git")
+        .unwrap();
+    let result = super::extract_gh_repo(&test_repo.repo, "origin");
+    assert_eq!(result, Some("owner/repo".to_string()));
+}
+
+#[test]
+fn extract_gh_repo_bare_alias() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo
+        .repo
+        .remote_set_url("origin", "github-work:owner/repo")
+        .unwrap();
+    let result = super::extract_gh_repo(&test_repo.repo, "origin");
+    assert_eq!(result, Some("owner/repo".to_string()));
+}
+
+#[test]
+fn extract_gh_repo_nonexistent_remote() {
+    let test_repo = TestRepo::new_with_remote();
+    let result = super::extract_gh_repo(&test_repo.repo, "nonexistent");
+    assert_eq!(result, None);
+}
