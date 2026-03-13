@@ -751,3 +751,103 @@ fn from_repo_round_trip_preserves_identity() {
 
     assert_eq!(messages_before, messages_after);
 }
+
+// ── drop_commit update_refs transfer tests ──────────────────────────────
+
+#[test]
+fn drop_commit_transfers_update_refs_to_adjacent() {
+    let mut graph = Weave {
+        base_oid: oid("aaa"),
+        branch_sections: vec![BranchSection {
+            reset_target: "onto".to_string(),
+            label: "feature-a".to_string(),
+            branch_names: vec!["feature-a".to_string()],
+            commits: vec![
+                make_commit("111", "C1"),
+                make_commit_with_refs("222", "C2", vec!["non-woven-branch"]),
+                make_commit("333", "C3"),
+            ],
+        }],
+        integration_line: vec![IntegrationEntry::Merge {
+            label: "feature-a".to_string(),
+            original_oid: None,
+        }],
+    };
+
+    graph.drop_commit(oid("222"));
+
+    // update_refs should transfer to adjacent commit (C1, preceding)
+    assert_eq!(graph.branch_sections[0].commits.len(), 2);
+    assert!(
+        graph.branch_sections[0].commits[0]
+            .update_refs
+            .contains(&"non-woven-branch".to_string()),
+        "update_refs should transfer to preceding commit"
+    );
+}
+
+#[test]
+fn drop_commit_transfers_update_refs_to_next_when_first() {
+    let mut graph = Weave {
+        base_oid: oid("aaa"),
+        branch_sections: vec![BranchSection {
+            reset_target: "onto".to_string(),
+            label: "feature-a".to_string(),
+            branch_names: vec!["feature-a".to_string()],
+            commits: vec![
+                make_commit_with_refs("111", "C1", vec!["non-woven-branch"]),
+                make_commit("222", "C2"),
+            ],
+        }],
+        integration_line: vec![IntegrationEntry::Merge {
+            label: "feature-a".to_string(),
+            original_oid: None,
+        }],
+    };
+
+    graph.drop_commit(oid("111"));
+
+    assert_eq!(graph.branch_sections[0].commits.len(), 1);
+    assert!(
+        graph.branch_sections[0].commits[0]
+            .update_refs
+            .contains(&"non-woven-branch".to_string()),
+        "update_refs should transfer to next commit when first is dropped"
+    );
+}
+
+#[test]
+fn drop_commit_on_integration_line_transfers_update_refs() {
+    let mut graph = Weave {
+        base_oid: oid("aaa"),
+        branch_sections: vec![],
+        integration_line: vec![
+            IntegrationEntry::Pick(make_commit("111", "C1")),
+            IntegrationEntry::Pick(make_commit_with_refs("222", "C2", vec!["loose-branch"])),
+            IntegrationEntry::Pick(make_commit("333", "C3")),
+        ],
+    };
+
+    graph.drop_commit(oid("222"));
+
+    // Should transfer to an adjacent Pick on the integration line
+    let picks: Vec<&CommitEntry> = graph
+        .integration_line
+        .iter()
+        .filter_map(|e| {
+            if let IntegrationEntry::Pick(c) = e {
+                Some(c)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(picks.len(), 2);
+    let has_ref = picks
+        .iter()
+        .any(|c| c.update_refs.contains(&"loose-branch".to_string()));
+    assert!(
+        has_ref,
+        "update_refs should transfer to adjacent pick on integration line"
+    );
+}
