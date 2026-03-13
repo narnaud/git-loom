@@ -271,6 +271,12 @@ Unknown identifiers are silently ignored.
 - **No merge commit handling**: merge commits are displayed like regular
   commits. There is no special visual treatment for merges.
 
+### CWD-relative file paths
+
+File paths in the status output are displayed relative to the current
+working directory, matching `git status` behavior. When run from
+`<repo>/src/`, the file `src/main.rs` is shown as `main.rs`.
+
 ## Branch Topology
 
 Feature branches are expected to be stacked linearly on top of each other.

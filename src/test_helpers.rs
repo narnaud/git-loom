@@ -303,6 +303,24 @@ impl TestRepo {
         f()
     }
 
+    /// Run a closure with CWD set to the given path (must be inside the repo).
+    pub fn in_dir_path<F, R>(&self, path: &Path, f: F) -> R
+    where
+        F: FnOnce() -> R,
+    {
+        let _lock = IN_DIR_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let restore = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        std::env::set_current_dir(path).unwrap();
+        struct RestoreDir(PathBuf);
+        impl Drop for RestoreDir {
+            fn drop(&mut self) {
+                let _ = std::env::set_current_dir(&self.0);
+            }
+        }
+        let _guard = RestoreDir(restore);
+        f()
+    }
+
     /// Switch HEAD to a branch and update the working directory.
     pub fn switch_branch(&self, name: &str) {
         self.repo.set_head(&format!("refs/heads/{}", name)).unwrap();

@@ -239,7 +239,9 @@ fn resolve_branch_rejects_commit_target() {
         &c1_oid.to_string(),
     );
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("not a commit"));
+    // With the centralized resolver, a commit hash that doesn't resolve to a branch
+    // produces a "did not resolve to a branch" error
+    assert!(result.unwrap_err().to_string().contains("branch"));
 }
 
 #[test]

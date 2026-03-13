@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail};
 use git2::Repository;
 
 use crate::branch::is_on_first_parent_line;
-use crate::git::{self, Target};
+use crate::git::{self, Target, TargetKind};
 use crate::git_commands::{self, git_branch};
 use crate::msg;
 use crate::weave::{self, Weave};
@@ -19,16 +19,23 @@ use crate::weave::{self, Weave};
 pub fn run(target: String, skip_confirm: bool) -> Result<()> {
     let repo = git::open_repo()?;
 
-    let resolved = git::resolve_target(&repo, &target)?;
+    let resolved = git::resolve_arg(
+        &repo,
+        &target,
+        &[
+            TargetKind::File,
+            TargetKind::Branch,
+            TargetKind::Commit,
+            TargetKind::Unstaged,
+        ],
+    )?;
 
     match resolved {
         Target::Commit(hash) => drop_commit(&repo, &hash, skip_confirm),
         Target::Branch(name) => drop_branch(&repo, &name, skip_confirm),
         Target::File(path) => drop_file(&repo, &path, skip_confirm),
         Target::Unstaged => drop_all(&repo, skip_confirm),
-        Target::CommitFile { .. } => {
-            bail!("Cannot drop a commit file\nUse `git loom fold <file_id> zz` to uncommit a file")
-        }
+        _ => unreachable!(),
     }
 }
 

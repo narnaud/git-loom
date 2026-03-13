@@ -618,3 +618,53 @@ fn drop_all_fails_when_no_changes() {
         "error should mention no changes"
     );
 }
+
+// ── Integration tests for centralized resolver ───────────────────────────
+
+#[test]
+fn drop_merge_commit_fails() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("a.txt", "a.txt");
+    let a_oid = test_repo.head_oid();
+    let upstream_oid = test_repo.find_remote_branch_target("origin/main");
+
+    // Create a merge commit
+    test_repo.commit_merge("Merge side", a_oid, upstream_oid);
+    let merge_oid = test_repo.head_oid();
+
+    let result = test_repo.in_dir(|| crate::drop::run(merge_oid.to_string(), true));
+    assert!(result.is_err());
+    assert!(
+        result.unwrap_err().to_string().contains("merge commit"),
+        "Error should mention merge commit"
+    );
+}
+
+#[test]
+fn drop_prefers_file_over_branch_name_collision() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit_empty("A1");
+    let a1_oid = test_repo.head_oid();
+    test_repo.create_branch_at_commit("collision", a1_oid);
+    test_repo.write_file("collision", "dirty data");
+
+    let result = test_repo.in_dir(|| crate::drop::run("collision".to_string(), true));
+    assert!(result.is_ok(), "Expected ok, got: {:?}", result);
+    // Branch should still exist (file was dropped, not the branch)
+    assert!(test_repo.branch_exists("collision"));
+}
+
+#[test]
+fn drop_file_resolves_from_nested_cwd() {
+    let test_repo = TestRepo::new_with_remote();
+    let sub_dir = test_repo.workdir().join("sub");
+    std::fs::create_dir_all(&sub_dir).unwrap();
+    std::fs::write(sub_dir.join("file.txt"), "content").unwrap();
+    test_repo.stage_files(&["sub/file.txt"]);
+    test_repo.commit_staged("add sub/file.txt");
+    // Dirty the file
+    std::fs::write(sub_dir.join("file.txt"), "modified").unwrap();
+
+    let result = test_repo.in_dir_path(&sub_dir, || crate::drop::run("file.txt".to_string(), true));
+    assert!(result.is_ok(), "Expected ok, got: {:?}", result);
+}

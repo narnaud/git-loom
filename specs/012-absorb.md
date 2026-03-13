@@ -176,6 +176,8 @@ shown in parentheses.
 - At least one commit in scope (between merge-base and HEAD)
 - At least one tracked file with uncommitted changes
 
+File arguments are resolved via `resolve_arg()` with `accept = [File]` — see spec 002 for the resolution algorithm.
+
 ## Error Cases
 
 - **No changes**: `"Nothing to absorb — make some changes to tracked files first"`

@@ -1,4 +1,4 @@
-use crate::git::gather_repo_info;
+use crate::git::{self, Target, TargetKind, gather_repo_info};
 use crate::test_helpers::TestRepo;
 
 // ── Tests ──────────────────────────────────────────────────────────────
@@ -248,11 +248,17 @@ fn branch_at_upstream_is_detected() {
 
 #[test]
 fn resolve_full_commit_hash() {
-    let test_repo = TestRepo::new();
-    test_repo.commit("Second commit", "file.txt");
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit_empty("Second commit");
 
     let head_oid = test_repo.head_oid();
-    let result = crate::git::resolve_target(&test_repo.repo, &head_oid.to_string());
+    let result = test_repo.in_dir(|| {
+        crate::git::resolve_arg(
+            &test_repo.repo,
+            &head_oid.to_string(),
+            &[crate::git::TargetKind::Commit],
+        )
+    });
 
     assert!(result.is_ok());
     match result.unwrap() {
@@ -266,12 +272,18 @@ fn resolve_full_commit_hash() {
 
 #[test]
 fn resolve_partial_commit_hash() {
-    let test_repo = TestRepo::new();
-    test_repo.commit("Second commit", "file.txt");
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit_empty("Second commit");
 
     let head_oid = test_repo.head_oid();
     let partial_hash = &head_oid.to_string()[..7];
-    let result = crate::git::resolve_target(&test_repo.repo, partial_hash);
+    let result = test_repo.in_dir(|| {
+        crate::git::resolve_arg(
+            &test_repo.repo,
+            partial_hash,
+            &[crate::git::TargetKind::Commit],
+        )
+    });
 
     assert!(result.is_ok());
     match result.unwrap() {
@@ -285,17 +297,218 @@ fn resolve_partial_commit_hash() {
 
 #[test]
 fn resolve_invalid_target_fails() {
-    let test_repo = TestRepo::new();
+    let test_repo = TestRepo::new_with_remote();
 
-    let result = crate::git::resolve_target(&test_repo.repo, "nonexistent");
+    let result = test_repo.in_dir(|| {
+        crate::git::resolve_arg(
+            &test_repo.repo,
+            "nonexistent",
+            &[
+                crate::git::TargetKind::Commit,
+                crate::git::TargetKind::Branch,
+                crate::git::TargetKind::File,
+            ],
+        )
+    });
 
-    // Without upstream, shortid resolution should fail because gather_repo_info fails
     assert!(result.is_err());
     let err_msg = result.unwrap_err().to_string();
-    // Error should mention either "upstream" or "shortid"
     assert!(
-        err_msg.contains("upstream") || err_msg.contains("shortid"),
-        "Expected error about upstream or shortid, got: {}",
+        !err_msg.is_empty(),
+        "Expected non-empty error message, got: {}",
         err_msg
     );
+}
+
+// ── Tests for resolve_arg ───────────────────────────────────────────────
+
+#[test]
+fn resolve_arg_file_on_disk() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.write_file("hello.txt", "content");
+    test_repo.in_dir(|| {
+        let result = git::resolve_arg(&test_repo.repo, "hello.txt", &[TargetKind::File]).unwrap();
+        assert_eq!(result, Target::File("hello.txt".to_string()));
+    });
+}
+
+#[test]
+fn resolve_arg_file_cwd_relative() {
+    let test_repo = TestRepo::new_with_remote();
+    let sub_dir = test_repo.workdir().join("sub");
+    std::fs::create_dir_all(&sub_dir).unwrap();
+    std::fs::write(sub_dir.join("deep.txt"), "content").unwrap();
+    test_repo.in_dir_path(&sub_dir, || {
+        let result = git::resolve_arg(&test_repo.repo, "deep.txt", &[TargetKind::File]).unwrap();
+        assert_eq!(result, Target::File("sub/deep.txt".to_string()));
+    });
+}
+
+#[test]
+fn resolve_arg_file_not_found_errors() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.in_dir(|| {
+        let result = git::resolve_arg(&test_repo.repo, "nope.txt", &[TargetKind::File]);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("file"),
+            "error should mention accepted types: {msg}"
+        );
+    });
+}
+
+#[test]
+fn resolve_arg_branch() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit_empty("A1");
+    let a1_oid = test_repo.head_oid();
+    test_repo.create_branch_at_commit("feature-a", a1_oid);
+    test_repo.in_dir(|| {
+        let result = git::resolve_arg(&test_repo.repo, "feature-a", &[TargetKind::Branch]).unwrap();
+        assert_eq!(result, Target::Branch("feature-a".to_string()));
+    });
+}
+
+#[test]
+fn resolve_arg_branch_not_accepted_skips() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit_empty("A1");
+    let a1_oid = test_repo.head_oid();
+    test_repo.create_branch_at_commit("feature-a", a1_oid);
+    test_repo.in_dir(|| {
+        // Only accept File — branch should not match
+        let result = git::resolve_arg(&test_repo.repo, "feature-a", &[TargetKind::File]);
+        assert!(result.is_err());
+    });
+}
+
+#[test]
+fn resolve_arg_file_before_branch_wins() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit_empty("A1");
+    let a1_oid = test_repo.head_oid();
+    test_repo.create_branch_at_commit("collision", a1_oid);
+    test_repo.write_file("collision", "data");
+    test_repo.in_dir(|| {
+        // File first → file wins
+        let result = git::resolve_arg(
+            &test_repo.repo,
+            "collision",
+            &[TargetKind::File, TargetKind::Branch],
+        )
+        .unwrap();
+        assert_eq!(result, Target::File("collision".to_string()));
+    });
+}
+
+#[test]
+fn resolve_arg_branch_before_file_wins() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit_empty("A1");
+    let a1_oid = test_repo.head_oid();
+    test_repo.create_branch_at_commit("collision", a1_oid);
+    test_repo.write_file("collision", "data");
+    test_repo.in_dir(|| {
+        // Branch first → branch wins
+        let result = git::resolve_arg(
+            &test_repo.repo,
+            "collision",
+            &[TargetKind::Branch, TargetKind::File],
+        )
+        .unwrap();
+        assert_eq!(result, Target::Branch("collision".to_string()));
+    });
+}
+
+#[test]
+fn resolve_arg_commit_by_hash() {
+    let test_repo = TestRepo::new_with_remote();
+    let oid = test_repo.commit_empty("A1");
+    test_repo.in_dir(|| {
+        let result =
+            git::resolve_arg(&test_repo.repo, &oid.to_string(), &[TargetKind::Commit]).unwrap();
+        assert!(matches!(result, Target::Commit(_)));
+    });
+}
+
+#[test]
+fn resolve_arg_commit_rejects_merge() {
+    let test_repo = TestRepo::new_with_remote();
+    let upstream_oid = test_repo.find_remote_branch_target("origin/main");
+    test_repo.commit_empty("A1");
+    let a1_oid = test_repo.head_oid();
+    // Create a merge commit
+    test_repo.commit_merge("Merge side", a1_oid, upstream_oid);
+    let merge_oid = test_repo.head_oid();
+    test_repo.in_dir(|| {
+        let result = git::resolve_arg(
+            &test_repo.repo,
+            &merge_oid.to_string(),
+            &[TargetKind::Commit],
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("merge commit"));
+    });
+}
+
+#[test]
+fn resolve_arg_commit_not_accepted_skips() {
+    let test_repo = TestRepo::new_with_remote();
+    let oid = test_repo.commit_empty("A1");
+    test_repo.in_dir(|| {
+        // Only accept File — commit hash should not match
+        let result = git::resolve_arg(&test_repo.repo, &oid.to_string(), &[TargetKind::File]);
+        assert!(result.is_err());
+    });
+}
+
+#[test]
+fn resolve_arg_branch_by_shortid() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit_empty("A1");
+    let a1_oid = test_repo.head_oid();
+    test_repo.create_branch_at_commit("feature-a", a1_oid);
+    test_repo.in_dir(|| {
+        let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
+        let entities = info.collect_entities();
+        let alloc = crate::shortid::IdAllocator::new(entities);
+        let sid = alloc.get_branch("feature-a");
+        let result = git::resolve_arg(&test_repo.repo, &sid, &[TargetKind::Branch]).unwrap();
+        assert_eq!(result, Target::Branch("feature-a".to_string()));
+    });
+}
+
+#[test]
+fn resolve_arg_commit_by_shortid() {
+    let test_repo = TestRepo::new_with_remote();
+    let oid = test_repo.commit_empty("A1");
+    test_repo.in_dir(|| {
+        let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
+        let entities = info.collect_entities();
+        let alloc = crate::shortid::IdAllocator::new(entities);
+        let sid = alloc.get_commit(oid);
+        let result = git::resolve_arg(&test_repo.repo, &sid, &[TargetKind::Commit]).unwrap();
+        assert!(matches!(result, Target::Commit(_)));
+    });
+}
+
+#[test]
+fn resolve_arg_unstaged() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit_empty("A1");
+    test_repo.in_dir(|| {
+        let result = git::resolve_arg(&test_repo.repo, "zz", &[TargetKind::Unstaged]).unwrap();
+        assert_eq!(result, Target::Unstaged);
+    });
+}
+
+#[test]
+fn resolve_arg_unstaged_not_accepted() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit_empty("A1");
+    test_repo.in_dir(|| {
+        let result = git::resolve_arg(&test_repo.repo, "zz", &[TargetKind::Commit]);
+        assert!(result.is_err());
+    });
 }

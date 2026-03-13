@@ -122,6 +122,8 @@ conflicts with standard git tools.
 The `-b <branch>` argument uses the shared resolution strategy (see Spec 002),
 restricted to branches only:
 
+Arguments are resolved via `resolve_arg()` with `accept = [Branch]` — see spec 002 for the resolution algorithm.
+
 **Resolution Order:**
 
 1. **Local branch names** - Exact match for woven feature branches

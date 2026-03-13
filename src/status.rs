@@ -13,7 +13,8 @@ pub fn run(
     let repo = git::open_repo()?;
     let _ = git::require_workdir(&repo, "display status")?;
 
-    let opts = graph::default_render_opts(theme);
+    let cwd_prefix = git::cwd_relative_to_repo(&repo).unwrap_or_default();
+    let opts = graph::default_render_opts(theme, cwd_prefix);
     let show_files = file_filter.is_some();
     let mut info = git::gather_repo_info(&repo, show_files, context)?;
     if !show_all {

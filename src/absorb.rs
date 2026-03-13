@@ -326,38 +326,18 @@ fn get_changed_files(
     } else {
         let mut result = Vec::new();
         for arg in user_files {
-            let path = resolve_file_arg(repo, workdir, arg)?;
+            let path = resolve_file_arg(repo, arg)?;
             result.push(path);
         }
         Ok(result)
     }
 }
 
-/// Resolve a user argument to a file path.
-///
-/// Tries, in order:
-/// 1. Literal file path (exists on disk or has a diff against HEAD)
-/// 2. Short ID via `resolve_target` → `Target::File(path)`
-fn resolve_file_arg(repo: &Repository, workdir: &Path, arg: &str) -> Result<String> {
-    // Try as literal path first
-    let full_path = workdir.join(arg);
-    if full_path.exists() {
-        return Ok(arg.to_string());
-    }
-    // Check if it's a deletion (file existed in HEAD but was deleted)
-    let diff = git_commands::diff_head_file(workdir, arg)?;
-    if !diff.is_empty() {
-        return Ok(arg.to_string());
-    }
-
-    // Try as short ID
-    match git::resolve_target(repo, arg)? {
+/// Resolve a user argument to a file path using the centralized resolver.
+fn resolve_file_arg(repo: &Repository, arg: &str) -> Result<String> {
+    match git::resolve_arg(repo, arg, &[git::TargetKind::File])? {
         git::Target::File(path) => Ok(path),
-        _ => bail!(
-            "'{}' is not a file path or file short ID\n\
-             Run `git-loom status` to see available IDs",
-            arg
-        ),
+        _ => unreachable!(),
     }
 }
 

@@ -130,7 +130,7 @@ fn resolve_staging(repo: &Repository, workdir: &std::path::Path, files: &[String
 
     let mut resolved_paths = Vec::new();
     for arg in files {
-        let path = resolve_file_arg(repo, workdir, arg)?;
+        let path = resolve_file_arg(repo, arg)?;
         resolved_paths.push(path);
     }
 
@@ -140,19 +140,11 @@ fn resolve_staging(repo: &Repository, workdir: &std::path::Path, files: &[String
     Ok(())
 }
 
-/// Resolve a file argument: try as short ID first, fall back to filesystem path.
-fn resolve_file_arg(repo: &Repository, workdir: &std::path::Path, arg: &str) -> Result<String> {
-    match git::resolve_target(repo, arg) {
-        Ok(Target::File(path)) => Ok(path),
-        Ok(_) => bail!("Target '{}' is not a file", arg),
-        Err(_) => {
-            let full_path = workdir.join(arg);
-            if full_path.exists() {
-                Ok(arg.to_string())
-            } else {
-                bail!("File '{}' not found", arg)
-            }
-        }
+/// Resolve a file argument using the centralized resolver.
+fn resolve_file_arg(repo: &Repository, arg: &str) -> Result<String> {
+    match git::resolve_arg(repo, arg, &[git::TargetKind::File])? {
+        Target::File(path) => Ok(path),
+        _ => unreachable!(),
     }
 }
 
@@ -203,7 +195,7 @@ fn resolve_explicit_branch(
     workdir: &std::path::Path,
     branch: &str,
 ) -> Result<String> {
-    match git::resolve_target(repo, branch) {
+    match git::resolve_arg(repo, branch, &[git::TargetKind::Branch]) {
         Ok(target) => {
             let name = target.expect_branch()?;
             if info.branches.iter().any(|b| b.name == name) {

@@ -284,6 +284,8 @@ rebase operation. The source uses the `commit_sid:index` format.
 
 ## Target Resolution
 
+Arguments are resolved via `resolve_arg()` with `accept = [Commit, CommitFile, File, Unstaged]` — see spec 002 for the resolution algorithm.
+
 Arguments are resolved using the shared resolution strategy (see Spec 002)
 with an additional filesystem fallback:
 

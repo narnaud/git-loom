@@ -28,6 +28,7 @@ fn default_opts() -> RenderOpts {
     RenderOpts {
         terminal_width: None,
         theme: Theme::dark(),
+        cwd_prefix: String::new(),
     }
 }
 
@@ -41,6 +42,7 @@ fn render_plain_with_width(info: RepoInfo, width: u16) -> String {
     let opts = RenderOpts {
         terminal_width: Some(width),
         theme: Theme::dark(),
+        cwd_prefix: String::new(),
     };
     strip_ansi(&graph::render(info, &opts))
 }
