@@ -254,6 +254,11 @@ fn drop_branch_with_info(
         } else {
             graph.drop_branch(branch_name);
         }
+    } else if owned.is_empty() {
+        // Co-located non-woven: no commits to drop, just delete the ref
+        git_branch::delete(workdir, branch_name)?;
+        msg::success(&format!("Dropped branch `{}`", branch_name));
+        return Ok(());
     } else {
         // Non-woven branch: drop each uniquely owned commit individually
         for oid in &owned {
