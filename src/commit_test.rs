@@ -562,3 +562,29 @@ fn commit_nonexistent_file_fails() {
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("not found"));
 }
+
+#[test]
+fn commit_accepts_staged_rename_only() {
+    let test_repo = setup_with_woven_branch();
+
+    // Create and commit a file first
+    test_repo.write_file("original.txt", "content");
+    test_repo.stage_files(&["original.txt"]);
+    test_repo.commit_staged("Add original");
+
+    // Rename via git mv (stages the rename)
+    let workdir = test_repo.workdir();
+    std::process::Command::new("git")
+        .current_dir(&workdir)
+        .args(["mv", "original.txt", "renamed.txt"])
+        .output()
+        .unwrap();
+
+    // verify_has_staged_changes should accept a rename-only index
+    let result = super::verify_has_staged_changes(&test_repo.repo);
+    assert!(
+        result.is_ok(),
+        "staged rename should be accepted, got: {:?}",
+        result.err()
+    );
+}
