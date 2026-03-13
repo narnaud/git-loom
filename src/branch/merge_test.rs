@@ -58,6 +58,52 @@ fn merge_already_woven_errors() {
     assert!(result.is_err(), "merging already-woven branch should error");
 }
 
+/// Merging then unmerging a branch is a round-trip: branch still exists with its commits.
+#[test]
+fn merge_then_unmerge_round_trip() {
+    let test_repo = TestRepo::new_with_remote();
+
+    // Create and populate a non-woven branch
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+    test_repo.create_branch_at("feature-rt", &base_oid.to_string());
+    test_repo.switch_branch("feature-rt");
+    test_repo.commit("RT1", "rt1.txt");
+    test_repo.commit("RT2", "rt2.txt");
+    test_repo.switch_branch("integration");
+
+    // Merge (weave)
+    test_repo
+        .in_dir(|| super::merge::run(Some("feature-rt".to_string()), false))
+        .unwrap();
+
+    let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
+    let woven: Vec<&str> = info.branches.iter().map(|b| b.name.as_str()).collect();
+    assert!(
+        woven.contains(&"feature-rt"),
+        "branch should be woven after merge"
+    );
+
+    // Unmerge
+    test_repo
+        .in_dir(|| super::unmerge::run(Some("feature-rt".to_string())))
+        .unwrap();
+
+    let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
+    let woven: Vec<&str> = info.branches.iter().map(|b| b.name.as_str()).collect();
+    assert!(
+        !woven.contains(&"feature-rt"),
+        "branch should not be woven after unmerge"
+    );
+
+    // Branch ref should still exist
+    assert!(test_repo.branch_exists("feature-rt"));
+
+    // The tip commit of feature-rt should have message "RT2"
+    let tip = test_repo.get_branch_target("feature-rt");
+    let tip_commit = test_repo.find_commit(tip);
+    assert_eq!(tip_commit.summary().unwrap_or(""), "RT2");
+}
+
 /// Merging a nonexistent branch should error.
 #[test]
 fn merge_nonexistent_branch_errors() {
