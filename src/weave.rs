@@ -366,11 +366,12 @@ impl Weave {
             self.branch_sections[idx].commits.truncate(boundary + 1);
             self.branch_sections[idx].label = inner_ref.clone();
             self.branch_sections[idx].branch_names = vec![inner_ref.clone()];
-            // Remove the inner branch from update_refs since it's now the
-            // section's own branch_names (emitted after the label line).
+            // Remove only the chosen inner branch from update_refs; preserve
+            // any other co-located refs at this commit.
+            let inner = inner_ref.clone();
             self.branch_sections[idx].commits[boundary]
                 .update_refs
-                .clear();
+                .retain(|r| *r != inner);
 
             // Update the merge entry to reference the inner branch
             for entry in &mut self.integration_line {
