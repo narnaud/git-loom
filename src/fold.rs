@@ -519,6 +519,24 @@ pub fn move_commit_to_branch(
         .iter()
         .any(|s| s.label == branch_name || s.branch_names.contains(&branch_name.to_string()));
     if !has_section {
+        // Only allow creating a synthetic section for branches that are
+        // at the merge-base (empty) or don't exist yet. Reject branches
+        // that have diverged — they are out of scope.
+        if let Ok(branch) = repo.find_branch(branch_name, git2::BranchType::Local) {
+            let branch_oid = branch
+                .get()
+                .peel_to_commit()
+                .map(|c| c.id())
+                .unwrap_or(git2::Oid::zero());
+            if branch_oid != graph.base_oid {
+                bail!(
+                    "Branch '{}' exists but is not part of the current integration scope.\n\
+                     Use `loom branch merge {}` to weave it first.",
+                    branch_name,
+                    branch_name
+                );
+            }
+        }
         graph.add_branch_section(
             branch_name.to_string(),
             vec![branch_name.to_string()],

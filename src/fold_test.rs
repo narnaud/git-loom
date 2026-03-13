@@ -516,6 +516,36 @@ fn fold_commit_to_empty_branch() {
     );
 }
 
+#[test]
+fn fold_commit_to_existing_out_of_scope_branch_fails() {
+    let test_repo = TestRepo::new_with_remote();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    // Create an out-of-scope branch with its own commit (diverged from base)
+    test_repo.create_branch_at("out-of-scope", &base_oid.to_string());
+    test_repo.switch_branch("out-of-scope");
+    test_repo.commit("Out of scope work", "oos.txt");
+    test_repo.switch_branch("integration");
+
+    // Create a woven branch with a commit
+    test_repo.create_branch_at("feature-a", &base_oid.to_string());
+    test_repo.switch_branch("feature-a");
+    test_repo.commit("A1", "a1.txt");
+    let a1_oid = test_repo.head_oid();
+    test_repo.switch_branch("integration");
+    test_repo.merge_no_ff("feature-a");
+
+    // Try to move A1 to the out-of-scope branch — should fail
+    let result = super::fold_commit_to_branch(&test_repo.repo, &a1_oid.to_string(), "out-of-scope");
+    assert!(result.is_err(), "should reject out-of-scope branch");
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("not part of the current integration scope"),
+        "error should mention scope, got: {}",
+        err
+    );
+}
+
 // ── Type dispatch / classify tests ───────────────────────────────────────
 
 #[test]
