@@ -154,7 +154,7 @@ Merge commits in the branch are skipped when gathering commit messages.
 
 ## Branch Selection
 
-- **Explicit argument**: Resolved via `resolve_target()`, must be a woven branch
+- **Explicit argument**: Resolved via `resolve_arg()` with `accept = [Branch]` — see spec 002. Must be a woven branch.
 - **Interactive picker**: Lists woven branches from `info.branches` via `cliclack::select`
 - No "create new" option (unlike commit — we're pushing existing branches)
 

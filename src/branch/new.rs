@@ -94,7 +94,8 @@ fn resolve_commit(
             Ok(info.upstream.merge_base_oid.to_string())
         }
         Some(t) => {
-            let resolved = git::resolve_target(repo, t)?;
+            let resolved =
+                git::resolve_arg(repo, t, &[git::TargetKind::Commit, git::TargetKind::Branch])?;
             match resolved {
                 git::Target::Commit(hash) => Ok(hash),
                 git::Target::Branch(name) => {
@@ -106,14 +107,7 @@ fn resolve_commit(
                         .context("Branch does not point to a commit")?;
                     Ok(oid.to_string())
                 }
-                git::Target::File(path) => bail!(
-                    "Target resolved to file '{}'\nUse a commit or branch target instead",
-                    path
-                ),
-                git::Target::Unstaged => bail!("Cannot use unstaged as a branch target"),
-                git::Target::CommitFile { .. } => {
-                    bail!("Cannot use a commit file as a branch target")
-                }
+                _ => unreachable!(),
             }
         }
     }

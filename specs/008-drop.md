@@ -190,6 +190,8 @@ Prompt: `"Discard all local changes?"`. Success: `"Discarded all local changes"`
 
 ## Target Resolution
 
+Arguments are resolved via `resolve_arg()` with `accept = [File, Branch, Commit, Unstaged]` — see spec 002 for the resolution algorithm.
+
 The `<target>` is interpreted using the shared resolution strategy
 (see Spec 002):
 

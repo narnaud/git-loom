@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use git2::{Repository, StatusOptions};
 
 use crate::commit;
-use crate::git::{self, Target};
+use crate::git::{self, Target, TargetKind};
 use crate::git_commands::{self, git_branch, git_commit, git_rebase};
 use crate::msg;
 use crate::weave::{self, Weave};
@@ -56,9 +56,29 @@ pub fn run(create: bool, args: Vec<String>) -> Result<()> {
     // Resolve all arguments
     let resolved_sources: Vec<Target> = source_args
         .iter()
-        .map(|s| resolve_fold_arg(&repo, s))
+        .map(|s| {
+            git::resolve_arg(
+                &repo,
+                s,
+                &[
+                    TargetKind::Commit,
+                    TargetKind::CommitFile,
+                    TargetKind::File,
+                    TargetKind::Unstaged,
+                ],
+            )
+        })
         .collect::<Result<Vec<_>, _>>()?;
-    let resolved_target = resolve_fold_arg(&repo, target_arg)?;
+    let resolved_target = git::resolve_arg(
+        &repo,
+        target_arg,
+        &[
+            TargetKind::Commit,
+            TargetKind::CommitFile,
+            TargetKind::File,
+            TargetKind::Unstaged,
+        ],
+    )?;
 
     // Classify and dispatch
     match classify(&resolved_sources, &resolved_target)? {
@@ -96,12 +116,10 @@ fn run_create(repo: &Repository, args: &[String]) -> Result<()> {
     let workdir = git::require_workdir(repo, "fold")?;
 
     // Resolve source — must be a commit
-    let source = resolve_fold_arg(repo, source_arg)?;
+    let source = git::resolve_arg(repo, source_arg, &[TargetKind::Commit])?;
     let commit_hash = match source {
         Target::Commit(hash) => hash,
-        Target::Branch(_) => bail!("Source must be a commit, not a branch"),
-        Target::File(_) => bail!("Source must be a commit, not a file"),
-        _ => bail!("Source must be a commit"),
+        _ => unreachable!(),
     };
 
     git_branch::validate_name(branch_name)?;
@@ -163,10 +181,10 @@ fn create_branch_and_move(
 /// Single-argument form: `loom fold <target>`. The target must resolve to a
 /// commit. If nothing is staged, bails with the same message as `loom commit`.
 fn run_staged(repo: &Repository, target_arg: &str) -> Result<()> {
-    let resolved = resolve_fold_arg(repo, target_arg)?;
+    let resolved = git::resolve_arg(repo, target_arg, &[TargetKind::Commit])?;
     let commit_hash = match resolved {
         Target::Commit(hash) => hash,
-        _ => bail!("Target must be a commit when folding staged files"),
+        _ => unreachable!(),
     };
 
     commit::verify_has_staged_changes(repo)?;
@@ -344,14 +362,6 @@ fn collect_changed_files(repo: &Repository) -> Result<Vec<String>> {
         }
     }
     Ok(paths)
-}
-
-/// Resolve an argument for the fold command.
-///
-/// Delegates to `resolve_target()` which handles branches, git refs, short IDs,
-/// filenames, and filesystem paths with changes.
-fn resolve_fold_arg(repo: &Repository, arg: &str) -> Result<Target> {
-    git::resolve_target(repo, arg)
 }
 
 /// Fold file changes into a commit (Case 1: File(s) + Commit).

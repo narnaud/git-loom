@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::Result;
 use git2::Repository;
 
 use crate::branch;
@@ -12,7 +12,11 @@ use crate::weave;
 pub fn run(target: String, message: Option<String>) -> Result<()> {
     let repo = git::open_repo()?;
 
-    let resolved = git::resolve_target(&repo, &target)?;
+    let resolved = git::resolve_arg(
+        &repo,
+        &target,
+        &[git::TargetKind::Branch, git::TargetKind::Commit],
+    )?;
 
     match resolved {
         Target::Commit(hash) => reword_commit(&repo, &hash, message),
@@ -37,9 +41,7 @@ pub fn run(target: String, message: Option<String>) -> Result<()> {
             git_branch::validate_name(&new_name)?;
             reword_branch(&repo, &name, &new_name)
         }
-        Target::File(_) => bail!("Cannot reword a file\nUse `git add` to stage file changes"),
-        Target::Unstaged => bail!("Cannot reword unstaged changes"),
-        Target::CommitFile { .. } => bail!("Cannot reword a commit file"),
+        _ => unreachable!(),
     }
 }
 

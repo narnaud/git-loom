@@ -269,6 +269,21 @@ The resolution system ensures that **what you see is what you type**:
 
 Git reference resolution has no prerequisites (works in any repository).
 
+### Argument resolution: `resolve_arg()`
+
+All commands resolve user-provided arguments through `git::resolve_arg(repo, arg, accept)`.
+The `accept` parameter is a `&[TargetKind]` slice specifying which kinds of targets the
+command accepts and in what priority order. Resolution strategies are only attempted for
+the listed kinds. Merge commits are automatically rejected when resolving `Commit` targets.
+CWD-relative path conversion is handled internally for `File` targets.
+
+Available `TargetKind` values:
+- `File` — a working-tree file path (CWD-relative → repo-relative conversion applied)
+- `Branch` — a local branch name
+- `Commit` — a non-merge commit (hash, `HEAD`, etc.; branch names are excluded)
+- `CommitFile` — a commit-file reference (e.g. `02:0`)
+- `Unstaged` — the unstaged working directory (`zz`)
+
 ## Design Decisions
 
 - **Global collision resolution:** all entity types share one ID namespace.

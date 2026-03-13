@@ -154,6 +154,241 @@ impl Target {
     }
 }
 
+/// Which kinds of targets `resolve_arg` should try matching.
+/// The order in the `accept` slice determines priority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetKind {
+    File,
+    Branch,
+    Commit,
+    CommitFile,
+    Unstaged,
+}
+
+impl std::fmt::Display for TargetKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TargetKind::File => write!(f, "file"),
+            TargetKind::Branch => write!(f, "branch"),
+            TargetKind::Commit => write!(f, "commit"),
+            TargetKind::CommitFile => write!(f, "commit file"),
+            TargetKind::Unstaged => write!(f, "unstaged changes"),
+        }
+    }
+}
+
+/// Resolve a user-provided argument to a `Target`.
+///
+/// Only the resolution strategies for the kinds listed in `accept` are
+/// attempted, in the order given.  The first match wins.  If nothing
+/// matches, a generic error lists the accepted types.
+pub fn resolve_arg(repo: &Repository, arg: &str, accept: &[TargetKind]) -> Result<Target> {
+    // Phase 1: direct checks (cheap, no graph building)
+    for kind in accept {
+        let result = match kind {
+            TargetKind::File => try_resolve_file(repo, arg)?,
+            TargetKind::Branch => try_resolve_branch(repo, arg)?,
+            TargetKind::Commit => try_resolve_commit(repo, arg)?,
+            TargetKind::CommitFile | TargetKind::Unstaged => None,
+        };
+        if let Some(target) = result {
+            return Ok(target);
+        }
+    }
+
+    // Phase 2: shortid resolution (expensive, builds the graph)
+    if let Some(target) = try_resolve_shortid(repo, arg, accept)? {
+        return Ok(target);
+    }
+
+    let types: Vec<_> = accept.iter().map(|k| k.to_string()).collect();
+    bail!("'{}' did not resolve to a {}", arg, types.join(" or "))
+}
+
+/// Reject a commit if it is a merge commit.
+fn reject_merge_commit(repo: &Repository, oid: git2::Oid) -> Result<()> {
+    let commit = repo.find_commit(oid)?;
+    if commit.parent_count() > 1 {
+        bail!("Cannot operate on a merge commit");
+    }
+    Ok(())
+}
+
+/// Try to resolve `arg` as a file path (CWD-relative → repo-relative).
+fn try_resolve_file(repo: &Repository, arg: &str) -> Result<Option<Target>> {
+    let repo_path = cwd_to_repo_path(repo, arg).unwrap_or_else(|_| arg.to_string());
+    let workdir = match repo.workdir() {
+        Some(w) => w,
+        None => return Ok(None),
+    };
+    let full_path = workdir.join(&repo_path);
+    if full_path.exists() {
+        return Ok(Some(Target::File(repo_path)));
+    }
+    // Check for deleted files (removed from disk but changed vs HEAD)
+    let diff = crate::git_commands::diff_head_file(workdir, &repo_path)?;
+    if !diff.is_empty() {
+        return Ok(Some(Target::File(repo_path)));
+    }
+    Ok(None)
+}
+
+/// Try to resolve `arg` as a local branch name.
+fn try_resolve_branch(repo: &Repository, arg: &str) -> Result<Option<Target>> {
+    if let Ok(branch) = repo.find_branch(arg, BranchType::Local) {
+        let name = branch
+            .name()?
+            .context("Branch name is not valid UTF-8")?
+            .to_string();
+        return Ok(Some(Target::Branch(name)));
+    }
+    Ok(None)
+}
+
+/// Try to resolve `arg` as a git reference (hash, HEAD, tag, etc.).
+/// Rejects merge commits. Does NOT resolve local branch names as commits —
+/// use `try_resolve_branch` for that.
+fn try_resolve_commit(repo: &Repository, arg: &str) -> Result<Option<Target>> {
+    // Explicitly exclude local branch names so that branch and commit targets
+    // remain distinct when the caller specifies only TargetKind::Commit.
+    if repo.find_branch(arg, BranchType::Local).is_ok() {
+        return Ok(None);
+    }
+    if let Ok(obj) = repo.revparse_single(arg)
+        && let Ok(commit) = obj.peel_to_commit()
+    {
+        let oid = commit.id();
+        reject_merge_commit(repo, oid)?;
+        return Ok(Some(Target::Commit(oid.to_string())));
+    }
+    Ok(None)
+}
+
+/// Try to resolve `arg` via the shortid allocator, but only return
+/// results matching one of the `accept` kinds.
+fn try_resolve_shortid(
+    repo: &Repository,
+    arg: &str,
+    accept: &[TargetKind],
+) -> Result<Option<Target>> {
+    let needs_files = arg.contains(':');
+    let info = gather_repo_info(repo, needs_files, 1)?;
+    let entities = info.collect_entities();
+    let allocator = crate::shortid::IdAllocator::new(entities);
+
+    for kind in accept {
+        match kind {
+            TargetKind::Unstaged => {
+                if allocator.get_unstaged() == arg {
+                    return Ok(Some(Target::Unstaged));
+                }
+            }
+            TargetKind::Branch => {
+                for branch in &info.branches {
+                    if allocator.get_branch(&branch.name) == arg {
+                        return Ok(Some(Target::Branch(branch.name.clone())));
+                    }
+                }
+            }
+            TargetKind::Commit => {
+                for commit in &info.commits {
+                    if allocator.get_commit(commit.oid) == arg {
+                        reject_merge_commit(repo, commit.oid)?;
+                        return Ok(Some(Target::Commit(commit.oid.to_string())));
+                    }
+                }
+            }
+            TargetKind::File => {
+                for file in &info.working_changes {
+                    if allocator.get_file(&file.path) == arg || file.path == arg {
+                        return Ok(Some(Target::File(file.path.clone())));
+                    }
+                }
+            }
+            TargetKind::CommitFile => {
+                if let Some((commit_part, index_part)) = arg.split_once(':')
+                    && let Ok(index) = index_part.parse::<usize>()
+                {
+                    for commit in &info.commits {
+                        if allocator.get_commit(commit.oid) == commit_part {
+                            if let Some(file) = commit.files.get(index) {
+                                return Ok(Some(Target::CommitFile {
+                                    commit: commit.oid.to_string(),
+                                    path: file.path.clone(),
+                                }));
+                            }
+                            bail!(
+                                "Commit has no file at index {}\nRun `git-loom status -f` to see available IDs",
+                                index
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// Convert a CWD-relative path to a repo-relative path.
+///
+/// If CWD is `<repo>/src/` and `arg` is `"git.rs"`, returns `"src/git.rs"`.
+fn cwd_to_repo_path(repo: &Repository, arg: &str) -> Result<String> {
+    let prefix = cwd_relative_to_repo(repo)?;
+    if prefix.is_empty() {
+        return Ok(arg.to_string());
+    }
+    Ok(format!("{}/{}", prefix, arg))
+}
+
+/// Compute the CWD relative to the repo root as a forward-slash string.
+///
+/// Returns an empty string when CWD is the repo root.
+pub fn cwd_relative_to_repo(repo: &Repository) -> Result<String> {
+    let workdir = repo
+        .workdir()
+        .context("Repository has no working directory")?;
+    let cwd = std::env::current_dir()?;
+    // Canonicalize both paths to normalize platform-specific representations
+    // (e.g., drive letter case and path separator style on Windows).
+    let workdir_canonical =
+        std::fs::canonicalize(workdir).unwrap_or_else(|_| workdir.to_path_buf());
+    let cwd_canonical = std::fs::canonicalize(&cwd).unwrap_or(cwd);
+    let rel = cwd_canonical
+        .strip_prefix(&workdir_canonical)
+        .unwrap_or(std::path::Path::new(""));
+    let s = rel
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join("/");
+    Ok(s)
+}
+
+/// Convert a repo-relative path to a CWD-relative display string given
+/// a pre-computed CWD prefix (as returned by [`cwd_relative_to_repo`]).
+///
+/// - Empty prefix → path returned unchanged (CWD is repo root).
+/// - Path starts with prefix → strip it (file is under CWD).
+/// - Otherwise → prepend the appropriate number of `../` components.
+pub fn cwd_relative_path(repo_path: &str, cwd_prefix: &str) -> String {
+    if cwd_prefix.is_empty() {
+        return repo_path.to_string();
+    }
+    let cwd_parts: Vec<&str> = cwd_prefix.split('/').collect();
+    let file_parts: Vec<&str> = repo_path.split('/').collect();
+    let common = cwd_parts
+        .iter()
+        .zip(file_parts.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
+    let ups = cwd_parts.len() - common;
+    let remaining = &file_parts[common..];
+    let mut result: Vec<&str> = vec![".."; ups];
+    result.extend_from_slice(remaining);
+    result.join("/")
+}
+
 /// Info about the upstream tracking branch and the merge-base with HEAD.
 #[derive(Debug)]
 pub struct UpstreamInfo {
@@ -350,73 +585,6 @@ pub fn gather_repo_info(repo: &Repository, show_files: bool, context: usize) -> 
     })
 }
 
-/// Resolve a target identifier to a commit, branch, or file.
-///
-/// This function tries multiple resolution strategies in order:
-///
-/// # Resolution Strategy
-///
-/// 1. **Local branch names** - Exact match for local branch names
-///    - Branch names resolve to `Target::Branch(name)`
-///    - Example: "feature-a" → Target::Branch("feature-a")
-/// 2. **Git references** - Any valid git reference (hash, HEAD, etc.)
-///    - All other references resolve to `Target::Commit(hash)`
-///    - Example: "abc123" → Target::Commit(full_hash)
-/// 3. **ShortIDs** - Searches branches, commits, files in order
-///    - Branch shortids resolve to `Target::Branch(name)`
-///    - Commit shortids resolve to `Target::Commit(hash)`
-///    - File shortids resolve to `Target::File(path)`
-///
-/// This prioritization ensures branch names are always treated as branches,
-/// allowing intuitive operations like "git-loom reword feature-a -m new-name".
-/// To reference the commit at a branch tip, use its hash or commit shortid.
-///
-/// # Arguments
-///
-/// * `repo` - The git repository
-/// * `target` - The target identifier (branch name, git hash, shortid, etc.)
-///
-/// # Returns
-///
-/// Returns a `Target` enum indicating what the identifier resolved to:
-/// - `Target::Branch(name)` - A branch name (from full name or branch shortid)
-/// - `Target::Commit(hash)` - A commit hash (from git ref or commit shortid)
-/// - `Target::File(path)` - A file path (from file shortid only)
-pub fn resolve_target(repo: &Repository, target: &str) -> Result<Target> {
-    // First, check if it's a local branch name
-    // This allows intuitive branch operations: "git-loom reword feature-a -m new-name"
-    if let Ok(branch) = repo.find_branch(target, BranchType::Local) {
-        let branch_name = branch
-            .name()?
-            .context("Branch name is not valid UTF-8")?
-            .to_string();
-        return Ok(Target::Branch(branch_name));
-    }
-
-    // Try parsing as git reference (commit hash, HEAD, tag, etc.)
-    if let Ok(obj) = repo.revparse_single(target)
-        && let Ok(commit) = obj.peel_to_commit()
-    {
-        return Ok(Target::Commit(commit.id().to_string()));
-    }
-
-    // Not a valid git reference - try as shortid
-    // This requires building the full graph (needs upstream)
-    match resolve_shortid(repo, target) {
-        Ok(resolved) => Ok(resolved),
-        Err(shortid_err) => {
-            // Fall back to filesystem path with changes (file or directory)
-            if let Some(workdir) = repo.workdir() {
-                let full_path = workdir.join(target);
-                if full_path.exists() && path_has_changes(repo, target)? {
-                    return Ok(Target::File(target.to_string()));
-                }
-            }
-            Err(shortid_err)
-        }
-    }
-}
-
 /// Check if a path (file or directory) has staged or unstaged changes.
 pub fn path_has_changes(repo: &Repository, path: &str) -> Result<bool> {
     let mut opts = StatusOptions::new();
@@ -447,68 +615,6 @@ pub fn get_staged_files(repo: &Repository) -> Result<Vec<String>> {
         }
     }
     Ok(paths)
-}
-
-/// Resolve a shortid to a commit, branch, or file by rebuilding the graph.
-fn resolve_shortid(repo: &Repository, shortid: &str) -> Result<Target> {
-    // Only gather file info when the shortid looks like a commit-file reference (contains ':')
-    let needs_files = shortid.contains(':');
-    let info = gather_repo_info(repo, needs_files, 1)?;
-
-    // Build entities using the shared method
-    let entities = info.collect_entities();
-    let allocator = crate::shortid::IdAllocator::new(entities);
-
-    // Check if it matches the unstaged entity
-    if allocator.get_unstaged() == shortid {
-        return Ok(Target::Unstaged);
-    }
-
-    // Search for matching shortid in branches
-    for branch in &info.branches {
-        if allocator.get_branch(&branch.name) == shortid {
-            return Ok(Target::Branch(branch.name.clone()));
-        }
-    }
-
-    // Search for matching shortid in commits
-    for commit in &info.commits {
-        if allocator.get_commit(commit.oid) == shortid {
-            return Ok(Target::Commit(commit.oid.to_string()));
-        }
-    }
-
-    // Search for matching shortid or filename in working change files
-    for file in &info.working_changes {
-        if allocator.get_file(&file.path) == shortid || file.path == shortid {
-            return Ok(Target::File(file.path.clone()));
-        }
-    }
-
-    // Search for commit file shortids (format: "commit_sid:index")
-    if let Some((commit_part, index_part)) = shortid.split_once(':')
-        && let Ok(index) = index_part.parse::<usize>()
-    {
-        for commit in &info.commits {
-            if allocator.get_commit(commit.oid) == commit_part {
-                if let Some(file) = commit.files.get(index) {
-                    return Ok(Target::CommitFile {
-                        commit: commit.oid.to_string(),
-                        path: file.path.clone(),
-                    });
-                }
-                bail!(
-                    "Commit has no file at index {}\nRun `git-loom status -f` to see available IDs",
-                    index
-                );
-            }
-        }
-    }
-
-    bail!(
-        "No commit, branch, file, or target with shortid '{}'\nRun `git-loom status` to see available IDs",
-        shortid
-    )
 }
 
 /// Count the number of commits reachable from `from` but not from `hide`.

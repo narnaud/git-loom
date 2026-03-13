@@ -560,7 +560,11 @@ fn commit_nonexistent_file_fails() {
     });
 
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("not found"));
+    // With the centralized resolver, a nonexistent file produces a "did not resolve to a file" error
+    assert!(
+        result.unwrap_err().to_string().contains("file"),
+        "Error should mention file"
+    );
 }
 
 #[test]

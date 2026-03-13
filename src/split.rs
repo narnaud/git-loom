@@ -1,7 +1,7 @@
 use anyhow::{Result, bail};
 use git2::{Oid, Repository};
 
-use crate::git::{self, Target};
+use crate::git::{self, Target, TargetKind};
 use crate::git_commands::{self, git_commit, git_rebase};
 use crate::msg;
 use crate::weave;
@@ -21,14 +21,11 @@ fn commit_or_editor(workdir: &std::path::Path, message: Option<&str>) -> Result<
 pub fn run(target: String, message: Option<String>) -> Result<()> {
     let repo = git::open_repo()?;
 
-    let resolved = git::resolve_target(&repo, &target)?;
+    let resolved = git::resolve_arg(&repo, &target, &[TargetKind::Commit])?;
 
     match resolved {
         Target::Commit(hash) => split_commit(&repo, &hash, message),
-        Target::Branch(_) => bail!("Cannot split a branch"),
-        Target::File(_) => bail!("Cannot split a file"),
-        Target::Unstaged => bail!("Cannot split unstaged changes"),
-        Target::CommitFile { .. } => bail!("Cannot split a commit file"),
+        _ => unreachable!(),
     }
 }
 
@@ -37,11 +34,6 @@ fn split_commit(repo: &Repository, commit_hash: &str, message: Option<String>) -
     let workdir = git::require_workdir(repo, "split")?;
     let commit_oid = repo.revparse_single(commit_hash)?.peel_to_commit()?.id();
     let commit = repo.find_commit(commit_oid)?;
-
-    // Reject merge commits
-    if commit.parent_count() > 1 {
-        bail!("Cannot split a merge commit");
-    }
 
     // Get files changed in the commit
     let files = git::commit_file_paths(repo, commit_oid)?;
@@ -85,7 +77,6 @@ pub fn split_commit_with_selection(
     let commit_oid = repo.revparse_single(commit_hash)?.peel_to_commit()?.id();
     let commit = repo.find_commit(commit_oid)?;
 
-    // Reject merge commits
     if commit.parent_count() > 1 {
         bail!("Cannot split a merge commit");
     }

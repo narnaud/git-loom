@@ -61,7 +61,7 @@ fn resolve_woven_branch(
     info: &git::RepoInfo,
     branch_arg: &str,
 ) -> Result<String> {
-    let name = git::resolve_target(repo, branch_arg)?.expect_branch()?;
+    let name = git::resolve_arg(repo, branch_arg, &[git::TargetKind::Branch])?.expect_branch()?;
     if info.branches.iter().any(|b| b.name == name) {
         Ok(name)
     } else {

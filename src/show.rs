@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::Result;
 
 use crate::git::{self, Target};
 use crate::git_commands;
@@ -6,14 +6,16 @@ use crate::git_commands;
 /// Show the diff and metadata for a commit (like `git show`), using short IDs.
 pub fn run(target: String) -> Result<()> {
     let repo = git::open_repo()?;
-    let resolved = git::resolve_target(&repo, &target)?;
+    let resolved = git::resolve_arg(
+        &repo,
+        &target,
+        &[git::TargetKind::Commit, git::TargetKind::Branch],
+    )?;
 
     let git_ref = match resolved {
         Target::Commit(hash) => hash,
         Target::Branch(name) => name,
-        Target::File(_) => bail!("Cannot show a file\nRun `git-loom status` to see available IDs"),
-        Target::Unstaged => bail!("Cannot show unstaged changes"),
-        Target::CommitFile { .. } => bail!("Cannot show a commit file reference"),
+        _ => unreachable!(),
     };
 
     let workdir = git::require_workdir(&repo, "show")?;

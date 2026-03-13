@@ -1289,37 +1289,48 @@ fn resolve_fold_arg_filesystem_path() {
     // Modify a file — should resolve as Target::File via filesystem fallback
     test_repo.write_file("file1.txt", "changed");
 
-    let result = super::resolve_fold_arg(&test_repo.repo, "file1.txt");
+    let result = test_repo
+        .in_dir(|| git::resolve_arg(&test_repo.repo, "file1.txt", &[git::TargetKind::File]));
     assert!(result.is_ok(), "resolve failed: {:?}", result);
     assert!(matches!(result.unwrap(), git::Target::File(_)));
 }
 
 #[test]
 fn resolve_fold_arg_commit_hash() {
-    let test_repo = TestRepo::new();
-    let c1_oid = test_repo.commit("commit", "file1.txt");
+    let test_repo = TestRepo::new_with_remote();
+    let c1_oid = test_repo.commit_empty("commit");
 
-    let result = super::resolve_fold_arg(&test_repo.repo, &c1_oid.to_string());
+    let result = test_repo.in_dir(|| {
+        git::resolve_arg(
+            &test_repo.repo,
+            &c1_oid.to_string(),
+            &[git::TargetKind::Commit],
+        )
+    });
     assert!(result.is_ok());
     assert!(matches!(result.unwrap(), git::Target::Commit(_)));
 }
 
 #[test]
 fn resolve_fold_arg_branch_name() {
-    let test_repo = TestRepo::new();
-    test_repo.create_branch("feature-a");
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit_empty("A1");
+    let a1_oid = test_repo.head_oid();
+    test_repo.create_branch_at_commit("feature-a", a1_oid);
 
-    let result = super::resolve_fold_arg(&test_repo.repo, "feature-a");
+    let result = test_repo
+        .in_dir(|| git::resolve_arg(&test_repo.repo, "feature-a", &[git::TargetKind::Branch]));
     assert!(result.is_ok());
     assert!(matches!(result.unwrap(), git::Target::Branch(_)));
 }
 
 #[test]
 fn resolve_fold_arg_head() {
-    let test_repo = TestRepo::new();
-    test_repo.commit("commit", "file1.txt");
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit_empty("commit");
 
-    let result = super::resolve_fold_arg(&test_repo.repo, "HEAD");
+    let result =
+        test_repo.in_dir(|| git::resolve_arg(&test_repo.repo, "HEAD", &[git::TargetKind::Commit]));
     assert!(result.is_ok());
     assert!(matches!(result.unwrap(), git::Target::Commit(_)));
 }
@@ -1398,9 +1409,10 @@ fn fold_create_rejects_non_commit_source() {
         &["feature-a".to_string(), "new-branch".to_string()],
     );
     assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
     assert!(
-        result.unwrap_err().to_string().contains("must be a commit"),
-        "should error when source is a branch"
+        err.contains("commit"),
+        "should error when source is a branch, got: {err}"
     );
 }
 
@@ -1469,19 +1481,20 @@ fn fold_staged_only_uses_staged_not_unstaged() {
 
 #[test]
 fn fold_staged_non_commit_target_fails() {
-    let test_repo = TestRepo::new();
+    let test_repo = TestRepo::new_with_remote();
     test_repo.commit("First commit", "file1.txt");
+    let a1_oid = test_repo.head_oid();
+    test_repo.create_branch_at_commit("feature-a", a1_oid);
 
     test_repo.write_file("file1.txt", "staged content");
     test_repo.stage_files(&["file1.txt"]);
 
-    // The default branch resolves as a Branch, not a commit
-    let branch_name = test_repo.current_branch_name();
-    let result = super::run_staged(&test_repo.repo, &branch_name);
+    // Passing a branch name when only Commit is accepted should fail
+    let result = test_repo.in_dir(|| super::run_staged(&test_repo.repo, "feature-a"));
     assert!(result.is_err(), "should have failed");
     let err_msg = result.unwrap_err().to_string();
     assert!(
-        err_msg.contains("must be a commit"),
+        err_msg.contains("commit"),
         "should error when target is not a commit, got: {err_msg}"
     );
 }

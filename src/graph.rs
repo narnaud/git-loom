@@ -106,6 +106,8 @@ pub struct RenderOpts {
     pub terminal_width: Option<u16>,
     /// Color theme for the graph output.
     pub theme: Theme,
+    /// CWD prefix relative to repo root (empty string if at root).
+    pub cwd_prefix: String,
 }
 
 /// A logical section in the rendered status output. Sections are built from
@@ -138,11 +140,17 @@ pub fn render(info: RepoInfo, opts: &RenderOpts) -> String {
 }
 
 /// Detect terminal width and build render options for the given theme.
-pub fn default_render_opts(theme: Theme) -> RenderOpts {
+pub fn default_render_opts(theme: Theme, cwd_prefix: String) -> RenderOpts {
     RenderOpts {
         terminal_width: terminal_size().map(|(Width(w), _)| w),
         theme,
+        cwd_prefix,
     }
+}
+
+/// Convert a repo-relative path to CWD-relative for display.
+fn display_path(repo_path: &str, cwd_prefix: &str) -> String {
+    crate::git::cwd_relative_path(repo_path, cwd_prefix)
 }
 
 // ── Section building ────────────────────────────────────────────────────
@@ -330,10 +338,18 @@ fn render_sections(sections: &[Section], ids: &IdAllocator, opts: &RenderOpts) -
                     idx < last_idx,
                     ids,
                     &opts.theme,
+                    &opts.cwd_prefix,
                 );
             }
             Section::Loose(commits) => {
-                render_loose(&mut out, commits, idx < last_idx, ids, &opts.theme);
+                render_loose(
+                    &mut out,
+                    commits,
+                    idx < last_idx,
+                    ids,
+                    &opts.theme,
+                    &opts.cwd_prefix,
+                );
             }
             Section::Upstream(info) => {
                 render_upstream(&mut out, info, &opts.theme);
@@ -394,7 +410,9 @@ fn render_working_changes(
                 "│".color(theme.graph),
                 ids.get_file(&change.path).color(theme.shortid).underline(),
                 "!!".color(theme.conflict).bold(),
-                change.path.color(theme.conflict).bold()
+                display_path(&change.path, &opts.cwd_prefix)
+                    .color(theme.conflict)
+                    .bold()
             )
             .unwrap();
         }
@@ -406,7 +424,7 @@ fn render_working_changes(
                 ids.get_file(&change.path).color(theme.shortid).underline(),
                 change.index.to_string().color(theme.staged),
                 change.worktree.to_string().color(theme.unstaged),
-                change.path
+                display_path(&change.path, &opts.cwd_prefix)
             )
             .unwrap();
         }
@@ -427,10 +445,10 @@ fn render_untracked(
     if untracked.len() > UNTRACKED_MULTICOLUMN_THRESHOLD
         && let Some(width) = opts.terminal_width
     {
-        render_untracked_multicolumn(out, untracked, ids, width, &opts.theme);
+        render_untracked_multicolumn(out, untracked, ids, width, &opts.theme, &opts.cwd_prefix);
         return;
     }
-    render_untracked_single_column(out, untracked, ids, &opts.theme);
+    render_untracked_single_column(out, untracked, ids, &opts.theme, &opts.cwd_prefix);
 }
 
 fn render_untracked_single_column(
@@ -438,6 +456,7 @@ fn render_untracked_single_column(
     untracked: &[&FileChange],
     ids: &IdAllocator,
     theme: &Theme,
+    cwd_prefix: &str,
 ) {
     for change in untracked {
         writeln!(
@@ -446,7 +465,7 @@ fn render_untracked_single_column(
             "│".color(theme.graph),
             ids.get_file(&change.path).color(theme.shortid).underline(),
             " ⁕".color(theme.untracked),
-            change.path
+            display_path(&change.path, cwd_prefix)
         )
         .unwrap();
     }
@@ -459,6 +478,7 @@ fn render_untracked_multicolumn(
     ids: &IdAllocator,
     term_width: u16,
     theme: &Theme,
+    cwd_prefix: &str,
 ) {
     let available = (term_width as usize).saturating_sub(GRAPH_PREFIX_WIDTH);
     let separator = "   │ "; // 5 display columns
@@ -469,7 +489,8 @@ fn render_untracked_multicolumn(
         .iter()
         .map(|f| {
             let sid = ids.get_file(&f.path);
-            sid.len() + 1 + 2 + 1 + f.path.len()
+            let disp = display_path(&f.path, cwd_prefix);
+            sid.len() + 1 + 2 + 1 + disp.len()
         })
         .collect();
 
@@ -488,13 +509,14 @@ fn render_untracked_multicolumn(
             }
             let f = untracked[idx];
             let sid = ids.get_file(&f.path);
+            let disp = display_path(&f.path, cwd_prefix);
 
             write!(
                 out,
                 "{} {} {}",
                 sid.color(theme.shortid).underline(),
                 " ⁕".color(theme.untracked),
-                f.path
+                disp
             )
             .unwrap();
 
@@ -520,6 +542,7 @@ fn render_branch(
     more_sections: bool,
     ids: &IdAllocator,
     theme: &Theme,
+    cwd_prefix: &str,
 ) {
     for (i, (name, remote)) in names.iter().enumerate() {
         let branch_id = ids.get_branch(name);
@@ -570,7 +593,7 @@ fn render_branch(
                 file_sid.color(theme.shortid).underline(),
                 file.index.to_string().color(theme.staged),
                 file.worktree.to_string().color(theme.unstaged),
-                file.path
+                display_path(&file.path, cwd_prefix)
             )
             .unwrap();
         }
@@ -591,6 +614,7 @@ fn render_loose(
     more_sections: bool,
     ids: &IdAllocator,
     theme: &Theme,
+    cwd_prefix: &str,
 ) {
     for commit in commits {
         let sid = ids.get_commit(commit.oid);
@@ -613,7 +637,7 @@ fn render_loose(
                 file_sid.color(theme.shortid).underline(),
                 file.index.to_string().color(theme.staged),
                 file.worktree.to_string().color(theme.unstaged),
-                file.path
+                display_path(&file.path, cwd_prefix)
             )
             .unwrap();
         }
