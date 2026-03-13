@@ -120,6 +120,11 @@ fn detect_remote_type(
             let target_branch = extract_target_branch(upstream_label);
             return Ok(RemoteType::Gerrit { target_branch });
         }
+        msg::warn(&format!(
+            "Unknown loom.remote-type '{}' — falling back to auto-detection.\n\
+             Valid values: github, azure, gerrit",
+            config_value.trim()
+        ));
     }
 
     // 2. Check remote URL for github.com
