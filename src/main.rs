@@ -304,10 +304,8 @@ fn main() {
         cli.command,
         Some(Command::InternalWriteTodo { .. }) | Some(Command::Trace) | Some(Command::Show { .. })
     );
-    if should_log
-        && let Ok(repo) = git::open_repo()
-        && let Some(git_dir) = repo.workdir().map(|w| w.join(".git"))
-    {
+    if should_log && let Ok(repo) = git::open_repo() {
+        let git_dir = repo.path().to_path_buf();
         let cmd_line = std::env::args().collect::<Vec<_>>().join(" ");
         trace::init(&git_dir, &cmd_line);
     }
@@ -358,11 +356,7 @@ fn main() {
 
 fn handle_trace() -> anyhow::Result<()> {
     let repo = git::open_repo()?;
-    let git_dir = repo
-        .workdir()
-        .map(|w| w.join(".git"))
-        .ok_or_else(|| anyhow::anyhow!("Not a working directory"))?;
-
+    let git_dir = repo.path().to_path_buf();
     trace::print_latest_log(&git_dir)
 }
 
