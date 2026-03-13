@@ -851,3 +851,37 @@ fn drop_commit_on_integration_line_transfers_update_refs() {
         "update_refs should transfer to adjacent pick on integration line"
     );
 }
+
+// ── drop_branch update_refs preservation tests ──────────────────────────
+
+#[test]
+fn drop_branch_preserves_colocated_update_refs_at_boundary() {
+    let mut graph = Weave {
+        base_oid: oid("aaa"),
+        branch_sections: vec![BranchSection {
+            reset_target: "onto".to_string(),
+            label: "feat3".to_string(),
+            branch_names: vec!["feat3".to_string()],
+            commits: vec![
+                make_commit_with_refs("111", "C1", vec!["feat1", "feat2"]),
+                make_commit("222", "C2"),
+            ],
+        }],
+        integration_line: vec![IntegrationEntry::Merge {
+            label: "feat3".to_string(),
+            original_oid: None,
+        }],
+    };
+
+    graph.drop_branch("feat3");
+
+    // feat1 should be the new section label (first ref found)
+    assert_eq!(graph.branch_sections[0].label, "feat1");
+    // feat2 should still be in update_refs, NOT cleared
+    assert!(
+        graph.branch_sections[0].commits[0]
+            .update_refs
+            .contains(&"feat2".to_string()),
+        "co-located inner refs must be preserved"
+    );
+}
