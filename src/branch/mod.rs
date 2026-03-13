@@ -9,7 +9,9 @@ use anyhow::Result;
 use crate::git;
 use crate::msg;
 
-/// Emit a warning if `name` matches the configured hidden branch pattern.
+/// Emit a warning if `name` starts with the configured hidden branch prefix.
+/// Despite the config key name `loom.hideBranchPattern`, this performs
+/// prefix matching, not glob matching.
 pub(crate) fn warn_if_hidden(repo: &Repository, name: &str) {
     let pattern =
         git::hide_branch_pattern(repo).unwrap_or_else(|| git::DEFAULT_HIDE_PATTERN.to_string());
