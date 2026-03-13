@@ -592,6 +592,7 @@ fn fold_commit_file_to_unstaged(repo: &Repository, commit_hash: &str, path: &str
     } else {
         // Non-HEAD: edit+continue pattern with save-head rollback
         let saved_head = head_oid.to_string();
+        let saved_refs = git::snapshot_branch_refs(repo)?;
 
         let mut graph = Weave::from_repo(repo)?;
         graph.edit_commit(target_oid);
@@ -617,6 +618,7 @@ fn fold_commit_file_to_unstaged(repo: &Repository, commit_hash: &str, path: &str
         // Re-apply changes to working tree
         if let Err(e) = git_commands::apply_patch(workdir, &file_diff) {
             let _ = git_commit::reset_hard(workdir, &saved_head);
+            let _ = git::restore_branch_refs(workdir, &saved_refs);
             return Err(e).context("Failed to uncommit file, operation rolled back");
         }
     }
@@ -833,6 +835,7 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
         // Non-HEAD: capture the diff, drop the commit, then apply the diff
         let diff = git_commands::diff_commit(workdir, commit_hash)?;
         let saved_head = head_oid.to_string();
+        let saved_refs = git::snapshot_branch_refs(repo)?;
 
         let mut graph = Weave::from_repo(repo)?;
         graph.drop_commit(target_oid);
@@ -844,6 +847,7 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
             && let Err(e) = git_commands::apply_patch(workdir, &diff)
         {
             let _ = git_commit::reset_hard(workdir, &saved_head);
+            let _ = git::restore_branch_refs(workdir, &saved_refs);
             return Err(e)
                 .context("Failed to apply changes to working directory, operation rolled back");
         }
