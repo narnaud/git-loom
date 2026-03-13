@@ -147,8 +147,16 @@ pub fn run(skip_confirm: bool) -> Result<()> {
             })?;
         if confirmed {
             for name in &gone {
-                git_branch::delete(workdir, name)?;
-                msg::success(&format!("Removed branch `{}`", name));
+                match git_branch::safe_delete(workdir, name) {
+                    Ok(()) => msg::success(&format!("Removed branch `{}`", name)),
+                    Err(_) => {
+                        msg::warn(&format!(
+                            "Skipped branch `{}` — it has unmerged local commits.\n\
+                             Use `git branch -D {}` to force-delete.",
+                            name, name
+                        ));
+                    }
+                }
             }
         }
     }
