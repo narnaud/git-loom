@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 
 use crate::branch::is_on_first_parent_line;
 use crate::git;
@@ -24,12 +24,7 @@ pub fn run(branch: Option<String>) -> Result<()> {
         .branches
         .iter()
         .find(|b| b.name == branch_name)
-        .with_context(|| {
-            format!(
-                "Branch '{}' is not woven into the integration branch",
-                branch_name
-            )
-        })?;
+        .expect("branch guaranteed to exist after resolve_woven_branch");
 
     let head_oid = git::head_oid(&repo)?;
     let merge_base_oid = info.upstream.merge_base_oid;
