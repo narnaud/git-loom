@@ -458,7 +458,7 @@ fn push_github(
     loom_trace::log_command("gh", &args.join(" "), duration_ms, status.success(), "");
 
     if !status.success() {
-        // gh prints its own messages — not fatal
+        msg::warn("PR creation may have failed — check your browser");
     }
 
     Ok(())
