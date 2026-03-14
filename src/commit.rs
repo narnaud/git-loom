@@ -1,10 +1,19 @@
+use std::path::Path;
+
 use anyhow::{Context, Result, bail};
 use git2::{Repository, StatusOptions};
+use serde::{Deserialize, Serialize};
 
 use crate::git::{self, Target};
 use crate::git_commands::{self, git_branch, git_commit};
 use crate::msg;
-use crate::weave::{self, Weave};
+use crate::transaction::{self, LoomState, Rollback};
+use crate::weave::{self, RebaseOutcome, Weave};
+
+#[derive(Serialize, Deserialize)]
+struct CommitContext {
+    branch_name: String,
+}
 
 /// Create a commit on a feature branch without leaving the integration branch.
 ///
@@ -13,6 +22,7 @@ use crate::weave::{self, Weave};
 pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) -> Result<()> {
     let repo = git::open_repo()?;
     let workdir = git::require_workdir(&repo, "commit")?.to_path_buf();
+    let git_dir = repo.path().to_path_buf();
 
     // Gather repo info once — also serves as verification that we're on an
     // integration branch (gather_repo_info requires an upstream).
@@ -40,10 +50,10 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
             git_commit::commit_with_editor(&workdir)
         };
         if let Err(e) = result {
-            let _ = restore_staged(&workdir, &saved_staged);
+            let _ = git_commands::restore_staged_patch(&workdir, &saved_staged);
             return Err(e);
         }
-        restore_staged(&workdir, &saved_staged)?;
+        git_commands::restore_staged_patch(&workdir, &saved_staged)?;
         let new_head = git::head_oid(&repo)?;
         msg::success(&format!(
             "Created commit `{}`",
@@ -54,6 +64,7 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
 
     // Step 3: Save HEAD for rollback
     let saved_head = git::head_oid(&repo)?.to_string();
+    let saved_refs = transaction::refs_to_strings(&git::snapshot_branch_refs(&repo)?);
 
     // Step 4: Resolve branch target (may create a new branch at merge-base)
     // Snapshot existing branch names so we can detect newly-created branches.
@@ -79,7 +90,7 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
         git_commit::commit_with_editor(&workdir)
     };
     if let Err(e) = commit_result {
-        let _ = restore_staged(&workdir, &saved_staged);
+        let _ = git_commands::restore_staged_patch(&workdir, &saved_staged);
         return Err(e);
     }
 
@@ -102,20 +113,58 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
     graph.move_commit(head_oid, &branch_name)?;
 
     let todo = graph.to_todo();
-    if let Err(e) = weave::run_rebase(&workdir, Some(&graph.base_oid.to_string()), &todo) {
-        // Mixed reset preserves working-tree changes (the committed content
-        // stays in the working directory as unstaged modifications).
-        let _ = git_commit::reset_mixed(&workdir, &saved_head);
-        if branch_is_new {
-            let _ = git_branch::delete(&workdir, &branch_name);
+
+    // Save LoomState before the rebase so we can resume on conflict.
+    let mut delete_branches = vec![];
+    if branch_is_new {
+        delete_branches.push(branch_name.clone());
+    }
+    let ctx = CommitContext {
+        branch_name: branch_name.clone(),
+    };
+    let state = LoomState {
+        command: "commit".to_string(),
+        rollback: Rollback {
+            saved_head: saved_head.clone(),
+            saved_refs,
+            delete_branches,
+            saved_staged_patch: saved_staged.clone(),
+            reset_mixed: true,
+            ..Default::default()
+        },
+        context: serde_json::to_value(&ctx)?,
+    };
+    transaction::save(&git_dir, &state)?;
+
+    match weave::run_rebase(&workdir, Some(&graph.base_oid.to_string()), &todo)? {
+        RebaseOutcome::Completed => {
+            transaction::delete(&git_dir)?;
+            post_commit(&workdir, &branch_name, &saved_staged)?;
         }
-        let _ = restore_staged(&workdir, &saved_staged);
-        return Err(e);
+        RebaseOutcome::Conflicted => {
+            transaction::warn_conflict_paused("commit");
+        }
     }
 
-    restore_staged(&workdir, &saved_staged)?;
+    Ok(())
+}
 
-    let new_hash = git_commands::rev_parse(&workdir, &branch_name)?;
+/// Resume a `commit` operation after a conflict has been resolved.
+pub fn after_continue(
+    workdir: &Path,
+    rollback: &crate::transaction::Rollback,
+    context: &serde_json::Value,
+) -> Result<()> {
+    let ctx: CommitContext =
+        serde_json::from_value(context.clone()).context("Failed to parse commit resume context")?;
+    post_commit(workdir, &ctx.branch_name, &rollback.saved_staged_patch)
+}
+
+/// Post-rebase work: restore staged changes and print success message.
+fn post_commit(workdir: &Path, branch_name: &str, saved_staged: &str) -> Result<()> {
+    git_commands::restore_staged_patch(workdir, saved_staged)?;
+
+    let new_hash = git_commands::rev_parse(workdir, branch_name)?;
 
     msg::success(&format!(
         "Created commit `{}` on branch `{}`",
@@ -186,23 +235,6 @@ fn save_and_unstage_other_staged(
     let patch = git_commands::diff_cached_files(workdir, &other)?;
     git_commands::unstage_files(workdir, &other)?;
     Ok(patch)
-}
-
-/// Re-apply a previously saved staged patch.
-///
-/// No-ops if the patch is empty. On failure, emits a warning rather than
-/// returning an error — the primary operation already succeeded.
-fn restore_staged(workdir: &std::path::Path, patch: &str) -> Result<()> {
-    if patch.is_empty() {
-        return Ok(());
-    }
-    if let Err(e) = git_commands::apply_cached_patch(workdir, patch) {
-        eprintln!(
-            "Warning: could not restore pre-existing staged changes: {}",
-            e
-        );
-    }
-    Ok(())
 }
 
 /// Resolve a file argument using the centralized resolver.

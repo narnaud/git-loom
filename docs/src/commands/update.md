@@ -67,11 +67,28 @@ git-loom update
 # > Fetching latest changes...
 # > Fetched latest changes
 # > Rebasing onto upstream...
-# x Rebase failed
-# error: CONFLICT (content): Merge conflict in file.txt
+# x Rebase paused due to conflicts
+# ! Conflicts detected — resolve them with git, then run:
+#   loom continue   to complete the update
+#   loom abort      to cancel and restore original state
 ```
 
-Resolve conflicts with standard git commands (`git rebase --continue`, etc.).
+Resolve conflicts in your editor, stage the resolutions, then continue:
+
+```bash
+git add <resolved-files>
+git-loom continue
+# ✓ Updated branch `integration` with `origin/main` (abc1234 Latest commit)
+```
+
+Or cancel the update:
+
+```bash
+git-loom abort
+# ✓ Aborted `loom update` and restored original state
+```
+
+See [`continue`](continue.md) and [`abort`](abort.md) for details.
 
 ### Error: not on an integration branch
 

@@ -2,14 +2,51 @@ use std::path::Path;
 
 use anyhow::{Result, bail};
 
+/// Outcome of a rebase operation.
+pub enum RebaseOutcome {
+    Completed,
+    Conflicted,
+}
+
 /// Continue an in-progress rebase.
-/// If continuation fails, automatically aborts the rebase.
-pub fn continue_rebase(workdir: &Path) -> Result<()> {
-    if super::run_git(workdir, &["rebase", "--continue"]).is_err() {
-        let _ = abort(workdir);
-        bail!("Rebase failed with conflicts — aborted");
+///
+/// Returns `Completed` if the rebase finished without conflicts,
+/// or `Conflicted` if a new conflict was encountered.
+/// Does NOT abort on conflict — the caller is responsible.
+pub fn continue_rebase(workdir: &Path) -> Result<RebaseOutcome> {
+    if super::run_git(workdir, &["rebase", "--continue"]).is_ok() {
+        Ok(RebaseOutcome::Completed)
+    } else {
+        Ok(RebaseOutcome::Conflicted)
     }
-    Ok(())
+}
+
+/// Run a plain `git rebase` with the given extra args.
+///
+/// Returns `RebaseOutcome::Completed` on success, or
+/// `RebaseOutcome::Conflicted` if the rebase stopped due to a conflict
+/// (detected by the presence of `rebase-merge/` or `rebase-apply/`).
+/// Any other failure (e.g., bad args) is returned as `Err`.
+pub fn rebase(git_dir: &Path, workdir: &Path, upstream: &str) -> Result<RebaseOutcome> {
+    match super::run_git(
+        workdir,
+        &[
+            "rebase",
+            "--autostash",
+            "--update-refs",
+            "--rebase-merges",
+            upstream,
+        ],
+    ) {
+        Ok(()) => Ok(RebaseOutcome::Completed),
+        Err(e) => {
+            if is_in_progress(git_dir) {
+                Ok(RebaseOutcome::Conflicted)
+            } else {
+                Err(e)
+            }
+        }
+    }
 }
 
 /// Rebase commits between `upstream` and HEAD onto `newbase`.
@@ -34,4 +71,26 @@ pub fn rebase_onto(workdir: &Path, newbase: &str, upstream: &str) -> Result<()> 
 /// Abort an in-progress rebase.
 pub fn abort(workdir: &Path) -> Result<()> {
     super::run_git(workdir, &["rebase", "--abort"])
+}
+
+/// Check whether a rebase is currently in progress in the repository.
+///
+/// Detects the presence of `rebase-merge/` or `rebase-apply/` directories
+/// under the git dir, which git creates when a rebase is paused.
+pub fn is_in_progress(git_dir: &Path) -> bool {
+    git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists()
+}
+
+/// Continue an in-progress rebase, aborting automatically on conflict.
+///
+/// Used by out-of-scope callers (`fold` edit-and-continue paths,
+/// `split`, `reword`) that want the old hard-fail behavior.
+pub fn continue_rebase_or_abort(workdir: &Path) -> Result<()> {
+    match continue_rebase(workdir)? {
+        RebaseOutcome::Completed => Ok(()),
+        RebaseOutcome::Conflicted => {
+            let _ = abort(workdir);
+            bail!("Rebase failed with conflicts — aborted");
+        }
+    }
 }

@@ -48,9 +48,12 @@ clink.argmatcher("git-loom")
         "drop"         .. drop_matcher,
         "fold",
         "show",
+        "trace",
         "split"        .. split_matcher,
         "absorb"       .. absorb_matcher,
         "update",
-        "push"
+        "push",
+        "continue",
+        "abort"
     )
     :addflags("--no-color", "--help", "-h")

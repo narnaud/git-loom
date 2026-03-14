@@ -355,8 +355,12 @@ When dropping a branch that shares its tip with another branch (co-located),
 the commits are preserved for the surviving branch. The surviving branch
 transparently inherits the topology — no manual intervention required.
 
-### Atomic Operations
+### Atomic Operations and Resumable Conflicts
 
-All drop operations are atomic: either they complete fully or the repository
-is left in its original state. The user is never left in a partially-applied
-state that requires manual recovery.
+`drop branch` and working-tree operations (`drop file`, `drop zz`) are atomic:
+either they complete fully or the repository is left in its original state.
+
+`drop commit` supports resumable conflict handling. If the rebase encounters a
+conflict, the operation is paused and state is saved to `.git/loom/state.json`.
+The user resolves conflicts and runs `loom continue` or `loom abort`. While
+paused, most other loom commands are blocked.

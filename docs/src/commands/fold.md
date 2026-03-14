@@ -141,6 +141,38 @@ Arguments can be:
 - **Git references** — `HEAD`, `HEAD~2`, etc.
 - **`zz`** — reserved token for the unstaged working directory
 
+## Conflicts
+
+The following fold operations support conflict recovery (pause/resume):
+
+- Amend files into a non-HEAD commit
+- Fixup a commit into another
+- Move a commit to a branch
+- Uncommit a commit to the working directory (non-HEAD)
+
+If a supported fold hits a conflict, the operation is paused:
+
+```bash
+git-loom fold d0 feature-b
+# ! Conflicts detected — resolve them with git, then run:
+#   loom continue   to complete the fold
+#   loom abort      to cancel and restore original state
+```
+
+```bash
+git add <resolved-files> && git-loom continue
+# ✓ Moved `d0` to branch `feature-b` (now `e1f2a3b`)
+```
+
+The following fold operations **do not** support pause/resume and abort
+immediately on conflict:
+
+- Uncommit a single file (`CommitFile → zz`)
+- Move a file between commits (`CommitFile → Commit`)
+- Create a new branch and move a commit (`--create`)
+
+See [`continue`](continue.md) and [`abort`](abort.md) for details.
+
 ## Prerequisites
 
 - Must be in a git repository with a working tree

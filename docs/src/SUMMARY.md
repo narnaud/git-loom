@@ -18,6 +18,7 @@
 - [Uncommitting Changes](guides/uncommitting.md)
 - [Auto-absorbing Changes](guides/absorbing.md)
 - [Pushing for Review](guides/pushing.md)
+- [Resolving Conflicts](guides/conflict-resolution.md)
 
 # Commands
 
@@ -35,6 +36,8 @@
 - [update](commands/update.md)
 - [push](commands/push.md)
 - [trace](commands/trace.md)
+- [continue](commands/continue.md)
+- [abort](commands/abort.md)
 
 # Reference
 

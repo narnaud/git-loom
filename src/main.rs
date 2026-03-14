@@ -16,6 +16,7 @@ mod show;
 mod split;
 mod status;
 mod trace;
+mod transaction;
 mod update;
 mod weave;
 
@@ -66,7 +67,11 @@ const GROUPED_COMMANDS: &str = "\
 \x1b[1;33mInspection:\x1b[0m
   \x1b[32mstatus\x1b[0m            Show the branch-aware status (\x1b[34mdefault\x1b[0m command)
   \x1b[32mshow\x1b[0m, \x1b[32msh\x1b[0m          Show commit details (like git show)
-  \x1b[32mtrace\x1b[0m             Show the latest command trace";
+  \x1b[32mtrace\x1b[0m             Show the latest command trace
+
+\x1b[1;33mRecovery:\x1b[0m
+  \x1b[32mcontinue\x1b[0m, \x1b[32mc\x1b[0m       Resume a paused operation after resolving conflicts
+  \x1b[32mabort\x1b[0m, \x1b[32ma\x1b[0m          Cancel a paused operation and restore original state";
 
 #[derive(Parser)]
 #[command(
@@ -212,6 +217,14 @@ enum Command {
     /// Show the latest command trace
     Trace,
 
+    // -- Recovery --
+    /// Resume a paused loom operation after resolving conflicts
+    #[command(visible_alias = "c")]
+    Continue,
+    /// Cancel a paused loom operation and restore original state
+    #[command(visible_alias = "a")]
+    Abort,
+
     // -- Hidden --
     /// Generate shell completions (powershell, clink)
     #[command(hide = true)]
@@ -310,6 +323,30 @@ fn main() {
         trace::init(&git_dir, &cmd_line);
     }
 
+    // Check for a paused loom operation and block most commands if one exists.
+    // Exempt: show, trace, continue, abort, completions, internal-write-todo.
+    let is_exempt = matches!(
+        cli.command,
+        Some(Command::Show { .. })
+            | Some(Command::Trace)
+            | Some(Command::Continue)
+            | Some(Command::Abort)
+            | Some(Command::Completions { .. })
+            | Some(Command::InternalWriteTodo { .. })
+    );
+    if !is_exempt && let Ok(repo) = git::open_repo() {
+        let git_dir = repo.path().to_path_buf();
+        if let Ok(Some(state)) = transaction::load(&git_dir) {
+            msg::error(&format!(
+                "A `loom {}` is paused due to conflicts.\n\
+                 Run `loom continue` to resume or `loom abort` to cancel.\n\
+                 If no loom operation is in progress, delete `.git/loom/state.json` to reset.",
+                state.command
+            ));
+            std::process::exit(1);
+        }
+    }
+
     let theme = resolve_theme(cli.theme);
 
     let result = match cli.command {
@@ -340,6 +377,8 @@ fn main() {
         Some(Command::Update { yes }) => update::run(yes),
         Some(Command::Fold { create, args }) => fold::run(create, args),
         Some(Command::Trace) => handle_trace(),
+        Some(Command::Continue) => handle_continue(),
+        Some(Command::Abort) => handle_abort(),
         Some(Command::Completions { .. }) => unreachable!(),
         Some(Command::InternalWriteTodo { source, todo_file }) => {
             handle_write_todo(&source, &todo_file)
@@ -358,6 +397,20 @@ fn handle_trace() -> anyhow::Result<()> {
     let repo = git::open_repo()?;
     let git_dir = repo.path().to_path_buf();
     trace::print_latest_log(&git_dir)
+}
+
+fn handle_continue() -> anyhow::Result<()> {
+    let repo = git::open_repo()?;
+    let workdir = git::require_workdir(&repo, "continue")?.to_path_buf();
+    let git_dir = repo.path().to_path_buf();
+    transaction::continue_cmd(&workdir, &git_dir)
+}
+
+fn handle_abort() -> anyhow::Result<()> {
+    let repo = git::open_repo()?;
+    let workdir = git::require_workdir(&repo, "abort")?.to_path_buf();
+    let git_dir = repo.path().to_path_buf();
+    transaction::abort_cmd(&workdir, &git_dir)
 }
 
 fn resolve_theme(arg: ThemeArg) -> graph::Theme {

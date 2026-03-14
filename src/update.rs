@@ -1,19 +1,27 @@
+use std::path::Path;
+
 use anyhow::{Context, Result, bail};
 use git2::BranchType;
+use serde::{Deserialize, Serialize};
 
 use crate::git;
+use crate::git_commands::git_rebase::RebaseOutcome;
 use crate::git_commands::{self, git_branch, git_rebase};
 use crate::msg;
+use crate::transaction::{self, LoomState, Rollback};
+
+#[derive(Serialize, Deserialize)]
+struct UpdateContext {
+    branch_name: String,
+    upstream_name: String,
+    skip_confirm: bool,
+}
 
 /// Update the integration branch by fetching and rebasing from upstream.
-///
-/// Performs `git fetch --tags --force --prune` followed by
-/// `git rebase --autostash <upstream>` on the current integration branch,
-/// then updates submodules if any are configured. On merge conflict, the error
-/// is reported so the user can resolve it manually.
 pub fn run(skip_confirm: bool) -> Result<()> {
     let repo = git::open_repo()?;
-    let workdir = git::require_workdir(&repo, "update")?;
+    let workdir = git::require_workdir(&repo, "update")?.to_path_buf();
+    let git_dir = repo.path().to_path_buf();
 
     // Validate that we're on a branch with an upstream tracking ref
     let head = repo.head().context("Failed to get HEAD reference")?;
@@ -43,7 +51,7 @@ pub fn run(skip_confirm: bool) -> Result<()> {
     let spinner = msg::spinner();
     spinner.start("Fetching latest changes...");
 
-    let result = git_commands::run_git(workdir, &["fetch", "--tags", "--force", "--prune"]);
+    let result = git_commands::run_git(&workdir, &["fetch", "--tags", "--force", "--prune"]);
 
     match result {
         Ok(()) => {
@@ -55,37 +63,60 @@ pub fn run(skip_confirm: bool) -> Result<()> {
         }
     }
 
+    // Save rollback state before the rebase
+    let ctx = UpdateContext {
+        branch_name: branch_name.clone(),
+        upstream_name: upstream_name.clone(),
+        skip_confirm,
+    };
+    let state = LoomState {
+        command: "update".to_string(),
+        rollback: Rollback {
+            ..Default::default()
+        },
+        context: serde_json::to_value(&ctx)?,
+    };
+    transaction::save(&git_dir, &state)?;
+
     // Rebase onto upstream with autostash
     let spinner = msg::spinner();
     spinner.start("Rebasing onto upstream...");
 
-    let result = git_commands::run_git(
-        workdir,
-        &[
-            "rebase",
-            "--autostash",
-            "--rebase-merges",
-            "--update-refs",
-            &upstream_name,
-        ],
-    );
+    let outcome = git_rebase::rebase(&git_dir, &workdir, &upstream_name);
 
-    match result {
-        Ok(()) => {
+    match outcome {
+        Ok(RebaseOutcome::Completed) => {
             spinner.stop("Rebased onto upstream");
+            transaction::delete(&git_dir)?;
+            // Re-open repo after rebase (OIDs changed)
+            let repo2 = git2::Repository::discover(&workdir)?;
+            post_update(&workdir, &repo2, &ctx)?;
         }
-        Err(_) => {
-            let _ = git_rebase::abort(workdir);
+        Ok(RebaseOutcome::Conflicted) => {
+            spinner.error("Rebase paused due to conflicts");
+            transaction::warn_conflict_paused("update");
+        }
+        Err(e) => {
+            let _ = git_rebase::abort(&workdir);
+            transaction::delete(&git_dir)?;
             spinner.error("Rebase failed");
-            bail!(
-                "Rebase onto `{}` had conflicts — aborted\n\
-                 Run `git rebase --rebase-merges --update-refs --autostash {}` to resolve manually",
-                upstream_name,
-                upstream_name
-            );
+            return Err(e);
         }
     }
 
+    Ok(())
+}
+
+/// Resume an `update` operation after a conflict has been resolved.
+pub fn after_continue(workdir: &Path, context: &serde_json::Value) -> Result<()> {
+    let ctx: UpdateContext =
+        serde_json::from_value(context.clone()).context("Failed to parse update resume context")?;
+    let repo = git2::Repository::discover(workdir)?;
+    post_update(workdir, &repo, &ctx)
+}
+
+/// Post-rebase work: submodule update, upstream reporting, gone-branch cleanup.
+fn post_update(workdir: &Path, repo: &git2::Repository, ctx: &UpdateContext) -> Result<()> {
     // Update submodules if .gitmodules exists
     if workdir.join(".gitmodules").exists() {
         let spinner = msg::spinner();
@@ -107,7 +138,7 @@ pub fn run(skip_confirm: bool) -> Result<()> {
 
     // Show the latest upstream commit
     let upstream_info = repo
-        .revparse_single(&upstream_name)
+        .revparse_single(&ctx.upstream_name)
         .ok()
         .and_then(|obj| obj.peel_to_commit().ok())
         .map(|commit| {
@@ -119,11 +150,11 @@ pub fn run(skip_confirm: bool) -> Result<()> {
 
     msg::success(&format!(
         "Updated branch `{}` with `{}`{}",
-        branch_name, upstream_name, upstream_info
+        ctx.branch_name, ctx.upstream_name, upstream_info
     ));
 
     // Propose removing local branches whose remote tracking branch was pruned
-    let gone = find_branches_with_gone_upstream(&repo, &branch_name)?;
+    let gone = find_branches_with_gone_upstream(repo, &ctx.branch_name)?;
     if !gone.is_empty() {
         let mut warn_msg = format!(
             "{} local {} with a gone upstream:",
@@ -139,7 +170,7 @@ pub fn run(skip_confirm: bool) -> Result<()> {
             warn_msg.push_str(name);
         }
         msg::warn(&warn_msg);
-        let confirmed = skip_confirm
+        let confirmed = ctx.skip_confirm
             || msg::confirm(if gone.len() == 1 {
                 "Remove it?"
             } else {

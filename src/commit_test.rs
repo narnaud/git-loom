@@ -332,10 +332,11 @@ fn commit_moves_to_correct_branch_in_topology() {
 }
 
 /// Bug: committing to a new branch when the file conflicts with an existing
-/// woven branch would lose working-tree changes. The rollback used reset --hard
-/// which discarded the content that had just been committed.
+/// woven branch would lose working-tree changes. Now that conflicts pause the
+/// operation instead of aborting, the operation is kept alive for `loom continue`
+/// or `loom abort`.
 #[test]
-fn commit_conflict_preserves_working_tree_changes() {
+fn commit_conflict_pauses_operation() {
     let test_repo = TestRepo::new_with_remote();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
@@ -361,20 +362,20 @@ fn commit_conflict_preserves_working_tree_changes() {
         )
     });
 
-    // The commit should fail (conflict between new-line and feat1 both adding feature1)
-    assert!(result.is_err(), "commit should fail due to merge conflict");
+    // The commit should succeed (operation paused, not aborted)
+    assert!(result.is_ok(), "commit should pause on conflict, not fail");
 
-    // Critical: working-tree changes must be preserved
-    assert_eq!(
-        test_repo.read_file("feature1"),
-        "conflicting content",
-        "Working-tree changes should be preserved after failed commit"
+    // The state file should exist indicating a paused operation
+    let state_path = test_repo.repo.path().join("loom").join("state.json");
+    assert!(
+        state_path.exists(),
+        "loom state file should exist when paused"
     );
 
-    // The new branch should have been cleaned up
+    // The new branch should still exist (kept for potential abort)
     assert!(
-        !test_repo.branch_exists("new-line"),
-        "new-line branch should be deleted after rollback"
+        test_repo.branch_exists("new-line"),
+        "new-line branch should be kept while operation is paused"
     );
 }
 
@@ -406,13 +407,20 @@ fn commit_conflict_preserves_existing_empty_branch() {
         )
     });
 
-    // The commit should fail due to merge conflict
-    assert!(result.is_err(), "commit should fail due to merge conflict");
+    // The commit should pause (not abort) on conflict
+    assert!(result.is_ok(), "commit should pause on conflict, not fail");
 
-    // Critical: the pre-existing empty branch must NOT be deleted
+    // The state file should exist
+    let state_path = test_repo.repo.path().join("loom").join("state.json");
+    assert!(
+        state_path.exists(),
+        "loom state file should exist when paused"
+    );
+
+    // Critical: the pre-existing empty branch must NOT be deleted while paused
     assert!(
         test_repo.branch_exists("empty-branch"),
-        "Pre-existing empty branch should be preserved after rollback"
+        "Pre-existing empty branch should be preserved while operation is paused"
     );
 }
 

@@ -61,14 +61,17 @@ git-loom update [--yes]
 When the rebase encounters a merge conflict:
 
 1. The spinner stops with an error indicator
-2. The git error output (stderr) is displayed
-3. git-loom exits with a non-zero status
+2. The state is saved to `.git/loom/state.json`
+3. git-loom reports that the operation is paused and exits successfully
 
-The user then resolves the conflict using standard git commands.
+The user then resolves the conflict using standard git tools. Afterward:
 
-> **Implementation note:** git-loom auto-aborts the rebase on conflict and
-> instructs the user to re-run manually. This prevents a half-finished rebase
-> from confusing other loom commands that assume a clean repo state.
+- `loom continue` — continues the rebase, runs submodule update, reports the
+  updated upstream, and proposes removal of gone-upstream branches
+- `loom abort` — aborts the rebase and restores the original branch state
+
+While the operation is paused, most other loom commands are blocked. Only
+`loom show`, `loom trace`, `loom continue`, and `loom abort` are permitted.
 
 ## Prerequisites
 
