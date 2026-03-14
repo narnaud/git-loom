@@ -132,16 +132,16 @@ pub fn run(dry_run: bool, user_files: Vec<String>) -> Result<()> {
             .iter()
             .map(|(_, _, hunks)| hunks.len())
             .sum::<usize>();
-    let mut unique_targets: HashSet<Oid> = HashSet::new();
-    let mut assigned_file_set: HashSet<&str> = HashSet::new();
-    for (f, oid) in &whole_file_assigned {
-        unique_targets.insert(*oid);
-        assigned_file_set.insert(f.as_str());
-    }
-    for (f, oid, _) in &hunk_assigned {
-        unique_targets.insert(*oid);
-        assigned_file_set.insert(f.as_str());
-    }
+    let unique_targets: HashSet<Oid> = whole_file_assigned
+        .iter()
+        .map(|(_, oid)| *oid)
+        .chain(hunk_assigned.iter().map(|(_, oid, _)| *oid))
+        .collect();
+    let assigned_file_set: HashSet<&str> = whole_file_assigned
+        .iter()
+        .map(|(f, _)| f.as_str())
+        .chain(hunk_assigned.iter().map(|(f, _, _)| f.as_str()))
+        .collect();
     let num_commits = unique_targets.len();
     let num_files = assigned_file_set.len();
 
@@ -229,8 +229,8 @@ pub fn run(dry_run: bool, user_files: Vec<String>) -> Result<()> {
             rollback(false);
             return Err(e);
         }
-        let repo2 = Repository::discover(workdir)?;
-        let fixup_oid = git::head_oid(&repo2)?;
+        let fixup_hash = git_commands::rev_parse(workdir, "HEAD")?;
+        let fixup_oid = git2::Oid::from_str(&fixup_hash)?;
         fixup_pairs.push((fixup_oid, *target_oid));
     }
 
@@ -249,8 +249,8 @@ pub fn run(dry_run: bool, user_files: Vec<String>) -> Result<()> {
             rollback(false);
             return Err(e);
         }
-        let repo2 = Repository::discover(workdir)?;
-        let fixup_oid = git::head_oid(&repo2)?;
+        let fixup_hash = git_commands::rev_parse(workdir, "HEAD")?;
+        let fixup_oid = git2::Oid::from_str(&fixup_hash)?;
         fixup_pairs.push((fixup_oid, *target_oid));
     }
 
@@ -315,11 +315,7 @@ pub fn run(dry_run: bool, user_files: Vec<String>) -> Result<()> {
             )?;
         }
         RebaseOutcome::Conflicted => {
-            msg::warn(
-                "Conflicts detected — resolve them with git, then run:\n\
-                 `loom continue`   to complete the absorb\n\
-                 `loom abort`      to cancel and restore original state",
-            );
+            transaction::warn_conflict_paused("absorb");
         }
     }
 
@@ -353,14 +349,7 @@ fn post_absorb(
     num_files: usize,
     num_commits: usize,
 ) -> Result<()> {
-    if !saved_staged.is_empty()
-        && let Err(e) = git_commands::apply_cached_patch(workdir, saved_staged)
-    {
-        eprintln!(
-            "Warning: could not restore pre-existing staged changes: {}",
-            e
-        );
-    }
+    git_commands::restore_staged_patch(workdir, saved_staged)?;
 
     if let Some(patch) = skipped_patch
         && let Err(e) = git_commands::apply_patch(workdir, patch)

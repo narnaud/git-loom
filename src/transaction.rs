@@ -142,6 +142,16 @@ pub fn apply_rollback(workdir: &Path, rollback: &Rollback) -> Result<()> {
     Ok(())
 }
 
+/// Emit the standard conflict-pause warning for a resumable command.
+pub fn warn_conflict_paused(command: &str) {
+    crate::msg::warn(&format!(
+        "Conflicts detected — resolve them with git, then run:\n\
+         `loom continue`   to complete the {}\n\
+         `loom abort`      to cancel and restore original state",
+        command
+    ));
+}
+
 /// Implement `loom continue`.
 ///
 /// 1. If a rebase is still active, runs `git rebase --continue`.
@@ -192,7 +202,7 @@ pub fn abort_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
 fn dispatch_after_continue(workdir: &Path, state: &LoomState) -> Result<()> {
     match state.command.as_str() {
         "update" => crate::update::after_continue(workdir, &state.context),
-        "commit" => crate::commit::after_continue(workdir, &state.context),
+        "commit" => crate::commit::after_continue(workdir, &state.rollback, &state.context),
         "absorb" => crate::absorb::after_continue(workdir, &state.rollback, &state.context),
         "drop" => crate::drop::after_continue(workdir, &state.context),
         "fold" => crate::fold::after_continue(workdir, &state.context),

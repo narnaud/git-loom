@@ -13,7 +13,6 @@ use crate::weave::{self, RebaseOutcome, Weave};
 #[derive(Serialize, Deserialize)]
 struct CommitContext {
     branch_name: String,
-    saved_staged_patch: String,
 }
 
 /// Create a commit on a feature branch without leaving the integration branch.
@@ -51,10 +50,10 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
             git_commit::commit_with_editor(&workdir)
         };
         if let Err(e) = result {
-            let _ = restore_staged(&workdir, &saved_staged);
+            let _ = git_commands::restore_staged_patch(&workdir, &saved_staged);
             return Err(e);
         }
-        restore_staged(&workdir, &saved_staged)?;
+        git_commands::restore_staged_patch(&workdir, &saved_staged)?;
         let new_head = git::head_oid(&repo)?;
         msg::success(&format!(
             "Created commit `{}`",
@@ -91,7 +90,7 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
         git_commit::commit_with_editor(&workdir)
     };
     if let Err(e) = commit_result {
-        let _ = restore_staged(&workdir, &saved_staged);
+        let _ = git_commands::restore_staged_patch(&workdir, &saved_staged);
         return Err(e);
     }
 
@@ -122,7 +121,6 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
     }
     let ctx = CommitContext {
         branch_name: branch_name.clone(),
-        saved_staged_patch: saved_staged.clone(),
     };
     let state = LoomState {
         command: "commit".to_string(),
@@ -144,11 +142,7 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
             post_commit(&workdir, &branch_name, &saved_staged)?;
         }
         RebaseOutcome::Conflicted => {
-            msg::warn(
-                "Conflicts detected — resolve them with git, then run:\n\
-                 `loom continue`   to complete the commit\n\
-                 `loom abort`      to cancel and restore original state",
-            );
+            transaction::warn_conflict_paused("commit");
         }
     }
 
@@ -156,15 +150,19 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
 }
 
 /// Resume a `commit` operation after a conflict has been resolved.
-pub fn after_continue(workdir: &Path, context: &serde_json::Value) -> Result<()> {
+pub fn after_continue(
+    workdir: &Path,
+    rollback: &crate::transaction::Rollback,
+    context: &serde_json::Value,
+) -> Result<()> {
     let ctx: CommitContext =
         serde_json::from_value(context.clone()).context("Failed to parse commit resume context")?;
-    post_commit(workdir, &ctx.branch_name, &ctx.saved_staged_patch)
+    post_commit(workdir, &ctx.branch_name, &rollback.saved_staged_patch)
 }
 
 /// Post-rebase work: restore staged changes and print success message.
 fn post_commit(workdir: &Path, branch_name: &str, saved_staged: &str) -> Result<()> {
-    restore_staged(workdir, saved_staged)?;
+    git_commands::restore_staged_patch(workdir, saved_staged)?;
 
     let new_hash = git_commands::rev_parse(workdir, branch_name)?;
 
@@ -237,23 +235,6 @@ fn save_and_unstage_other_staged(
     let patch = git_commands::diff_cached_files(workdir, &other)?;
     git_commands::unstage_files(workdir, &other)?;
     Ok(patch)
-}
-
-/// Re-apply a previously saved staged patch.
-///
-/// No-ops if the patch is empty. On failure, emits a warning rather than
-/// returning an error — the primary operation already succeeded.
-fn restore_staged(workdir: &std::path::Path, patch: &str) -> Result<()> {
-    if patch.is_empty() {
-        return Ok(());
-    }
-    if let Err(e) = git_commands::apply_cached_patch(workdir, patch) {
-        eprintln!(
-            "Warning: could not restore pre-existing staged changes: {}",
-            e
-        );
-    }
-    Ok(())
 }
 
 /// Resolve a file argument using the centralized resolver.
