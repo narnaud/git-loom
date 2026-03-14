@@ -268,7 +268,7 @@ pub fn run(dry_run: bool, user_files: Vec<String>) -> Result<()> {
     }
 
     let todo = graph.to_todo();
-    if let Err(e) = weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo) {
+    if let Err(e) = weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo) {
         rollback(true);
         return Err(e);
     }

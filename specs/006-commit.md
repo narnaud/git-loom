@@ -283,12 +283,17 @@ rather than switching to the feature branch to commit directly. This means:
 - **Atomic**: If the operation fails (conflict), the commit still exists and
   can be recovered or resolved
 
-### Conflicts Are User-Resolved
+### Conflicts and Resumable Flow
 
-If the operation encounters conflicts, it pauses and the user resolves them
-with standard git tools. This was chosen over automatic abort because:
+If the relocation rebase encounters conflicts, the operation is paused rather
+than aborted. The state is saved to `.git/loom/state.json`. The user resolves
+conflicts with standard git tools, then runs:
 
-- **Progress preservation**: The commit is already created; aborting would lose
-  work
-- **Familiarity**: Users know how to resolve merge conflicts
-- **Transparency**: Conflicts are real issues that need human judgment
+- `loom continue` — resumes and completes the relocation
+- `loom abort` — cancels the operation and restores the original state
+
+The commit remains in the working tree (via mixed reset) while paused, so no
+work is lost. On abort, the original staged changes are restored.
+
+While the operation is paused, most other loom commands are blocked. Only
+`loom show`, `loom trace`, `loom continue`, and `loom abort` are permitted.

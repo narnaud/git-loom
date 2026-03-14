@@ -148,8 +148,12 @@ Key behaviors:
 - All branch refs are kept up to date automatically
 - Uncommitted working tree changes are preserved
 - Empty commits are preserved
-- On failure, the rebase is automatically aborted, leaving the repository
-  in its original state
+- On conflict, the outcome depends on the calling command. Commands that own
+  the paused state (e.g., `update`, `commit`, `absorb`, `drop commit`, simple
+  `fold` paths) surface a `Conflicted` outcome and leave the rebase paused for
+  the user to resolve with `loom continue` or `loom abort`. Out-of-scope
+  commands (e.g., `reword`, `split`, excluded `fold` paths) abort explicitly
+  and leave the repository in its original state
 
 ## Integration with Commands
 
@@ -188,10 +192,13 @@ other branches), the section is split into a stacked topology. This ensures
 the moved commit appears only on the target branch, not on all co-located
 branches.
 
-### Atomic Operations
+### Atomic Operations and Paused Conflicts
 
-If the rebase fails, it is automatically aborted, leaving the repository in
-its original state. Either the operation succeeds completely or nothing changes.
+Out-of-scope commands abort on conflict, leaving the repository in its original
+state. In-scope resumable commands (e.g., `update`, `commit`, `absorb`,
+`drop commit`, simple `fold` paths) pause on conflict and save state to
+`.git/loom/state.json`. The user resolves conflicts and runs `loom continue`
+or `loom abort` to complete or cancel the operation.
 
 ### Fallback for Non-Integration Repos
 
