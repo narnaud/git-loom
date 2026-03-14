@@ -161,7 +161,7 @@ pub fn continue_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
         }
     }
 
-    dispatch_after_continue(workdir, git_dir, &state)?;
+    dispatch_after_continue(workdir, &state)?;
     delete(git_dir)?;
     Ok(())
 }
@@ -189,9 +189,9 @@ pub fn abort_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
 }
 
 /// Dispatch to the command-specific `after_continue` handler.
-fn dispatch_after_continue(workdir: &Path, git_dir: &Path, state: &LoomState) -> Result<()> {
+fn dispatch_after_continue(workdir: &Path, state: &LoomState) -> Result<()> {
     match state.command.as_str() {
-        "update" => crate::update::after_continue(workdir, git_dir, &state.context),
+        "update" => crate::update::after_continue(workdir, &state.context),
         "commit" => crate::commit::after_continue(workdir, &state.context),
         "absorb" => crate::absorb::after_continue(workdir, &state.rollback, &state.context),
         "drop" => crate::drop::after_continue(workdir, &state.context),
