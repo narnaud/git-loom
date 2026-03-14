@@ -5,6 +5,7 @@ use git2::BranchType;
 use serde::{Deserialize, Serialize};
 
 use crate::git;
+use crate::git_commands::git_rebase::RebaseOutcome;
 use crate::git_commands::{self, git_branch, git_rebase};
 use crate::msg;
 use crate::transaction::{self, LoomState, Rollback};
@@ -63,8 +64,6 @@ pub fn run(skip_confirm: bool) -> Result<()> {
     }
 
     // Save rollback state before the rebase
-    let saved_head = git::head_oid(&repo)?.to_string();
-    let saved_refs = transaction::refs_to_strings(&git::snapshot_branch_refs(&repo)?);
     let ctx = UpdateContext {
         branch_name: branch_name.clone(),
         upstream_name: upstream_name.clone(),
@@ -73,8 +72,6 @@ pub fn run(skip_confirm: bool) -> Result<()> {
     let state = LoomState {
         command: "update".to_string(),
         rollback: Rollback {
-            saved_head,
-            saved_refs,
             ..Default::default()
         },
         context: serde_json::to_value(&ctx)?,
@@ -85,44 +82,29 @@ pub fn run(skip_confirm: bool) -> Result<()> {
     let spinner = msg::spinner();
     spinner.start("Rebasing onto upstream...");
 
-    let result = git_commands::run_git(
-        &workdir,
-        &[
-            "rebase",
-            "--autostash",
-            "--rebase-merges",
-            "--update-refs",
-            &upstream_name,
-        ],
-    );
+    let outcome = git_rebase::rebase(&git_dir, &workdir, &upstream_name);
 
-    match result {
-        Ok(()) => {
+    match outcome {
+        Ok(RebaseOutcome::Completed) => {
             spinner.stop("Rebased onto upstream");
             transaction::delete(&git_dir)?;
             // Re-open repo after rebase (OIDs changed)
             let repo2 = git2::Repository::discover(&workdir)?;
             post_update(&workdir, &repo2, &ctx)?;
         }
-        Err(_) => {
-            if git_rebase::is_in_progress(&git_dir) {
-                spinner.error("Rebase paused due to conflicts");
-                msg::warn(
-                    "Conflicts detected — resolve them with git, then run:\n\
-                     `loom continue`   to complete the update\n\
-                     `loom abort`      to cancel and restore original state",
-                );
-            } else {
-                let _ = git_rebase::abort(&workdir);
-                transaction::delete(&git_dir)?;
-                spinner.error("Rebase failed");
-                bail!(
-                    "Rebase onto `{}` had conflicts — aborted\n\
-                     Run `git rebase --rebase-merges --update-refs --autostash {}` to resolve manually",
-                    upstream_name,
-                    upstream_name
-                );
-            }
+        Ok(RebaseOutcome::Conflicted) => {
+            spinner.error("Rebase paused due to conflicts");
+            msg::warn(
+                "Conflicts detected — resolve them with git, then run:\n\
+                 `loom continue`   to complete the update\n\
+                 `loom abort`      to cancel and restore original state",
+            );
+        }
+        Err(e) => {
+            let _ = git_rebase::abort(&workdir);
+            transaction::delete(&git_dir)?;
+            spinner.error("Rebase failed");
+            return Err(e);
         }
     }
 
@@ -130,7 +112,7 @@ pub fn run(skip_confirm: bool) -> Result<()> {
 }
 
 /// Resume an `update` operation after a conflict has been resolved.
-pub fn after_continue(workdir: &Path, _git_dir: &Path, context: &serde_json::Value) -> Result<()> {
+pub fn after_continue(workdir: &Path, context: &serde_json::Value) -> Result<()> {
     let ctx: UpdateContext =
         serde_json::from_value(context.clone()).context("Failed to parse update resume context")?;
     let repo = git2::Repository::discover(workdir)?;
