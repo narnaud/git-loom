@@ -126,6 +126,28 @@ git-loom drop feature-a
 # Commits preserved for the surviving branch
 ```
 
+## Conflicts
+
+**Dropping a commit** supports conflict recovery. If the rebase hits a conflict,
+the operation is paused:
+
+```bash
+git-loom drop ab
+# ! Conflicts detected — resolve them with git, then run:
+#   loom continue   to complete the drop
+#   loom abort      to cancel and restore original state
+```
+
+```bash
+git add <resolved-files> && git-loom continue
+# ✓ Dropped commit `ab`
+```
+
+**Dropping a branch** does not support pause/resume — if a conflict occurs it
+aborts immediately and leaves the repository in its original state.
+
+See [`continue`](continue.md) and [`abort`](abort.md) for details.
+
 ## Prerequisites
 
 - Must be in a git repository with a working tree

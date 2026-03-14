@@ -73,6 +73,26 @@ git-loom absorb src/auth.rs src/utils.rs
 # Absorbed 2 hunk(s) from 2 file(s) into 2 commit(s)
 ```
 
+## Conflicts
+
+If the rebase that folds the fixup commits hits a conflict, the operation is
+**paused**. Pre-existing staged changes are saved aside automatically.
+
+```bash
+git-loom absorb
+#   src/auth.rs -> a1b2c3d "Add authentication"
+# ! Conflicts detected — resolve them with git, then run:
+#   loom continue   to complete the absorb
+#   loom abort      to cancel and restore original state
+```
+
+```bash
+git add <resolved-files> && git-loom continue
+# ✓ Absorbed 1 hunk(s) from 1 file(s) into 1 commit(s)
+```
+
+See [`continue`](continue.md) and [`abort`](abort.md) for details.
+
 ## Prerequisites
 
 - Must be on an integration branch
