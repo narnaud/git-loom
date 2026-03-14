@@ -396,23 +396,6 @@ fn collect_changed_files(repo: &Repository) -> Result<Vec<String>> {
     Ok(paths)
 }
 
-/// Re-apply a previously saved staged patch.
-///
-/// No-ops if the patch is empty. On failure, emits a warning — the primary
-/// operation already succeeded.
-fn restore_staged(workdir: &Path, patch: &str) -> Result<()> {
-    if patch.is_empty() {
-        return Ok(());
-    }
-    if let Err(e) = git_commands::apply_cached_patch(workdir, patch) {
-        eprintln!(
-            "Warning: could not restore pre-existing staged changes: {}",
-            e
-        );
-    }
-    Ok(())
-}
-
 /// Fold file changes into a commit (Case 1: File(s) + Commit).
 fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str) -> Result<()> {
     let workdir = git::require_workdir(repo, "fold")?;
@@ -453,10 +436,10 @@ fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str
         git_commit::stage_files(workdir, &file_refs)?;
         if let Err(e) = git_commit::amend_no_edit(workdir) {
             let _ = git_commands::unstage_files(workdir, &file_refs);
-            let _ = restore_staged(workdir, &saved_staged);
+            let _ = git_commands::restore_staged_patch(workdir, &saved_staged);
             return Err(e);
         }
-        restore_staged(workdir, &saved_staged)?;
+        git_commands::restore_staged_patch(workdir, &saved_staged)?;
         new_hash = git_commands::rev_parse(workdir, "HEAD")?;
     } else {
         // Create a fixup commit on HEAD with only the changed files, then
@@ -470,7 +453,7 @@ fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str
         git_commit::stage_files(workdir, &file_refs)?;
         if let Err(e) = git_commit::commit(workdir, &message) {
             let _ = git_commands::unstage_files(workdir, &file_refs);
-            let _ = restore_staged(workdir, &saved_staged);
+            let _ = git_commands::restore_staged_patch(workdir, &saved_staged);
             return Err(e);
         }
 
@@ -512,16 +495,12 @@ fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str
         match weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)? {
             RebaseOutcome::Completed => {
                 transaction::delete(&git_dir)?;
-                restore_staged(workdir, &saved_staged)?;
+                git_commands::restore_staged_patch(workdir, &saved_staged)?;
                 new_hash = git_commands::rev_parse(workdir, TRACK_BRANCH)?;
                 let _ = git_branch::delete(workdir, TRACK_BRANCH);
             }
             RebaseOutcome::Conflicted => {
-                msg::warn(
-                    "Conflicts detected — resolve them with git, then run:\n  \
-                     loom continue   to complete the fold\n  \
-                     loom abort      to cancel and restore original state",
-                );
+                transaction::warn_conflict_paused("fold");
                 return Ok(());
             }
         }
@@ -593,11 +572,7 @@ fn fold_commit_into_commit(repo: &Repository, source_hash: &str, target_hash: &s
             ));
         }
         RebaseOutcome::Conflicted => {
-            msg::warn(
-                "Conflicts detected — resolve them with git, then run:\n  \
-                 loom continue   to complete the fold\n  \
-                 loom abort      to cancel and restore original state",
-            );
+            transaction::warn_conflict_paused("fold");
         }
     }
 
@@ -638,11 +613,7 @@ fn fold_commit_to_branch(repo: &Repository, commit_hash: &str, branch_name: &str
             ));
         }
         RebaseOutcome::Conflicted => {
-            msg::warn(
-                "Conflicts detected — resolve them with git, then run:\n  \
-                 loom continue   to complete the fold\n  \
-                 loom abort      to cancel and restore original state",
-            );
+            transaction::warn_conflict_paused("fold");
         }
     }
 
@@ -1028,11 +999,7 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
                 }
             }
             RebaseOutcome::Conflicted => {
-                msg::warn(
-                    "Conflicts detected — resolve them with git, then run:\n  \
-                     loom continue   to complete the fold\n  \
-                     loom abort      to cancel and restore original state",
-                );
+                transaction::warn_conflict_paused("fold");
                 return Ok(());
             }
         }
@@ -1059,7 +1026,7 @@ pub fn after_continue(workdir: &Path, context: &serde_json::Value) -> Result<()>
         } => {
             let new_hash = git_commands::rev_parse(workdir, TRACK_BRANCH)?;
             let _ = git_branch::delete(workdir, TRACK_BRANCH);
-            restore_staged(workdir, &saved_staged)?;
+            git_commands::restore_staged_patch(workdir, &saved_staged)?;
             msg::success(&format!(
                 "Folded {} file(s) into `{}` (now `{}`)",
                 files_count,
