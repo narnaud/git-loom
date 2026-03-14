@@ -102,7 +102,7 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
     graph.move_commit(head_oid, &branch_name)?;
 
     let todo = graph.to_todo();
-    if let Err(e) = weave::run_rebase(&workdir, Some(&graph.base_oid.to_string()), &todo) {
+    if let Err(e) = weave::run_rebase_or_abort(&workdir, Some(&graph.base_oid.to_string()), &todo) {
         // Mixed reset preserves working-tree changes (the committed content
         // stays in the working directory as unstaged modifications).
         let _ = git_commit::reset_mixed(&workdir, &saved_head);

@@ -172,7 +172,7 @@ fn drop_commit(repo: &Repository, commit_hash: &str, skip_confirm: bool) -> Resu
     graph.drop_commit(commit_oid);
 
     let todo = graph.to_todo();
-    weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
+    weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo)?;
 
     msg::success(&format!("Dropped commit `{}`", short_hash));
     Ok(())
@@ -274,7 +274,7 @@ fn drop_branch_with_info(
     }
 
     let todo = graph.to_todo();
-    weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
+    weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo)?;
 
     // Delete the branch ref (warn on failure — extremely unlikely)
     if let Err(e) = git_branch::delete(workdir, branch_name) {

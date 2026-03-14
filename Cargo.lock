@@ -348,6 +348,7 @@ dependencies = [
  "colored",
  "git2",
  "inquire",
+ "serde",
  "serde_json",
  "shell-escape",
  "tempfile",
@@ -873,6 +874,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
  "serde_core",
+ "serde_derive",
 ]
 
 [[package]]

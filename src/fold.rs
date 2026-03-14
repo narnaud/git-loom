@@ -458,7 +458,9 @@ fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str
         graph.track_commit(target_oid, TRACK_BRANCH);
 
         let todo = graph.to_todo();
-        if let Err(e) = weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo) {
+        if let Err(e) =
+            weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo)
+        {
             let _ = git_branch::delete(workdir, TRACK_BRANCH);
             let _ = restore_staged(workdir, &saved_staged);
             bail!(
@@ -506,7 +508,7 @@ fn fold_commit_into_commit(repo: &Repository, source_hash: &str, target_hash: &s
     graph.track_commit(target_oid, TRACK_BRANCH);
 
     let todo = graph.to_todo();
-    if let Err(e) = weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo) {
+    if let Err(e) = weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo) {
         let _ = git_branch::delete(workdir, TRACK_BRANCH);
         return Err(e);
     }
@@ -598,7 +600,7 @@ pub fn move_commit_to_branch(
     graph.move_commit(commit_oid, branch_name)?;
 
     let todo = graph.to_todo();
-    weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
+    weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo)?;
 
     Ok(())
 }
@@ -647,7 +649,7 @@ fn fold_commit_file_to_unstaged(repo: &Repository, commit_hash: &str, path: &str
         graph.edit_commit(target_oid);
 
         let todo = graph.to_todo();
-        weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
+        weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo)?;
 
         // Paused at target — reverse the file, stage, amend
         if let Err(e) = git_commands::apply_patch_reverse(workdir, &file_diff)
@@ -662,7 +664,7 @@ fn fold_commit_file_to_unstaged(repo: &Repository, commit_hash: &str, path: &str
         new_hash = git_commands::rev_parse(workdir, "HEAD")?;
 
         // Continue the rebase
-        git_rebase::continue_rebase(workdir)?;
+        git_rebase::continue_rebase_or_abort(workdir)?;
 
         // Re-apply changes to working tree
         if let Err(e) = git_commands::apply_patch(workdir, &file_diff) {
@@ -741,7 +743,8 @@ fn fold_commit_file_to_commit(
         // Create temp branch AFTER from_repo to avoid polluting the Weave graph
         git_branch::force_create(workdir, TRACK_BRANCH, target_hash)?;
 
-        let phase1_rebase = weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo);
+        let phase1_rebase =
+            weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo);
         if let Err(e) = phase1_rebase {
             let _ = git_branch::delete(workdir, TRACK_BRANCH);
             return Err(e);
@@ -760,7 +763,7 @@ fn fold_commit_file_to_commit(
         // This hash will be tracked through phase 2 via a temp branch.
         let phase1_source_hash = git_commands::rev_parse(workdir, "HEAD")?;
 
-        if let Err(e) = git_rebase::continue_rebase(workdir) {
+        if let Err(e) = git_rebase::continue_rebase_or_abort(workdir) {
             let _ = git_branch::delete(workdir, TRACK_BRANCH);
             return Err(e);
         }
@@ -782,7 +785,9 @@ fn fold_commit_file_to_commit(
 
         let todo = graph.to_todo();
 
-        if let Err(e) = weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo) {
+        if let Err(e) =
+            weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo)
+        {
             let _ = git_branch::delete(workdir, TRACK_BRANCH);
             let _ = git_commit::reset_hard(workdir, &saved_head);
             let _ = git::restore_branch_refs(workdir, &saved_refs);
@@ -803,7 +808,7 @@ fn fold_commit_file_to_commit(
         // Capture target new hash after amend, before continue moves HEAD
         new_target_hash = git_commands::rev_parse(workdir, "HEAD")?;
 
-        if let Err(e) = git_rebase::continue_rebase(workdir) {
+        if let Err(e) = git_rebase::continue_rebase_or_abort(workdir) {
             let _ = git_branch::delete(workdir, TRACK_BRANCH);
             let _ = git_commit::reset_hard(workdir, &saved_head);
             let _ = git::restore_branch_refs(workdir, &saved_refs);
@@ -822,7 +827,7 @@ fn fold_commit_file_to_commit(
         graph.edit_commit(target_oid);
 
         let todo = graph.to_todo();
-        weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
+        weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo)?;
 
         // First pause: at source — remove file
         if let Err(e) = git_commands::apply_patch_reverse(workdir, &file_diff)
@@ -837,7 +842,7 @@ fn fold_commit_file_to_commit(
         new_source_hash = git_commands::rev_parse(workdir, "HEAD")?;
 
         // Continue to second pause: at target
-        git_rebase::continue_rebase(workdir)?;
+        git_rebase::continue_rebase_or_abort(workdir)?;
 
         // Second pause: at target — add file
         if let Err(e) = git_commands::apply_patch(workdir, &file_diff)
@@ -851,7 +856,7 @@ fn fold_commit_file_to_commit(
         // Capture target new hash after amend, before continue moves HEAD
         new_target_hash = git_commands::rev_parse(workdir, "HEAD")?;
 
-        git_rebase::continue_rebase(workdir)?;
+        git_rebase::continue_rebase_or_abort(workdir)?;
     }
 
     msg::success(&format!(
@@ -890,7 +895,7 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
         graph.drop_commit(target_oid);
 
         let todo = graph.to_todo();
-        weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
+        weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo)?;
 
         if !diff.is_empty()
             && let Err(e) = git_commands::apply_patch(workdir, &diff)
