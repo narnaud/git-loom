@@ -24,6 +24,10 @@ Inspection:
   show, sh          Show commit details (like git show)
   trace             Show the latest command trace
 
+Recovery:
+  continue          Resume a paused operation after resolving conflicts
+  abort             Cancel a paused operation and restore original state
+
 Options:
       --no-color       Disable colored output
       --theme <THEME>  Color theme for graph output [default: auto] [possible values: auto, dark, light]
