@@ -8,7 +8,7 @@ use crate::git;
 use crate::git_commands::{self, git_commit, git_rebase};
 
 /// Persistent state saved when a loom command is paused due to a rebase conflict.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct LoomState {
     /// The name of the interrupted command (e.g., "update", "commit").
     pub command: String,
@@ -19,7 +19,7 @@ pub struct LoomState {
 }
 
 /// Rollback information captured before the rebase step starts.
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct Rollback {
     /// HEAD OID before the operation started.
     pub saved_head: String,
@@ -31,6 +31,19 @@ pub struct Rollback {
     pub saved_staged_patch: String,
     /// Full working-tree diff saved before the rebase (may be empty).
     pub saved_worktree_patch: String,
+    /// If true, use `git reset --mixed` instead of `--hard` when restoring HEAD.
+    /// Set for commands (e.g., `commit`) where the committed content should
+    /// remain in the working directory as unstaged changes after abort.
+    #[serde(default)]
+    pub reset_mixed: bool,
+}
+
+/// Convert a `snapshot_branch_refs` result to the string map stored in `Rollback`.
+pub fn refs_to_strings(snapshot: &HashMap<String, git2::Oid>) -> HashMap<String, String> {
+    snapshot
+        .iter()
+        .map(|(k, v)| (k.clone(), v.to_string()))
+        .collect()
 }
 
 /// Return the path to the state file: `<git_dir>/loom/state.json`.
@@ -90,7 +103,11 @@ pub fn delete(git_dir: &Path) -> Result<()> {
 /// Apply shared rollback: restore HEAD, branch refs, and patches.
 pub fn apply_rollback(workdir: &Path, rollback: &Rollback) -> Result<()> {
     if !rollback.saved_head.is_empty() {
-        let _ = git_commit::reset_hard(workdir, &rollback.saved_head);
+        if rollback.reset_mixed {
+            let _ = git_commit::reset_mixed(workdir, &rollback.saved_head);
+        } else {
+            let _ = git_commit::reset_hard(workdir, &rollback.saved_head);
+        }
     }
 
     // Restore branch refs
@@ -199,6 +216,7 @@ mod tests {
                 delete_branches: vec!["new-branch".to_string()],
                 saved_staged_patch: "--- a/foo\n+++ b/foo\n".to_string(),
                 saved_worktree_patch: String::new(),
+                reset_mixed: false,
             },
             context: serde_json::json!({ "branch_name": "feature" }),
         };
