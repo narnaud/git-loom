@@ -92,6 +92,39 @@ git-loom commit -m "initial scaffold" zz
 # No -b flag, branch matches remote → creates loose commit directly
 ```
 
+## Conflicts
+
+If the rebase that moves the commit to its target branch hits a conflict, the
+operation is **paused** rather than aborted. The committed content is safe in
+git history; loom saves recovery state to `.git/loom/state.json` and exits
+with code 0.
+
+```bash
+git-loom commit -b feature-auth -m "add auth" zz
+# ✓ Created branch `feature-auth` at `a1b2c3d`
+# ! Conflicts detected — resolve them with git, then run:
+#   loom continue   to complete the commit
+#   loom abort      to cancel and restore original state
+```
+
+Resolve conflicts, then:
+
+```bash
+git add <resolved-files>
+git-loom continue
+# ✓ Created commit `b4c5d6e` on branch `feature-auth`
+```
+
+Or cancel and return to the original state (the commit content comes back as
+unstaged working-tree changes):
+
+```bash
+git-loom abort
+# ✓ Aborted `loom commit` and restored original state
+```
+
+See [`continue`](continue.md) and [`abort`](abort.md) for details.
+
 ## Prerequisites
 
 - Must be on an integration branch (has upstream tracking and woven feature branches)

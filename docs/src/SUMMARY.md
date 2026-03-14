@@ -35,6 +35,8 @@
 - [update](commands/update.md)
 - [push](commands/push.md)
 - [trace](commands/trace.md)
+- [continue](commands/continue.md)
+- [abort](commands/abort.md)
 
 # Reference
 
