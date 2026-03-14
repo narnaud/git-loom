@@ -158,12 +158,44 @@ pub fn run(dry_run: bool, user_files: Vec<String>) -> Result<()> {
         hunk_groups.entry(oid).or_default().push((path, hunks));
     }
 
+    // Build the set of files being absorbed so we can identify pre-existing
+    // staged files that are NOT being absorbed and must not leak into any
+    // fixup commit.
+    let absorbed_files: std::collections::HashSet<&str> = groups
+        .values()
+        .flatten()
+        .map(|s| s.as_str())
+        .chain(
+            hunk_groups
+                .values()
+                .flatten()
+                .map(|(path, _)| path.as_str()),
+        )
+        .collect();
+    let pre_staged = git::get_staged_files(&repo)?;
+    let non_absorbed_staged: Vec<&str> = pre_staged
+        .iter()
+        .filter(|f| !absorbed_files.contains(f.as_str()))
+        .map(|s| s.as_str())
+        .collect();
+    let saved_staged = if non_absorbed_staged.is_empty() {
+        String::new()
+    } else {
+        let patch = git_commands::diff_cached_files(workdir, &non_absorbed_staged)?;
+        git_commands::unstage_files(workdir, &non_absorbed_staged)?;
+        patch
+    };
+
     // Snapshot full working-tree diff before any mutations, for rollback
     let saved_worktree_patch = git_commands::run_git_stdout(workdir, &["diff", "HEAD"])?;
 
     let rollback = |warn_patch_err: bool| {
         let _ = git_commit::reset_hard(workdir, &saved_head);
         let _ = git::restore_branch_refs(workdir, &saved_refs);
+        // Best-effort restore of pre-existing staged state
+        if !saved_staged.is_empty() {
+            let _ = git_commands::apply_cached_patch(workdir, &saved_staged);
+        }
         if !saved_worktree_patch.is_empty()
             && let Err(e) = git_commands::apply_patch(workdir, &saved_worktree_patch)
             && warn_patch_err
@@ -239,6 +271,16 @@ pub fn run(dry_run: bool, user_files: Vec<String>) -> Result<()> {
     if let Err(e) = weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo) {
         rollback(true);
         return Err(e);
+    }
+
+    // Restore pre-existing staged changes that were not part of the absorb.
+    if !saved_staged.is_empty()
+        && let Err(e) = git_commands::apply_cached_patch(workdir, &saved_staged)
+    {
+        eprintln!(
+            "Warning: could not restore pre-existing staged changes: {}",
+            e
+        );
     }
 
     // Re-apply skipped changes to the working tree

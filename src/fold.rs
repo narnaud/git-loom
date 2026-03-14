@@ -364,6 +364,23 @@ fn collect_changed_files(repo: &Repository) -> Result<Vec<String>> {
     Ok(paths)
 }
 
+/// Re-apply a previously saved staged patch.
+///
+/// No-ops if the patch is empty. On failure, emits a warning — the primary
+/// operation already succeeded.
+fn restore_staged(workdir: &Path, patch: &str) -> Result<()> {
+    if patch.is_empty() {
+        return Ok(());
+    }
+    if let Err(e) = git_commands::apply_cached_patch(workdir, patch) {
+        eprintln!(
+            "Warning: could not restore pre-existing staged changes: {}",
+            e
+        );
+    }
+    Ok(())
+}
+
 /// Fold file changes into a commit (Case 1: File(s) + Commit).
 fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str) -> Result<()> {
     let workdir = git::require_workdir(repo, "fold")?;
@@ -381,6 +398,22 @@ fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str
 
     let file_refs: Vec<&str> = files.iter().map(|s| s.as_str()).collect();
 
+    // Save and unstage any pre-existing staged files not in our target list,
+    // so they don't accidentally end up in this commit/amend.
+    let staged = git::get_staged_files(repo)?;
+    let other_staged: Vec<&str> = staged
+        .iter()
+        .filter(|f| !file_refs.contains(&f.as_str()))
+        .map(|s| s.as_str())
+        .collect();
+    let saved_staged = if other_staged.is_empty() {
+        String::new()
+    } else {
+        let patch = git_commands::diff_cached_files(workdir, &other_staged)?;
+        git_commands::unstage_files(workdir, &other_staged)?;
+        patch
+    };
+
     let new_hash;
 
     if is_head {
@@ -388,8 +421,10 @@ fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str
         git_commit::stage_files(workdir, &file_refs)?;
         if let Err(e) = git_commit::amend_no_edit(workdir) {
             let _ = git_commands::unstage_files(workdir, &file_refs);
+            let _ = restore_staged(workdir, &saved_staged);
             return Err(e);
         }
+        restore_staged(workdir, &saved_staged)?;
         new_hash = git_commands::rev_parse(workdir, "HEAD")?;
     } else {
         // Create a fixup commit on HEAD with only the changed files, then
@@ -403,6 +438,7 @@ fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str
         git_commit::stage_files(workdir, &file_refs)?;
         if let Err(e) = git_commit::commit(workdir, &message) {
             let _ = git_commands::unstage_files(workdir, &file_refs);
+            let _ = restore_staged(workdir, &saved_staged);
             return Err(e);
         }
 
@@ -423,12 +459,14 @@ fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str
         let todo = graph.to_todo();
         if let Err(e) = weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo) {
             let _ = git_branch::delete(workdir, TRACK_BRANCH);
+            let _ = restore_staged(workdir, &saved_staged);
             bail!(
                 "{}\nThe fixup commit has been kept — you can retry with `git rebase --autosquash`",
                 e
             );
         }
 
+        restore_staged(workdir, &saved_staged)?;
         new_hash = git_commands::rev_parse(workdir, TRACK_BRANCH)?;
         let _ = git_branch::delete(workdir, TRACK_BRANCH);
     }
