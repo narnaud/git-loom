@@ -70,8 +70,8 @@ const GROUPED_COMMANDS: &str = "\
   \x1b[32mtrace\x1b[0m             Show the latest command trace
 
 \x1b[1;33mRecovery:\x1b[0m
-  \x1b[32mcontinue\x1b[0m          Resume a paused operation after resolving conflicts
-  \x1b[32mabort\x1b[0m             Cancel a paused operation and restore original state";
+  \x1b[32mcontinue\x1b[0m, \x1b[32mc\x1b[0m       Resume a paused operation after resolving conflicts
+  \x1b[32mabort\x1b[0m, \x1b[32ma\x1b[0m          Cancel a paused operation and restore original state";
 
 #[derive(Parser)]
 #[command(
@@ -219,8 +219,10 @@ enum Command {
 
     // -- Recovery --
     /// Resume a paused loom operation after resolving conflicts
+    #[command(visible_alias = "c")]
     Continue,
     /// Cancel a paused loom operation and restore original state
+    #[command(visible_alias = "a")]
     Abort,
 
     // -- Hidden --
