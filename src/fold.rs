@@ -1,12 +1,36 @@
 use anyhow::{Context, Result, bail};
 use git2::{Repository, StatusOptions};
+use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 use crate::commit;
 use crate::git::{self, Target, TargetKind};
 use crate::git_commands::{self, git_branch, git_commit, git_rebase};
 use crate::msg;
-use crate::weave::{self, Weave};
-use std::path::Path;
+use crate::transaction::{self, LoomState, Rollback};
+use crate::weave::{self, RebaseOutcome, Weave};
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "op")]
+enum FoldVariant {
+    FilesIntoCommit {
+        original_commit_hash: String,
+        files_count: usize,
+        saved_staged: String,
+    },
+    CommitIntoCommit {
+        source_hash: String,
+        target_hash: String,
+    },
+    CommitToBranch {
+        commit_hash: String,
+        branch_name: String,
+    },
+    CommitToUnstaged {
+        commit_hash: String,
+        diff: String,
+    },
+}
 
 /// Temporary branch used to track a commit's new OID through a rebase.
 const TRACK_BRANCH: &str = "_loom-track";
@@ -160,9 +184,17 @@ fn create_branch_and_move(
 ) -> Result<()> {
     git_branch::create(workdir, branch_name, base_hash)?;
 
-    if let Err(e) = move_commit_to_branch(repo, commit_hash, branch_name) {
-        let _ = git_branch::delete(workdir, branch_name);
-        return Err(e);
+    match move_commit_to_branch(repo, commit_hash, branch_name) {
+        Ok(RebaseOutcome::Completed) => {}
+        Ok(RebaseOutcome::Conflicted) => {
+            let _ = git_rebase::abort(workdir);
+            let _ = git_branch::delete(workdir, branch_name);
+            bail!("Rebase failed with conflicts — aborted");
+        }
+        Err(e) => {
+            let _ = git_branch::delete(workdir, branch_name);
+            return Err(e);
+        }
     }
 
     let new_hash = git_commands::rev_parse(workdir, branch_name)?;
@@ -456,21 +488,43 @@ fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str
         git_branch::force_create(workdir, TRACK_BRANCH, commit_hash)?;
         graph.track_commit(target_oid, TRACK_BRANCH);
 
-        let todo = graph.to_todo();
-        if let Err(e) =
-            weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo)
-        {
-            let _ = git_branch::delete(workdir, TRACK_BRANCH);
-            let _ = restore_staged(workdir, &saved_staged);
-            bail!(
-                "{}\nThe fixup commit has been kept — you can retry with `git rebase --autosquash`",
-                e
-            );
-        }
+        // Save LoomState before the rebase.
+        let git_dir = repo.path().to_path_buf();
+        let saved_head_str = git_commands::rev_parse(workdir, "HEAD")?;
+        let saved_refs_map = transaction::refs_to_strings(&git::snapshot_branch_refs(&repo)?);
+        let fold_ctx = serde_json::to_value(FoldVariant::FilesIntoCommit {
+            original_commit_hash: commit_hash.to_string(),
+            files_count: files.len(),
+            saved_staged: saved_staged.clone(),
+        })?;
+        let loom_state = LoomState {
+            command: "fold".to_string(),
+            rollback: Rollback {
+                saved_head: saved_head_str,
+                saved_refs: saved_refs_map,
+                ..Default::default()
+            },
+            context: fold_ctx,
+        };
+        transaction::save(&git_dir, &loom_state)?;
 
-        restore_staged(workdir, &saved_staged)?;
-        new_hash = git_commands::rev_parse(workdir, TRACK_BRANCH)?;
-        let _ = git_branch::delete(workdir, TRACK_BRANCH);
+        let todo = graph.to_todo();
+        match weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)? {
+            RebaseOutcome::Completed => {
+                transaction::delete(&git_dir)?;
+                restore_staged(workdir, &saved_staged)?;
+                new_hash = git_commands::rev_parse(workdir, TRACK_BRANCH)?;
+                let _ = git_branch::delete(workdir, TRACK_BRANCH);
+            }
+            RebaseOutcome::Conflicted => {
+                msg::warn(
+                    "Conflicts detected — resolve them with git, then run:\n  \
+                     loom continue   to complete the fold\n  \
+                     loom abort      to cancel and restore original state",
+                );
+                return Ok(());
+            }
+        }
     }
 
     msg::success(&format!(
@@ -506,21 +560,46 @@ fn fold_commit_into_commit(repo: &Repository, source_hash: &str, target_hash: &s
     git_branch::force_create(workdir, TRACK_BRANCH, target_hash)?;
     graph.track_commit(target_oid, TRACK_BRANCH);
 
+    // Save LoomState before the rebase.
+    let git_dir = repo.path().to_path_buf();
+    let saved_head_str = git_commands::rev_parse(workdir, "HEAD")?;
+    let saved_refs_map = transaction::refs_to_strings(&git::snapshot_branch_refs(repo)?);
+    let fold_ctx = serde_json::to_value(FoldVariant::CommitIntoCommit {
+        source_hash: source_hash.to_string(),
+        target_hash: target_hash.to_string(),
+    })?;
+    let loom_state = LoomState {
+        command: "fold".to_string(),
+        rollback: Rollback {
+            saved_head: saved_head_str,
+            saved_refs: saved_refs_map,
+            ..Default::default()
+        },
+        context: fold_ctx,
+    };
+    transaction::save(&git_dir, &loom_state)?;
+
     let todo = graph.to_todo();
-    if let Err(e) = weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo) {
-        let _ = git_branch::delete(workdir, TRACK_BRANCH);
-        return Err(e);
+    match weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)? {
+        RebaseOutcome::Completed => {
+            transaction::delete(&git_dir)?;
+            let new_hash = git_commands::rev_parse(workdir, TRACK_BRANCH)?;
+            let _ = git_branch::delete(workdir, TRACK_BRANCH);
+            msg::success(&format!(
+                "Folded `{}` into `{}` (now `{}`)",
+                git_commands::short_hash(source_hash),
+                git_commands::short_hash(target_hash),
+                git_commands::short_hash(&new_hash)
+            ));
+        }
+        RebaseOutcome::Conflicted => {
+            msg::warn(
+                "Conflicts detected — resolve them with git, then run:\n  \
+                 loom continue   to complete the fold\n  \
+                 loom abort      to cancel and restore original state",
+            );
+        }
     }
-
-    let new_hash = git_commands::rev_parse(workdir, TRACK_BRANCH)?;
-    let _ = git_branch::delete(workdir, TRACK_BRANCH);
-
-    msg::success(&format!(
-        "Folded `{}` into `{}` (now `{}`)",
-        git_commands::short_hash(source_hash),
-        git_commands::short_hash(target_hash),
-        git_commands::short_hash(&new_hash)
-    ));
 
     Ok(())
 }
@@ -528,31 +607,57 @@ fn fold_commit_into_commit(repo: &Repository, source_hash: &str, target_hash: &s
 /// Move a commit to a branch (Case 3: Commit + Branch → Move).
 fn fold_commit_to_branch(repo: &Repository, commit_hash: &str, branch_name: &str) -> Result<()> {
     let workdir = git::require_workdir(repo, "fold")?;
-    move_commit_to_branch(repo, commit_hash, branch_name)?;
+    let git_dir = repo.path().to_path_buf();
 
-    let new_hash = git_commands::rev_parse(workdir, branch_name)?;
+    let saved_head = git::head_oid(repo)?.to_string();
+    let saved_refs = transaction::refs_to_strings(&git::snapshot_branch_refs(repo)?);
+    let ctx = serde_json::to_value(FoldVariant::CommitToBranch {
+        commit_hash: commit_hash.to_string(),
+        branch_name: branch_name.to_string(),
+    })?;
+    let state = LoomState {
+        command: "fold".to_string(),
+        rollback: Rollback {
+            saved_head,
+            saved_refs,
+            ..Default::default()
+        },
+        context: ctx,
+    };
+    transaction::save(&git_dir, &state)?;
 
-    msg::success(&format!(
-        "Moved `{}` to branch `{}` (now `{}`)",
-        git_commands::short_hash(commit_hash),
-        branch_name,
-        git_commands::short_hash(&new_hash)
-    ));
+    match move_commit_to_branch(repo, commit_hash, branch_name)? {
+        RebaseOutcome::Completed => {
+            transaction::delete(&git_dir)?;
+            let new_hash = git_commands::rev_parse(workdir, branch_name)?;
+            msg::success(&format!(
+                "Moved `{}` to branch `{}` (now `{}`)",
+                git_commands::short_hash(commit_hash),
+                branch_name,
+                git_commands::short_hash(&new_hash)
+            ));
+        }
+        RebaseOutcome::Conflicted => {
+            msg::warn(
+                "Conflicts detected — resolve them with git, then run:\n  \
+                 loom continue   to complete the fold\n  \
+                 loom abort      to cancel and restore original state",
+            );
+        }
+    }
 
     Ok(())
 }
 
 /// Move a commit to the tip of a branch using Weave.
 ///
-/// The caller is responsible for ensuring the working tree is in an appropriate
-/// state. The rebase uses `--autostash` to handle any remaining uncommitted changes.
-///
-/// Used by both fold (commit+branch) and commit commands.
+/// Returns `RebaseOutcome` — callers are responsible for building and saving
+/// their own `LoomState` before calling this function.
 pub fn move_commit_to_branch(
     repo: &Repository,
     commit_hash: &str,
     branch_name: &str,
-) -> Result<()> {
+) -> Result<RebaseOutcome> {
     let workdir = git::require_workdir(repo, "fold")?;
 
     let commit_oid = git2::Oid::from_str(commit_hash)?;
@@ -599,9 +704,7 @@ pub fn move_commit_to_branch(
     graph.move_commit(commit_oid, branch_name)?;
 
     let todo = graph.to_todo();
-    weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo)?;
-
-    Ok(())
+    weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)
 }
 
 /// Uncommit a single file from a commit to the working directory.
@@ -893,16 +996,45 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
         let mut graph = Weave::from_repo(repo)?;
         graph.drop_commit(target_oid);
 
-        let todo = graph.to_todo();
-        weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo)?;
+        // Save LoomState before the rebase.
+        let git_dir = repo.path().to_path_buf();
+        let fold_ctx = serde_json::to_value(FoldVariant::CommitToUnstaged {
+            commit_hash: commit_hash.to_string(),
+            diff: diff.clone(),
+        })?;
+        let loom_state = LoomState {
+            command: "fold".to_string(),
+            rollback: Rollback {
+                saved_head: saved_head.clone(),
+                saved_refs: transaction::refs_to_strings(&saved_refs),
+                ..Default::default()
+            },
+            context: fold_ctx,
+        };
+        transaction::save(&git_dir, &loom_state)?;
 
-        if !diff.is_empty()
-            && let Err(e) = git_commands::apply_patch(workdir, &diff)
-        {
-            let _ = git_commit::reset_hard(workdir, &saved_head);
-            let _ = git::restore_branch_refs(workdir, &saved_refs);
-            return Err(e)
-                .context("Failed to apply changes to working directory, operation rolled back");
+        let todo = graph.to_todo();
+        match weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)? {
+            RebaseOutcome::Completed => {
+                transaction::delete(&git_dir)?;
+                if !diff.is_empty()
+                    && let Err(e) = git_commands::apply_patch(workdir, &diff)
+                {
+                    let _ = git_commit::reset_hard(workdir, &saved_head);
+                    let _ = git::restore_branch_refs(workdir, &saved_refs);
+                    return Err(e).context(
+                        "Failed to apply changes to working directory, operation rolled back",
+                    );
+                }
+            }
+            RebaseOutcome::Conflicted => {
+                msg::warn(
+                    "Conflicts detected — resolve them with git, then run:\n  \
+                     loom continue   to complete the fold\n  \
+                     loom abort      to cancel and restore original state",
+                );
+                return Ok(());
+            }
         }
     }
 
@@ -910,6 +1042,71 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
         "Uncommitted `{}` to working directory",
         git_commands::short_hash(commit_hash)
     ));
+
+    Ok(())
+}
+
+/// Resume a `fold` operation after a conflict has been resolved.
+pub fn after_continue(workdir: &Path, context: &serde_json::Value) -> Result<()> {
+    let variant: FoldVariant =
+        serde_json::from_value(context.clone()).context("Failed to parse fold resume context")?;
+
+    match variant {
+        FoldVariant::FilesIntoCommit {
+            original_commit_hash,
+            files_count,
+            saved_staged,
+        } => {
+            let new_hash = git_commands::rev_parse(workdir, TRACK_BRANCH)?;
+            let _ = git_branch::delete(workdir, TRACK_BRANCH);
+            restore_staged(workdir, &saved_staged)?;
+            msg::success(&format!(
+                "Folded {} file(s) into `{}` (now `{}`)",
+                files_count,
+                git_commands::short_hash(&original_commit_hash),
+                git_commands::short_hash(&new_hash)
+            ));
+        }
+        FoldVariant::CommitIntoCommit {
+            source_hash,
+            target_hash,
+        } => {
+            let new_hash = git_commands::rev_parse(workdir, TRACK_BRANCH)?;
+            let _ = git_branch::delete(workdir, TRACK_BRANCH);
+            msg::success(&format!(
+                "Folded `{}` into `{}` (now `{}`)",
+                git_commands::short_hash(&source_hash),
+                git_commands::short_hash(&target_hash),
+                git_commands::short_hash(&new_hash)
+            ));
+        }
+        FoldVariant::CommitToBranch {
+            commit_hash,
+            branch_name,
+        } => {
+            let new_hash = git_commands::rev_parse(workdir, &branch_name)?;
+            msg::success(&format!(
+                "Moved `{}` to branch `{}` (now `{}`)",
+                git_commands::short_hash(&commit_hash),
+                branch_name,
+                git_commands::short_hash(&new_hash)
+            ));
+        }
+        FoldVariant::CommitToUnstaged { commit_hash, diff } => {
+            if !diff.is_empty()
+                && let Err(e) = git_commands::apply_patch(workdir, &diff)
+            {
+                eprintln!(
+                    "Warning: could not re-apply changes to working directory: {}",
+                    e
+                );
+            }
+            msg::success(&format!(
+                "Uncommitted `{}` to working directory",
+                git_commands::short_hash(&commit_hash)
+            ));
+        }
+    }
 
     Ok(())
 }

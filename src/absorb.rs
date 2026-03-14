@@ -1,13 +1,23 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use git2::{Oid, Repository};
+use serde::{Deserialize, Serialize};
 
 use crate::git::{self, CommitInfo};
 use crate::git_commands::{self, git_commit};
 use crate::msg;
-use crate::weave::{self, Weave};
+use crate::transaction::{self, LoomState, Rollback};
+use crate::weave::{self, RebaseOutcome, Weave};
+
+#[derive(Serialize, Deserialize)]
+struct AbsorbContext {
+    skipped_patch: Option<String>,
+    num_hunks: usize,
+    num_files: usize,
+    num_commits: usize,
+}
 
 /// Per-hunk analysis result.
 enum HunkAnalysis {
@@ -33,6 +43,7 @@ enum FileAnalysis {
 pub fn run(dry_run: bool, user_files: Vec<String>) -> Result<()> {
     let repo = git::open_repo()?;
     let workdir = git::require_workdir(&repo, "absorb")?;
+    let git_dir = repo.path().to_path_buf();
     let info = git::gather_repo_info(&repo, false, 1)?;
 
     // Build in-scope commit set (non-merge commits between merge-base and HEAD)
@@ -267,15 +278,83 @@ pub fn run(dry_run: bool, user_files: Vec<String>) -> Result<()> {
         graph.fixup_commit(*fixup_oid, *target_oid)?;
     }
 
+    // Release the inline rollback closure's borrows before saving state.
+    let _ = rollback;
+
+    // Save LoomState before the rebase so we can resume on conflict.
+    let ctx = AbsorbContext {
+        skipped_patch: skipped_patch.clone(),
+        num_hunks,
+        num_files,
+        num_commits,
+    };
+    let state = LoomState {
+        command: "absorb".to_string(),
+        rollback: Rollback {
+            saved_head: saved_head.clone(),
+            saved_refs: transaction::refs_to_strings(&saved_refs),
+            saved_staged_patch: saved_staged.clone(),
+            saved_worktree_patch: saved_worktree_patch.clone(),
+            ..Default::default()
+        },
+        context: serde_json::to_value(&ctx)?,
+    };
+    transaction::save(&git_dir, &state)?;
+
     let todo = graph.to_todo();
-    if let Err(e) = weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo) {
-        rollback(true);
-        return Err(e);
+    match weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)? {
+        RebaseOutcome::Completed => {
+            transaction::delete(&git_dir)?;
+            post_absorb(
+                workdir,
+                &saved_staged,
+                skipped_patch.as_deref(),
+                num_hunks,
+                num_files,
+                num_commits,
+            )?;
+        }
+        RebaseOutcome::Conflicted => {
+            msg::warn(
+                "Conflicts detected — resolve them with git, then run:\n\
+                 `loom continue`   to complete the absorb\n\
+                 `loom abort`      to cancel and restore original state",
+            );
+        }
     }
 
-    // Restore pre-existing staged changes that were not part of the absorb.
+    Ok(())
+}
+
+/// Resume an `absorb` operation after a conflict has been resolved.
+pub fn after_continue(
+    workdir: &Path,
+    rollback: &Rollback,
+    context: &serde_json::Value,
+) -> Result<()> {
+    let ctx: AbsorbContext =
+        serde_json::from_value(context.clone()).context("Failed to parse absorb resume context")?;
+    post_absorb(
+        workdir,
+        &rollback.saved_staged_patch,
+        ctx.skipped_patch.as_deref(),
+        ctx.num_hunks,
+        ctx.num_files,
+        ctx.num_commits,
+    )
+}
+
+/// Post-rebase work: restore staged/skipped patches and print success message.
+fn post_absorb(
+    workdir: &Path,
+    saved_staged: &str,
+    skipped_patch: Option<&str>,
+    num_hunks: usize,
+    num_files: usize,
+    num_commits: usize,
+) -> Result<()> {
     if !saved_staged.is_empty()
-        && let Err(e) = git_commands::apply_cached_patch(workdir, &saved_staged)
+        && let Err(e) = git_commands::apply_cached_patch(workdir, saved_staged)
     {
         eprintln!(
             "Warning: could not restore pre-existing staged changes: {}",
@@ -283,8 +362,7 @@ pub fn run(dry_run: bool, user_files: Vec<String>) -> Result<()> {
         );
     }
 
-    // Re-apply skipped changes to the working tree
-    if let Some(ref patch) = skipped_patch
+    if let Some(patch) = skipped_patch
         && let Err(e) = git_commands::apply_patch(workdir, patch)
     {
         eprintln!("Warning: could not re-apply skipped changes: {}", e);

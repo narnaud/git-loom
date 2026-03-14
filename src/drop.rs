@@ -1,13 +1,21 @@
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use git2::Repository;
+use serde::{Deserialize, Serialize};
 
 use crate::branch::is_on_first_parent_line;
 use crate::git::{self, Target, TargetKind};
 use crate::git_commands::{self, git_branch};
 use crate::msg;
-use crate::weave::{self, Weave};
+use crate::transaction::{self, LoomState, Rollback};
+use crate::weave::{self, RebaseOutcome, Weave};
+
+#[derive(Serialize, Deserialize)]
+struct DropContext {
+    commit_hash: String,
+}
 
 /// Drop a commit, branch, or file from history or the working tree.
 ///
@@ -132,6 +140,7 @@ fn drop_all(repo: &Repository, skip_confirm: bool) -> Result<()> {
 /// to properly remove the entire branch section and merge topology.
 fn drop_commit(repo: &Repository, commit_hash: &str, skip_confirm: bool) -> Result<()> {
     let workdir = git::require_workdir(repo, "drop")?;
+    let git_dir = repo.path().to_path_buf();
 
     let commit_oid = git2::Oid::from_str(commit_hash)?;
     let info = git::gather_repo_info(repo, false, 1)?;
@@ -171,10 +180,50 @@ fn drop_commit(repo: &Repository, commit_hash: &str, skip_confirm: bool) -> Resu
     let mut graph = Weave::from_repo_with_info(repo, &info)?;
     graph.drop_commit(commit_oid);
 
-    let todo = graph.to_todo();
-    weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo)?;
+    // Save LoomState before the rebase so we can resume on conflict.
+    let saved_head = git::head_oid(repo)?.to_string();
+    let saved_refs = transaction::refs_to_strings(&git::snapshot_branch_refs(repo)?);
+    let ctx = DropContext {
+        commit_hash: commit_hash.to_string(),
+    };
+    let state = LoomState {
+        command: "drop".to_string(),
+        rollback: Rollback {
+            saved_head,
+            saved_refs,
+            ..Default::default()
+        },
+        context: serde_json::to_value(&ctx)?,
+    };
+    transaction::save(&git_dir, &state)?;
 
-    msg::success(&format!("Dropped commit `{}`", short_hash));
+    let todo = graph.to_todo();
+    match weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)? {
+        RebaseOutcome::Completed => {
+            transaction::delete(&git_dir)?;
+            msg::success(&format!("Dropped commit `{}`", short_hash));
+        }
+        RebaseOutcome::Conflicted => {
+            msg::warn(
+                "Conflicts detected — resolve them with git, then run:\n\
+                 `loom continue`   to complete the drop\n\
+                 `loom abort`      to cancel and restore original state",
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Resume a `drop commit` operation after a conflict has been resolved.
+pub fn after_continue(workdir: &Path, context: &serde_json::Value) -> Result<()> {
+    let ctx: DropContext =
+        serde_json::from_value(context.clone()).context("Failed to parse drop resume context")?;
+    let _ = workdir;
+    msg::success(&format!(
+        "Dropped commit `{}`",
+        git_commands::short_hash(&ctx.commit_hash)
+    ));
     Ok(())
 }
 
