@@ -339,7 +339,8 @@ fn main() {
         if let Ok(Some(state)) = transaction::load(&git_dir) {
             msg::error(&format!(
                 "A `loom {}` is paused due to conflicts.\n\
-                 Run `loom continue` to resume or `loom abort` to cancel.",
+                 Run `loom continue` to resume or `loom abort` to cancel.\n\
+                 If no loom operation is in progress, delete `.git/loom/state.json` to reset.",
                 state.command
             ));
             std::process::exit(1);

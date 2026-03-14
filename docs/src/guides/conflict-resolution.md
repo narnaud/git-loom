@@ -121,6 +121,21 @@ $ git add src/models.rs && git loom continue
 That's fine. Loom detects that the rebase is no longer active and skips
 straight to the post-rebase work when you run `loom continue`.
 
+## If the State File is Stale
+
+If loom blocks you with a "paused operation" error but you know no operation
+is actually in progress (e.g., after a crash or force-reset), delete the state
+file to reset:
+
+```bash
+rm .git/loom/state.json
+```
+
+> [!WARNING]
+> Only do this if you are certain no loom operation is paused. If a rebase is
+> still in progress, run `loom abort` instead — that also aborts the rebase
+> and restores your branch refs.
+
 ## See Also
 
 - [`continue`](../commands/continue.md) — reference for `loom continue`
