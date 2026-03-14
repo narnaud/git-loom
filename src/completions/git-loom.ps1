@@ -16,7 +16,10 @@ $_gitLoomCompleter = {
         @{ Name = 'update'; Description = 'Pull-rebase the integration branch' },
         @{ Name = 'push'; Description = 'Push the integration branch to the remote' },
         @{ Name = 'show'; Description = 'Show the diff and metadata for a commit' },
-        @{ Name = 'split'; Description = 'Split a commit into two sequential commits' }
+        @{ Name = 'trace'; Description = 'Trace loom operations for debugging' },
+        @{ Name = 'split'; Description = 'Split a commit into two sequential commits' },
+        @{ Name = 'continue'; Description = 'Continue a paused loom operation after resolving conflicts' },
+        @{ Name = 'abort'; Description = 'Abort a paused loom operation and restore original state' }
     )
 
     $globalFlags = @(
