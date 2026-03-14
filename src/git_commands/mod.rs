@@ -179,6 +179,16 @@ fn apply_patch_with_flags(workdir: &Path, patch: &str, flags: &[&str]) -> Result
     Ok(())
 }
 
+/// Get the staged (cached) diff for specific files.
+///
+/// Wraps `git diff --cached -- <files>`. Returns an empty string if the
+/// files have no staged changes.
+pub fn diff_cached_files(workdir: &Path, files: &[&str]) -> Result<String> {
+    let mut args = vec!["diff", "--cached", "--"];
+    args.extend(files);
+    run_git_stdout(workdir, &args)
+}
+
 /// Unstage specific files (remove from index without touching the working tree).
 ///
 /// Wraps `git reset HEAD -- <files>`.

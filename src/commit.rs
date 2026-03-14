@@ -21,8 +21,9 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
          Use `git commit` directly on feature branches",
     )?;
 
-    // Step 1: Stage files
-    resolve_staging(&repo, &workdir, &files)?;
+    // Step 1: Stage files (saving aside any pre-existing staged files not in
+    // the target list so they don't accidentally end up in this commit).
+    let saved_staged = resolve_staging(&repo, &workdir, &files)?;
 
     // Step 2: Verify index has changes
     verify_has_staged_changes(&repo)?;
@@ -33,11 +34,16 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
     // branch. This works regardless of whether local commits or woven
     // branches already exist.
     if branch.is_none() && info.branch_name == git::upstream_local_branch(&info.upstream.label) {
-        if let Some(msg) = &message {
-            git_commit::commit(&workdir, msg)?;
+        let result = if let Some(msg) = &message {
+            git_commit::commit(&workdir, msg)
         } else {
-            git_commit::commit_with_editor(&workdir)?;
+            git_commit::commit_with_editor(&workdir)
+        };
+        if let Err(e) = result {
+            let _ = restore_staged(&workdir, &saved_staged);
+            return Err(e);
         }
+        restore_staged(&workdir, &saved_staged)?;
         let new_head = git::head_oid(&repo)?;
         msg::success(&format!(
             "Created commit `{}`",
@@ -67,10 +73,14 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
         is_branch_at_merge_base(&repo, &branch_name, info.upstream.merge_base_oid)?;
 
     // Step 5: Create commit at HEAD
-    if let Some(msg) = &message {
-        git_commit::commit(&workdir, msg)?;
+    let commit_result = if let Some(msg) = &message {
+        git_commit::commit(&workdir, msg)
     } else {
-        git_commit::commit_with_editor(&workdir)?;
+        git_commit::commit_with_editor(&workdir)
+    };
+    if let Err(e) = commit_result {
+        let _ = restore_staged(&workdir, &saved_staged);
+        return Err(e);
     }
 
     // Step 6: Move commit to branch via Weave
@@ -99,8 +109,11 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
         if branch_is_new {
             let _ = git_branch::delete(&workdir, &branch_name);
         }
+        let _ = restore_staged(&workdir, &saved_staged);
         return Err(e);
     }
+
+    restore_staged(&workdir, &saved_staged)?;
 
     let new_hash = git_commands::rev_parse(&workdir, &branch_name)?;
 
@@ -115,17 +128,23 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
 
 /// Resolve staging based on file arguments.
 ///
-/// - Empty: use index as-is
-/// - Contains "zz": stage all changes
-/// - Otherwise: resolve each arg as short ID or file path, then stage
-fn resolve_staging(repo: &Repository, workdir: &std::path::Path, files: &[String]) -> Result<()> {
+/// - Empty: use index as-is; returns an empty saved patch.
+/// - Contains "zz": stage all changes; returns an empty saved patch.
+/// - Otherwise: save and unstage any pre-existing staged files NOT in the
+///   target list (so they don't leak into this commit), stage the target
+///   files, and return the saved patch for later restoration.
+fn resolve_staging(
+    repo: &Repository,
+    workdir: &std::path::Path,
+    files: &[String],
+) -> Result<String> {
     if files.is_empty() {
-        return Ok(());
+        return Ok(String::new());
     }
 
     if files.iter().any(|f| f == "zz") {
         git_commit::stage_all(workdir)?;
-        return Ok(());
+        return Ok(String::new());
     }
 
     let mut resolved_paths = Vec::new();
@@ -135,8 +154,54 @@ fn resolve_staging(repo: &Repository, workdir: &std::path::Path, files: &[String
     }
 
     let path_refs: Vec<&str> = resolved_paths.iter().map(|s| s.as_str()).collect();
+
+    // Save and unstage any pre-existing staged files not in our target list.
+    let saved_staged = save_and_unstage_other_staged(repo, workdir, &path_refs)?;
+
     git_commit::stage_files(workdir, &path_refs)?;
 
+    Ok(saved_staged)
+}
+
+/// Save the staged diff for files that are staged but NOT in `target_files`,
+/// then unstage them so they don't leak into the upcoming commit.
+///
+/// Returns the patch as a string (may be empty if nothing to save).
+fn save_and_unstage_other_staged(
+    repo: &Repository,
+    workdir: &std::path::Path,
+    target_files: &[&str],
+) -> Result<String> {
+    let staged = git::get_staged_files(repo)?;
+    let other: Vec<&str> = staged
+        .iter()
+        .filter(|f| !target_files.contains(&f.as_str()))
+        .map(|s| s.as_str())
+        .collect();
+
+    if other.is_empty() {
+        return Ok(String::new());
+    }
+
+    let patch = git_commands::diff_cached_files(workdir, &other)?;
+    git_commands::unstage_files(workdir, &other)?;
+    Ok(patch)
+}
+
+/// Re-apply a previously saved staged patch.
+///
+/// No-ops if the patch is empty. On failure, emits a warning rather than
+/// returning an error — the primary operation already succeeded.
+fn restore_staged(workdir: &std::path::Path, patch: &str) -> Result<()> {
+    if patch.is_empty() {
+        return Ok(());
+    }
+    if let Err(e) = git_commands::apply_cached_patch(workdir, patch) {
+        eprintln!(
+            "Warning: could not restore pre-existing staged changes: {}",
+            e
+        );
+    }
     Ok(())
 }
 
