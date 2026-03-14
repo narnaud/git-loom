@@ -229,6 +229,22 @@ pub fn rev_parse(workdir: &Path, reference: &str) -> Result<String> {
     Ok(out.trim().to_string())
 }
 
+/// Re-apply a previously saved staged patch, warning on failure.
+///
+/// No-ops if `patch` is empty. On failure, emits a warning to stderr — the
+/// primary operation has already succeeded, so this is best-effort.
+pub fn restore_staged_patch(workdir: &Path, patch: &str) -> Result<()> {
+    if !patch.is_empty()
+        && let Err(e) = apply_cached_patch(workdir, patch)
+    {
+        eprintln!(
+            "Warning: could not restore pre-existing staged changes: {}",
+            e
+        );
+    }
+    Ok(())
+}
+
 /// Truncate a full commit hash to a short display form (7 chars).
 pub fn short_hash(hash: &str) -> &str {
     &hash[..7.min(hash.len())]

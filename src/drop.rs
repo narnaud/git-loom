@@ -204,11 +204,7 @@ fn drop_commit(repo: &Repository, commit_hash: &str, skip_confirm: bool) -> Resu
             msg::success(&format!("Dropped commit `{}`", short_hash));
         }
         RebaseOutcome::Conflicted => {
-            msg::warn(
-                "Conflicts detected — resolve them with git, then run:\n\
-                 `loom continue`   to complete the drop\n\
-                 `loom abort`      to cancel and restore original state",
-            );
+            transaction::warn_conflict_paused("drop");
         }
     }
 
@@ -216,10 +212,9 @@ fn drop_commit(repo: &Repository, commit_hash: &str, skip_confirm: bool) -> Resu
 }
 
 /// Resume a `drop commit` operation after a conflict has been resolved.
-pub fn after_continue(workdir: &Path, context: &serde_json::Value) -> Result<()> {
+pub fn after_continue(_workdir: &Path, context: &serde_json::Value) -> Result<()> {
     let ctx: DropContext =
         serde_json::from_value(context.clone()).context("Failed to parse drop resume context")?;
-    let _ = workdir;
     msg::success(&format!(
         "Dropped commit `{}`",
         git_commands::short_hash(&ctx.commit_hash)

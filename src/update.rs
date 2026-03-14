@@ -94,11 +94,7 @@ pub fn run(skip_confirm: bool) -> Result<()> {
         }
         Ok(RebaseOutcome::Conflicted) => {
             spinner.error("Rebase paused due to conflicts");
-            msg::warn(
-                "Conflicts detected — resolve them with git, then run:\n\
-                 `loom continue`   to complete the update\n\
-                 `loom abort`      to cancel and restore original state",
-            );
+            transaction::warn_conflict_paused("update");
         }
         Err(e) => {
             let _ = git_rebase::abort(&workdir);
