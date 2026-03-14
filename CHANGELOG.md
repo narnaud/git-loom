@@ -1,5 +1,69 @@
 # Changelog
 
+## [0.15.0](https://github.com/narnaud/git-loom/compare/v0.14.0...v0.15.0) (2026-03-14)
+
+
+### Features ✨
+
+* **absorb:** absorb chunks instead of full files ([bdb27e3](https://github.com/narnaud/git-loom/commit/bdb27e3648370fa5a5ce6412e8b7b58c3c2a4707)), closes [#48](https://github.com/narnaud/git-loom/issues/48)
+* add centralized resolve_arg() and migrate all callers ([df8b365](https://github.com/narnaud/git-loom/commit/df8b3654960f13fcd86226eaf3aced08b62de017))
+* **branch:** add subcommands (new, merge, unmerge) ([1b1f8f6](https://github.com/narnaud/git-loom/commit/1b1f8f6a186719bc15686b3970f6c54342a43b43))
+* **fold:** allow folding staged files with single-arg `loom fold <target>` ([16997ef](https://github.com/narnaud/git-loom/commit/16997ef187cabbbe988e7a2a75ba76640ab567b7))
+
+
+### Bug Fixes 🐞
+
+* **commit,fold,absorb:** isolate staged files when explicit paths are given ([043a2f8](https://github.com/narnaud/git-loom/commit/043a2f8a677deecc635cd7b7e1e70e12d610cb6e))
+* **commit:** accept staged renames and typechanges as valid changes ([02d9fad](https://github.com/narnaud/git-loom/commit/02d9fad1380375558a3d31c99d15886eb06cc9d6))
+* **commit:** only delete newly-created branches on rollback ([056d220](https://github.com/narnaud/git-loom/commit/056d2200f9427e20bd0ee54ab66c37a325faefdc))
+* **drop:** skip unnecessary rebase for non-woven co-located branch drop ([ddec730](https://github.com/narnaud/git-loom/commit/ddec7308c57826b2059e1caad02001730d563386))
+* **drop:** support filenames, paths, and directories as targets ([d7aff5f](https://github.com/narnaud/git-loom/commit/d7aff5f402d5f34d53de006d2249f2567a2e3a5c))
+* **fold:** reject moving commits to out-of-scope branches ([a96a90b](https://github.com/narnaud/git-loom/commit/a96a90b081799e64c5e4964443680f6102f7b860))
+* **fold:** restore branch refs in non-HEAD uncommit rollback paths ([54f3b9d](https://github.com/narnaud/git-loom/commit/54f3b9d370a62505611b385e7c23ba9f73d13c1f))
+* **git:** fix index status precedence in get_working_changes ([07b476e](https://github.com/narnaud/git-loom/commit/07b476ed4b5c4e0cacfbd4ff6aaf35c0bc0c5391))
+* **git:** warn on partial failures in restore_branch_refs ([5da62cb](https://github.com/narnaud/git-loom/commit/5da62cb2896fc064173c5173c10b6a741e58e2df))
+* **main:** correct stale comment about logging exclusions ([757ff80](https://github.com/narnaud/git-loom/commit/757ff809afc4e02f47be7c30625dcea679ec07af))
+* **push:** show 'Pushed' success message before PR operations ([4d10e8a](https://github.com/narnaud/git-loom/commit/4d10e8adc8b1a170d4b71076022fbaf156f6ca19))
+* **push:** skip PR creation when pushing upstream target branch ([d388c6e](https://github.com/narnaud/git-loom/commit/d388c6eb5c09209c13f4d9f97462f8702a3216c9))
+* **push:** use bare branch name for existing PR detection ([810c18b](https://github.com/narnaud/git-loom/commit/810c18b92183ddf25584557b7a5dcd112292dc3d))
+* **push:** use commondir for Gerrit hook detection in worktrees ([82fb865](https://github.com/narnaud/git-loom/commit/82fb8652f2525fd8fb68eb3637d7acc48ffa3c01))
+* **push:** use msg::warn for CLI install advisory messages ([72db4c1](https://github.com/narnaud/git-loom/commit/72db4c1956296a8fc2a11802afe292e51f7067df))
+* **push:** warn on unrecognized loom.remote-type config value ([112b36f](https://github.com/narnaud/git-loom/commit/112b36f1674bf4314a0e8f4e014f811c4f5f2d8b))
+* **push:** warn when gh pr create fails instead of silent success ([00e50b3](https://github.com/narnaud/git-loom/commit/00e50b3b98080221b90fef3a15a701e899bbd434))
+* **trace:** use repo.path() for log directory, fixing linked worktrees ([acf0171](https://github.com/narnaud/git-loom/commit/acf017180e3bcf2aeddab481b55fc086e0f4dd61))
+* **unmerge:** replace dead .with_context() with .expect() ([ebdcc9e](https://github.com/narnaud/git-loom/commit/ebdcc9e84d84655176728f3a43a94e0f3ceda6a2))
+* **update:** use safe delete for gone-upstream branch cleanup ([54e1c2f](https://github.com/narnaud/git-loom/commit/54e1c2f942cf762354f3dc8e369157546ecf66c9))
+* **weave:** make move_commit and fixup_commit return Result, validate before removing ([650a69c](https://github.com/narnaud/git-loom/commit/650a69cfbe0eb55c578528c20570d5970ab5ff1f))
+* **weave:** preserve co-located update_refs when dropping stacked branch ([882a901](https://github.com/narnaud/git-loom/commit/882a901c369e844a3670388baf6ae54a451245d6))
+* **weave:** transfer update_refs when dropping commits ([ba115d6](https://github.com/narnaud/git-loom/commit/ba115d6a2ed5825fc835d1b1c72051f025fd3c36))
+
+
+### Documentation
+
+* add a favicon to the documentation ([9112225](https://github.com/narnaud/git-loom/commit/911222531496bc0ad5eac0d10ed380de0f33a41b))
+* add git-loom banner ([e585a00](https://github.com/narnaud/git-loom/commit/e585a00698e992da00333bdc82174802dd3284a7))
+* **branch:** clarify hideBranchPattern uses prefix matching, not glob ([03770fb](https://github.com/narnaud/git-loom/commit/03770fbd3720fc62bf8239a41a1f6866cd6bf714))
+* change tagline for a more specific one ([e50c2f6](https://github.com/narnaud/git-loom/commit/e50c2f62af060178e5ab306dd9068d98ee7793ac))
+* restructure and add colors for the help ([c05acc6](https://github.com/narnaud/git-loom/commit/c05acc649d46ad82cbdf8f1c68873912d69b8543))
+* rewrote branch documentation to handle branch subcommands ([606b431](https://github.com/narnaud/git-loom/commit/606b431513f3ad6292b1231f74927c0d143484c8))
+* **update:** document intentional auto-abort on rebase conflict ([022002d](https://github.com/narnaud/git-loom/commit/022002d575bf1fd6b67c22166e2faecd580d90f1))
+* use a screenshot instead of a screencast (annoying) ([e66b626](https://github.com/narnaud/git-loom/commit/e66b626b00bad12e06fb77b89fda3f2f59940a1a))
+
+
+### Tests
+
+* **branch:** add merge + unmerge round-trip test ([71ef336](https://github.com/narnaud/git-loom/commit/71ef336ab6388d3b91073a4e0c8afabb87706849))
+* **push:** add unit tests for extract_gh_repo URL parsing ([d64ca79](https://github.com/narnaud/git-loom/commit/d64ca796c0374661d4e4de145cf8003cf5325252))
+* **weave:** add unit tests for weave_branch ([bf9f549](https://github.com/narnaud/git-loom/commit/bf9f54998ba45ee21026ab5dea80d0c52d256b3d))
+
+
+### Other
+
+* adapt image for github and mdbook ([482ed48](https://github.com/narnaud/git-loom/commit/482ed482c46ae1442d94ce4b4f6cd0d28615c045))
+* **deps:** bump tempfile from 3.26.0 to 3.27.0 ([282036f](https://github.com/narnaud/git-loom/commit/282036f40ac9c02fb4e4bbdef83c4e1ffc76206e))
+* simplify README, link to documentation ([f74fd32](https://github.com/narnaud/git-loom/commit/f74fd32d06bab6ce99b6d120b8e25207d8ffd520))
+* update completions scripts ([17f2fc4](https://github.com/narnaud/git-loom/commit/17f2fc4c18689ee22db8ad53ebf42048933e4ea4))
+
 ## [0.14.0](https://github.com/narnaud/git-loom/compare/v0.13.0...v0.14.0) (2026-03-10)
 
 
