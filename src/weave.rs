@@ -871,7 +871,7 @@ pub fn start_edit_rebase(repo: &Repository, workdir: &Path, commit_oid: Oid) -> 
     if let Ok(mut graph) = Weave::from_repo(repo) {
         graph.edit_commit(commit_oid);
         let todo = graph.to_todo();
-        return run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo);
+        return run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo);
     }
 
     // Fallback: build a minimal linear todo for non-integration repos
@@ -934,7 +934,28 @@ fn build_and_run_linear_edit(repo: &Repository, workdir: &Path, commit_oid: Oid)
         todo.push('\n');
     }
 
-    run_rebase(workdir, upstream.as_deref(), &todo)
+    run_rebase_or_abort(workdir, upstream.as_deref(), &todo)
+}
+
+/// Outcome of a weave-based rebase.
+pub use crate::git_commands::git_rebase::RebaseOutcome;
+
+/// Execute a weave-based rebase, aborting automatically on conflict.
+///
+/// This is the legacy wrapper for out-of-scope callers (`reword`, `split`,
+/// and excluded `fold` paths). Use `run_rebase` directly for resumable commands.
+pub fn run_rebase_or_abort(
+    workdir: &Path,
+    upstream: Option<&str>,
+    todo_content: &str,
+) -> Result<()> {
+    match run_rebase(workdir, upstream, todo_content)? {
+        RebaseOutcome::Completed => Ok(()),
+        RebaseOutcome::Conflicted => {
+            let _ = git_commands::git_rebase::abort(workdir);
+            bail!("Rebase failed with conflicts — aborted");
+        }
+    }
 }
 
 /// Execute a weave-based rebase.
@@ -946,7 +967,14 @@ fn build_and_run_linear_edit(repo: &Repository, workdir: &Path, commit_oid: Oid)
 /// this OID (exclusive) up to HEAD are rebased. This is passed directly as the
 /// `<upstream>` argument to `git rebase`, NOT with a `^` suffix. For root
 /// commits, pass `None` to use `--root`.
-pub fn run_rebase(workdir: &Path, upstream: Option<&str>, todo_content: &str) -> Result<()> {
+///
+/// Returns `RebaseOutcome::Completed` on success, `RebaseOutcome::Conflicted`
+/// if the rebase stopped due to a conflict. Does NOT abort on conflict.
+pub fn run_rebase(
+    workdir: &Path,
+    upstream: Option<&str>,
+    todo_content: &str,
+) -> Result<RebaseOutcome> {
     use std::io::Write;
     use std::process::Command;
     use std::time::Instant;
@@ -1031,14 +1059,16 @@ pub fn run_rebase(workdir: &Path, upstream: Option<&str>, todo_content: &str) ->
     loom_trace::annotate("generated todo", todo_content);
 
     if !output.status.success() {
-        let _ = git_commands::git_rebase::abort(workdir);
-        bail!("Rebase failed with conflicts — aborted");
+        // Clean up the temp file — don't abort the rebase here; callers
+        // decide whether to abort (out-of-scope) or pause (resumable).
+        let _ = temp_path.close();
+        return Ok(RebaseOutcome::Conflicted);
     }
 
     // Clean up the temp file
     let _ = temp_path.close();
 
-    Ok(())
+    Ok(RebaseOutcome::Completed)
 }
 
 #[cfg(test)]
