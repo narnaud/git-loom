@@ -23,9 +23,9 @@ fi
 
 # ── Colors ────────────────────────────────────────────────────────────────
 if [[ -t 1 ]]; then
-    RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; NC='\033[0m'
 else
-    RED=''; GREEN=''; NC=''
+    RED=''; GREEN=''; YELLOW=''; NC=''
 fi
 
 # ── Global state (set by setup helpers, cleaned up by trap in test) ───────
@@ -74,6 +74,15 @@ commit_file() {
     echo "$msg" > "$WORK/$file"
     git -C "$WORK" add "$file"
     git -C "$WORK" commit -q -m "$msg"
+}
+
+# Commit a single file in an arbitrary git repo (not necessarily $WORK).
+# Usage: commit_file_in REPO "commit message" "filename.txt"
+commit_file_in() {
+    local repo="$1" msg="$2" file="$3"
+    echo "$msg" > "$repo/$file"
+    git -C "$repo" add "$file"
+    git -C "$repo" commit -q -m "$msg"
 }
 
 # Create a feature branch at the current remote base (no commits on it yet).
@@ -211,7 +220,9 @@ assert_head_parent_count() {
         || fail "${label:+[$label] }expected $expected parent(s), got $actual"
 }
 
-# ── Pass / fail ───────────────────────────────────────────────────────────
+# ── Pass / fail / describe ────────────────────────────────────────────────
+
+describe() { printf " ${YELLOW}=>${NC} %s\n" "$*"; }
 
 pass() {
     printf "${GREEN}[OK]${NC}  %s\n" "$(basename "$0" .sh)"
