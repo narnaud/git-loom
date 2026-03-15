@@ -11,9 +11,9 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Colors
 if [[ -t 1 ]]; then
-    RED='\033[0;31m'; GREEN='\033[0;32m'; BOLD='\033[1m'; NC='\033[0m'
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BOLD='\033[1m'; NC='\033[0m'
 else
-    RED=''; GREEN=''; BOLD=''; NC=''
+    RED=''; GREEN=''; YELLOW=''; BOLD=''; NC=''
 fi
 
 passed=0
@@ -22,7 +22,7 @@ failed_names=()
 
 for test_script in "$DIR"/test_*.sh; do
     name="$(basename "$test_script" .sh)"
-    printf "${BOLD}── %s ${NC}\n" "$name"
+    printf "${YELLOW}${BOLD}── %s ${NC}\n" "$name"
     if bash "$test_script"; then
         ((passed++)) || true
     else
