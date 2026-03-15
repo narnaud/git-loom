@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/narnaud/git-loom/compare/v0.15.0...v0.15.1) (2026-03-15)
+
+
+### Bug Fixes 🐞
+
+* **fold:** fix folding on branch, add an integration test ([7f6c514](https://github.com/narnaud/git-loom/commit/7f6c5145dd963487368e54428dba9135902adb42))
+
 ## [0.15.0](https://github.com/narnaud/git-loom/compare/v0.14.0...v0.15.0) (2026-03-14)
 
 
