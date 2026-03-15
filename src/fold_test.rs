@@ -328,6 +328,46 @@ fn fold_commit_to_branch() {
 }
 
 #[test]
+fn fold_commit_to_branch_via_short_ids() {
+    // Regression: `run()` was missing TargetKind::Branch when resolving the
+    // target, so `fold <commit-sid> <branch-sid>` would fail with
+    // "'xx' did not resolve to a commit or commit file or file or unstaged changes".
+    let test_repo = TestRepo::new_with_remote();
+
+    test_repo.commit("A1", "a1.txt");
+    let a1_oid = test_repo.head_oid();
+    test_repo.create_branch_at("feature-a", &a1_oid.to_string());
+
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+    test_repo.commit("B1", "b1.txt");
+    test_repo.rebase_onto(&base_oid.to_string(), &a1_oid.to_string());
+    test_repo.merge_no_ff("feature-a");
+
+    test_repo.commit("C1", "c1.txt");
+    let c1_oid = test_repo.head_oid();
+
+    // Get short IDs for the commit and branch
+    let (commit_sid, branch_sid) = test_repo.in_dir(|| {
+        let info = crate::git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
+        let alloc = crate::shortid::IdAllocator::new(info.collect_entities());
+        (
+            alloc.get_commit(c1_oid).to_string(),
+            alloc.get_branch("feature-a").to_string(),
+        )
+    });
+
+    let result =
+        test_repo.in_dir(|| super::run(false, vec![commit_sid.clone(), branch_sid.clone()]));
+
+    assert!(result.is_ok(), "fold via short IDs failed: {:?}", result);
+    assert_eq!(
+        test_repo.branch_commit_summary("feature-a"),
+        "C1",
+        "C1 should now be at the tip of feature-a"
+    );
+}
+
+#[test]
 fn fold_commit_to_branch_dirty_autostashed() {
     // Set up an integration branch with a woven feature branch and a loose commit
     let test_repo = TestRepo::new_with_remote();

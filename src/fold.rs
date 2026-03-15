@@ -73,6 +73,7 @@ pub fn run(create: bool, args: Vec<String>) -> Result<()> {
         &repo,
         target_arg,
         &[
+            TargetKind::Branch,
             TargetKind::Commit,
             TargetKind::CommitFile,
             TargetKind::File,
