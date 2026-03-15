@@ -32,3 +32,5 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo build --locked
       - run: cargo test
+      - if: runner.os == 'Linux'
+        run: bash test-integration.sh
