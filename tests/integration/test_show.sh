@@ -115,8 +115,7 @@ switch_to g-sid-show
 commit_file "Short ID show commit" "sid-show.txt"
 switch_to integration
 weave_branch "g-sid-show"
-status_out=$(gl status)
-commit_sid=$(grep 'Short ID show commit' <<< "$status_out" | grep -oE '[0-9a-z]{4,8}' | head -1)
+commit_sid=$(commit_sid_from_status 'Short ID show commit')
 out=$(gl show "$commit_sid")
 assert_exit_ok $? "show_commit_sid_ok"
 assert_contains "$out" "Short ID show commit" "show_commit_sid_msg"
@@ -129,8 +128,7 @@ switch_to g-branch-sid
 commit_file "Branch SID tip" "branch-sid.txt"
 switch_to integration
 weave_branch "g-branch-sid"
-status_out=$(gl status)
-branch_sid=$(grep -F '[g-branch-sid]' <<< "$status_out" | awk '{print $(NF-1)}')
+branch_sid=$(branch_sid_from_status 'g-branch-sid')
 out=$(gl show "$branch_sid")
 assert_exit_ok $? "show_branch_sid_ok"
 assert_contains "$out" "Branch SID tip" "show_branch_sid_msg"
@@ -144,8 +142,7 @@ commit_file "Equiv show commit" "equiv-show.txt"
 switch_to integration
 weave_branch "g-equiv-show"
 full_hash=$(git -C "$WORK" log --pretty=%H --all -- equiv-show.txt | head -1)
-status_out=$(gl status)
-commit_sid=$(grep 'Equiv show commit' <<< "$status_out" | grep -oE '[0-9a-z]{4,8}' | head -1)
+commit_sid=$(commit_sid_from_status 'Equiv show commit')
 out_full=$(gl show "$full_hash")
 out_sid=$(gl show "$commit_sid")
 assert_exit_ok $? "show_equiv_sid_ok"

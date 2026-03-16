@@ -102,9 +102,7 @@ switch_to g-shortid-feat
 commit_file "Short ID target commit" "shortid.txt"
 switch_to integration
 weave_branch "g-shortid-feat"
-# Capture commit short ID from status output (hex prefix before commit message)
-status_out=$(gl status)
-commit_sid=$(grep 'Short ID target commit' <<< "$status_out" | grep -oE '[0-9a-f]{4,8}' | head -1)
+commit_sid=$(commit_sid_from_status 'Short ID target commit')
 out=$(gl reword "$commit_sid" --message "Reworded via short ID")
 assert_exit_ok $? "reword_commit_sid_ok"
 assert_log_contains "Reworded via short ID" "reword_commit_sid_msg"
@@ -118,9 +116,7 @@ commit_file "Equiv lower" "equiv-lower.txt"
 commit_file "Equiv upper" "equiv-upper.txt"
 switch_to integration
 weave_branch "g-equiv-feat"
-# Get short ID for the lower commit
-status_out=$(gl status)
-lower_sid=$(grep 'Equiv lower' <<< "$status_out" | grep -oE '[0-9a-f]{4,8}' | head -1)
+lower_sid=$(commit_sid_from_status 'Equiv lower')
 # Also get its full hash for the equivalence test
 lower_full=$(git -C "$WORK" log --pretty=%H --all -- equiv-lower.txt | head -1)
 # Reword by full hash first, then assert same result works via short ID approach
@@ -177,9 +173,7 @@ switch_to g-sid-rename
 commit_file "SID rename commit" "sr.txt"
 switch_to integration
 weave_branch "g-sid-rename"
-# Capture branch short ID from status output (token before [g-sid-rename])
-status_out=$(gl status)
-branch_sid=$(grep -F '[g-sid-rename]' <<< "$status_out" | awk '{print $(NF-1)}')
+branch_sid=$(branch_sid_from_status 'g-sid-rename')
 out=$(gl reword "$branch_sid" --message "h-sid-renamed")
 assert_exit_ok $? "reword_branch_sid_ok"
 assert_branch_exists     "h-sid-renamed" "reword_branch_sid_new_exists"
@@ -192,8 +186,7 @@ switch_to g-fullname-sid
 commit_file "Fullname SID commit" "fs.txt"
 switch_to integration
 weave_branch "g-fullname-sid"
-status_out=$(gl status)
-branch_sid=$(grep -F '[g-fullname-sid]' <<< "$status_out" | awk '{print $(NF-1)}')
+branch_sid=$(branch_sid_from_status 'g-fullname-sid')
 # Rename via short ID
 out=$(gl reword "$branch_sid" --message "h-renamed-via-sid")
 assert_exit_ok $? "reword_fullname_sid_equiv_ok"
