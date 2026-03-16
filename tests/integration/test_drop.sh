@@ -105,8 +105,7 @@ commit_file "SID drop target" "sid-drop.txt"
 commit_file "SID keep above"  "sid-keep.txt"
 switch_to integration
 weave_branch "g-sid-drop"
-status_out=$(gl status)
-commit_sid=$(grep 'SID drop target' <<< "$status_out" | grep -oE '[0-9a-z]{4,8}' | head -1)
+commit_sid=$(commit_sid_from_status 'SID drop target')
 full_hash=$(git -C "$WORK" log --pretty=%H --all -- sid-drop.txt | head -1)
 out=$(gl drop "$commit_sid" --yes)
 assert_exit_ok $? "drop_commit_sid_ok"
@@ -138,8 +137,7 @@ switch_to g-solo-sid
 commit_file "Solo SID commit" "solo-sid.txt"
 switch_to integration
 weave_branch "g-solo-sid"
-status_out=$(gl status)
-commit_sid=$(grep 'Solo SID commit' <<< "$status_out" | grep -oE '[0-9a-z]{4,8}' | head -1)
+commit_sid=$(commit_sid_from_status 'Solo SID commit')
 full_hash=$(git -C "$WORK" log --pretty=%H --all -- solo-sid.txt | head -1)
 out=$(gl drop "$commit_sid" --yes)
 assert_exit_ok $? "drop_solo_sid_ok"
@@ -197,8 +195,7 @@ switch_to g-woven-sid
 commit_file "Woven SID commit" "wsid.txt"
 switch_to integration
 weave_branch "g-woven-sid"
-status_out=$(gl status)
-branch_sid=$(grep -F '[g-woven-sid]' <<< "$status_out" | awk '{print $(NF-1)}')
+branch_sid=$(branch_sid_from_status 'g-woven-sid')
 out=$(gl drop "$branch_sid" --yes)
 assert_exit_ok $? "drop_woven_sid_ok"
 assert_branch_not_exists "g-woven-sid"     "drop_woven_sid_ref_gone"

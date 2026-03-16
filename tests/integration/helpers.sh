@@ -130,6 +130,14 @@ branch_oid()        { git -C "$WORK" rev-parse "$1"; }
 log_oneline()       { git -C "$WORK" log --oneline; }
 head_parent_count() { git -C "$WORK" log -1 --pretty=%P | wc -w | tr -d ' '; }
 
+# Return the short ID for a commit, given its message as shown in gl status.
+# Usage: commit_sid=$(commit_sid_from_status "Commit message")
+commit_sid_from_status() { gl status | grep "$1" | grep -oE '[0-9a-z]{4,8}' | head -1; }
+
+# Return the short ID for a branch, given its name as shown in gl status.
+# Usage: branch_sid=$(branch_sid_from_status "branch-name")
+branch_sid_from_status() { gl status | grep -F "[$1]" | awk '{print $(NF-1)}'; }
+
 # ── Assertions ────────────────────────────────────────────────────────────
 
 assert_contains() {
