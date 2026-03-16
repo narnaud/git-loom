@@ -142,13 +142,13 @@ branch_sid_from_status() { gl status | grep -F "[$1]" | awk '{print $(NF-1)}'; }
 
 assert_contains() {
     local output="$1" needle="$2" label="${3:-}"
-    grep -qF "$needle" <<< "$output" \
+    grep -qF -- "$needle" <<< "$output" \
         || fail "${label:+[$label] }expected output to contain '$needle'"
 }
 
 assert_not_contains() {
     local output="$1" needle="$2" label="${3:-}"
-    ! grep -qF "$needle" <<< "$output" \
+    ! grep -qF -- "$needle" <<< "$output" \
         || fail "${label:+[$label] }expected output NOT to contain '$needle'"
 }
 
