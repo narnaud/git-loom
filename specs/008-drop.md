@@ -91,8 +91,9 @@ topology, and the branch ref is deleted. All of this happens in a single
 atomic operation.
 
 The branch must be in the integration range (between merge-base and HEAD).
-Branches outside this range are rejected with: `"Branch '<name>' is not in
-the integration range. Use 'git branch -d <name>' to delete it directly."`
+Branches outside this range are rejected with: `"Branch '<name>' is not woven
+into the integration branch"` and a hint to use `git branch -d <name>` to
+delete it directly.
 
 #### Non-woven branch (on the first-parent line)
 
