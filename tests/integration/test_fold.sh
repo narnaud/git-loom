@@ -581,4 +581,43 @@ assert_exit_ok $? "create_full_hash_ok"
 assert_branch_exists "h-from-hash" "create_full_hash_branch_exists"
 assert_contains "$(git -C "$WORK" log h-from-hash --oneline)" "Create from hash" "create_full_hash_on_branch"
 
+# ══════════════════════════════════════════════════════════════════════════════
+# CONTINUE / ABORT
+# ══════════════════════════════════════════════════════════════════════════════
+# Shared conflict setup: C1 changes A→B, C2 changes B→C.
+# Uncommitting C1 (fold zz) drops it from history, forcing C2 to cherry-pick
+# onto A → 3-way merge conflict.
+
+describe "fold uncommit: conflict → continue → commit removed from history"
+setup_repo_with_remote
+printf "A\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "Base"
+printf "B\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "C1"
+printf "C\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "C2"
+c1_hash=$(git -C "$WORK" rev-parse HEAD~1)
+gl_capture fold "$c1_hash" zz
+assert_state_file   "fold_cont_state"
+assert_contains "$OUT" "loom continue" "fold_cont_hint"
+printf "resolved\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt
+gl_capture continue
+assert_exit_ok  "$CODE" "fold_cont_ok"
+assert_no_state_file   "fold_cont_state_removed"
+assert_contains "$OUT" "Uncommitted" "fold_cont_msg"
+assert_log_not_contains "C1" "fold_cont_c1_gone"
+
+describe "fold uncommit: conflict → abort → original state restored"
+setup_repo_with_remote
+printf "A\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "Base"
+printf "B\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "C1"
+printf "C\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "C2"
+c1_hash=$(git -C "$WORK" rev-parse HEAD~1)
+old_head=$(head_hash)
+gl_capture fold "$c1_hash" zz
+assert_state_file "fold_abort_state"
+gl_capture abort
+assert_exit_ok  "$CODE" "fold_abort_ok"
+assert_contains "$OUT" "Aborted" "fold_abort_msg"
+assert_no_state_file   "fold_abort_state_removed"
+assert_eq "$old_head" "$(head_hash)" "fold_abort_head_restored"
+assert_log_contains "C1" "fold_abort_c1_preserved"
+
 pass

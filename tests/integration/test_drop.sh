@@ -396,4 +396,42 @@ assert_exit_ok $? "drop_branch_wt_ok"
 git -C "$WORK" diff --cached --name-only | grep -qF "wt-staged-branch.txt" \
     || fail "[drop_branch_wt_restored] staged file not in index after branch drop"
 
+# ══════════════════════════════════════════════════════════════════════════════
+# CONTINUE / ABORT
+# ══════════════════════════════════════════════════════════════════════════════
+# Shared conflict setup: C1 changes A→B, C2 changes B→C.
+# Dropping C1 forces C2 to cherry-pick onto A → 3-way merge conflict.
+
+describe "drop commit: conflict → continue → commit dropped"
+setup_repo_with_remote
+printf "A\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "Base"
+printf "B\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "C1"
+printf "C\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "C2"
+c1_hash=$(git -C "$WORK" rev-parse HEAD~1)
+gl_capture drop "$c1_hash" --yes
+assert_state_file   "drop_cont_state"
+assert_contains "$OUT" "loom continue" "drop_cont_hint"
+printf "resolved\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt
+gl_capture continue
+assert_exit_ok  "$CODE" "drop_cont_ok"
+assert_no_state_file   "drop_cont_state_removed"
+assert_contains "$OUT" "Dropped commit" "drop_cont_msg"
+assert_log_not_contains "C1" "drop_cont_c1_gone"
+
+describe "drop commit: conflict → abort → original state restored"
+setup_repo_with_remote
+printf "A\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "Base"
+printf "B\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "C1"
+printf "C\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "C2"
+c1_hash=$(git -C "$WORK" rev-parse HEAD~1)
+old_head=$(head_hash)
+gl_capture drop "$c1_hash" --yes
+assert_state_file "drop_abort_state"
+gl_capture abort
+assert_exit_ok  "$CODE" "drop_abort_ok"
+assert_contains "$OUT" "Aborted" "drop_abort_msg"
+assert_no_state_file   "drop_abort_state_removed"
+assert_eq "$old_head" "$(head_hash)" "drop_abort_head_restored"
+assert_log_contains "C1" "drop_abort_c1_preserved"
+
 pass
