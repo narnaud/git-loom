@@ -60,6 +60,9 @@ The `specs/` directory contains detailed design documents that describe each fea
 | `specs/010-update.md` | Pull-rebase integration branch and update submodules |
 | `specs/011-push.md` | Push a feature branch to remote (plain, GitHub, Gerrit) |
 | `specs/012-absorb.md` | Absorb: auto-distribute changes into originating commits |
+| `specs/013-split.md` | Split a commit into two or more commits |
+| `specs/014-continue-abort.md` | Continue or abort a paused loom operation |
+| `specs/015-swap.md` | Swap two commits or two branch sections |
 
 ## Build & Run Commands
 
