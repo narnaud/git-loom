@@ -15,6 +15,7 @@ mod shortid;
 mod show;
 mod split;
 mod status;
+mod swap;
 mod trace;
 mod transaction;
 mod update;
@@ -58,6 +59,7 @@ const GROUPED_COMMANDS: &str = "\
   \x1b[32mfold\x1b[0m              Amend, fixup, or move commits [\x1b[32mamend\x1b[0m, \x1b[32mam\x1b[0m, \x1b[32mfixup\x1b[0m, \x1b[32mmv\x1b[0m, \x1b[32mrub\x1b[0m]
   \x1b[32mabsorb\x1b[0m            Auto-distribute changes into originating commits
   \x1b[32msplit\x1b[0m             Split a commit into two
+  \x1b[32mswap\x1b[0m              Swap two commits or two branches
   \x1b[32mreword\x1b[0m, \x1b[32mrw\x1b[0m        Reword a commit message or rename a branch
   \x1b[32mdrop\x1b[0m, \x1b[32mrm\x1b[0m          Drop a change, commit, or branch
 
@@ -179,6 +181,13 @@ enum Command {
         /// New message or branch name (if not provided, opens editor for commits)
         #[arg(short, long)]
         message: Option<String>,
+    },
+    /// Swap two commits (within the same sequence) or two branch sections
+    Swap {
+        /// First commit hash/short ID or branch name
+        a: String,
+        /// Second commit hash/short ID or branch name
+        b: String,
     },
     /// Drop a local change, a commit, or a branch from history
     #[command(visible_alias = "rm")]
@@ -369,6 +378,7 @@ fn main() {
             message,
             files,
         }) => commit::run(branch, message, files),
+        Some(Command::Swap { a, b }) => swap::run(a, b),
         Some(Command::Drop { target, yes }) => drop::run(target, yes),
         Some(Command::Absorb { dry_run, files }) => absorb::run(dry_run, files),
         Some(Command::Show { target }) => show::run(target),
