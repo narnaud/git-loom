@@ -907,34 +907,17 @@ fn weave_branch_moves_picks_into_section() {
     assert_eq!(graph.branch_sections[0].label, "feature-x");
     assert_eq!(graph.branch_sections[0].commits.len(), 2);
 
-    // C3 should remain on the integration line as a Pick
-    let picks: Vec<&CommitEntry> = graph
-        .integration_line
-        .iter()
-        .filter_map(|e| {
-            if let IntegrationEntry::Pick(c) = e {
-                Some(c)
-            } else {
-                None
-            }
-        })
-        .collect();
-    assert_eq!(picks.len(), 1);
-    assert_eq!(picks[0].message, "C3");
-
-    // A merge entry for feature-x should exist
-    let merges: Vec<&String> = graph
-        .integration_line
-        .iter()
-        .filter_map(|e| {
-            if let IntegrationEntry::Merge { label, .. } = e {
-                Some(label)
-            } else {
-                None
-            }
-        })
-        .collect();
-    assert!(merges.contains(&&"feature-x".to_string()));
+    // The integration line should be [Merge(feature-x), Pick(C3)]:
+    // merge comes first so loose commits sit on top of it.
+    assert_eq!(graph.integration_line.len(), 2);
+    assert!(
+        matches!(&graph.integration_line[0], IntegrationEntry::Merge { label, .. } if label == "feature-x"),
+        "expected Merge(feature-x) at position 0"
+    );
+    assert!(
+        matches!(&graph.integration_line[1], IntegrationEntry::Pick(c) if c.message == "C3"),
+        "expected Pick(C3) at position 1"
+    );
 }
 
 // ── swap_commits unit tests ──────────────────────────────────────────────

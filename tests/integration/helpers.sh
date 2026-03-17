@@ -128,7 +128,8 @@ msg_at()            { git -C "$WORK" log -1 --skip="$1" --pretty=%s; }  # 0=HEAD
 upstream_oid()      { git -C "$WORK" rev-parse "$(git -C "$WORK" rev-parse --abbrev-ref --symbolic-full-name @{u})"; }
 branch_oid()        { git -C "$WORK" rev-parse "$1"; }
 log_oneline()       { git -C "$WORK" log --oneline; }
-head_parent_count() { git -C "$WORK" log -1 --pretty=%P | wc -w | tr -d ' '; }
+head_parent_count()      { git -C "$WORK" log -1         --pretty=%P | wc -w | tr -d ' '; }
+parent_count_at()        { git -C "$WORK" log -1 "$1"   --pretty=%P | wc -w | tr -d ' '; }
 
 # Return the short ID for a commit, given its message as shown in gl status.
 # Usage: commit_sid=$(commit_sid_from_status "Commit message")

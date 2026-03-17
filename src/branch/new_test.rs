@@ -97,9 +97,11 @@ fn run_default_target_is_merge_base() {
 fn branch_weave_creates_merge_topology() {
     // origin/main -> A1 -> A2 -> A3 (HEAD)
     // Branch at A2 should produce:
-    //   origin/main -> A1 -> A2 (feature-a)
-    //              \              \
-    //               A3' ---------> merge (HEAD)
+    //   origin/main -> A2 (feature-a) -> merge -> A3' (HEAD)
+    //              \                    /
+    //               --------------------
+    // The merge commit sits below the loose A3' commit so that loose commits
+    // build on top of the woven branch.
     let test_repo = TestRepo::new_with_remote();
     test_repo.commit("A1", "a1.txt");
     test_repo.commit("A2", "a2.txt");
@@ -112,21 +114,25 @@ fn branch_weave_creates_merge_topology() {
     assert!(result.is_ok(), "branch::run failed: {:?}", result.err());
     assert!(test_repo.branch_exists("feature-a"));
 
-    // HEAD should be a merge commit (2 parents)
+    // HEAD should be A3' — a regular commit with 1 parent (the merge)
     let head = test_repo.head_commit();
+    assert_eq!(head.parent_count(), 1, "HEAD should be A3' with 1 parent");
+
+    // HEAD's parent should be the merge commit (2 parents)
+    let merge_commit = head.parent(0).unwrap();
     assert_eq!(
-        head.parent_count(),
+        merge_commit.parent_count(),
         2,
-        "HEAD should be a merge commit with 2 parents"
+        "HEAD's parent should be the merge commit with 2 parents"
     );
 
-    // One parent should be the feature-a branch tip
-    let parent_oids: Vec<git2::Oid> = (0..head.parent_count())
-        .map(|i| head.parent_id(i).unwrap())
+    // One of the merge commit's parents should be the feature-a branch tip
+    let merge_parent_oids: Vec<git2::Oid> = (0..merge_commit.parent_count())
+        .map(|i| merge_commit.parent_id(i).unwrap())
         .collect();
     let feature_a_oid = test_repo.get_branch_target("feature-a");
     assert!(
-        parent_oids.contains(&feature_a_oid),
+        merge_parent_oids.contains(&feature_a_oid),
         "merge commit should have feature-a as a parent"
     );
 }
