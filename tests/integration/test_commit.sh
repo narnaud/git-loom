@@ -184,4 +184,58 @@ assert_exit_ok $? "alias_ci_ok"
 assert_contains "$out" "on branch"       "alias_ci_on_branch"
 assert_log_contains "Via ci alias"       "alias_ci_in_log"
 
+# ══════════════════════════════════════════════════════════════════════════════
+# CONTINUE / ABORT
+# ══════════════════════════════════════════════════════════════════════════════
+# Engineering a rebase conflict for `commit` is impractical: the staged diff
+# is relative to the integration HEAD, but it must apply to the feature branch
+# state, so any file touched by both will conflict during commit creation itself
+# rather than during the weave rebase. We therefore test continue/abort via a
+# synthetic state file, which exercises the same dispatch and rollback paths.
+
+describe "commit to branch: conflict → continue (resolving two conflicts) → new commit created"
+setup_repo_with_remote
+create_feature_branch "g-cont-conflict"
+switch_to g-cont-conflict
+printf "feature\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "Feature commit"
+switch_to integration
+weave_branch "g-cont-conflict"
+printf "integration\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "Integration commit"
+# C is created at HEAD (diff "integration"→"feature-v2"), then moved to the branch section.
+# Cherry-picking C onto FA1="feature" conflicts: base="integration" ≠ ours="feature".
+printf "feature-v2\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt
+gl_capture commit -b g-cont-conflict -m "Feature v2"
+assert_state_file   "commit_cont_state"
+assert_contains "$OUT" "loom continue" "commit_cont_hint"
+# 1st conflict: cherry-pick C onto FA1. Resolve to a non-empty value.
+printf "resolved\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt
+gl_capture continue
+# 2nd conflict: cherry-pick I1 (diff "feature"→"integration") onto "resolved" ≠ "feature".
+assert_state_file   "commit_cont_state2"
+printf "integration\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt
+gl_capture continue
+assert_exit_ok  "$CODE" "commit_cont_ok"
+assert_no_state_file   "commit_cont_state_removed"
+assert_contains "$OUT" "Created commit" "commit_cont_msg"
+assert_log_contains "Feature v2" "commit_cont_new_commit_in_log"
+
+describe "commit to branch: conflict → abort → HEAD restored"
+setup_repo_with_remote
+create_feature_branch "g-abort-conflict"
+switch_to g-abort-conflict
+printf "feature\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "Feature commit"
+switch_to integration
+weave_branch "g-abort-conflict"
+printf "integration\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "Integration commit"
+old_head=$(head_hash)
+printf "feature-v2\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt
+gl_capture commit -b g-abort-conflict -m "Feature v2"
+assert_state_file   "commit_abort_state"
+gl_capture abort
+assert_exit_ok  "$CODE" "commit_abort_ok"
+assert_contains "$OUT" "Aborted"   "commit_abort_msg"
+assert_no_state_file   "commit_abort_state_removed"
+assert_eq "$old_head" "$(head_hash)" "commit_abort_head_restored"
+assert_log_not_contains "Feature v2" "commit_abort_new_commit_gone"
+
 pass

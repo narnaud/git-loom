@@ -170,4 +170,37 @@ assert_exit_ok $? "topo_abs_ok"
 assert_head_parent_count 2   "topo_abs_merge_preserved"
 assert_branch_exists "g-topo-abs" "topo_abs_branch_exists"
 
+# ══════════════════════════════════════════════════════════════════════════════
+# CONTINUE / ABORT
+# ══════════════════════════════════════════════════════════════════════════════
+# Note: absorb attributes each hunk to the last commit that touched the lines,
+# so subsequent commits never conflict with the amended version.  We therefore
+# test the continue/abort machinery directly via a synthetic state file rather
+# than through a real rebase conflict.
+
+describe "absorb: continue with no active rebase dispatches after_continue"
+setup_repo_with_remote
+commit_file "Absorb base" "absorb-base.txt"
+mkdir -p "$WORK/.git/loom"
+printf '{"command":"absorb","rollback":{"saved_head":"","saved_refs":{},"delete_branches":[],"saved_staged_patch":"","saved_worktree_patch":""},"context":{"skipped_patch":null,"num_hunks":2,"num_files":1,"num_commits":1}}' \
+    > "$WORK/.git/loom/state.json"
+gl_capture continue
+assert_exit_ok  "$CODE" "absorb_cont_ok"
+assert_no_state_file   "absorb_cont_state_removed"
+assert_contains "$OUT" "Absorbed" "absorb_cont_msg"
+
+describe "absorb: abort restores original HEAD"
+setup_repo_with_remote
+commit_file "Absorb pre-state" "absorb-pre.txt"
+old_head=$(head_hash)
+mkdir -p "$WORK/.git/loom"
+printf '{"command":"absorb","rollback":{"saved_head":"%s","saved_refs":{},"delete_branches":[],"saved_staged_patch":"","saved_worktree_patch":""},"context":{"skipped_patch":null,"num_hunks":1,"num_files":1,"num_commits":1}}' \
+    "$old_head" > "$WORK/.git/loom/state.json"
+commit_file "Simulated rebase progress" "progress.txt"
+gl_capture abort
+assert_exit_ok  "$CODE" "absorb_abort_ok"
+assert_contains "$OUT" "Aborted" "absorb_abort_msg"
+assert_no_state_file   "absorb_abort_state_removed"
+assert_eq "$old_head" "$(head_hash)" "absorb_abort_head_restored"
+
 pass
