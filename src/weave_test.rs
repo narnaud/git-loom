@@ -936,3 +936,326 @@ fn weave_branch_moves_picks_into_section() {
         .collect();
     assert!(merges.contains(&&"feature-x".to_string()));
 }
+
+// ── swap_commits unit tests ──────────────────────────────────────────────
+
+#[test]
+fn swap_commits_on_integration_line() {
+    let mut graph = Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![],
+        integration_line: vec![
+            IntegrationEntry::Pick(make_commit(OID_C1, "C1")),
+            IntegrationEntry::Pick(make_commit(OID_C2, "C2")),
+        ],
+    };
+
+    graph.swap_commits(oid(OID_C1), oid(OID_C2)).unwrap();
+
+    if let IntegrationEntry::Pick(c) = &graph.integration_line[0] {
+        assert_eq!(c.message, "C2");
+    } else {
+        panic!("Expected Pick");
+    }
+    if let IntegrationEntry::Pick(c) = &graph.integration_line[1] {
+        assert_eq!(c.message, "C1");
+    } else {
+        panic!("Expected Pick");
+    }
+}
+
+#[test]
+fn swap_commits_in_branch_section() {
+    let mut graph = Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![BranchSection {
+            reset_target: "onto".to_string(),
+            commits: vec![make_commit(OID_A1, "A1"), make_commit(OID_A2, "A2")],
+            label: "feature-a".to_string(),
+            branch_names: vec!["feature-a".to_string()],
+        }],
+        integration_line: vec![IntegrationEntry::Merge {
+            original_oid: Some(oid(OID_MERGE1)),
+            label: "feature-a".to_string(),
+        }],
+    };
+
+    graph.swap_commits(oid(OID_A1), oid(OID_A2)).unwrap();
+
+    assert_eq!(graph.branch_sections[0].commits[0].message, "A2");
+    assert_eq!(graph.branch_sections[0].commits[1].message, "A1");
+}
+
+#[test]
+fn swap_commits_across_sections_errors() {
+    let mut graph = Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![
+            BranchSection {
+                reset_target: "onto".to_string(),
+                commits: vec![make_commit(OID_A1, "A1")],
+                label: "feature-a".to_string(),
+                branch_names: vec!["feature-a".to_string()],
+            },
+            BranchSection {
+                reset_target: "onto".to_string(),
+                commits: vec![make_commit(OID_B1, "B1")],
+                label: "feature-b".to_string(),
+                branch_names: vec!["feature-b".to_string()],
+            },
+        ],
+        integration_line: vec![
+            IntegrationEntry::Merge {
+                original_oid: None,
+                label: "feature-a".to_string(),
+            },
+            IntegrationEntry::Merge {
+                original_oid: None,
+                label: "feature-b".to_string(),
+            },
+        ],
+    };
+
+    let result = graph.swap_commits(oid(OID_A1), oid(OID_B1));
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("different"));
+}
+
+#[test]
+fn swap_commits_across_section_and_integration_errors() {
+    let mut graph = Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![BranchSection {
+            reset_target: "onto".to_string(),
+            commits: vec![make_commit(OID_A1, "A1")],
+            label: "feature-a".to_string(),
+            branch_names: vec!["feature-a".to_string()],
+        }],
+        integration_line: vec![
+            IntegrationEntry::Pick(make_commit(OID_C1, "C1")),
+            IntegrationEntry::Merge {
+                original_oid: None,
+                label: "feature-a".to_string(),
+            },
+        ],
+    };
+
+    let result = graph.swap_commits(oid(OID_A1), oid(OID_C1));
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("different"));
+}
+
+#[test]
+fn swap_commits_with_itself_errors() {
+    let mut graph = Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![],
+        integration_line: vec![IntegrationEntry::Pick(make_commit(OID_C1, "C1"))],
+    };
+
+    let result = graph.swap_commits(oid(OID_C1), oid(OID_C1));
+    assert!(result.is_err());
+}
+
+#[test]
+fn swap_commits_not_found_errors() {
+    let mut graph = Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![],
+        integration_line: vec![IntegrationEntry::Pick(make_commit(OID_C1, "C1"))],
+    };
+
+    let result = graph.swap_commits(oid(OID_C1), oid(OID_C2));
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("not found"));
+}
+
+// ── swap_branches unit tests ─────────────────────────────────────────────
+
+#[test]
+fn swap_branches_reorders_sections_and_merges() {
+    let mut graph = Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![
+            BranchSection {
+                reset_target: "onto".to_string(),
+                commits: vec![make_commit(OID_A1, "A1")],
+                label: "feature-a".to_string(),
+                branch_names: vec!["feature-a".to_string()],
+            },
+            BranchSection {
+                reset_target: "onto".to_string(),
+                commits: vec![make_commit(OID_B1, "B1")],
+                label: "feature-b".to_string(),
+                branch_names: vec!["feature-b".to_string()],
+            },
+        ],
+        integration_line: vec![
+            IntegrationEntry::Merge {
+                original_oid: Some(oid(OID_MERGE1)),
+                label: "feature-a".to_string(),
+            },
+            IntegrationEntry::Merge {
+                original_oid: Some(oid(OID_MERGE2)),
+                label: "feature-b".to_string(),
+            },
+        ],
+    };
+
+    graph.swap_branches("feature-a", "feature-b").unwrap();
+
+    // Sections are reordered
+    assert_eq!(graph.branch_sections[0].label, "feature-b");
+    assert_eq!(graph.branch_sections[1].label, "feature-a");
+
+    // Merge entries are reordered
+    if let IntegrationEntry::Merge { label, .. } = &graph.integration_line[0] {
+        assert_eq!(label, "feature-b");
+    } else {
+        panic!("Expected Merge");
+    }
+    if let IntegrationEntry::Merge { label, .. } = &graph.integration_line[1] {
+        assert_eq!(label, "feature-a");
+    } else {
+        panic!("Expected Merge");
+    }
+}
+
+#[test]
+fn swap_branches_stacked_dependency_errors() {
+    let mut graph = Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![
+            BranchSection {
+                reset_target: "onto".to_string(),
+                commits: vec![make_commit(OID_A1, "A1")],
+                label: "feature-a".to_string(),
+                branch_names: vec!["feature-a".to_string()],
+            },
+            BranchSection {
+                // feature-b is stacked on feature-a
+                reset_target: "feature-a".to_string(),
+                commits: vec![make_commit(OID_B1, "B1")],
+                label: "feature-b".to_string(),
+                branch_names: vec!["feature-b".to_string()],
+            },
+        ],
+        integration_line: vec![IntegrationEntry::Merge {
+            original_oid: None,
+            label: "feature-b".to_string(),
+        }],
+    };
+
+    let result = graph.swap_branches("feature-a", "feature-b");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("stacked"));
+}
+
+#[test]
+fn swap_branches_third_branch_stacked_on_target_errors() {
+    // Branch C stacks on feature-a; swapping feature-a and feature-b would
+    // leave C with a dangling reset_target — must be rejected.
+    let mut graph = Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![
+            BranchSection {
+                reset_target: "onto".to_string(),
+                commits: vec![make_commit(OID_A1, "A1")],
+                label: "feature-a".to_string(),
+                branch_names: vec!["feature-a".to_string()],
+            },
+            BranchSection {
+                reset_target: "onto".to_string(),
+                commits: vec![make_commit(OID_B1, "B1")],
+                label: "feature-b".to_string(),
+                branch_names: vec!["feature-b".to_string()],
+            },
+            BranchSection {
+                reset_target: "feature-a".to_string(), // C stacks on A
+                commits: vec![make_commit(OID_C1, "C1")],
+                label: "feature-c".to_string(),
+                branch_names: vec!["feature-c".to_string()],
+            },
+        ],
+        integration_line: vec![
+            IntegrationEntry::Merge {
+                original_oid: None,
+                label: "feature-a".to_string(),
+            },
+            IntegrationEntry::Merge {
+                original_oid: None,
+                label: "feature-b".to_string(),
+            },
+            IntegrationEntry::Merge {
+                original_oid: None,
+                label: "feature-c".to_string(),
+            },
+        ],
+    };
+
+    let result = graph.swap_branches("feature-a", "feature-b");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("stacked"));
+}
+
+#[test]
+fn swap_commits_on_integration_line_with_interleaved_merge() {
+    // Swapping C1 and C2 across an interleaved Merge is allowed:
+    // the merge entry stays at its position, only the picks swap.
+    let mut graph = Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![BranchSection {
+            reset_target: "onto".to_string(),
+            commits: vec![make_commit(OID_A1, "A1")],
+            label: "feature-a".to_string(),
+            branch_names: vec!["feature-a".to_string()],
+        }],
+        integration_line: vec![
+            IntegrationEntry::Pick(make_commit(OID_C1, "C1")),
+            IntegrationEntry::Merge {
+                original_oid: None,
+                label: "feature-a".to_string(),
+            },
+            IntegrationEntry::Pick(make_commit(OID_C2, "C2")),
+        ],
+    };
+
+    graph.swap_commits(oid(OID_C1), oid(OID_C2)).unwrap();
+
+    // C2 is now at position 0, Merge stays at 1, C1 is at 2
+    if let IntegrationEntry::Pick(c) = &graph.integration_line[0] {
+        assert_eq!(c.message, "C2");
+    } else {
+        panic!("Expected Pick at 0");
+    }
+    assert!(matches!(
+        &graph.integration_line[1],
+        IntegrationEntry::Merge { .. }
+    ));
+    if let IntegrationEntry::Pick(c) = &graph.integration_line[2] {
+        assert_eq!(c.message, "C1");
+    } else {
+        panic!("Expected Pick at 2");
+    }
+}
+
+#[test]
+fn swap_branches_not_found_errors() {
+    let mut graph = Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![BranchSection {
+            reset_target: "onto".to_string(),
+            commits: vec![make_commit(OID_A1, "A1")],
+            label: "feature-a".to_string(),
+            branch_names: vec!["feature-a".to_string()],
+        }],
+        integration_line: vec![IntegrationEntry::Merge {
+            original_oid: None,
+            label: "feature-a".to_string(),
+        }],
+    };
+
+    let result = graph.swap_branches("feature-a", "nonexistent");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("not found"));
+}

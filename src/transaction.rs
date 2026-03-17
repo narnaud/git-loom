@@ -206,6 +206,7 @@ fn dispatch_after_continue(workdir: &Path, state: &LoomState) -> Result<()> {
         "absorb" => crate::absorb::after_continue(workdir, &state.rollback, &state.context),
         "drop" => crate::drop::after_continue(workdir, &state.context),
         "fold" => crate::fold::after_continue(workdir, &state.context),
+        "swap" => crate::swap::after_continue(workdir, &state.context),
         other => bail!("Unknown command '{}' in loom state file", other),
     }
 }

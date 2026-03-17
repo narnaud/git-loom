@@ -657,6 +657,130 @@ impl Weave {
         }
     }
 
+    /// Swap two commits within the same sequence.
+    ///
+    /// Both commits must be in the same container: either the same branch section
+    /// or both on the integration line. Returns an error if they are in different
+    /// locations or if either commit is not found.
+    pub fn swap_commits(&mut self, oid_a: Oid, oid_b: Oid) -> Result<()> {
+        if oid_a == oid_b {
+            bail!("Cannot swap a commit with itself");
+        }
+
+        // Locate both commits in branch sections
+        let mut sec_a: Option<(usize, usize)> = None;
+        let mut sec_b: Option<(usize, usize)> = None;
+        for (si, section) in self.branch_sections.iter().enumerate() {
+            for (pi, commit) in section.commits.iter().enumerate() {
+                if commit.oid == oid_a {
+                    sec_a = Some((si, pi));
+                }
+                if commit.oid == oid_b {
+                    sec_b = Some((si, pi));
+                }
+            }
+        }
+
+        // Locate both commits on the integration line
+        let mut int_a: Option<usize> = None;
+        let mut int_b: Option<usize> = None;
+        for (i, entry) in self.integration_line.iter().enumerate() {
+            if let IntegrationEntry::Pick(c) = entry {
+                if c.oid == oid_a {
+                    int_a = Some(i);
+                }
+                if c.oid == oid_b {
+                    int_b = Some(i);
+                }
+            }
+        }
+
+        match (sec_a, sec_b, int_a, int_b) {
+            (Some((si_a, pi_a)), Some((si_b, pi_b)), _, _) if si_a == si_b => {
+                self.branch_sections[si_a].commits.swap(pi_a, pi_b);
+                Ok(())
+            }
+            (Some(_), Some(_), _, _) => {
+                bail!("Cannot swap commits from different branch sections")
+            }
+            (None, None, Some(i), Some(j)) => {
+                self.integration_line.swap(i, j);
+                Ok(())
+            }
+            _ => {
+                if sec_a.is_none() && int_a.is_none() {
+                    bail!("Commit {} not found in weave graph", oid_a)
+                } else if sec_b.is_none() && int_b.is_none() {
+                    bail!("Commit {} not found in weave graph", oid_b)
+                } else {
+                    bail!(
+                        "Cannot swap commits from different locations (branch section vs integration line)"
+                    )
+                }
+            }
+        }
+    }
+
+    /// Swap two branch sections, reordering their merge entries on the integration line.
+    ///
+    /// Returns an error if either branch is not found, if they resolve to the same
+    /// section, or if one is stacked on the other (dependency would be broken).
+    pub fn swap_branches(&mut self, branch_a: &str, branch_b: &str) -> Result<()> {
+        let idx_a = self
+            .branch_sections
+            .iter()
+            .position(|s| s.label == branch_a || s.branch_names.contains(&branch_a.to_string()));
+        let idx_b = self
+            .branch_sections
+            .iter()
+            .position(|s| s.label == branch_b || s.branch_names.contains(&branch_b.to_string()));
+
+        let Some(idx_a) = idx_a else {
+            bail!("Branch '{}' not found in weave graph", branch_a)
+        };
+        let Some(idx_b) = idx_b else {
+            bail!("Branch '{}' not found in weave graph", branch_b)
+        };
+
+        if idx_a == idx_b {
+            bail!("Cannot swap co-located branches");
+        }
+
+        let label_a = self.branch_sections[idx_a].label.clone();
+        let label_b = self.branch_sections[idx_b].label.clone();
+
+        // Refuse to swap if any stacking dependency would be broken.
+        // This covers A↔B direct stacking and any third branch C stacked on A or B.
+        for section in self.branch_sections.iter() {
+            let reset = &section.reset_target;
+            if *reset == label_a || *reset == label_b {
+                bail!(
+                    "Cannot swap branches: '{}' is stacked on '{}'",
+                    section.label,
+                    reset
+                );
+            }
+        }
+
+        // Swap the sections in the vec
+        self.branch_sections.swap(idx_a, idx_b);
+
+        // Swap the corresponding merge entries on the integration line
+        let merge_a = self
+            .integration_line
+            .iter()
+            .position(|e| matches!(e, IntegrationEntry::Merge { label, .. } if *label == label_a));
+        let merge_b = self
+            .integration_line
+            .iter()
+            .position(|e| matches!(e, IntegrationEntry::Merge { label, .. } if *label == label_b));
+        if let (Some(ma), Some(mb)) = (merge_a, merge_b) {
+            self.integration_line.swap(ma, mb);
+        }
+
+        Ok(())
+    }
+
     // ── Private helpers ──────────────────────────────────────────────────
 
     /// Remove a commit from wherever it is in the graph, returning it.
