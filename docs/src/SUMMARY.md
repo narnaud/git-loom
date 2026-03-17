@@ -25,6 +25,7 @@
 - [Overview](commands/README.md)
 - [init](commands/init.md)
 - [status](commands/status.md)
+- [swap](commands/swap.md)
 - [commit](commands/commit.md)
 - [fold](commands/fold.md)
 - [show](commands/show.md)
