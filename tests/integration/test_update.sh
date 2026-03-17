@@ -213,6 +213,7 @@ SUB_SEED="$TMPROOT/sub-seed"
 git init -q "$SUB_SEED"
 git -C "$SUB_SEED" config user.email "test@test.com"
 git -C "$SUB_SEED" config user.name "Test"
+git -C "$SUB_SEED" config core.autocrlf false
 echo "submod content" > "$SUB_SEED/sub.txt"
 git -C "$SUB_SEED" add sub.txt
 git -C "$SUB_SEED" commit -q -m "Sub initial"
