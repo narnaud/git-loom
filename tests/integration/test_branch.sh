@@ -90,8 +90,10 @@ commit_file "Weaveable commit" "weave.txt"
 weave_target="$(head_hash)"
 commit_file "Second loose commit" "second.txt"
 gl branch new g-woven-auto --target "$weave_target"
-# Weaving creates a merge commit: integration HEAD has 2 parents
-assert_head_parent_count 2 "new_weave_merge_topo"
+# Weaving creates a merge commit; loose commits build on top of it, so HEAD
+# is the loose commit (1 parent) and the merge commit is one step below (2 parents).
+assert_head_parent_count 1 "new_weave_head_topo"
+assert_eq "$(parent_count_at HEAD~1)" "2" "new_weave_merge_topo"
 assert_branch_exists "g-woven-auto" "new_weave_branch_exists"
 
 describe "target at HEAD triggers weaving (all loose commits move into branch)"

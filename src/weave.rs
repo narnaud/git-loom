@@ -554,17 +554,22 @@ impl Weave {
 
     /// Add a merge entry on the integration line.
     ///
-    /// If `position` is `None`, appends at the end.
-    /// If `position` is `Some(idx)`, inserts at that index.
+    /// If `position` is `None`, inserts before any loose `Pick` entries (after
+    /// all existing `Merge` entries), so the new branch sits below loose commits
+    /// in the resulting history.
+    /// If `position` is `Some(idx)`, inserts at that exact index.
     pub fn add_merge(&mut self, label: String, original_oid: Option<Oid>, position: Option<usize>) {
         let entry = IntegrationEntry::Merge {
             original_oid,
             label,
         };
-        match position {
-            Some(idx) => self.integration_line.insert(idx, entry),
-            None => self.integration_line.push(entry),
-        }
+        let idx = position.unwrap_or_else(|| {
+            self.integration_line
+                .iter()
+                .position(|e| matches!(e, IntegrationEntry::Pick(_)))
+                .unwrap_or(self.integration_line.len())
+        });
+        self.integration_line.insert(idx, entry);
     }
 
     /// Weave a non-woven branch into the integration line.
@@ -581,9 +586,12 @@ impl Weave {
             return;
         };
 
-        // Collect all Pick entries from 0..=branch_idx into the branch section
+        // Collect all Pick entries from 0..=branch_idx into the branch section.
+        // Also count existing Merge entries in that range — the new merge will be
+        // inserted right after them, before any loose Picks that follow branch_idx.
         let mut section_commits = Vec::new();
         let mut indices_to_remove = Vec::new();
+        let mut insert_pos = 0;
 
         for i in 0..=branch_idx {
             if let IntegrationEntry::Pick(commit) = &self.integration_line[i] {
@@ -592,6 +600,9 @@ impl Weave {
                 commit.update_refs.retain(|r| r != branch_name);
                 section_commits.push(commit);
                 indices_to_remove.push(i);
+            } else {
+                // A Merge entry in this range stays; the new merge goes after it.
+                insert_pos += 1;
             }
         }
 
@@ -608,11 +619,15 @@ impl Weave {
             branch_names: vec![branch_name.to_string()],
         });
 
-        // Add merge at the end of the integration line
-        self.integration_line.push(IntegrationEntry::Merge {
-            original_oid: None,
-            label: branch_name.to_string(),
-        });
+        // Insert merge before any loose commits that follow the branch tip,
+        // so those commits sit on top of the merge in the resulting history.
+        self.integration_line.insert(
+            insert_pos,
+            IntegrationEntry::Merge {
+                original_oid: None,
+                label: branch_name.to_string(),
+            },
+        );
     }
 
     /// Reassign a branch section from one branch name to another.
