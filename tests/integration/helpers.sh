@@ -177,6 +177,18 @@ assert_msg_at() {
         || fail "${label:+[$label] }message at ~$steps: expected '$expected', got '$actual'"
 }
 
+assert_state_file() {
+    local label="${1:-}"
+    [[ -f "$WORK/.git/loom/state.json" ]] \
+        || fail "${label:+[$label] }state file should exist"
+}
+
+assert_no_state_file() {
+    local label="${1:-}"
+    [[ ! -f "$WORK/.git/loom/state.json" ]] \
+        || fail "${label:+[$label] }state file should not exist"
+}
+
 assert_branch_exists() {
     local name="$1" label="${2:-}"
     git -C "$WORK" rev-parse --verify "refs/heads/$name" > /dev/null 2>&1 \
