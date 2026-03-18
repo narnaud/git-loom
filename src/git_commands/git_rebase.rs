@@ -13,8 +13,18 @@ pub enum RebaseOutcome {
 /// Returns `Completed` if the rebase finished without conflicts,
 /// or `Conflicted` if a new conflict was encountered.
 /// Does NOT abort on conflict — the caller is responsible.
+///
+/// Sets `GIT_EDITOR=true` to suppress the editor for commit messages
+/// during `--continue` (matching the suppression applied during the
+/// initial rebase in `weave::run_rebase`).
 pub fn continue_rebase(workdir: &Path) -> Result<RebaseOutcome> {
-    if super::run_git(workdir, &["rebase", "--continue"]).is_ok() {
+    use std::process::Command;
+    let status = Command::new("git")
+        .current_dir(workdir)
+        .args(["rebase", "--continue"])
+        .env("GIT_EDITOR", "true")
+        .status()?;
+    if status.success() {
         Ok(RebaseOutcome::Completed)
     } else {
         Ok(RebaseOutcome::Conflicted)
