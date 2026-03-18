@@ -178,7 +178,7 @@ fn post_update(workdir: &Path, repo: &git2::Repository, ctx: &UpdateContext) -> 
             })?;
         if confirmed {
             for name in &gone {
-                match git_branch::safe_delete(workdir, name) {
+                match git_branch::delete(workdir, name) {
                     Ok(()) => msg::success(&format!("Removed branch `{}`", name)),
                     Err(_) => {
                         msg::warn(&format!(
