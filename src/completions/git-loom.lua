@@ -54,6 +54,7 @@ clink.argmatcher("git-loom")
         "update",
         "push",
         "continue",
-        "abort"
+        "abort",
+        "swap"
     )
     :addflags("--no-color", "--help", "-h")
