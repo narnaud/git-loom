@@ -1,35 +1,24 @@
 name: Deploy documentation
 
 on:
-  push:
-    branches: [main]
-    paths: [docs/**]
   release:
     types: [published]
   workflow_dispatch:
-    inputs:
-      target:
-        description: 'Which docs to deploy'
-        required: true
-        default: stable
-        type: choice
-        options:
-          - stable
-          - latest
 
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
 
 concurrency:
   group: pages
   cancel-in-progress: false
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
-
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install mdBook
         uses: peaceiris/actions-mdbook@v2
@@ -39,19 +28,18 @@ jobs:
       - name: Build book
         run: mdbook build docs
 
-      - name: Deploy stable docs (release or manual)
-        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.target == 'stable')
-        uses: peaceiris/actions-gh-pages@v4
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v4
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: docs/book
-          keep_files: true
+          path: docs/book
 
-      - name: Deploy latest docs (push to main or manual)
-        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.target == 'latest')
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: docs/book
-          destination_dir: latest
-          keep_files: true
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
