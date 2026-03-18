@@ -1,3 +1,5 @@
+# git-loom
+
 ![git-loom](docs/src/assets/banner-adaptive.svg)
 
 **git-loom** is a Git CLI tool that makes working with integration branches seamless. Inspired by tools like [jujutsu](https://github.com/martinvonz/jj) and [Git Butler](https://gitbutler.com/), git-loom helps you work on multiple features simultaneously while keeping your branches organized and independent.
@@ -27,7 +29,7 @@ Commits:
   fold              Amend, fixup, or move commits [amend, am, fixup, mv, rub]
   absorb            Auto-distribute changes into originating commits
   split             Split a commit into two
-  swap              Swap two commits or two branches
+  swap              Swap two commits
   reword, rw        Reword a commit message or rename a branch
   drop, rm          Drop a change, commit, or branch
 

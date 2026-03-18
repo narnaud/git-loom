@@ -2,31 +2,20 @@
 
 ## Overview
 
-`git loom swap` reorders two commits within the same sequence, or exchanges the
-positions of two branch sections on the integration line. It is a single
-command that handles both use cases and provides conflict recovery via
-`loom continue` / `loom abort`.
+`git loom swap` reorders two commits within the same sequence. It provides
+conflict recovery via `loom continue` / `loom abort`.
 
 ## Why Swap?
 
-Reordering commits or branches in raw git requires interactive rebase with
-manual `pick` line editing:
+Reordering commits in raw git requires interactive rebase with manual `pick`
+line editing: opening an editor, locating both lines, cutting and pasting
+them, and saving — with no validation that they belong to the same sequence.
 
-- Swapping two commits means opening an editor, locating both lines, cutting
-  and pasting them, and saving — with no validation that they belong to the
-  same sequence.
-- Reordering two woven branches requires understanding the merge topology,
-  correctly moving both the `pick` lines _and_ the `label`/`merge` entries,
-  and then deleting the branch ref cleanup step — getting any of it wrong
-  corrupts the integration branch.
+`git-loom swap` handles this with a single, validated command:
 
-`git-loom swap` handles both cases with a single, validated command:
-
-- Accepts commit hashes, short IDs, or branch names
-- Validates that both arguments are the same type (both commits or both branches)
+- Accepts commit hashes or short IDs
 - Guards against cross-location swaps (different branch sections, or one in a
   section and the other on the integration line)
-- Guards against stacking dependencies that would be broken by a branch swap
 
 ## CLI
 
@@ -36,17 +25,10 @@ git-loom swap <a> <b>
 
 **Arguments:**
 
-- `<a>`: A commit hash (full or short), short ID, or branch name — the first
-  target to swap
-- `<b>`: A commit hash (full or short), short ID, or branch name — the second
-  target to swap
-
-Both arguments must resolve to the same kind of target: both commits or both
-branches. Mixing types (one commit, one branch) is an error.
+- `<a>`: A commit hash (full or short) or short ID — the first commit to swap
+- `<b>`: A commit hash (full or short) or short ID — the second commit to swap
 
 ## What Happens
-
-### When Arguments Are Commits
 
 The two commits swap positions within their shared sequence. The sequence can
 be either a branch section or the direct picks on the integration line.
@@ -75,51 +57,16 @@ be either a branch section or the direct picks on the integration line.
 - `"Commit <oid> not found in weave graph"` — the commit is not part of the
   current integration topology
 
-### When Arguments Are Branches
-
-The two branch sections swap their positions on the integration line. The merge
-entries and all commits in both sections are replayed in the new order.
-
-**What changes:**
-
-- The two branch sections exchange positions in the weave topology
-- Their corresponding merge entries on the integration line are also swapped
-- All commits in both sections are replayed onto the new base
-- On success, loom prints: `Swapped branches '<a>' and '<b>'`
-
-**What stays the same:**
-
-- Commit content and messages within each branch are preserved
-- All other branch sections remain in their original order
-- Branches not involved in the rebase are unaffected
-
-**Error cases:**
-
-- `"Branch '<name>' not found in weave graph"` — the branch is not woven into
-  the integration branch
-- `"Cannot swap co-located branches"` — both names resolve to the same branch
-  section
-- `"Cannot swap branches: '<C>' is stacked on '<A or B>'"` — any branch
-  (including the two being swapped) is stacked on the other; swapping would
-  break the stacking dependency
-
 ## Target Resolution
 
 Arguments are resolved via `resolve_arg()` with the accept list:
 
 ```
-[Branch, Commit]
+[Commit]
 ```
 
-Priority order (first match wins):
-
-1. **Branch name** — exact match against a local branch ref
-2. **Commit hash or short ID** — full OID, partial OID prefix, or 2-char
-   short ID
-
-Because `Branch` is checked first, a name that also happens to be a valid
-commit prefix resolves as a branch. See Spec 002 for the full resolution
-algorithm.
+Accepts full OID, partial OID prefix, or 2-char short ID. Branch names are
+not accepted. See Spec 002 for the full resolution algorithm.
 
 ## Conflict Recovery
 
@@ -132,9 +79,8 @@ rebase:
 
 **`LoomState.context` fields:**
 
-- `display_a` (`string`): human-readable label for the first target (short
-  hash for commits, branch name for branches)
-- `display_b` (`string`): human-readable label for the second target
+- `display_a` (`string`): short hash of the first commit
+- `display_b` (`string`): short hash of the second commit
 
 **`after_continue` behavior:** Prints `Swapped '<a>' and '<b>'` to confirm the
 operation completed successfully.
@@ -144,10 +90,9 @@ See [`continue`](../specs/014-continue-abort.md) and
 
 ## Prerequisites
 
-- Both targets must be woven into the current integration branch.
-- Both targets must be the same type (both commits or both branches).
-- For branch swap: no stacking dependencies between the two branches or any
-  third branch stacked on either of them.
+- Both commits must be woven into the current integration branch.
+- Both commits must be in the same container (same branch section or both on
+  the integration line).
 
 Uncommitted working tree changes are preserved automatically via
 `git rebase --autostash`.
@@ -181,22 +126,6 @@ $ git-loom swap aa bb
 # color scheme is now before button layout
 ```
 
-### Reorder two branch sections
-
-```bash
-$ git-loom status
-  ┌ feature-auth
-  │ * ca1 Login form
-  │ * ca2 JWT tokens
-  ├ feature-ui
-  │ * cb1 Button styles
-  └─ integration
-
-$ git-loom swap feature-auth feature-ui
-# Swapped branches `feature-auth` and `feature-ui`
-# feature-ui now appears before feature-auth on the integration line
-```
-
 ### Error: commits in different branch sections
 
 ```bash
@@ -204,32 +133,9 @@ $ git-loom swap ca1 cb1
 # ! Cannot swap commits from different branch sections
 ```
 
-### Error: stacked branch dependency
-
-```bash
-$ git-loom swap feature-auth feature-base
-# ! Cannot swap branches: 'feature-auth' is stacked on 'feature-base'
-```
-
 ## Design Decisions
 
-### Branch before Commit in resolution priority
-
-`resolve_arg()` checks `Branch` before `Commit` so that a branch name is never
-accidentally interpreted as a commit hash prefix. Commit short IDs (2-char)
-and OID prefixes still resolve correctly for any input that is not a known
-branch name.
-
-### Stacking guard covers all branches, not just the two being swapped
-
-The stacking check iterates all branch sections, not just the two targets.
-This catches the case where a third branch C is stacked on A or B: swapping
-A and B would place B's base below A's commits, leaving C's `reset_target`
-pointing to a branch that is now in the wrong position. The error message
-names the dependent branch to help the user understand what needs to be
-rearranged first.
-
-### Same-container constraint for commit swap
+### Same-container constraint
 
 Swapping commits across different branch sections would silently move a commit
 out of its owning branch, changing authorship attribution and branch

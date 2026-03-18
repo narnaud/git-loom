@@ -42,31 +42,6 @@ gl_capture swap "$hash_a" "$orphan_hash"
 assert_exit_fail "$CODE" "precond_commit_not_in_graph"
 assert_contains "$OUT" "not found in weave graph" "precond_commit_not_in_graph_msg"
 
-describe "precond: branch not in weave graph"
-setup_repo_with_remote
-create_feature_branch "g-unwoven"
-switch_to g-unwoven
-commit_file "Unwoven commit" "unwoven.txt"
-switch_to integration
-create_feature_branch "h-also-unwoven"
-switch_to h-also-unwoven
-commit_file "Also unwoven" "also-unwoven.txt"
-switch_to integration
-gl_capture swap g-unwoven h-also-unwoven
-assert_exit_fail "$CODE" "precond_branch_not_in_graph"
-assert_contains "$OUT" "not found in weave graph" "precond_branch_not_in_graph_msg"
-
-describe "precond: mixing commit and branch arguments"
-setup_repo_with_remote
-create_feature_branch "g-mixed"
-switch_to g-mixed
-commit_file "Mixed commit" "mixed.txt"
-switch_to integration
-weave_branch "g-mixed"
-hash_mixed=$(branch_oid g-mixed)
-gl_capture swap g-mixed "$hash_mixed"
-assert_exit_fail "$CODE" "precond_mixed_types"
-
 describe "precond: swap commit with itself"
 setup_repo_with_remote
 create_feature_branch "g-self"
@@ -113,38 +88,6 @@ gl_capture swap "$hash_loose" "$hash_branch"
 assert_exit_fail "$CODE" "precond_diff_locations"
 assert_contains "$OUT" "Cannot swap commits from different locations" "precond_diff_locations_msg"
 
-describe "precond: co-located branches (same section)"
-setup_repo_with_remote
-create_feature_branch "g-coloc"
-switch_to g-coloc
-commit_file "Coloc commit" "coloc.txt"
-switch_to integration
-weave_branch "g-coloc"
-# Two refs pointing to the exact same section
-git -C "$WORK" branch h-coloc g-coloc
-gl_capture swap g-coloc h-coloc
-assert_exit_fail "$CODE" "precond_colocated"
-assert_contains "$OUT" "Cannot swap co-located branches" "precond_colocated_msg"
-
-describe "precond: stacked branch dependency"
-setup_repo_with_remote
-# g-stack-base and h-stack-top start co-located (same tip)
-create_feature_branch "g-stack-base"
-switch_to g-stack-base
-commit_file "Stack base commit" "stack-base.txt"
-git -C "$WORK" branch h-stack-top g-stack-base
-switch_to integration
-weave_branch "g-stack-base"   # weaves both co-located branches into one section
-# Add a loose commit on the integration line to serve as the source to move
-commit_file "Source to move" "source.txt"
-src_sid=$(commit_sid_from_status "Source to move")
-# Moving the loose commit to h-stack-top splits the co-located section,
-# giving h-stack-top a reset_target of "g-stack-base" (true stacked topology)
-gl fold "$src_sid" h-stack-top >/dev/null
-gl_capture swap g-stack-base h-stack-top
-assert_exit_fail "$CODE" "precond_stacked"
-assert_contains "$OUT" "Cannot swap branches" "precond_stacked_msg"
-assert_contains "$OUT" "stacked on" "precond_stacked_detail"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SWAP TWO COMMITS (LOOSE COMMITS ON INTEGRATION LINE)
@@ -260,112 +203,6 @@ assert_exit_ok $? "content_swap_ok"
 assert_file_content "apple.txt"  "content of apple"  "content_apple_preserved"
 assert_file_content "banana.txt" "content of banana" "content_banana_preserved"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# SWAP TWO BRANCHES
-# ══════════════════════════════════════════════════════════════════════════════
-
-describe "swap two branches by name — sections exchange positions"
-setup_repo_with_remote
-create_feature_branch "g-branch-order-a"
-switch_to g-branch-order-a
-commit_file "Order A commit" "order-a.txt"
-switch_to integration
-weave_branch "g-branch-order-a"
-
-create_feature_branch "h-branch-order-b"
-switch_to h-branch-order-b
-commit_file "Order B commit" "order-b.txt"
-switch_to integration
-weave_branch "h-branch-order-b"
-
-# Before swap: g-branch-order-a is below (earlier), h-branch-order-b is above (later)
-status_before=$(gl status)
-assert_contains "$status_before" "g-branch-order-a" "branches_before_a_visible"
-assert_contains "$status_before" "h-branch-order-b" "branches_before_b_visible"
-
-out=$(gl swap g-branch-order-a h-branch-order-b)
-assert_exit_ok $? "branch_swap_ok"
-assert_contains "$out" "Swapped branches" "branch_swap_msg"
-assert_contains "$out" "g-branch-order-a" "branch_swap_msg_a"
-assert_contains "$out" "h-branch-order-b" "branch_swap_msg_b"
-
-# Both branches' commits should still be present
-assert_log_contains "Order A commit" "branch_swap_a_commit_in_log"
-assert_log_contains "Order B commit" "branch_swap_b_commit_in_log"
-
-describe "swap two branches preserves all commit content"
-setup_repo_with_remote
-create_feature_branch "g-swap-files-a"
-switch_to g-swap-files-a
-echo "file from branch a" > "$WORK/branch-a-file.txt"
-git -C "$WORK" add branch-a-file.txt
-git -C "$WORK" commit -q -m "Branch A file"
-switch_to integration
-weave_branch "g-swap-files-a"
-
-create_feature_branch "h-swap-files-b"
-switch_to h-swap-files-b
-echo "file from branch b" > "$WORK/branch-b-file.txt"
-git -C "$WORK" add branch-b-file.txt
-git -C "$WORK" commit -q -m "Branch B file"
-switch_to integration
-weave_branch "h-swap-files-b"
-
-out=$(gl swap g-swap-files-a h-swap-files-b)
-assert_exit_ok $? "branch_files_swap_ok"
-
-assert_file_content "branch-a-file.txt" "file from branch a" "branch_swap_file_a_preserved"
-assert_file_content "branch-b-file.txt" "file from branch b" "branch_swap_file_b_preserved"
-
-describe "swap two multi-commit branches — all commits preserved in new order"
-setup_repo_with_remote
-create_feature_branch "g-multi-a"
-switch_to g-multi-a
-commit_file "Multi A1" "multi-a1.txt"
-commit_file "Multi A2" "multi-a2.txt"
-switch_to integration
-weave_branch "g-multi-a"
-
-create_feature_branch "h-multi-b"
-switch_to h-multi-b
-commit_file "Multi B1" "multi-b1.txt"
-commit_file "Multi B2" "multi-b2.txt"
-switch_to integration
-weave_branch "h-multi-b"
-
-out=$(gl swap g-multi-a h-multi-b)
-assert_exit_ok $? "multi_branch_swap_ok"
-assert_contains "$out" "Swapped branches" "multi_branch_swap_msg"
-
-assert_log_contains "Multi A1" "multi_swap_a1_in_log"
-assert_log_contains "Multi A2" "multi_swap_a2_in_log"
-assert_log_contains "Multi B1" "multi_swap_b1_in_log"
-assert_log_contains "Multi B2" "multi_swap_b2_in_log"
-
-# ══════════════════════════════════════════════════════════════════════════════
-# UNCOMMITTED CHANGES PRESERVED (--autostash)
-# ══════════════════════════════════════════════════════════════════════════════
-
-describe "swap with dirty working tree — changes are stashed and restored"
-setup_repo_with_remote
-create_feature_branch "g-stash-a"
-switch_to g-stash-a
-commit_file "Stash A" "stash-a.txt"
-switch_to integration
-weave_branch "g-stash-a"
-
-create_feature_branch "h-stash-b"
-switch_to h-stash-b
-commit_file "Stash B" "stash-b.txt"
-switch_to integration
-weave_branch "h-stash-b"
-
-write_file "dirty.txt" "uncommitted change"
-
-out=$(gl swap g-stash-a h-stash-b)
-assert_exit_ok $? "stash_swap_ok"
-assert_contains "$out" "Swapped branches" "stash_swap_msg"
-assert_file_content "dirty.txt" "uncommitted change" "stash_dirty_preserved"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CONTINUE / ABORT
@@ -412,6 +249,7 @@ assert_contains "$out" "Swapped commits" "cont_success_msg"
 
 describe "swap: conflict pauses, abort → original HEAD restored"
 setup_repo_with_remote
+git -C "$WORK" config rerere.enabled false
 echo "base" > "$WORK/shared.txt"
 git -C "$WORK" add shared.txt
 git -C "$WORK" commit -q -m "Add shared file"

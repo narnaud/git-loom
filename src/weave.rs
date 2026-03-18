@@ -736,66 +736,6 @@ impl Weave {
         }
     }
 
-    /// Swap two branch sections, reordering their merge entries on the integration line.
-    ///
-    /// Returns an error if either branch is not found, if they resolve to the same
-    /// section, or if one is stacked on the other (dependency would be broken).
-    pub fn swap_branches(&mut self, branch_a: &str, branch_b: &str) -> Result<()> {
-        let idx_a = self
-            .branch_sections
-            .iter()
-            .position(|s| s.label == branch_a || s.branch_names.contains(&branch_a.to_string()));
-        let idx_b = self
-            .branch_sections
-            .iter()
-            .position(|s| s.label == branch_b || s.branch_names.contains(&branch_b.to_string()));
-
-        let Some(idx_a) = idx_a else {
-            bail!("Branch '{}' not found in weave graph", branch_a)
-        };
-        let Some(idx_b) = idx_b else {
-            bail!("Branch '{}' not found in weave graph", branch_b)
-        };
-
-        if idx_a == idx_b {
-            bail!("Cannot swap co-located branches");
-        }
-
-        let label_a = self.branch_sections[idx_a].label.clone();
-        let label_b = self.branch_sections[idx_b].label.clone();
-
-        // Refuse to swap if any stacking dependency would be broken.
-        // This covers A↔B direct stacking and any third branch C stacked on A or B.
-        for section in self.branch_sections.iter() {
-            let reset = &section.reset_target;
-            if *reset == label_a || *reset == label_b {
-                bail!(
-                    "Cannot swap branches: '{}' is stacked on '{}'",
-                    section.label,
-                    reset
-                );
-            }
-        }
-
-        // Swap the sections in the vec
-        self.branch_sections.swap(idx_a, idx_b);
-
-        // Swap the corresponding merge entries on the integration line
-        let merge_a = self
-            .integration_line
-            .iter()
-            .position(|e| matches!(e, IntegrationEntry::Merge { label, .. } if *label == label_a));
-        let merge_b = self
-            .integration_line
-            .iter()
-            .position(|e| matches!(e, IntegrationEntry::Merge { label, .. } if *label == label_b));
-        if let (Some(ma), Some(mb)) = (merge_a, merge_b) {
-            self.integration_line.swap(ma, mb);
-        }
-
-        Ok(())
-    }
-
     // ── Private helpers ──────────────────────────────────────────────────
 
     /// Remove a commit from wherever it is in the graph, returning it.

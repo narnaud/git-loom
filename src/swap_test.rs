@@ -1,5 +1,5 @@
 use crate::test_helpers::TestRepo;
-use crate::weave::{IntegrationEntry, Weave};
+use crate::weave::Weave;
 
 // ── swap commits ──────────────────────────────────────────────────────────
 
@@ -70,64 +70,4 @@ fn swap_commits_across_sections_errors() {
         "should fail for commits in different sections"
     );
     assert!(result.unwrap_err().to_string().contains("different"));
-}
-
-// ── swap branches ─────────────────────────────────────────────────────────
-
-#[test]
-fn swap_branches_reorders_integration_line() {
-    let test_repo = TestRepo::new_with_remote();
-    let base_oid = test_repo.find_remote_branch_target("origin/main");
-
-    test_repo.create_branch_at("feature-a", &base_oid.to_string());
-    test_repo.switch_branch("feature-a");
-    test_repo.commit("A1", "a1.txt");
-
-    test_repo.create_branch_at("feature-b", &base_oid.to_string());
-    test_repo.switch_branch("feature-b");
-    test_repo.commit("B1", "b1.txt");
-
-    test_repo.switch_branch("integration");
-    test_repo.merge_no_ff("feature-a");
-    test_repo.merge_no_ff("feature-b");
-
-    let result = super::swap_two_branches(
-        &test_repo.repo,
-        "feature-a".to_string(),
-        "feature-b".to_string(),
-    );
-    assert!(result.is_ok(), "swap_two_branches failed: {:?}", result);
-
-    // After swap: feature-b merge should be first (oldest) on integration line
-    let graph = Weave::from_repo(&test_repo.repo).unwrap();
-    if let IntegrationEntry::Merge { label, .. } = &graph.integration_line[0] {
-        assert_eq!(label, "feature-b");
-    } else {
-        panic!("Expected Merge entry at position 0");
-    }
-    if let IntegrationEntry::Merge { label, .. } = &graph.integration_line[1] {
-        assert_eq!(label, "feature-a");
-    } else {
-        panic!("Expected Merge entry at position 1");
-    }
-}
-
-#[test]
-fn swap_branches_not_found_errors() {
-    let test_repo = TestRepo::new_with_remote();
-    let base_oid = test_repo.find_remote_branch_target("origin/main");
-
-    test_repo.create_branch_at("feature-a", &base_oid.to_string());
-    test_repo.switch_branch("feature-a");
-    test_repo.commit("A1", "a1.txt");
-    test_repo.switch_branch("integration");
-    test_repo.merge_no_ff("feature-a");
-
-    let result = super::swap_two_branches(
-        &test_repo.repo,
-        "feature-a".to_string(),
-        "nonexistent".to_string(),
-    );
-    assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("not found"));
 }

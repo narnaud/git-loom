@@ -59,7 +59,7 @@ const GROUPED_COMMANDS: &str = "\
   \x1b[32mfold\x1b[0m              Amend, fixup, or move commits [\x1b[32mamend\x1b[0m, \x1b[32mam\x1b[0m, \x1b[32mfixup\x1b[0m, \x1b[32mmv\x1b[0m, \x1b[32mrub\x1b[0m]
   \x1b[32mabsorb\x1b[0m            Auto-distribute changes into originating commits
   \x1b[32msplit\x1b[0m             Split a commit into two
-  \x1b[32mswap\x1b[0m              Swap two commits or two branches
+  \x1b[32mswap\x1b[0m              Swap two commits
   \x1b[32mreword\x1b[0m, \x1b[32mrw\x1b[0m        Reword a commit message or rename a branch
   \x1b[32mdrop\x1b[0m, \x1b[32mrm\x1b[0m          Drop a change, commit, or branch
 
@@ -182,11 +182,11 @@ enum Command {
         #[arg(short, long)]
         message: Option<String>,
     },
-    /// Swap two commits (within the same sequence) or two branch sections
+    /// Swap two commits within the same sequence
     Swap {
-        /// First commit hash/short ID or branch name
+        /// First commit hash or short ID
         a: String,
-        /// Second commit hash/short ID or branch name
+        /// Second commit hash or short ID
         b: String,
     },
     /// Drop a local change, a commit, or a branch from history
