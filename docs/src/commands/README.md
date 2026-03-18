@@ -13,6 +13,7 @@ Commits:
   fold              Amend, fixup, or move commits [amend, am, fixup, mv, rub]
   absorb            Auto-distribute changes into originating commits
   split             Split a commit into two
+  swap              Swap two commits or two branches
   reword, rw        Reword a commit message or rename a branch
   drop, rm          Drop a change, commit, or branch
 
@@ -25,8 +26,8 @@ Inspection:
   trace             Show the latest command trace
 
 Recovery:
-  continue          Resume a paused operation after resolving conflicts
-  abort             Cancel a paused operation and restore original state
+  continue, c       Resume a paused operation after resolving conflicts
+  abort, a          Cancel a paused operation and restore original state
 
 Options:
       --no-color       Disable colored output
