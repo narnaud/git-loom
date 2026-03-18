@@ -27,6 +27,7 @@ Commits:
   fold              Amend, fixup, or move commits [amend, am, fixup, mv, rub]
   absorb            Auto-distribute changes into originating commits
   split             Split a commit into two
+  swap              Swap two commits or two branches
   reword, rw        Reword a commit message or rename a branch
   drop, rm          Drop a change, commit, or branch
 
@@ -37,6 +38,10 @@ Inspection:
   status            Show the branch-aware status (default command)
   show, sh          Show commit details (like git show)
   trace             Show the latest command trace
+
+Recovery:
+  continue, c       Resume a paused operation after resolving conflicts
+  abort, a          Cancel a paused operation and restore original state
 ```
 
 ## Installation
