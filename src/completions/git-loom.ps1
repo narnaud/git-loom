@@ -19,7 +19,8 @@ $_gitLoomCompleter = {
         @{ Name = 'trace'; Description = 'Trace loom operations for debugging' },
         @{ Name = 'split'; Description = 'Split a commit into two sequential commits' },
         @{ Name = 'continue'; Description = 'Continue a paused loom operation after resolving conflicts' },
-        @{ Name = 'abort'; Description = 'Abort a paused loom operation and restore original state' }
+        @{ Name = 'abort'; Description = 'Abort a paused loom operation and restore original state' },
+        @{ Name = 'swap'; Description = 'Swap two commits' }
     )
 
     $globalFlags = @(
