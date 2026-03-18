@@ -47,17 +47,6 @@ pub fn delete(workdir: &Path, name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Delete a local branch only if it is fully merged.
-///
-/// Wraps `git branch -d <name>`. Returns an error if the branch
-/// contains commits not reachable from its upstream or HEAD.
-pub fn safe_delete(workdir: &Path, name: &str) -> Result<()> {
-    run_git(workdir, &["branch", "-d", name])
-        .with_context(|| format!("Branch '{}' has unmerged commits", name))?;
-
-    Ok(())
-}
-
 /// Create a new branch at a remote tracking ref and switch to it.
 ///
 /// Wraps `git switch -c <name> --track <upstream>`.
