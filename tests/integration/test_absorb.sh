@@ -194,7 +194,7 @@ setup_repo_with_remote
 commit_file "Absorb pre-state" "absorb-pre.txt"
 old_head=$(head_hash)
 mkdir -p "$WORK/.git/loom"
-printf '{"command":"absorb","rollback":{"saved_head":"%s","saved_refs":{},"delete_branches":[],"saved_staged_patch":"","saved_worktree_patch":""},"context":{"skipped_patch":null,"num_hunks":1,"num_files":1,"num_commits":1}}' \
+printf '{"command":"absorb","rollback":{"reset_hard_to":"%s","delete_branches":[],"saved_staged_patch":"","saved_worktree_patch":""},"context":{"skipped_patch":null,"num_hunks":1,"num_files":1,"num_commits":1}}' \
     "$old_head" > "$WORK/.git/loom/state.json"
 commit_file "Simulated rebase progress" "progress.txt"
 gl_capture abort

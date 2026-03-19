@@ -254,6 +254,10 @@ fn apply_plan(repo: &Repository, workdir: &Path, git_dir: &Path, plan: AbsorbPla
     let state = LoomState {
         command: "absorb".to_string(),
         rollback: Rollback {
+            // reset_hard_to undoes the fixup commits created before the rebase.
+            // git rebase --abort restores HEAD to after the fixup commits, not to
+            // the original pre-absorb HEAD, so we must hard-reset to fully undo them.
+            reset_hard_to: saved_head.to_string(),
             saved_staged_patch: saved_staged.clone(),
             saved_worktree_patch: saved_worktree.clone(),
             ..Default::default()
@@ -394,10 +398,10 @@ fn rollback_pre_rebase(
     if !saved_staged.is_empty() {
         let _ = git_commands::apply_cached_patch(workdir, saved_staged);
     }
-    if !saved_worktree.is_empty() {
-        if let Err(e) = git_commands::apply_patch(workdir, saved_worktree) {
-            eprintln!("Warning: could not restore working tree changes: {}", e);
-        }
+    if !saved_worktree.is_empty()
+        && let Err(e) = git_commands::apply_patch(workdir, saved_worktree)
+    {
+        eprintln!("Warning: could not restore working tree changes: {}", e);
     }
 }
 

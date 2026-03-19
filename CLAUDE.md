@@ -81,6 +81,7 @@ git-loom must never discard user data — staged changes, working tree changes, 
 **The abort architecture:** `loom abort` calls `git rebase --abort`, which already restores HEAD, all branch refs (via `--update-refs`), and any autostashed working-tree changes. Extra cleanup beyond that is driven entirely by the `Rollback` struct saved in `LoomState` — `Rollback::apply_abort()` acts on whichever fields are populated:
 
 - `reset_mixed_to` → `reset --mixed` to undo a pre-rebase commit (used by `commit`)
+- `reset_hard_to` → `reset --hard` to undo pre-rebase commits (used by `absorb`: `git rebase --abort` restores HEAD to after the fixup commits, not to the original pre-absorb HEAD)
 - `delete_branches` → delete temp branches (used by `commit` and `fold FilesIntoCommit`/`CommitIntoCommit`)
 - `saved_staged_patch` → re-stage changes that were saved aside (used by `commit`, `absorb`, `fold FilesIntoCommit`)
 - `saved_worktree_patch` → re-apply working-tree changes (used by `absorb`)
