@@ -34,7 +34,8 @@ fn default_opts() -> RenderOpts {
 
 /// Render and strip ANSI codes for plain-text comparison.
 fn render_plain(info: RepoInfo) -> String {
-    strip_ansi(&graph::render(info, &default_opts()))
+    let ids = crate::shortid::IdAllocator::new(info.collect_entities());
+    strip_ansi(&graph::render(info, &ids, &default_opts()))
 }
 
 /// Render with a specific terminal width for multi-column tests.
@@ -44,7 +45,8 @@ fn render_plain_with_width(info: RepoInfo, width: u16) -> String {
         theme: Theme::dark(),
         cwd_prefix: String::new(),
     };
-    strip_ansi(&graph::render(info, &opts))
+    let ids = crate::shortid::IdAllocator::new(info.collect_entities());
+    strip_ansi(&graph::render(info, &ids, &opts))
 }
 
 /// Helper to create a fake OID from a single byte (padded to 20 bytes).

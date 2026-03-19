@@ -138,7 +138,8 @@ fn filter_by_full_git_hash_shows_only_that_commit() {
     assert_eq!(info.commits.len(), 2);
     assert!(info.commits.iter().all(|c| !c.files.is_empty()));
 
-    let filter = resolve_commit_filter(&test_repo.repo, &[c1_oid.to_string()], &info);
+    let allocator = IdAllocator::new(info.collect_entities());
+    let filter = resolve_commit_filter(&test_repo.repo, &[c1_oid.to_string()], &info, &allocator);
     assert!(filter.contains(&c1_oid));
     assert_eq!(filter.len(), 1);
 }
@@ -150,11 +151,10 @@ fn filter_by_loom_short_id_shows_only_that_commit() {
     let c2_oid = test_repo.commit("C2", "file2.txt");
 
     let info = gather_repo_info(&test_repo.repo, true, 1).unwrap();
-    let entities = info.collect_entities();
-    let allocator = IdAllocator::new(entities);
+    let allocator = IdAllocator::new(info.collect_entities());
     let c2_sid = allocator.get_commit(c2_oid).to_string();
 
-    let filter = resolve_commit_filter(&test_repo.repo, &[c2_sid], &info);
+    let filter = resolve_commit_filter(&test_repo.repo, &[c2_sid], &info, &allocator);
     assert!(filter.contains(&c2_oid));
     assert_eq!(filter.len(), 1);
 }
@@ -165,6 +165,12 @@ fn filter_unknown_id_silently_skipped() {
     test_repo.commit("C1", "file1.txt");
 
     let info = gather_repo_info(&test_repo.repo, true, 1).unwrap();
-    let filter = resolve_commit_filter(&test_repo.repo, &["nonexistent_id".to_string()], &info);
+    let allocator = IdAllocator::new(info.collect_entities());
+    let filter = resolve_commit_filter(
+        &test_repo.repo,
+        &["nonexistent_id".to_string()],
+        &info,
+        &allocator,
+    );
     assert!(filter.is_empty());
 }
