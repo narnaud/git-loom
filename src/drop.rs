@@ -181,18 +181,12 @@ fn drop_commit(repo: &Repository, commit_hash: &str, skip_confirm: bool) -> Resu
     graph.drop_commit(commit_oid);
 
     // Save LoomState before the rebase so we can resume on conflict.
-    let saved_head = git::head_oid(repo)?.to_string();
-    let saved_refs = transaction::refs_to_strings(&git::snapshot_branch_refs(repo)?);
     let ctx = DropContext {
         commit_hash: commit_hash.to_string(),
     };
     let state = LoomState {
         command: "drop".to_string(),
-        rollback: Rollback {
-            saved_head,
-            saved_refs,
-            ..Default::default()
-        },
+        rollback: Rollback::default(),
         context: serde_json::to_value(&ctx)?,
     };
     transaction::save(&git_dir, &state)?;

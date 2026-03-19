@@ -291,8 +291,6 @@ pub fn run(dry_run: bool, user_files: Vec<String>) -> Result<()> {
     let state = LoomState {
         command: "absorb".to_string(),
         rollback: Rollback {
-            saved_head: saved_head.clone(),
-            saved_refs: transaction::refs_to_strings(&saved_refs),
             saved_staged_patch: saved_staged.clone(),
             saved_worktree_patch: saved_worktree_patch.clone(),
             ..Default::default()

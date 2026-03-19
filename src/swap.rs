@@ -42,15 +42,9 @@ fn swap_two_commits(repo: &Repository, hash_a: String, hash_b: String) -> Result
     let mut graph = Weave::from_repo(repo)?;
     graph.swap_commits(oid_a, oid_b)?;
 
-    let saved_head = git::head_oid(repo)?.to_string();
-    let saved_refs = transaction::refs_to_strings(&git::snapshot_branch_refs(repo)?);
     let state = LoomState {
         command: "swap".to_string(),
-        rollback: Rollback {
-            saved_head,
-            saved_refs,
-            ..Default::default()
-        },
+        rollback: Rollback::default(),
         context: serde_json::to_value(&SwapContext {
             display_a: display_a.to_string(),
             display_b: display_b.to_string(),
