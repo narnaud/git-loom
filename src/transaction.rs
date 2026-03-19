@@ -27,6 +27,9 @@ pub struct Rollback {
     /// HEAD OID to `reset --mixed` to on abort.
     #[serde(default)]
     pub reset_mixed_to: String,
+    /// HEAD OID to `reset --hard` to on abort.
+    #[serde(default)]
+    pub reset_hard_to: String,
     /// Branches created during this operation that should be deleted on abort.
     #[serde(default)]
     pub delete_branches: Vec<String>,
@@ -43,12 +46,16 @@ impl Rollback {
     ///
     /// Acts on whichever fields are populated:
     /// - `reset_mixed_to` → `reset --mixed` to undo a pre-rebase commit
+    /// - `reset_hard_to` → `reset --hard` to undo pre-rebase commits (e.g. fixup commits)
     /// - `delete_branches` → delete temporary branches
     /// - `saved_staged_patch` → re-stage saved changes
     /// - `saved_worktree_patch` → re-apply saved working-tree changes
     pub fn apply_abort(&self, workdir: &Path) -> Result<()> {
         if !self.reset_mixed_to.is_empty() {
             git_commit::reset_mixed(workdir, &self.reset_mixed_to)?;
+        }
+        if !self.reset_hard_to.is_empty() {
+            git_commit::reset_hard(workdir, &self.reset_hard_to)?;
         }
         for branch in &self.delete_branches {
             let _ = git_branch::delete(workdir, branch);
