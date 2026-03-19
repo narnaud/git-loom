@@ -5,7 +5,7 @@ use anyhow::{Context, Result, bail};
 use git2::{Oid, Repository};
 use serde::{Deserialize, Serialize};
 
-use crate::git::{self, CommitInfo};
+use crate::git::{self, CommitInfo, RepoInfo};
 use crate::git_commands::{self, git_commit};
 use crate::msg;
 use crate::transaction::{self, LoomState, Rollback};
@@ -39,6 +39,19 @@ enum FileAnalysis {
     Skipped { reason: String },
 }
 
+/// Planned absorb: which files/hunks go to which commits.
+struct AbsorbPlan {
+    /// Whole-file assignments: (file_path, target_commit_oid).
+    whole_file_assigned: Vec<(String, Oid)>,
+    /// Hunk-level assignments: (file_path, target_commit_oid, hunks).
+    hunk_assigned: Vec<(String, Oid, Vec<DiffHunk>)>,
+    /// Files that could not be absorbed (saved and re-applied after rebase).
+    skipped_files: Vec<String>,
+    num_hunks: usize,
+    num_files: usize,
+    num_commits: usize,
+}
+
 /// Absorb working tree changes into the commits that last touched the affected lines.
 pub fn run(dry_run: bool, user_files: Vec<String>) -> Result<()> {
     let repo = git::open_repo()?;
@@ -46,32 +59,50 @@ pub fn run(dry_run: bool, user_files: Vec<String>) -> Result<()> {
     let git_dir = repo.path().to_path_buf();
     let info = git::gather_repo_info(&repo, false, 1)?;
 
-    // Build in-scope commit set (non-merge commits between merge-base and HEAD)
-    let in_scope: HashMap<Oid, &CommitInfo> = info.commits.iter().map(|c| (c.oid, c)).collect();
-
-    if in_scope.is_empty() {
+    if info.commits.is_empty() {
         bail!("No commits in scope — nothing to absorb into");
     }
 
-    // Get changed files
     let changed_files = get_changed_files(&repo, workdir, &user_files)?;
     if changed_files.is_empty() {
         bail!("Nothing to absorb — make some changes to tracked files first");
     }
 
-    // Build Weave for branch name lookup in output
     let weave_graph = Weave::from_repo_with_info(&repo, &info)?;
+    let plan = build_plan(&repo, workdir, &info, &changed_files, &weave_graph)?;
 
-    // Analyze each file — collect assignments at hunk level
+    if dry_run {
+        println!(
+            "\nDry run: would absorb {} hunk(s) from {} file(s) into {} commit(s)",
+            plan.num_hunks, plan.num_files, plan.num_commits
+        );
+        return Ok(());
+    }
+
+    apply_plan(&repo, workdir, &git_dir, plan)
+}
+
+/// Analyze changed files and build an absorb plan.
+///
+/// Prints each assignment as it's determined. Returns an error if nothing can be absorbed.
+fn build_plan(
+    repo: &Repository,
+    workdir: &Path,
+    info: &RepoInfo,
+    changed_files: &[String],
+    weave_graph: &Weave,
+) -> Result<AbsorbPlan> {
+    let in_scope: HashMap<Oid, &CommitInfo> = info.commits.iter().map(|c| (c.oid, c)).collect();
+
     let mut whole_file_assigned: Vec<(String, Oid)> = Vec::new();
     let mut hunk_assigned: Vec<(String, Oid, Vec<DiffHunk>)> = Vec::new();
     let mut skipped_files: Vec<String> = Vec::new();
     let mut any_assigned = false;
 
-    for file in &changed_files {
-        match analyze_file(&repo, workdir, file, &in_scope)? {
+    for file in changed_files {
+        match analyze_file(repo, workdir, file, &in_scope)? {
             FileAnalysis::Assigned { commit_oid } => {
-                print_assignment(file, commit_oid, &in_scope, &weave_graph);
+                print_assignment(file, commit_oid, &in_scope, weave_graph);
                 whole_file_assigned.push((file.clone(), commit_oid));
                 any_assigned = true;
             }
@@ -89,7 +120,7 @@ pub fn run(dry_run: bool, user_files: Vec<String>) -> Result<()> {
                                 total,
                                 commit_oid,
                                 &in_scope,
-                                &weave_graph,
+                                weave_graph,
                             );
                             per_commit.entry(commit_oid).or_default().push(hunk);
                         }
@@ -126,64 +157,57 @@ pub fn run(dry_run: bool, user_files: Vec<String>) -> Result<()> {
         bail!("No files could be absorbed");
     }
 
-    // Count stats
     let num_hunks: usize = whole_file_assigned.len()
         + hunk_assigned
             .iter()
             .map(|(_, _, hunks)| hunks.len())
             .sum::<usize>();
-    let unique_targets: HashSet<Oid> = whole_file_assigned
+    let num_commits = whole_file_assigned
         .iter()
         .map(|(_, oid)| *oid)
         .chain(hunk_assigned.iter().map(|(_, oid, _)| *oid))
-        .collect();
-    let assigned_file_set: HashSet<&str> = whole_file_assigned
+        .collect::<HashSet<Oid>>()
+        .len();
+    let num_files = whole_file_assigned
         .iter()
         .map(|(f, _)| f.as_str())
         .chain(hunk_assigned.iter().map(|(f, _, _)| f.as_str()))
-        .collect();
-    let num_commits = unique_targets.len();
-    let num_files = assigned_file_set.len();
+        .collect::<HashSet<&str>>()
+        .len();
 
-    if dry_run {
-        println!(
-            "\nDry run: would absorb {} hunk(s) from {} file(s) into {} commit(s)",
-            num_hunks, num_files, num_commits
-        );
-        return Ok(());
-    }
+    Ok(AbsorbPlan {
+        whole_file_assigned,
+        hunk_assigned,
+        skipped_files,
+        num_hunks,
+        num_files,
+        num_commits,
+    })
+}
 
-    // Save state for rollback
-    let saved_head = git::head_oid(&repo)?.to_string();
-    let saved_refs = git::snapshot_branch_refs(&repo)?;
+/// Apply an absorb plan: create fixup commits and run the rebase.
+fn apply_plan(repo: &Repository, workdir: &Path, git_dir: &Path, plan: AbsorbPlan) -> Result<()> {
+    let saved_head = git::head_oid(repo)?.to_string();
+    let saved_refs = git::snapshot_branch_refs(repo)?;
 
-    // Group whole-file assignments by target commit
+    // Group assignments by target commit.
     let mut groups: HashMap<Oid, Vec<String>> = HashMap::new();
-    for (file, oid) in &whole_file_assigned {
+    for (file, oid) in &plan.whole_file_assigned {
         groups.entry(*oid).or_default().push(file.clone());
     }
-
-    // Group hunk assignments by target commit
     let mut hunk_groups: HashMap<Oid, Vec<(String, Vec<DiffHunk>)>> = HashMap::new();
-    for (path, oid, hunks) in hunk_assigned {
+    for (path, oid, hunks) in plan.hunk_assigned {
         hunk_groups.entry(oid).or_default().push((path, hunks));
     }
 
-    // Build the set of files being absorbed so we can identify pre-existing
-    // staged files that are NOT being absorbed and must not leak into any
-    // fixup commit.
-    let absorbed_files: std::collections::HashSet<&str> = groups
+    // Save staged files that are NOT being absorbed so they don't leak into fixup commits.
+    let absorbed_files: HashSet<&str> = groups
         .values()
         .flatten()
         .map(|s| s.as_str())
-        .chain(
-            hunk_groups
-                .values()
-                .flatten()
-                .map(|(path, _)| path.as_str()),
-        )
+        .chain(hunk_groups.values().flatten().map(|(p, _)| p.as_str()))
         .collect();
-    let pre_staged = git::get_staged_files(&repo)?;
+    let pre_staged = git::get_staged_files(repo)?;
     let non_absorbed_staged: Vec<&str> = pre_staged
         .iter()
         .filter(|f| !absorbed_files.contains(f.as_str()))
@@ -197,119 +221,58 @@ pub fn run(dry_run: bool, user_files: Vec<String>) -> Result<()> {
         patch
     };
 
-    // Snapshot full working-tree diff before any mutations, for rollback
-    let saved_worktree_patch = git_commands::run_git_stdout(workdir, &["diff", "HEAD"])?;
+    // Snapshot full working-tree diff before any mutations (needed for pre-rebase rollback).
+    let saved_worktree = git_commands::run_git_stdout(workdir, &["diff", "HEAD"])?;
 
-    let rollback = |warn_patch_err: bool| {
-        let _ = git_commit::reset_hard(workdir, &saved_head);
-        let _ = git::restore_branch_refs(workdir, &saved_refs);
-        // Best-effort restore of pre-existing staged state
-        if !saved_staged.is_empty() {
-            let _ = git_commands::apply_cached_patch(workdir, &saved_staged);
-        }
-        if !saved_worktree_patch.is_empty()
-            && let Err(e) = git_commands::apply_patch(workdir, &saved_worktree_patch)
-            && warn_patch_err
-        {
-            eprintln!("Warning: could not restore working tree changes: {}", e);
-        }
-    };
+    // Create fixup commits; rolls back to pre-mutation state on any failure.
+    let fixup_pairs = create_fixup_commits(
+        workdir,
+        &groups,
+        &hunk_groups,
+        &saved_head,
+        &saved_refs,
+        &saved_staged,
+        &saved_worktree,
+    )?;
 
-    let mut fixup_pairs: Vec<(Oid, Oid)> = Vec::new();
+    // Save diffs for skipped files and restore their working-tree state before the rebase.
+    let skipped_patch = save_skipped_patch(workdir, &plan.skipped_files)?;
 
-    // Create fixup commits for whole-file groups
-    for (target_oid, files) in &groups {
-        let file_refs: Vec<&str> = files.iter().map(|s| s.as_str()).collect();
-        if let Err(e) = git_commit::stage_files(workdir, &file_refs) {
-            rollback(false);
-            return Err(e);
-        }
-        let msg = format!("fixup! absorb into {}", target_oid);
-        if let Err(e) = git_commit::commit(workdir, &msg) {
-            rollback(false);
-            return Err(e);
-        }
-        let fixup_hash = git_commands::rev_parse(workdir, "HEAD")?;
-        let fixup_oid = git2::Oid::from_str(&fixup_hash)?;
-        fixup_pairs.push((fixup_oid, *target_oid));
-    }
-
-    // Create fixup commits for hunk groups
-    for (target_oid, file_hunks) in &hunk_groups {
-        let mut combined_patch = String::new();
-        for (path, hunks) in file_hunks {
-            combined_patch.push_str(&build_hunk_patch(path, hunks));
-        }
-        if let Err(e) = git_commands::apply_cached_patch(workdir, &combined_patch) {
-            rollback(false);
-            return Err(e);
-        }
-        let msg = format!("fixup! absorb into {}", target_oid);
-        if let Err(e) = git_commit::commit(workdir, &msg) {
-            rollback(false);
-            return Err(e);
-        }
-        let fixup_hash = git_commands::rev_parse(workdir, "HEAD")?;
-        let fixup_oid = git2::Oid::from_str(&fixup_hash)?;
-        fixup_pairs.push((fixup_oid, *target_oid));
-    }
-
-    // Save diffs of skipped content and restore working tree before rebase
-    let skipped_file_refs: Vec<&str> = skipped_files.iter().map(|f| f.as_str()).collect();
-    let skipped_patch = if !skipped_file_refs.is_empty() {
-        let dirty = git_commands::diff_head_name_only(workdir)?;
-        if !dirty.trim().is_empty() {
-            let mut diff_args: Vec<&str> = vec!["diff", "HEAD", "--"];
-            diff_args.extend(skipped_file_refs.iter().copied());
-            let full_patch = git_commands::run_git_stdout(workdir, &diff_args)?;
-            let _ = git_commands::restore_files_to_head(workdir, &skipped_file_refs);
-            Some(full_patch)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Build Weave with the fixup commits, apply fixup_commit for each pair
+    // Build Weave with the fixup commits.
     let repo2 = Repository::discover(workdir)?;
     let mut graph = Weave::from_repo(&repo2)?;
     for (fixup_oid, target_oid) in &fixup_pairs {
         graph.fixup_commit(*fixup_oid, *target_oid)?;
     }
 
-    // Release the inline rollback closure's borrows before saving state.
-    let _ = rollback;
-
-    // Save LoomState before the rebase so we can resume on conflict.
     let ctx = AbsorbContext {
         skipped_patch: skipped_patch.clone(),
-        num_hunks,
-        num_files,
-        num_commits,
+        num_hunks: plan.num_hunks,
+        num_files: plan.num_files,
+        num_commits: plan.num_commits,
     };
     let state = LoomState {
         command: "absorb".to_string(),
         rollback: Rollback {
             saved_staged_patch: saved_staged.clone(),
-            saved_worktree_patch: saved_worktree_patch.clone(),
+            saved_worktree_patch: saved_worktree.clone(),
             ..Default::default()
         },
         context: serde_json::to_value(&ctx)?,
     };
-    transaction::save(&git_dir, &state)?;
+    transaction::save(git_dir, &state)?;
 
     let todo = graph.to_todo();
     match weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)? {
         RebaseOutcome::Completed => {
-            transaction::delete(&git_dir)?;
+            transaction::delete(git_dir)?;
             post_absorb(
                 workdir,
                 &saved_staged,
                 skipped_patch.as_deref(),
-                num_hunks,
-                num_files,
-                num_commits,
+                plan.num_hunks,
+                plan.num_files,
+                plan.num_commits,
             )?;
         }
         RebaseOutcome::Conflicted => {
@@ -318,6 +281,124 @@ pub fn run(dry_run: bool, user_files: Vec<String>) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Create fixup commits for each whole-file and hunk-level assignment.
+///
+/// On any failure, rolls back to the pre-mutation state (reset hard, restore refs and patches)
+/// before returning the error.
+fn create_fixup_commits(
+    workdir: &Path,
+    groups: &HashMap<Oid, Vec<String>>,
+    hunk_groups: &HashMap<Oid, Vec<(String, Vec<DiffHunk>)>>,
+    saved_head: &str,
+    saved_refs: &HashMap<String, git2::Oid>,
+    saved_staged: &str,
+    saved_worktree: &str,
+) -> Result<Vec<(Oid, Oid)>> {
+    let mut fixup_pairs: Vec<(Oid, Oid)> = Vec::new();
+
+    for (target_oid, files) in groups {
+        let file_refs: Vec<&str> = files.iter().map(|s| s.as_str()).collect();
+        if let Err(e) = git_commit::stage_files(workdir, &file_refs) {
+            rollback_pre_rebase(
+                workdir,
+                saved_head,
+                saved_refs,
+                saved_staged,
+                saved_worktree,
+            );
+            return Err(e);
+        }
+        let msg = format!("fixup! absorb into {}", target_oid);
+        if let Err(e) = git_commit::commit(workdir, &msg) {
+            rollback_pre_rebase(
+                workdir,
+                saved_head,
+                saved_refs,
+                saved_staged,
+                saved_worktree,
+            );
+            return Err(e);
+        }
+        let fixup_hash = git_commands::rev_parse(workdir, "HEAD")?;
+        let fixup_oid = git2::Oid::from_str(&fixup_hash)?;
+        fixup_pairs.push((fixup_oid, *target_oid));
+    }
+
+    for (target_oid, file_hunks) in hunk_groups {
+        let mut combined_patch = String::new();
+        for (path, hunks) in file_hunks {
+            combined_patch.push_str(&build_hunk_patch(path, hunks));
+        }
+        if let Err(e) = git_commands::apply_cached_patch(workdir, &combined_patch) {
+            rollback_pre_rebase(
+                workdir,
+                saved_head,
+                saved_refs,
+                saved_staged,
+                saved_worktree,
+            );
+            return Err(e);
+        }
+        let msg = format!("fixup! absorb into {}", target_oid);
+        if let Err(e) = git_commit::commit(workdir, &msg) {
+            rollback_pre_rebase(
+                workdir,
+                saved_head,
+                saved_refs,
+                saved_staged,
+                saved_worktree,
+            );
+            return Err(e);
+        }
+        let fixup_hash = git_commands::rev_parse(workdir, "HEAD")?;
+        let fixup_oid = git2::Oid::from_str(&fixup_hash)?;
+        fixup_pairs.push((fixup_oid, *target_oid));
+    }
+
+    Ok(fixup_pairs)
+}
+
+/// Save diffs for skipped files and restore their working-tree state before the rebase.
+fn save_skipped_patch(workdir: &Path, skipped_files: &[String]) -> Result<Option<String>> {
+    if skipped_files.is_empty() {
+        return Ok(None);
+    }
+    let refs: Vec<&str> = skipped_files.iter().map(|f| f.as_str()).collect();
+    let dirty = git_commands::diff_head_name_only(workdir)?;
+    if dirty.trim().is_empty() {
+        return Ok(None);
+    }
+    let mut diff_args = vec!["diff", "HEAD", "--"];
+    diff_args.extend(refs.iter().copied());
+    let patch = git_commands::run_git_stdout(workdir, &diff_args)?;
+    let _ = git_commands::restore_files_to_head(workdir, &refs);
+    Ok(Some(patch))
+}
+
+/// Roll back pre-rebase mutations: reset hard, restore refs and saved patches.
+///
+/// Used when a failure occurs during fixup commit creation, before any rebase has started.
+/// This is distinct from `Rollback::apply_abort()`, which handles post-conflict abort and
+/// trusts `git rebase --abort --update-refs` to restore branch refs.
+fn rollback_pre_rebase(
+    workdir: &Path,
+    saved_head: &str,
+    saved_refs: &HashMap<String, git2::Oid>,
+    saved_staged: &str,
+    saved_worktree: &str,
+) {
+    let _ = git_commit::reset_hard(workdir, saved_head);
+    let _ = git::restore_branch_refs(workdir, saved_refs);
+    if !saved_staged.is_empty() {
+        let _ = git_commands::apply_cached_patch(workdir, saved_staged);
+    }
+    if !saved_worktree.is_empty() {
+        if let Err(e) = git_commands::apply_patch(workdir, saved_worktree) {
+            eprintln!("Warning: could not restore working tree changes: {}", e);
+        }
+    }
 }
 
 /// Resume an `absorb` operation after a conflict has been resolved.
