@@ -474,8 +474,6 @@ fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str
 
         // Save LoomState before the rebase.
         let git_dir = repo.path().to_path_buf();
-        let saved_head_str = git_commands::rev_parse(workdir, "HEAD")?;
-        let saved_refs_map = transaction::refs_to_strings(&git::snapshot_branch_refs(&repo)?);
         let fold_ctx = serde_json::to_value(FoldVariant::FilesIntoCommit {
             original_commit_hash: commit_hash.to_string(),
             files_count: files.len(),
@@ -484,8 +482,6 @@ fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str
         let loom_state = LoomState {
             command: "fold".to_string(),
             rollback: Rollback {
-                saved_head: saved_head_str,
-                saved_refs: saved_refs_map,
                 saved_staged_patch: saved_staged.clone(),
                 delete_branches: vec![TRACK_BRANCH.to_string()],
                 ..Default::default()
@@ -544,8 +540,6 @@ fn fold_commit_into_commit(repo: &Repository, source_hash: &str, target_hash: &s
 
     // Save LoomState before the rebase.
     let git_dir = repo.path().to_path_buf();
-    let saved_head_str = git_commands::rev_parse(workdir, "HEAD")?;
-    let saved_refs_map = transaction::refs_to_strings(&git::snapshot_branch_refs(repo)?);
     let fold_ctx = serde_json::to_value(FoldVariant::CommitIntoCommit {
         source_hash: source_hash.to_string(),
         target_hash: target_hash.to_string(),
@@ -553,8 +547,6 @@ fn fold_commit_into_commit(repo: &Repository, source_hash: &str, target_hash: &s
     let loom_state = LoomState {
         command: "fold".to_string(),
         rollback: Rollback {
-            saved_head: saved_head_str,
-            saved_refs: saved_refs_map,
             delete_branches: vec![TRACK_BRANCH.to_string()],
             ..Default::default()
         },
@@ -588,19 +580,13 @@ fn fold_commit_to_branch(repo: &Repository, commit_hash: &str, branch_name: &str
     let workdir = git::require_workdir(repo, "fold")?;
     let git_dir = repo.path().to_path_buf();
 
-    let saved_head = git::head_oid(repo)?.to_string();
-    let saved_refs = transaction::refs_to_strings(&git::snapshot_branch_refs(repo)?);
     let ctx = serde_json::to_value(FoldVariant::CommitToBranch {
         commit_hash: commit_hash.to_string(),
         branch_name: branch_name.to_string(),
     })?;
     let state = LoomState {
         command: "fold".to_string(),
-        rollback: Rollback {
-            saved_head,
-            saved_refs,
-            ..Default::default()
-        },
+        rollback: Rollback::default(),
         context: ctx,
     };
     transaction::save(&git_dir, &state)?;
@@ -979,11 +965,7 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
         })?;
         let loom_state = LoomState {
             command: "fold".to_string(),
-            rollback: Rollback {
-                saved_head: saved_head.clone(),
-                saved_refs: transaction::refs_to_strings(&saved_refs),
-                ..Default::default()
-            },
+            rollback: Rollback::default(),
             context: fold_ctx,
         };
         transaction::save(&git_dir, &loom_state)?;

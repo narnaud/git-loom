@@ -74,6 +74,23 @@ The `specs/` directory contains detailed design documents that describe each fea
 - **Format:** `cargo fmt`
 - **Check (fast compile check):** `cargo check`
 
+## Non-Negotiable: Never Lose User Data
+
+git-loom must never discard user data — staged changes, working tree changes, or uncommitted work — as a side effect of any operation, including conflict resolution, abort, or continue flows.
+
+**The abort architecture:** `loom abort` calls `git rebase --abort`, which already restores HEAD, all branch refs (via `--update-refs`), and any autostashed working-tree changes. Extra cleanup beyond that is driven entirely by the `Rollback` struct saved in `LoomState` — `Rollback::apply_abort()` acts on whichever fields are populated:
+
+- `reset_mixed_to` → `reset --mixed` to undo a pre-rebase commit (used by `commit`)
+- `delete_branches` → delete temp branches (used by `commit` and `fold FilesIntoCommit`/`CommitIntoCommit`)
+- `saved_staged_patch` → re-stage changes that were saved aside (used by `commit`, `absorb`, `fold FilesIntoCommit`)
+- `saved_worktree_patch` → re-apply working-tree changes (used by `absorb`)
+
+**Required pattern** for any new resumable command (one that calls `weave::run_rebase`):
+
+1. Populate the appropriate `Rollback` fields before saving `LoomState`
+2. Register the command name in `transaction::dispatch_after_continue`
+3. There is no `dispatch_after_abort` — abort is handled automatically by `Rollback::apply_abort()`
+
 ## Non-Negotiable: After Every Code Change
 
 After editing any code, you **must** run the following before considering the task done:

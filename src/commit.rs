@@ -64,7 +64,6 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
 
     // Step 3: Save HEAD for rollback
     let saved_head = git::head_oid(&repo)?.to_string();
-    let saved_refs = transaction::refs_to_strings(&git::snapshot_branch_refs(&repo)?);
 
     // Step 4: Resolve branch target (may create a new branch at merge-base)
     // Snapshot existing branch names so we can detect newly-created branches.
@@ -125,11 +124,9 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
     let state = LoomState {
         command: "commit".to_string(),
         rollback: Rollback {
-            saved_head: saved_head.clone(),
-            saved_refs,
+            reset_mixed_to: saved_head.clone(),
             delete_branches,
             saved_staged_patch: saved_staged.clone(),
-            reset_mixed: true,
             ..Default::default()
         },
         context: serde_json::to_value(&ctx)?,

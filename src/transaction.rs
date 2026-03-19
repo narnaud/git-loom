@@ -1,11 +1,9 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
-use crate::git;
-use crate::git_commands::{self, git_commit, git_rebase};
+use crate::git_commands::{self, git_branch, git_commit, git_rebase};
 
 /// Persistent state saved when a loom command is paused due to a rebase conflict.
 #[derive(Debug, Serialize, Deserialize)]
@@ -19,31 +17,50 @@ pub struct LoomState {
 }
 
 /// Rollback information captured before the rebase step starts.
+///
+/// Only fields that are actually consumed by a command's `after_abort` handler
+/// belong here. `git rebase --abort` already restores HEAD, all branch refs
+/// (via `--update-refs`), and autostashed working-tree changes — so those do
+/// not need to be saved.
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct Rollback {
-    /// HEAD OID before the operation started.
-    pub saved_head: String,
-    /// Snapshot of all branch ref OIDs before the operation.
-    pub saved_refs: HashMap<String, String>,
+    /// HEAD OID to `reset --mixed` to on abort.
+    #[serde(default)]
+    pub reset_mixed_to: String,
     /// Branches created during this operation that should be deleted on abort.
+    #[serde(default)]
     pub delete_branches: Vec<String>,
     /// Staged diff saved aside during the operation (may be empty).
-    pub saved_staged_patch: String,
-    /// Full working-tree diff saved before the rebase (may be empty).
-    pub saved_worktree_patch: String,
-    /// If true, use `git reset --mixed` instead of `--hard` when restoring HEAD.
-    /// Set for commands (e.g., `commit`) where the committed content should
-    /// remain in the working directory as unstaged changes after abort.
     #[serde(default)]
-    pub reset_mixed: bool,
+    pub saved_staged_patch: String,
+    /// Working-tree diff saved before the rebase (may be empty).
+    #[serde(default)]
+    pub saved_worktree_patch: String,
 }
 
-/// Convert a `snapshot_branch_refs` result to the string map stored in `Rollback`.
-pub fn refs_to_strings(snapshot: &HashMap<String, git2::Oid>) -> HashMap<String, String> {
-    snapshot
-        .iter()
-        .map(|(k, v)| (k.clone(), v.to_string()))
-        .collect()
+impl Rollback {
+    /// Apply the rollback after `git rebase --abort` has run.
+    ///
+    /// Acts on whichever fields are populated:
+    /// - `reset_mixed_to` → `reset --mixed` to undo a pre-rebase commit
+    /// - `delete_branches` → delete temporary branches
+    /// - `saved_staged_patch` → re-stage saved changes
+    /// - `saved_worktree_patch` → re-apply saved working-tree changes
+    pub fn apply_abort(&self, workdir: &Path) -> Result<()> {
+        if !self.reset_mixed_to.is_empty() {
+            git_commit::reset_mixed(workdir, &self.reset_mixed_to)?;
+        }
+        for branch in &self.delete_branches {
+            let _ = git_branch::delete(workdir, branch);
+        }
+        git_commands::restore_staged_patch(workdir, &self.saved_staged_patch)?;
+        if !self.saved_worktree_patch.is_empty()
+            && let Err(e) = git_commands::apply_patch(workdir, &self.saved_worktree_patch)
+        {
+            eprintln!("Warning: could not re-apply working-tree changes: {}", e);
+        }
+        Ok(())
+    }
 }
 
 /// Return the path to the state file: `<git_dir>/loom/state.json`.
@@ -100,48 +117,6 @@ pub fn delete(git_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Apply shared rollback: restore HEAD, branch refs, and patches.
-pub fn apply_rollback(workdir: &Path, rollback: &Rollback) -> Result<()> {
-    if !rollback.saved_head.is_empty() {
-        if rollback.reset_mixed {
-            let _ = git_commit::reset_mixed(workdir, &rollback.saved_head);
-        } else {
-            let _ = git_commit::reset_hard(workdir, &rollback.saved_head);
-        }
-    }
-
-    // Restore branch refs
-    let oid_map: HashMap<String, git2::Oid> = rollback
-        .saved_refs
-        .iter()
-        .filter_map(|(name, oid_str)| {
-            git2::Oid::from_str(oid_str)
-                .ok()
-                .map(|oid| (name.clone(), oid))
-        })
-        .collect();
-    if !oid_map.is_empty() {
-        let _ = git::restore_branch_refs(workdir, &oid_map);
-    }
-
-    // Delete newly created branches
-    for branch in &rollback.delete_branches {
-        let _ = git_commands::git_branch::delete(workdir, branch);
-    }
-
-    // Restore pre-existing staged changes
-    if !rollback.saved_staged_patch.is_empty() {
-        let _ = git_commands::apply_cached_patch(workdir, &rollback.saved_staged_patch);
-    }
-
-    // Restore working-tree changes
-    if !rollback.saved_worktree_patch.is_empty() {
-        let _ = git_commands::apply_patch(workdir, &rollback.saved_worktree_patch);
-    }
-
-    Ok(())
-}
-
 /// Emit the standard conflict-pause warning for a resumable command.
 pub fn warn_conflict_paused(command: &str) {
     crate::msg::warn(&format!(
@@ -178,8 +153,11 @@ pub fn continue_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
 
 /// Implement `loom abort`.
 ///
-/// 1. Aborts any active rebase.
-/// 2. Applies shared rollback.
+/// 1. Aborts any active rebase (`git rebase --abort` restores HEAD, branch
+///    refs via `--update-refs`, and any autostashed working-tree changes).
+/// 2. Calls `rollback.apply_abort()` for any cleanup `git rebase --abort`
+///    cannot do on its own (un-committing staged changes, deleting temp branches,
+///    restoring saved patches).
 /// 3. Deletes state.
 pub fn abort_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
     let state = load_required(git_dir)?;
@@ -188,7 +166,7 @@ pub fn abort_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
         let _ = git_rebase::abort(workdir);
     }
 
-    apply_rollback(workdir, &state.rollback)?;
+    state.rollback.apply_abort(workdir)?;
     delete(git_dir)?;
 
     crate::msg::success(&format!(
@@ -220,14 +198,10 @@ mod tests {
         let state = LoomState {
             command: "commit".to_string(),
             rollback: Rollback {
-                saved_head: "abc123".to_string(),
-                saved_refs: [("feature".to_string(), "def456".to_string())]
-                    .into_iter()
-                    .collect(),
+                reset_mixed_to: "abc123".to_string(),
                 delete_branches: vec!["new-branch".to_string()],
                 saved_staged_patch: "--- a/foo\n+++ b/foo\n".to_string(),
-                saved_worktree_patch: String::new(),
-                reset_mixed: false,
+                ..Default::default()
             },
             context: serde_json::json!({ "branch_name": "feature" }),
         };
@@ -235,11 +209,7 @@ mod tests {
         let json = serde_json::to_string_pretty(&state).unwrap();
         let restored: LoomState = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.command, "commit");
-        assert_eq!(restored.rollback.saved_head, "abc123");
-        assert_eq!(
-            restored.rollback.saved_refs.get("feature"),
-            Some(&"def456".to_string())
-        );
+        assert_eq!(restored.rollback.reset_mixed_to, "abc123");
         assert_eq!(restored.rollback.delete_branches, vec!["new-branch"]);
     }
 
