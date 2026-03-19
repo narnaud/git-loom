@@ -17,6 +17,11 @@ pub fn run(
     let opts = graph::default_render_opts(theme, cwd_prefix);
     let show_files = file_filter.is_some();
     let mut info = git::gather_repo_info(&repo, show_files, context)?;
+
+    // Collect entities from the full info BEFORE filtering so that short IDs
+    // are stable regardless of which branches are hidden.
+    let ids = shortid::IdAllocator::new(info.collect_entities());
+
     if !show_all {
         let pattern = git::hide_branch_pattern(&repo)
             .unwrap_or_else(|| git::DEFAULT_HIDE_PATTERN.to_string());
@@ -26,10 +31,10 @@ pub fn run(
     }
 
     // When specific commits are requested, clear files from non-matching commits.
-    if let Some(ids) = &file_filter
-        && !ids.is_empty()
+    if let Some(filter_ids) = &file_filter
+        && !filter_ids.is_empty()
     {
-        let filter_oids = resolve_commit_filter(&repo, ids, &info);
+        let filter_oids = resolve_commit_filter(&repo, filter_ids, &info, &ids);
         for commit in &mut info.commits {
             if !filter_oids.contains(&commit.oid) {
                 commit.files.clear();
@@ -37,7 +42,7 @@ pub fn run(
         }
     }
 
-    let output = graph::render(info, &opts);
+    let output = graph::render(info, &ids, &opts);
     print!("{}", output);
     Ok(())
 }
@@ -49,10 +54,8 @@ fn resolve_commit_filter(
     repo: &git2::Repository,
     ids: &[String],
     info: &git::RepoInfo,
+    allocator: &shortid::IdAllocator,
 ) -> HashSet<git2::Oid> {
-    let entities = info.collect_entities();
-    let allocator = shortid::IdAllocator::new(entities);
-
     let mut filter_oids = HashSet::new();
 
     for id in ids {

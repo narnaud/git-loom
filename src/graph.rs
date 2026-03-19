@@ -133,10 +133,9 @@ enum Section {
 // ── Public API ──────────────────────────────────────────────────────────
 
 /// Build sections from repo data and render them as a UTF-8 graph string.
-pub fn render(info: RepoInfo, opts: &RenderOpts) -> String {
-    let ids = IdAllocator::new(info.collect_entities());
+pub fn render(info: RepoInfo, ids: &IdAllocator, opts: &RenderOpts) -> String {
     let sections = build_sections(info);
-    render_sections(&sections, &ids, opts)
+    render_sections(&sections, ids, opts)
 }
 
 /// Detect terminal width and build render options for the given theme.
