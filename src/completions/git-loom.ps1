@@ -20,7 +20,8 @@ $_gitLoomCompleter = {
         @{ Name = 'split'; Description = 'Split a commit into two sequential commits' },
         @{ Name = 'continue'; Description = 'Continue a paused loom operation after resolving conflicts' },
         @{ Name = 'abort'; Description = 'Abort a paused loom operation and restore original state' },
-        @{ Name = 'swap'; Description = 'Swap two commits' }
+        @{ Name = 'swap'; Description = 'Swap two commits' },
+        @{ Name = 'switch'; Description = 'Switch to any branch for testing' }
     )
 
     $globalFlags = @(

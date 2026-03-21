@@ -47,6 +47,24 @@ pub fn delete(workdir: &Path, name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Switch to an existing local branch.
+///
+/// Wraps `git switch <name>`.
+pub fn switch(workdir: &Path, name: &str) -> Result<()> {
+    run_git(workdir, &["switch", name])
+        .with_context(|| format!("Failed to switch to branch '{}'", name))?;
+    Ok(())
+}
+
+/// Detach HEAD at a ref without creating a local branch.
+///
+/// Wraps `git switch --detach <refspec>`.
+pub fn switch_detach(workdir: &Path, refspec: &str) -> Result<()> {
+    run_git(workdir, &["switch", "--detach", refspec])
+        .with_context(|| format!("Failed to detach HEAD at '{}'", refspec))?;
+    Ok(())
+}
+
 /// Create a new branch at a remote tracking ref and switch to it.
 ///
 /// Wraps `git switch -c <name> --track <upstream>`.
