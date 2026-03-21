@@ -1538,3 +1538,63 @@ fn fold_staged_non_commit_target_fails() {
         "should error when target is not a commit, got: {err_msg}"
     );
 }
+
+// ── Abort preserves working state ────────────────────────────────────────
+
+/// Regression: loom abort after a fold conflict must preserve staged changes
+/// on other files, unstaged changes, and new untracked files.
+///
+/// Conflict setup: Commit A creates `shared.txt`; Commit B modifies it.
+/// Folding the working-tree version of `shared.txt` into A rewrites A's
+/// content; when B is replayed it expects A's original content → conflict.
+#[test]
+fn fold_abort_preserves_working_state() {
+    let test_repo = TestRepo::new_with_remote();
+
+    let a_oid = test_repo.commit("version-a", "shared.txt");
+    test_repo.write_file("shared.txt", "version-b");
+    test_repo.stage_files(&["shared.txt"]);
+    test_repo.commit_staged("Commit B");
+
+    // Write the content we want to fold into A.
+    // When B is replayed after modified-A it expects "version-a" → conflict.
+    test_repo.write_file("shared.txt", "version-folded");
+
+    // Bystander state — fold.rs saves other staged files via saved_staged_patch.
+    test_repo.write_file("other-staged.txt", "staged-content");
+    test_repo.stage_files(&["other-staged.txt"]);
+    test_repo.write_file("other-unstaged.txt", "unstaged-content");
+    test_repo.write_file("new-file.txt", "new-content");
+
+    let result = super::fold_files_into_commit(
+        &test_repo.repo,
+        &["shared.txt".to_string()],
+        &a_oid.to_string(),
+    );
+    assert!(
+        result.is_ok(),
+        "fold should pause on conflict: {:?}",
+        result
+    );
+
+    let state_path = test_repo.repo.path().join("loom").join("state.json");
+    assert!(
+        state_path.exists(),
+        "loom state must exist when fold is paused on conflict"
+    );
+
+    let workdir = test_repo.workdir();
+    let git_dir = test_repo.repo.path().to_path_buf();
+    crate::transaction::abort_cmd(&workdir, &git_dir).unwrap();
+
+    assert_eq!(test_repo.read_file("other-staged.txt"), "staged-content");
+    assert_eq!(
+        test_repo.read_file("other-unstaged.txt"),
+        "unstaged-content"
+    );
+    assert!(
+        workdir.join("new-file.txt").exists(),
+        "new untracked file must survive abort"
+    );
+    assert_eq!(test_repo.read_file("new-file.txt"), "new-content");
+}

@@ -668,3 +668,60 @@ fn drop_file_resolves_from_nested_cwd() {
     let result = test_repo.in_dir_path(&sub_dir, || crate::drop::run("file.txt".to_string(), true));
     assert!(result.is_ok(), "Expected ok, got: {:?}", result);
 }
+
+// ── Abort preserves working state ────────────────────────────────────────
+
+/// Regression: loom abort after a drop conflict must preserve staged changes,
+/// unstaged changes on other files, and new untracked files.
+///
+/// Conflict setup: Commit A creates `shared.txt`; Commit B modifies it.
+/// Dropping A forces B to be replayed without A — B's diff expects `shared.txt`
+/// to exist with A's content, but the file no longer exists → conflict.
+#[test]
+fn drop_abort_preserves_working_state() {
+    let test_repo = TestRepo::new_with_remote();
+
+    // Commit A creates shared.txt; Commit B modifies it.
+    let a_oid = test_repo.commit("version-a", "shared.txt");
+    test_repo.write_file("shared.txt", "version-b");
+    test_repo.stage_files(&["shared.txt"]);
+    test_repo.commit_staged("Commit B");
+
+    // Working state set up before running drop.
+    test_repo.write_file("shared.txt", "working-edit"); // change to the conflicting file
+    test_repo.write_file("other-staged.txt", "staged-content");
+    test_repo.stage_files(&["other-staged.txt"]);
+    test_repo.write_file("other-unstaged.txt", "unstaged-content");
+    test_repo.write_file("new-file.txt", "new-content");
+
+    // Drop A — B cannot be replayed without A's file → conflict → loom pauses.
+    let result = super::drop_commit(&test_repo.repo, &a_oid.to_string(), true);
+    assert!(
+        result.is_ok(),
+        "drop_commit should pause on conflict: {:?}",
+        result
+    );
+
+    let state_path = test_repo.repo.path().join("loom").join("state.json");
+    assert!(
+        state_path.exists(),
+        "loom state must exist when drop is paused on conflict"
+    );
+
+    let workdir = test_repo.workdir();
+    let git_dir = test_repo.repo.path().to_path_buf();
+    crate::transaction::abort_cmd(&workdir, &git_dir).unwrap();
+
+    // All working state preserved after abort.
+    assert_eq!(test_repo.read_file("shared.txt"), "working-edit");
+    assert_eq!(test_repo.read_file("other-staged.txt"), "staged-content");
+    assert_eq!(
+        test_repo.read_file("other-unstaged.txt"),
+        "unstaged-content"
+    );
+    assert!(
+        workdir.join("new-file.txt").exists(),
+        "new untracked file must survive abort"
+    );
+    assert_eq!(test_repo.read_file("new-file.txt"), "new-content");
+}

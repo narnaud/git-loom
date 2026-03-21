@@ -548,3 +548,96 @@ fn absorb_staged_only_changes() {
         test_repo.assert_working_tree_clean();
     });
 }
+
+// ── Abort preserves working state ────────────────────────────────────────
+
+/// Regression: loom abort for absorb must restore the pre-absorb HEAD
+/// (`reset_hard_to`) and re-apply saved staged/worktree patches.
+///
+/// Absorb creates fixup commits before the rebase, advancing HEAD. If the
+/// rebase is aborted, `git rebase --abort` only restores HEAD to the
+/// post-fixup state, not the original pre-absorb HEAD. The `reset_hard_to`
+/// rollback field corrects this.
+///
+/// This test simulates absorb's pre-rebase state directly (saves patches,
+/// clears working changes, creates a fixup commit, injects LoomState) and
+/// then calls abort_cmd to verify the full rollback path.
+#[test]
+fn absorb_abort_preserves_working_state() {
+    let test_repo = TestRepo::new_with_remote();
+
+    // Commit the files that will serve as bystanders and the absorb target.
+    // They must be committed so that `git diff HEAD` / `git diff --cached`
+    // can capture modifications to them.
+    test_repo.write_file("feature.txt", "original\n");
+    test_repo.write_file("other-staged.txt", "original-staged\n");
+    test_repo.write_file("other-unstaged.txt", "original-unstaged\n");
+    test_repo.stage_files(&["feature.txt", "other-staged.txt", "other-unstaged.txt"]);
+    test_repo.commit_staged("Initial setup");
+
+    let pre_absorb_oid = test_repo.head_oid();
+
+    // Set up bystander modifications (what the user has before running absorb).
+    test_repo.write_file("other-staged.txt", "staged-content");
+    test_repo.stage_files(&["other-staged.txt"]);
+    test_repo.write_file("other-unstaged.txt", "unstaged-content");
+    test_repo.write_file("new-file.txt", "new-content"); // new untracked file
+
+    // Modify feature.txt (this is what absorb would absorb).
+    test_repo.write_file("feature.txt", "modified\n");
+
+    let workdir = test_repo.workdir();
+    let git_dir = test_repo.repo.path().to_path_buf();
+
+    // Mirror absorb's pre-rebase cleanup sequence:
+    // 1. Save staged diff (other-staged.txt).
+    let saved_staged =
+        crate::git_commands::diff_cached_files(&workdir, &["other-staged.txt"]).unwrap();
+    // 2. Unstage everything so that git diff HEAD captures all working changes.
+    crate::git_commands::run_git(&workdir, &["restore", "--staged", "."]).unwrap();
+    // 3. Save full working-tree diff (other-staged.txt unstaged + other-unstaged.txt + feature.txt).
+    let saved_worktree = crate::git_commands::run_git_stdout(&workdir, &["diff", "HEAD"]).unwrap();
+    // 4. Clear the working tree back to HEAD (absorb does this before creating fixup commits).
+    //    new-file.txt is untracked and is not touched by `restore`.
+    crate::git_commands::run_git(&workdir, &["restore", "--staged", "--worktree", "."]).unwrap();
+
+    // 5. Simulate absorb creating a fixup commit (HEAD moves past pre_absorb_oid).
+    test_repo.write_file("feature.txt", "modified\n");
+    test_repo.stage_files(&["feature.txt"]);
+    test_repo.commit_staged("fixup! Initial setup");
+
+    // Inject LoomState as absorb would save it before the rebase.
+    let state = crate::transaction::LoomState {
+        command: "absorb".to_string(),
+        rollback: crate::transaction::Rollback {
+            reset_hard_to: pre_absorb_oid.to_string(),
+            saved_staged_patch: saved_staged,
+            saved_worktree_patch: saved_worktree,
+            ..Default::default()
+        },
+        context: serde_json::json!({ "dry_run": false }),
+    };
+    crate::transaction::save(&git_dir, &state).unwrap();
+
+    // Abort (no active rebase; just applies rollback fields).
+    crate::transaction::abort_cmd(&workdir, &git_dir).unwrap();
+
+    // HEAD must be at the pre-absorb position (reset_hard_to undo the fixup commit).
+    assert_eq!(
+        test_repo.head_oid(),
+        pre_absorb_oid,
+        "HEAD must be restored to pre-absorb state"
+    );
+
+    // Bystander state preserved.
+    assert_eq!(test_repo.read_file("other-staged.txt"), "staged-content");
+    assert_eq!(
+        test_repo.read_file("other-unstaged.txt"),
+        "unstaged-content"
+    );
+    assert!(
+        workdir.join("new-file.txt").exists(),
+        "new untracked file must survive abort"
+    );
+    assert_eq!(test_repo.read_file("new-file.txt"), "new-content");
+}
