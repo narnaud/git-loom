@@ -29,6 +29,10 @@ existing pages.
 5. **SUMMARY.md**: read `docs/src/SUMMARY.md` to check whether the command is
    already listed, and to find the right insertion point if not.
 
+6. **Command list files**: read `README.md` (the `## Commands` code block) and
+   `docs/src/commands/README.md` (the opening code block) — you will always
+   update both in Step 5.
+
 ## Step 2 — Determine action
 
 - **New page**: the command has no existing doc page — create
@@ -144,10 +148,43 @@ alphabetical order:
 - [<command>](commands/<command>.md)
 ```
 
-## Step 5 — Output
+## Step 5 — Update command lists (always)
+
+**Always** update the command list in both files, even for existing commands.
+The canonical source of truth is the `GROUPED_COMMANDS` constant in
+`src/main.rs` (already read in Step 1).
+
+### `README.md` — `## Commands` section
+
+Replace the entire code block under `## Commands` with the current grouped
+command list. Use the same category headings and spacing as `GROUPED_COMMANDS`.
+Do **not** include the `Options:` block or the `Usage:` header line — the
+README version is a trimmed overview.
+
+### `docs/src/commands/README.md` — opening code block
+
+Replace the entire opening code block with the current full help output:
+
+```
+Usage: git-loom [OPTIONS] [COMMAND]
+
+<categories and commands from GROUPED_COMMANDS>
+
+Options:
+      --no-color       Disable colored output
+      --theme <THEME>  Color theme for graph output [default: auto] [possible values: auto, dark, light]
+  -h, --help           Print help (see more with '--help')
+  -V, --version        Print version
+```
+
+Leave all prose after the code block unchanged.
+
+## Step 6 — Output
 
 - Write the doc file (create or overwrite).
+- Write the updated `README.md`.
+- Write the updated `docs/src/commands/README.md`.
 - If SUMMARY.md was updated, write that file too.
-- Confirm the file path(s) written.
+- Confirm all file paths written.
 - Remind the user that the built HTML under `docs/book/` is not regenerated
   automatically — run `mdbook build docs` to rebuild if needed.
