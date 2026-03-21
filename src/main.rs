@@ -2,6 +2,7 @@ mod absorb;
 mod branch;
 mod commit;
 mod completions;
+mod diff;
 mod drop;
 mod fold;
 mod git;
@@ -69,6 +70,7 @@ const GROUPED_COMMANDS: &str = "\
 \x1b[1;33mInspection:\x1b[0m
   \x1b[32mstatus\x1b[0m            Show the branch-aware status (\x1b[34mdefault\x1b[0m command)
   \x1b[32mshow\x1b[0m, \x1b[32msh\x1b[0m          Show commit details (like git show)
+  \x1b[32mdiff\x1b[0m, \x1b[32mdi\x1b[0m          Show a diff using short IDs (like git diff)
   \x1b[32mtrace\x1b[0m             Show the latest command trace
 
 \x1b[1;33mRecovery:\x1b[0m
@@ -223,6 +225,12 @@ enum Command {
         /// Commit hash, branch name, or short ID
         target: String,
     },
+    /// Show a diff using short IDs (like `git diff`)
+    #[command(visible_alias = "di")]
+    Diff {
+        /// Files, commits, or commit ranges (short IDs supported, e.g. `ma`, `d0`, `d0..3a`)
+        args: Vec<String>,
+    },
     /// Show the latest command trace
     Trace,
 
@@ -324,7 +332,10 @@ fn main() {
     // InternalWriteTodo — it runs as a subprocess — and Status/Trace/Show which are read-only).
     let should_log = !matches!(
         cli.command,
-        Some(Command::InternalWriteTodo { .. }) | Some(Command::Trace) | Some(Command::Show { .. })
+        Some(Command::InternalWriteTodo { .. })
+            | Some(Command::Trace)
+            | Some(Command::Show { .. })
+            | Some(Command::Diff { .. })
     );
     if should_log && let Ok(repo) = git::open_repo() {
         let git_dir = repo.path().to_path_buf();
@@ -337,6 +348,7 @@ fn main() {
     let is_exempt = matches!(
         cli.command,
         Some(Command::Show { .. })
+            | Some(Command::Diff { .. })
             | Some(Command::Trace)
             | Some(Command::Continue)
             | Some(Command::Abort)
@@ -382,6 +394,7 @@ fn main() {
         Some(Command::Drop { target, yes }) => drop::run(target, yes),
         Some(Command::Absorb { dry_run, files }) => absorb::run(dry_run, files),
         Some(Command::Show { target }) => show::run(target),
+        Some(Command::Diff { args }) => diff::run(args),
         Some(Command::Split { target, message }) => split::run(target, message),
         Some(Command::Push { branch, no_pr }) => push::run(branch, no_pr),
         Some(Command::Update { yes }) => update::run(yes),
