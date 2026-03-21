@@ -71,3 +71,58 @@ fn swap_commits_across_sections_errors() {
     );
     assert!(result.unwrap_err().to_string().contains("different"));
 }
+
+// ── Abort preserves working state ────────────────────────────────────────
+
+/// Regression: loom abort after a swap conflict must preserve staged changes,
+/// unstaged changes on other files, and new untracked files.
+///
+/// Conflict setup: Commit A creates `shared.txt`; Commit B modifies it.
+/// Swapping them puts B first — B's diff expects A's content but the file
+/// doesn't yet exist at the rebase base → conflict.
+#[test]
+fn swap_abort_preserves_working_state() {
+    let test_repo = TestRepo::new_with_remote();
+
+    let a_oid = test_repo.commit("version-a", "shared.txt");
+    test_repo.write_file("shared.txt", "version-b");
+    test_repo.stage_files(&["shared.txt"]);
+    test_repo.commit_staged("Commit B");
+    let b_oid = test_repo.head_oid();
+
+    // Working state before swap.
+    test_repo.write_file("shared.txt", "working-edit");
+    test_repo.write_file("other-staged.txt", "staged-content");
+    test_repo.stage_files(&["other-staged.txt"]);
+    test_repo.write_file("other-unstaged.txt", "unstaged-content");
+    test_repo.write_file("new-file.txt", "new-content");
+
+    let result = super::swap_two_commits(&test_repo.repo, a_oid.to_string(), b_oid.to_string());
+    assert!(
+        result.is_ok(),
+        "swap should pause on conflict: {:?}",
+        result
+    );
+
+    let state_path = test_repo.repo.path().join("loom").join("state.json");
+    assert!(
+        state_path.exists(),
+        "loom state must exist when swap is paused on conflict"
+    );
+
+    let workdir = test_repo.workdir();
+    let git_dir = test_repo.repo.path().to_path_buf();
+    crate::transaction::abort_cmd(&workdir, &git_dir).unwrap();
+
+    assert_eq!(test_repo.read_file("shared.txt"), "working-edit");
+    assert_eq!(test_repo.read_file("other-staged.txt"), "staged-content");
+    assert_eq!(
+        test_repo.read_file("other-unstaged.txt"),
+        "unstaged-content"
+    );
+    assert!(
+        workdir.join("new-file.txt").exists(),
+        "new untracked file must survive abort"
+    );
+    assert_eq!(test_repo.read_file("new-file.txt"), "new-content");
+}

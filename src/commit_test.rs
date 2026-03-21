@@ -600,3 +600,72 @@ fn commit_accepts_staged_rename_only() {
         result.err()
     );
 }
+
+// ── Abort preserves working state ────────────────────────────────────────
+
+/// Regression: loom abort after a commit conflict must preserve staged changes
+/// on other files, unstaged changes, and new untracked files.
+///
+/// Conflict setup: feat1 branch commits `shared.txt`; we then try to commit
+/// `shared.txt` to a new branch — the weave rebase conflicts because both
+/// branches touch the same file.
+#[test]
+fn commit_abort_preserves_working_state() {
+    let test_repo = TestRepo::new_with_remote();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    // Create feat1 with a commit that adds shared.txt.
+    test_repo.create_branch_at("feat1", &base_oid.to_string());
+    test_repo.switch_branch("feat1");
+    test_repo.commit("feat1-content", "shared.txt");
+
+    test_repo.switch_branch("integration");
+    test_repo.commit("int", "int.txt"); // prevent fast-forward
+    test_repo.merge_no_ff("feat1");
+
+    // other-staged.txt is staged — commit.rs will save it aside and restore on abort.
+    test_repo.write_file("other-staged.txt", "staged-content");
+    test_repo.stage_files(&["other-staged.txt"]);
+    test_repo.write_file("other-unstaged.txt", "unstaged-content");
+    test_repo.write_file("new-file.txt", "new-content");
+
+    // Write conflicting content to shared.txt (same file as feat1 commit).
+    test_repo.write_file("shared.txt", "conflicting-write");
+
+    let result = test_repo.in_dir(|| {
+        super::run(
+            Some("new-line".to_string()),
+            Some("New line".to_string()),
+            vec!["shared.txt".to_string()],
+        )
+    });
+    assert!(
+        result.is_ok(),
+        "commit should pause on conflict: {:?}",
+        result
+    );
+
+    let state_path = test_repo.repo.path().join("loom").join("state.json");
+    assert!(
+        state_path.exists(),
+        "loom state must exist when commit is paused on conflict"
+    );
+
+    let workdir = test_repo.workdir();
+    let git_dir = test_repo.repo.path().to_path_buf();
+    crate::transaction::abort_cmd(&workdir, &git_dir).unwrap();
+
+    // reset --mixed undoes the pre-rebase commit; shared.txt comes back as unstaged.
+    assert_eq!(test_repo.read_file("shared.txt"), "conflicting-write");
+    // saved_staged_patch explicitly re-stages other-staged.txt.
+    assert_eq!(test_repo.read_file("other-staged.txt"), "staged-content");
+    assert_eq!(
+        test_repo.read_file("other-unstaged.txt"),
+        "unstaged-content"
+    );
+    assert!(
+        workdir.join("new-file.txt").exists(),
+        "new untracked file must survive abort"
+    );
+    assert_eq!(test_repo.read_file("new-file.txt"), "new-content");
+}
