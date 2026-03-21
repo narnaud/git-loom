@@ -34,6 +34,7 @@
 - [reword](commands/reword.md)
 - [drop](commands/drop.md)
 - [branch](commands/branch.md)
+- [switch](commands/switch.md)
 - [status](commands/status.md)
 - [show](commands/show.md)
 - [diff](commands/diff.md)

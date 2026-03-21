@@ -17,6 +17,7 @@ mod show;
 mod split;
 mod status;
 mod swap;
+mod switch;
 mod trace;
 mod transaction;
 mod update;
@@ -66,6 +67,7 @@ const GROUPED_COMMANDS: &str = "\
 
 \x1b[1;33mBranches:\x1b[0m
   \x1b[32mbranch\x1b[0m, \x1b[32mbr\x1b[0m        Manage feature branches (create, merge, unmerge)
+  \x1b[32mswitch\x1b[0m, \x1b[32msw\x1b[0m        Switch to any branch for testing (without weaving)
 
 \x1b[1;33mInspection:\x1b[0m
   \x1b[32mstatus\x1b[0m            Show the branch-aware status (\x1b[34mdefault\x1b[0m command)
@@ -205,6 +207,13 @@ enum Command {
     /// Manage feature branches (create, merge, unmerge)
     #[command(visible_alias = "br")]
     Branch(BranchCmd),
+
+    /// Switch to any branch for testing without weaving it into the integration branch
+    #[command(visible_alias = "sw")]
+    Switch {
+        /// Branch name or short ID (if not provided, shows interactive picker)
+        branch: Option<String>,
+    },
 
     // -- Inspection --
     /// Show the branch-aware status
@@ -382,6 +391,7 @@ fn main() {
             all,
         }) => status::run(files, context, all, theme),
         Some(Command::Init { name }) => init::run(name),
+        Some(Command::Switch { branch }) => switch::run(branch),
         Some(Command::Branch(cmd)) => match cmd.action {
             Some(BranchAction::New(args)) => branch::new::run(args.name, args.target),
             Some(BranchAction::Merge { branch, all }) => branch::merge::run(branch, all),

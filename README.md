@@ -35,6 +35,7 @@ Commits:
 
 Branches:
   branch, br        Manage feature branches (create, merge, unmerge)
+  switch, sw        Switch to any branch for testing (without weaving)
 
 Inspection:
   status            Show the branch-aware status (default command)
