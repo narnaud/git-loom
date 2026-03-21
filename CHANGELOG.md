@@ -1,5 +1,82 @@
 # Changelog
 
+## [0.16.0](https://github.com/narnaud/git-loom/compare/v0.15.1...v0.16.0) (2026-03-21)
+
+
+### Features ✨
+
+* **continue-abort:** add completion ([abd4be4](https://github.com/narnaud/git-loom/commit/abd4be412215a4a3761b908f5f9abcfa0289c7de))
+* **continue-abort:** infrastructure for conflict pause/resume (phases 1-2) ([fbed373](https://github.com/narnaud/git-loom/commit/fbed373defe28559b14f2508acd253eaa84b49e5))
+* **continue-abort:** wire pause/resume into all resumable commands (phases 3-4) ([7318793](https://github.com/narnaud/git-loom/commit/7318793516b21a1b04061bfcf5106e4f7005691b))
+* **diff:** add loom diff command with short ID support ([53c3e3c](https://github.com/narnaud/git-loom/commit/53c3e3cfb2130c6a73e68d0d790e7ab757245be7))
+* **swap:** add completion for swap ([7436636](https://github.com/narnaud/git-loom/commit/74366363c264ee6f796fb5b52c838582290c2a81))
+* **swap:** add swap command to reorder commits or branches ([1b697d0](https://github.com/narnaud/git-loom/commit/1b697d0b4d5011b5dfc25ae9f458afa0ecdd18d2))
+* **swap:** remove branch swapping ([18b5c48](https://github.com/narnaud/git-loom/commit/18b5c485ff1707d050e446d5208cfae192454cb1))
+
+
+### Bug Fixes 🐞
+
+* **absorb:** restore pre-absorb HEAD on abort via reset_hard_to ([db8889a](https://github.com/narnaud/git-loom/commit/db8889a24831ead8676b3aa71f190fc0273ccd3b))
+* **docs:** preserve existing docs when deploying stable or latest ([8d4193b](https://github.com/narnaud/git-loom/commit/8d4193bb96ae72661e16af304156d4f9e130d3af))
+* **status:** compute short IDs before hiding branches for stability ([534d22c](https://github.com/narnaud/git-loom/commit/534d22c4e1c0ad9df9988eeaae46c77cc18c9238))
+* suppress editor on git rebase --continue ([a2f85be](https://github.com/narnaud/git-loom/commit/a2f85beec2442274c7d0aa86788e709d0c8dc6f3))
+* **weave:** place merge commits before loose picks, not at HEAD ([b2f3e9f](https://github.com/narnaud/git-loom/commit/b2f3e9ff6683d3cb81f25a6f3fd8f34245fbcaf5))
+
+
+### Documentation
+
+* **continue-abort:** document loom continue and loom abort ([22c4eaf](https://github.com/narnaud/git-loom/commit/22c4eaf849e4b77d399b5943caa8a3153350a8e4))
+* **continue-abort:** inform the user he can remove the state file ([31c9d9b](https://github.com/narnaud/git-loom/commit/31c9d9b5ffc4fbeccf06551a1338db497b795137))
+* **diff:** add spec and user docs for loom diff command ([f1c933c](https://github.com/narnaud/git-loom/commit/f1c933cd89bc1b069086f7ca6674c420e01f5816))
+* **guides:** add conflict resolution guide ([a33c015](https://github.com/narnaud/git-loom/commit/a33c015e4ac3af35d77dc7b92c024d66e7fae343))
+* only update docs on release, have the main doc on /latest ([f8b43a6](https://github.com/narnaud/git-loom/commit/f8b43a6a78995d7e765b80cf3f5243e0abdaee30))
+* rework documentation deployment ([a5fe772](https://github.com/narnaud/git-loom/commit/a5fe772145f62587c89851f369d36598e7f05768))
+* **swap:** add spec 015 for swap command ([21a96e2](https://github.com/narnaud/git-loom/commit/21a96e23f0379659182b2ec70a583f641a9d3516))
+* **swap:** add swap command documentation ([01bd3e8](https://github.com/narnaud/git-loom/commit/01bd3e83ee84e706e38043378e4c689e91c35903))
+* update command list ([8daa5d6](https://github.com/narnaud/git-loom/commit/8daa5d68c69057559c5ec3d79669b7dcc55f3396))
+
+
+### Changes
+
+* **absorb:** split run() and extract rollback_pre_rebase() ([8658fe5](https://github.com/narnaud/git-loom/commit/8658fe5e77adf788c0e2eb51659f6e59eb518c2f))
+* **continue-abort:** add aliases `c` and `a` for continue and abort ([09e5c43](https://github.com/narnaud/git-loom/commit/09e5c437bbc354690c3b5d773cb1e56f19d8439c))
+* deduplicate conflict warning and restore_staged helpers ([c05636e](https://github.com/narnaud/git-loom/commit/c05636e2410f25c2633a8f6380de1dc58432d02e))
+* **tests:** extract commit_sid_from_status and branch_sid_from_status helpers ([f2e2a4e](https://github.com/narnaud/git-loom/commit/f2e2a4edf81012c3ce4772b43dc3a0bb2d881d56))
+* **transaction:** simplify Rollback — trust git rebase --abort for refs ([993db36](https://github.com/narnaud/git-loom/commit/993db365f622a855cfdd1c309cf950c84187d1d1))
+* **update:** consistency with other commands, remove unused argument ([779f587](https://github.com/narnaud/git-loom/commit/779f5871a92e396d9496bdbb4ae2a63a5f08b3e4))
+* **update:** force delete branches with gone upstream ([7027142](https://github.com/narnaud/git-loom/commit/7027142bf3b858372cc38efbf7f332fc58ee2881))
+
+
+### Tests
+
+* **abort:** add working-state preservation tests for all transaction commands ([4168a43](https://github.com/narnaud/git-loom/commit/4168a4313bd8c4ed29592c435f309394685b9072))
+* **absorb:** add integration tests ([8545b6c](https://github.com/narnaud/git-loom/commit/8545b6c8878e5ac96afd5b70b60a08bee9a5da6d))
+* add bash integration test suite for the final binary ([021012c](https://github.com/narnaud/git-loom/commit/021012cda71d834586eb7509c2a4c53f0b88d004))
+* add describe calls to all integration test files ([01c553f](https://github.com/narnaud/git-loom/commit/01c553fb7924a81b90dadb6857527187e5a8de4a))
+* add integration tests for gl init ([9774f2c](https://github.com/narnaud/git-loom/commit/9774f2c02b02170a246abfba5d4666135505aa30))
+* **branch:** expand integration tests with comprehensive coverage ([3a378e5](https://github.com/narnaud/git-loom/commit/3a378e541080e93218846f6bce7b37302475f2e3))
+* **commit:** add integration tests ([a4f5e59](https://github.com/narnaud/git-loom/commit/a4f5e5925470729f1ce78d38dd1c75be1fa1e1f5))
+* **continue-abort:** add integration tests for continue/abort flow ([a0ca291](https://github.com/narnaud/git-loom/commit/a0ca2911b59ab50c6592692f8becb684f936ab59))
+* **drop:** add comprehensive integration tests; fix spec error message ([277e471](https://github.com/narnaud/git-loom/commit/277e471d878dfb46aa0092c0f56f1103607f7c13))
+* **fold:** add integration tests ([5c644fa](https://github.com/narnaud/git-loom/commit/5c644fad48257530335e7ce7e813bbac534c3844))
+* **integration:** add real conflict continue/abort tests for commit, fold, drop, absorb ([3b6e983](https://github.com/narnaud/git-loom/commit/3b6e98394c85c3222758de53494105b463cf4403))
+* **integration:** add swap integration tests and fix CRLF warning ([c737988](https://github.com/narnaud/git-loom/commit/c737988077020dbe8c442e4934308e8a04271265))
+* **reword:** expand integration tests with comprehensive coverage ([c9e41ce](https://github.com/narnaud/git-loom/commit/c9e41ceb3d9770bc12011f404de7c4c859f97b58))
+* **show:** add integration tests ([e40927b](https://github.com/narnaud/git-loom/commit/e40927b4b698b952d1f542e51a1d58fcf1f5c53e))
+* **split:** add integration tests ([53706da](https://github.com/narnaud/git-loom/commit/53706da7d4087e38dac36cced938f6c3937a691d))
+* **status:** comprehensive integration tests for gl status ([f77dae1](https://github.com/narnaud/git-loom/commit/f77dae1e4c9bbbc7a93ecf6cd98d0cc958798697))
+* **update:** add integration tests ([74440ca](https://github.com/narnaud/git-loom/commit/74440caafe20d490998ecdfefb40479c3ea05395))
+
+
+### Other
+
+* **claude:** add more permissions ([788d81d](https://github.com/narnaud/git-loom/commit/788d81d0f4088afee458d82b4d84bf0ea0ced8f5))
+* **claude:** add update-docs skill for creating and updating command docs ([6c79ab6](https://github.com/narnaud/git-loom/commit/6c79ab6d7eba5fafd4070cdd4752cf0ad4dc81b8))
+* **claude:** add write-integration-tests skill ([2ebe2a2](https://github.com/narnaud/git-loom/commit/2ebe2a2bf51b77b26826ebdd643c6a40799dba2c))
+* **claude:** add write-spec skill for creating and updating specs ([9eca3a4](https://github.com/narnaud/git-loom/commit/9eca3a443dbc42fd682327985faa235b92f8bd8e))
+* **claude:** update update-docs skill to always update command list ([b22ca66](https://github.com/narnaud/git-loom/commit/b22ca66430c3d4569779c3f5a895b5f0b858e9a5))
+* **deps:** bump clap from 4.5.60 to 4.6.0 ([3bac005](https://github.com/narnaud/git-loom/commit/3bac005dd9bd733e4f24fd0119fbd32a4ee361d5))
+
 ## [0.15.1](https://github.com/narnaud/git-loom/compare/v0.15.0...v0.15.1) (2026-03-15)
 
 
