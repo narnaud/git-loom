@@ -63,6 +63,7 @@ The `specs/` directory contains detailed design documents that describe each fea
 | `specs/013-split.md` | Split a commit into two or more commits |
 | `specs/014-continue-abort.md` | Continue or abort a paused loom operation |
 | `specs/015-swap.md` | Swap two commits or two branch sections |
+| `specs/016-diff.md` | Diff: short-ID–aware wrapper around git diff |
 
 ## Build & Run Commands
 

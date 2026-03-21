@@ -23,6 +23,7 @@ Branches:
 Inspection:
   status            Show the branch-aware status (default command)
   show, sh          Show commit details (like git show)
+  diff, di          Show a diff using short IDs (like git diff)
   trace             Show the latest command trace
 
 Recovery:

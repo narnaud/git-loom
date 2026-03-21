@@ -36,6 +36,7 @@
 - [branch](commands/branch.md)
 - [status](commands/status.md)
 - [show](commands/show.md)
+- [diff](commands/diff.md)
 - [trace](commands/trace.md)
 - [continue](commands/continue.md)
 - [abort](commands/abort.md)
