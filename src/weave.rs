@@ -1147,7 +1147,7 @@ pub fn run_rebase(
     // Build args string for logging
     let upstream_arg = upstream.unwrap_or("--root");
     let log_args = format!(
-        "rebase --interactive --autostash --keep-empty --no-autosquash --rebase-merges --update-refs {}",
+        "rebase --interactive --autostash --keep-empty --empty=drop --no-autosquash --rebase-merges --update-refs {}",
         upstream_arg
     );
 
@@ -1158,6 +1158,7 @@ pub fn run_rebase(
             "--interactive",
             "--autostash",
             "--keep-empty",
+            "--empty=drop",
             "--no-autosquash",
             "--rebase-merges",
             "--update-refs",
@@ -1216,11 +1217,38 @@ pub fn run_rebase(
     Ok(RebaseOutcome::Completed)
 }
 
-/// Collect patch-IDs for all commits in the range `base..head` using a
-/// single `git log -p | git patch-id --stable` pipeline (2 processes total).
-/// Returns `None` if either command fails.
+/// Collect patch-IDs for all commits in the range `base..head`.
+///
+/// Uses `git rev-list` to enumerate commits, then `git diff-tree -p --stdin`
+/// piped to `git patch-id --stable` — the same method used by `batch_patch_ids`
+/// for feature commits. Using the same diff engine for both sides is critical:
+/// `git diff-tree` ignores the `diff.algorithm` config (always uses Myers),
+/// while `git log -p` respects it. When the repo is configured with a
+/// non-default algorithm (e.g. `histogram`), the two commands produce
+/// different hunks for the same commit, leading to different patch-IDs.
 fn collect_patch_ids(workdir: &Path, base: &Oid, head: &Oid) -> Option<HashSet<String>> {
-    let pairs = run_patch_id_pipeline(workdir, &["log", "-p", &format!("{}..{}", base, head)])?;
+    use std::process::Command;
+
+    let output = Command::new("git")
+        .current_dir(workdir)
+        .args(["rev-list", &format!("{}..{}", base, head)])
+        .output()
+        .ok()?;
+
+    if !output.status.success() || output.stdout.is_empty() {
+        return Some(HashSet::new());
+    }
+
+    let oids: Vec<Oid> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| Oid::from_str(line.trim()).ok())
+        .collect();
+
+    if oids.is_empty() {
+        return Some(HashSet::new());
+    }
+
+    let pairs = batch_patch_ids(workdir, &oids)?;
     Some(pairs.into_iter().map(|(_, pid)| pid).collect())
 }
 
@@ -1303,25 +1331,6 @@ fn pipe_to_patch_id(workdir: &Path, diff: &[u8]) -> Option<Vec<(String, String)>
             })
             .collect(),
     )
-}
-
-/// Run `git <args> | git patch-id --stable` and return `(commit_hex, patch_id)` pairs.
-fn run_patch_id_pipeline(workdir: &Path, args: &[&str]) -> Option<Vec<(String, String)>> {
-    use std::process::{Command, Stdio};
-
-    let log = Command::new("git")
-        .current_dir(workdir)
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-
-    if !log.status.success() || log.stdout.is_empty() {
-        return None;
-    }
-
-    pipe_to_patch_id(workdir, &log.stdout)
 }
 
 #[cfg(test)]
