@@ -9,6 +9,7 @@ use crate::git_commands::git_rebase::RebaseOutcome;
 use crate::git_commands::{self, git_branch, git_rebase};
 use crate::msg;
 use crate::transaction::{self, LoomState, Rollback};
+use crate::weave::Weave;
 
 #[derive(Serialize, Deserialize)]
 struct UpdateContext {
@@ -78,11 +79,38 @@ pub fn run(skip_confirm: bool) -> Result<()> {
     };
     transaction::save(&git_dir, &state)?;
 
-    // Rebase onto upstream with autostash
+    // Rebase onto upstream using the weave model.
+    //
+    // Plain `git rebase --rebase-merges` preserves merge topology literally,
+    // which can place new upstream commits on the wrong side of merge commits
+    // (inside a feature branch instead of on the base line). The weave model
+    // generates a clean todo where every branch section `reset onto`, ensuring
+    // branches are correctly rebased onto the new upstream tip.
     let spinner = msg::spinner();
     spinner.start("Rebasing onto upstream...");
 
-    let outcome = git_rebase::rebase(&git_dir, &workdir, &upstream_name);
+    // Re-open repo after fetch (remote refs changed)
+    let repo = git2::Repository::discover(&workdir)?;
+
+    let outcome = match Weave::from_repo(&repo) {
+        Ok(mut graph) => {
+            // Drop branch-section commits already in the new upstream
+            // (merged or cherry-picked). This prevents conflicts from
+            // replaying commits whose content is already in the base.
+            let new_upstream_oid = repo
+                .revparse_single(&upstream_name)
+                .context("Failed to resolve upstream ref")?
+                .id();
+            graph.filter_upstream_commits(&repo, &workdir, new_upstream_oid);
+            let todo = graph.to_todo();
+            crate::weave::run_rebase(&workdir, Some(&upstream_name), &todo)
+        }
+        Err(_) => {
+            // Fallback: no integration topology (e.g., plain branch with no weave).
+            // Use plain rebase.
+            git_rebase::rebase(&git_dir, &workdir, &upstream_name)
+        }
+    };
 
     match outcome {
         Ok(RebaseOutcome::Completed) => {

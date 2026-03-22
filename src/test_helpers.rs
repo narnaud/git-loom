@@ -517,6 +517,80 @@ impl TestRepo {
         last_oid
     }
 
+    /// Simulate a cherry-pick of a local commit onto the remote's main branch.
+    ///
+    /// Computes the diff between the local commit and its parent, then applies
+    /// those new/changed files on top of the remote tip's tree. This produces a
+    /// commit with the same patch-id as the original, so git rebase will
+    /// correctly detect it as a duplicate.
+    pub fn cherry_pick_to_remote(&self, local_oid: git2::Oid, message: &str) -> git2::Oid {
+        let remote_path = self.remote_path().expect("No remote repository found");
+        let remote_repo = Repository::open_bare(&remote_path).unwrap();
+        // Use a different committer to ensure the cherry-picked commit gets a
+        // different OID from the original (same patch-id, different commit hash).
+        let sig = Signature::now("Upstream", "upstream@test.com").unwrap();
+
+        let remote_tip = remote_repo
+            .find_branch("main", BranchType::Local)
+            .unwrap()
+            .get()
+            .target()
+            .unwrap();
+        let parent = remote_repo.find_commit(remote_tip).unwrap();
+
+        // Diff the local commit against its parent to find changed files
+        let local_commit = self.repo.find_commit(local_oid).unwrap();
+        let local_tree = local_commit.tree().unwrap();
+        let local_parent_tree = local_commit.parent(0).unwrap().tree().unwrap();
+        let diff = self
+            .repo
+            .diff_tree_to_tree(Some(&local_parent_tree), Some(&local_tree), None)
+            .unwrap();
+
+        // Start from the remote tip's tree and overlay changed files
+        let remote_parent_tree = parent.tree().unwrap();
+        let mut builder = remote_repo.treebuilder(Some(&remote_parent_tree)).unwrap();
+
+        diff.foreach(
+            &mut |delta, _| {
+                match delta.status() {
+                    git2::Delta::Added | git2::Delta::Modified => {
+                        let new_file = delta.new_file();
+                        let path = new_file.path().unwrap().to_str().unwrap();
+                        let blob = self.repo.find_blob(new_file.id()).unwrap();
+                        let new_blob = remote_repo.blob(blob.content()).unwrap();
+                        builder.insert(path, new_blob, 0o100644).unwrap();
+                    }
+                    git2::Delta::Deleted => {
+                        let old_file = delta.old_file();
+                        let path = old_file.path().unwrap().to_str().unwrap();
+                        builder.remove(path).unwrap();
+                    }
+                    _ => {}
+                }
+                true
+            },
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let tree_oid = builder.write().unwrap();
+        let tree = remote_repo.find_tree(tree_oid).unwrap();
+
+        remote_repo
+            .commit(
+                Some("refs/heads/main"),
+                &sig,
+                &sig,
+                message,
+                &tree,
+                &[&parent],
+            )
+            .unwrap()
+    }
+
     /// Fetch from the remote repository.
     ///
     /// Updates origin/* references in the working repository.

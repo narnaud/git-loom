@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
@@ -5,6 +6,7 @@ use git2::{Oid, Repository};
 
 use crate::git;
 use crate::git_commands;
+use crate::msg;
 
 /// Command for a commit in the todo file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -280,6 +282,70 @@ impl Weave {
     }
 
     // ── Mutation methods ─────────────────────────────────────────────────
+
+    /// Remove branch-section commits that are already in the new upstream
+    /// (merged or cherry-picked). Empty sections and their merges are removed.
+    ///
+    /// Uses two strategies:
+    /// 1. Exact OID ancestry (commit was directly merged)
+    /// 2. Patch-ID matching (commit was cherry-picked with a different OID)
+    pub fn filter_upstream_commits(
+        &mut self,
+        repo: &Repository,
+        workdir: &Path,
+        new_upstream_oid: Oid,
+    ) {
+        // Collect patch-IDs of new upstream commits (between old base and new upstream)
+        let upstream_patch_ids = collect_patch_ids(workdir, &self.base_oid, &new_upstream_oid);
+        if upstream_patch_ids.is_none() {
+            msg::warn(
+                "Could not compute patch-IDs for upstream commits — \
+                 cherry-picked commits may not be detected",
+            );
+        }
+
+        // Collect all branch-section commit OIDs that aren't trivially in upstream
+        let mut candidates: Vec<(Oid, bool)> = Vec::new(); // (oid, ancestor_match)
+        let mut to_drop = Vec::new();
+        for section in &self.branch_sections {
+            for commit in &section.commits {
+                // Strategy 1: exact ancestor check
+                if repo
+                    .graph_descendant_of(new_upstream_oid, commit.oid)
+                    .unwrap_or(false)
+                {
+                    to_drop.push(commit.oid);
+                } else {
+                    candidates.push((commit.oid, false));
+                }
+            }
+        }
+
+        // Strategy 2: batch patch-ID match for remaining candidates
+        if let Some(ref upstream_ids) = upstream_patch_ids
+            && !candidates.is_empty()
+        {
+            let candidate_oids: Vec<Oid> = candidates.iter().map(|(oid, _)| *oid).collect();
+            let feature_ids = batch_patch_ids(workdir, &candidate_oids);
+            if feature_ids.is_none() {
+                msg::warn(
+                    "Could not compute patch-IDs for feature commits — \
+                     cherry-picked commits may not be detected",
+                );
+            }
+            if let Some(feature_ids) = feature_ids {
+                for (oid, pid) in &feature_ids {
+                    if upstream_ids.contains(pid) {
+                        to_drop.push(*oid);
+                    }
+                }
+            }
+        }
+
+        for oid in to_drop {
+            self.drop_commit(oid);
+        }
+    }
 
     /// Remove a commit from the graph.
     ///
@@ -1148,6 +1214,114 @@ pub fn run_rebase(
     let _ = temp_path.close();
 
     Ok(RebaseOutcome::Completed)
+}
+
+/// Collect patch-IDs for all commits in the range `base..head` using a
+/// single `git log -p | git patch-id --stable` pipeline (2 processes total).
+/// Returns `None` if either command fails.
+fn collect_patch_ids(workdir: &Path, base: &Oid, head: &Oid) -> Option<HashSet<String>> {
+    let pairs = run_patch_id_pipeline(workdir, &["log", "-p", &format!("{}..{}", base, head)])?;
+    Some(pairs.into_iter().map(|(_, pid)| pid).collect())
+}
+
+/// Compute patch-IDs for a list of specific commits in a single pipeline.
+/// Runs `git diff-tree -p --stdin | git patch-id --stable` (2 processes total).
+/// Returns `(oid, patch_id)` pairs, or `None` on failure.
+fn batch_patch_ids(workdir: &Path, oids: &[Oid]) -> Option<Vec<(Oid, String)>> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    // diff-tree --stdin reads commit OIDs from stdin (one per line) and
+    // outputs the diff for each.
+    let mut diff_tree = Command::new("git")
+        .current_dir(workdir)
+        .args(["diff-tree", "-p", "--stdin"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+
+    {
+        let stdin = diff_tree.stdin.as_mut()?;
+        for oid in oids {
+            writeln!(stdin, "{}", oid).ok()?;
+        }
+    }
+    diff_tree.stdin = None;
+
+    let diff_output = diff_tree.wait_with_output().ok()?;
+    if !diff_output.status.success() || diff_output.stdout.is_empty() {
+        return None;
+    }
+
+    let pairs = pipe_to_patch_id(workdir, &diff_output.stdout)?;
+    Some(
+        pairs
+            .into_iter()
+            .filter_map(|(oid_str, pid)| Oid::from_str(&oid_str).ok().map(|oid| (oid, pid)))
+            .collect(),
+    )
+}
+
+/// Pipe raw diff bytes into `git patch-id --stable` and parse the output.
+/// Each output line is `<patch-id> <commit-id>`.
+/// Returns `(commit_hex, patch_id)` pairs.
+fn pipe_to_patch_id(workdir: &Path, diff: &[u8]) -> Option<Vec<(String, String)>> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let mut child = Command::new("git")
+        .current_dir(workdir)
+        .args(["patch-id", "--stable"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+
+    {
+        let stdin = child.stdin.as_mut()?;
+        stdin.write_all(diff).ok()?;
+    }
+    child.stdin = None;
+
+    let output = child.wait_with_output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Some(
+        stdout
+            .lines()
+            .filter_map(|line| {
+                let mut parts = line.split_whitespace();
+                let pid = parts.next()?.to_string();
+                let oid = parts.next()?.to_string();
+                Some((oid, pid))
+            })
+            .collect(),
+    )
+}
+
+/// Run `git <args> | git patch-id --stable` and return `(commit_hex, patch_id)` pairs.
+fn run_patch_id_pipeline(workdir: &Path, args: &[&str]) -> Option<Vec<(String, String)>> {
+    use std::process::{Command, Stdio};
+
+    let log = Command::new("git")
+        .current_dir(workdir)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+
+    if !log.status.success() || log.stdout.is_empty() {
+        return None;
+    }
+
+    pipe_to_patch_id(workdir, &log.stdout)
 }
 
 #[cfg(test)]
