@@ -1,3 +1,4 @@
+use crate::git_commands;
 use crate::test_helpers::TestRepo;
 use git2::{BranchType, Repository, Signature};
 
@@ -306,5 +307,260 @@ fn update_keeps_branches_without_tracking_config() {
     assert!(
         test_repo.branch_exists("local-only"),
         "local-only branch should be preserved (no upstream configured)"
+    );
+}
+
+#[test]
+fn update_skips_integration_line_commits_already_in_upstream() {
+    let test_repo = TestRepo::new_with_remote();
+
+    // Create a commit on the integration line (local only, not yet in remote).
+    test_repo.commit("Integration commit A", "a.txt");
+    let commit_a = test_repo.head_oid();
+
+    // Push commit A to a temporary remote branch so the bare repo holds the
+    // object, without advancing origin/main yet.
+    let workdir = test_repo.workdir();
+    git_commands::run_git(&workdir, &["push", "origin", "HEAD:refs/heads/temp-a"]).unwrap();
+
+    // Advance remote/main past commit A (simulating upstream absorbing it).
+    let remote_path = test_repo.remote_path().unwrap();
+    {
+        let remote_repo = Repository::open_bare(&remote_path).unwrap();
+        let sig = Signature::now("Test", "test@test.com").unwrap();
+        let commit_a_obj = remote_repo.find_commit(commit_a).unwrap();
+        let tree = commit_a_obj.tree().unwrap();
+        let new_oid = remote_repo
+            .commit(
+                None,
+                &sig,
+                &sig,
+                "New upstream commit",
+                &tree,
+                &[&commit_a_obj],
+            )
+            .unwrap();
+        remote_repo
+            .reference("refs/heads/main", new_oid, true, "advance main past A")
+            .unwrap();
+    }
+
+    // origin/main in the work repo is still at Initial here. loom update
+    // will fetch, detect that commit A is already in the new upstream, drop
+    // it from the integration line, and fast-forward cleanly — no conflicts.
+    let result = test_repo.in_dir(|| super::run(false));
+    assert!(result.is_ok(), "update failed: {:?}", result.err());
+
+    let repo2 = Repository::open(test_repo.workdir()).unwrap();
+    let new_head = repo2.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(
+        new_head.summary().unwrap_or(""),
+        "New upstream commit",
+        "integration should be at the new upstream tip"
+    );
+    assert_eq!(new_head.parent_count(), 1);
+}
+
+#[test]
+fn update_drops_merge_when_feature_branch_fully_integrated_into_upstream() {
+    let test_repo = TestRepo::new_with_remote();
+    let initial_oid = test_repo.head_oid();
+
+    // Build woven topology: integration merges feature-a.
+    test_repo.create_branch_at_commit("feature-a", initial_oid);
+    test_repo.switch_branch("feature-a");
+    test_repo.commit("Feature A work", "feature-a.txt");
+    let feature_tip = test_repo.head_oid();
+
+    test_repo.switch_branch("integration");
+    test_repo.commit_merge("Merge branch 'feature-a'", initial_oid, feature_tip);
+    assert_eq!(test_repo.head_commit().parent_count(), 2);
+
+    // Push feature-a so the remote has the feature_tip object.
+    let workdir = test_repo.workdir();
+    git_commands::run_git(&workdir, &["push", "origin", "feature-a"]).unwrap();
+
+    // Advance remote/main past feature-a to simulate it being merged upstream.
+    let remote_path = test_repo.remote_path().unwrap();
+    {
+        let remote_repo = Repository::open_bare(&remote_path).unwrap();
+        let sig = Signature::now("Test", "test@test.com").unwrap();
+        let feature_commit = remote_repo.find_commit(feature_tip).unwrap();
+        let tree = feature_commit.tree().unwrap();
+        // Create commit without touching the ref (parent is not the current main tip).
+        let new_oid = remote_repo
+            .commit(
+                None,
+                &sig,
+                &sig,
+                "Upstream integration of feature-a",
+                &tree,
+                &[&feature_commit],
+            )
+            .unwrap();
+        // Force-update refs/heads/main to the new commit.
+        remote_repo
+            .reference(
+                "refs/heads/main",
+                new_oid,
+                true,
+                "advance main past feature-a",
+            )
+            .unwrap();
+    }
+
+    // origin/main in the work repo is still at initial here — loom update
+    // will fetch, detect that feature_tip is now in upstream, and remove the
+    // null merge.
+    let result = test_repo.in_dir(|| super::run(false));
+    assert!(result.is_ok(), "update failed: {:?}", result.err());
+
+    let repo2 = Repository::open(test_repo.workdir()).unwrap();
+    let new_head = repo2.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(
+        new_head.parent_count(),
+        1,
+        "integration should be flat after feature-a is fully merged into upstream"
+    );
+}
+
+#[test]
+fn update_trims_partially_integrated_branch() {
+    let test_repo = TestRepo::new_with_remote();
+    let initial_oid = test_repo.head_oid();
+
+    // Build a feature-a branch with two commits.
+    test_repo.create_branch_at_commit("feature-a", initial_oid);
+    test_repo.switch_branch("feature-a");
+    test_repo.commit("Feature A part 1", "feature-a-1.txt");
+    let part1_tip = test_repo.head_oid();
+    test_repo.commit("Feature A part 2", "feature-a-2.txt");
+    let part2_tip = test_repo.head_oid();
+
+    // Merge feature-a (both commits) into integration.
+    test_repo.switch_branch("integration");
+    test_repo.commit_merge("Merge branch 'feature-a'", initial_oid, part2_tip);
+    assert_eq!(test_repo.head_commit().parent_count(), 2);
+
+    // Push feature-a so the remote has both commit objects.
+    let workdir = test_repo.workdir();
+    git_commands::run_git(&workdir, &["push", "origin", "feature-a"]).unwrap();
+
+    // Advance remote/main to include only part1 (not part2), simulating
+    // partial upstream integration.
+    let remote_path = test_repo.remote_path().unwrap();
+    {
+        let remote_repo = Repository::open_bare(&remote_path).unwrap();
+        let sig = Signature::now("Test", "test@test.com").unwrap();
+        let part1_commit = remote_repo.find_commit(part1_tip).unwrap();
+        let tree = part1_commit.tree().unwrap();
+        // Create commit without touching the ref (parent is not the current main tip).
+        let new_oid = remote_repo
+            .commit(
+                None,
+                &sig,
+                &sig,
+                "Upstream integration of feature-a part 1",
+                &tree,
+                &[&part1_commit],
+            )
+            .unwrap();
+        // Force-update refs/heads/main to the new commit.
+        remote_repo
+            .reference(
+                "refs/heads/main",
+                new_oid,
+                true,
+                "advance main past feature-a part 1",
+            )
+            .unwrap();
+    }
+
+    // origin/main is still at initial here. After update, part1 is in
+    // upstream so it is trimmed from the branch section; part2 is not, so
+    // the merge is preserved with only part2 left in the branch.
+    let result = test_repo.in_dir(|| super::run(false));
+    assert!(result.is_ok(), "update failed: {:?}", result.err());
+
+    let repo2 = Repository::open(test_repo.workdir()).unwrap();
+    let new_head = repo2.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(
+        new_head.parent_count(),
+        2,
+        "integration should still be a merge: part2 was not integrated upstream"
+    );
+    assert!(
+        test_repo.branch_exists("feature-a"),
+        "feature-a branch should still exist after partial trim"
+    );
+}
+
+#[test]
+fn update_drops_woven_section_when_commits_cherry_picked_into_upstream() {
+    // Regression: when upstream advances by cherry-picking a woven branch
+    // commit (same diff, different OID), loom must detect it via git-cherry
+    // and not try to re-apply it — which would cause a "cherry-pick is now
+    // empty" error during the interactive rebase.
+    let test_repo = TestRepo::new_with_remote();
+    let initial_oid = test_repo.head_oid();
+
+    // Add a "buffer" commit to remote/main first so that the cherry-picked
+    // commit will have a different parent than the original, giving it a
+    // different OID but the same diff.
+    test_repo.add_remote_commits(&["Upstream buffer"]);
+
+    // Build woven topology: integration merges feature-a (1 commit).
+    test_repo.create_branch_at_commit("feature-a", initial_oid);
+    test_repo.switch_branch("feature-a");
+    test_repo.commit("Feature A work", "feature-a.txt");
+    let feature_tip = test_repo.head_oid();
+
+    test_repo.switch_branch("integration");
+    test_repo.commit_merge("Merge branch 'feature-a'", initial_oid, feature_tip);
+    assert_eq!(test_repo.head_commit().parent_count(), 2);
+
+    // Push the feature-a commit so the bare repo has the object.
+    let workdir = test_repo.workdir();
+    git_commands::run_git(&workdir, &["push", "origin", "feature-a"]).unwrap();
+
+    // Advance remote/main by cherry-picking feature-a: same tree/message but
+    // different parent → different OID, same patch-id.
+    let remote_path = test_repo.remote_path().unwrap();
+    {
+        let remote_repo = Repository::open_bare(&remote_path).unwrap();
+        let sig = Signature::now("Test", "test@test.com").unwrap();
+        let feature_commit = remote_repo.find_commit(feature_tip).unwrap();
+        let main_tip = remote_repo
+            .find_branch("main", BranchType::Local)
+            .unwrap()
+            .get()
+            .target()
+            .unwrap();
+        let main_commit = remote_repo.find_commit(main_tip).unwrap();
+        // Cherry-pick: same tree and message but different parent → different OID.
+        remote_repo
+            .commit(
+                Some("refs/heads/main"),
+                &sig,
+                &sig,
+                "Feature A work",
+                &feature_commit.tree().unwrap(),
+                &[&main_commit],
+            )
+            .unwrap();
+    }
+
+    // After update, the branch section should be detected as fully
+    // cherry-picked (via git cherry content comparison), and the merge should
+    // be removed from the integration branch.
+    let result = test_repo.in_dir(|| super::run(false));
+    assert!(result.is_ok(), "update failed: {:?}", result.err());
+
+    let repo2 = Repository::open(test_repo.workdir()).unwrap();
+    let new_head = repo2.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(
+        new_head.parent_count(),
+        1,
+        "integration should be flat after feature-a is cherry-picked into upstream"
     );
 }

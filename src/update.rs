@@ -5,10 +5,10 @@ use git2::BranchType;
 use serde::{Deserialize, Serialize};
 
 use crate::git;
-use crate::git_commands::git_rebase::RebaseOutcome;
 use crate::git_commands::{self, git_branch, git_rebase};
 use crate::msg;
 use crate::transaction::{self, LoomState, Rollback};
+use crate::weave::{self, IntegrationEntry, RebaseOutcome, Weave};
 
 #[derive(Serialize, Deserialize)]
 struct UpdateContext {
@@ -47,6 +47,11 @@ pub fn run(skip_confirm: bool) -> Result<()> {
         .context("Upstream branch name is not valid UTF-8")?
         .to_string();
 
+    // Build Weave BEFORE fetch to capture the current integration topology.
+    // At this point branch commits are relative to the old upstream merge-base,
+    // so the graph is accurate even if the upstream later advances past them.
+    let mut graph = Weave::from_repo(&repo)?;
+
     // Fetch with tags, force-update, and prune deleted remote branches
     let spinner = msg::spinner();
     spinner.start("Fetching latest changes...");
@@ -63,6 +68,103 @@ pub fn run(skip_confirm: bool) -> Result<()> {
         }
     }
 
+    // Re-open the repository so we see the updated remote-tracking refs.
+    // The external `git fetch` process writes refs to disk; the previously
+    // opened Repository object may have stale cached data (libgit2 caches
+    // packed-refs keyed by mtime, which can be imprecise on Windows NTFS).
+    let repo = git2::Repository::discover(&workdir)?;
+
+    // Resolve the new upstream tip now that the fetch is complete.
+    let new_upstream_oid = repo
+        .revparse_single(&upstream_name)
+        .with_context(|| format!("Could not resolve '{}' after fetch", upstream_name))?
+        .id();
+
+    // Remove any commits from branch sections that are now reachable from the
+    // new upstream — they were integrated upstream and replaying them would
+    // produce empty or duplicate commits.
+    let mut partially_trimmed: Vec<String> = Vec::new();
+    for section in &mut graph.branch_sections {
+        let before = section.commits.len();
+
+        // Capture the section tip before any filtering so git cherry can
+        // compare the full original range.
+        let section_tip = section.commits.last().map(|c| c.oid.to_string());
+
+        // Content-based detection: find commits whose patch is already present
+        // in the new upstream via cherry-pick (different OID, same diff).
+        // graph_descendant_of only catches exact OID ancestry, not cherry-picks.
+        let cherry_applied: Vec<String> = section_tip
+            .as_deref()
+            .map(|tip| {
+                let upstream_str = new_upstream_oid.to_string();
+                git_commands::run_git_stdout(&workdir, &["cherry", &upstream_str, tip])
+                    .unwrap_or_default()
+                    .lines()
+                    .filter(|l| l.starts_with("- "))
+                    .filter_map(|l| l[2..].trim().split_whitespace().next().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        section.commits.retain(|c| {
+            // OID-based: commit is a literal ancestor of the new upstream.
+            let by_ancestry = repo
+                .graph_descendant_of(new_upstream_oid, c.oid)
+                .unwrap_or(false);
+            // Content-based: commit's patch is already in the upstream (cherry-pick).
+            let full_oid = c.oid.to_string();
+            let by_content = cherry_applied
+                .iter()
+                .any(|abbrev| full_oid.starts_with(abbrev.as_str()));
+            !by_ancestry && !by_content
+        });
+
+        if !section.commits.is_empty() && section.commits.len() < before {
+            // Some (not all) commits were removed; the original merge OID no
+            // longer describes the trimmed branch, so let git create a fresh
+            // merge commit.
+            partially_trimmed.push(section.label.clone());
+        }
+    }
+    for label in &partially_trimmed {
+        for entry in &mut graph.integration_line {
+            if let IntegrationEntry::Merge {
+                label: l,
+                original_oid,
+            } = entry
+                && l == label
+            {
+                *original_oid = None;
+            }
+        }
+    }
+
+    // Drop sections that became fully empty (entire branch merged upstream).
+    let empty_labels: Vec<String> = graph
+        .branch_sections
+        .iter()
+        .filter(|s| s.commits.is_empty())
+        .map(|s| s.label.clone())
+        .collect();
+    for label in &empty_labels {
+        graph.drop_branch(label);
+    }
+
+    // Also drop Pick entries on the integration line that are already
+    // reachable from the new upstream. In non-interactive rebase git skips
+    // these automatically; in our interactive todo it would cherry-pick them
+    // onto a base that already has those changes, causing unnecessary conflicts.
+    graph.integration_line.retain(|entry| {
+        if let IntegrationEntry::Pick(commit) = entry {
+            !repo
+                .graph_descendant_of(new_upstream_oid, commit.oid)
+                .unwrap_or(false)
+        } else {
+            true
+        }
+    });
+
     // Save rollback state before the rebase
     let ctx = UpdateContext {
         branch_name: branch_name.clone(),
@@ -78,11 +180,13 @@ pub fn run(skip_confirm: bool) -> Result<()> {
     };
     transaction::save(&git_dir, &state)?;
 
-    // Rebase onto upstream with autostash
+    // Rebase onto upstream using the Weave-generated todo so topology is
+    // always correct, even when feature branches were merged into upstream.
     let spinner = msg::spinner();
     spinner.start("Rebasing onto upstream...");
 
-    let outcome = git_rebase::rebase(&git_dir, &workdir, &upstream_name);
+    let todo = graph.to_todo();
+    let outcome = weave::run_rebase(&workdir, Some(&upstream_name), &todo);
 
     match outcome {
         Ok(RebaseOutcome::Completed) => {

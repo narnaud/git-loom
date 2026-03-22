@@ -47,9 +47,18 @@ git-loom update [--yes]
    are force-updated. Deleted remote branches are pruned locally.
 3. **Rebase**: Local commits are replayed on top of the fetched upstream
    changes. Uncommitted working tree changes are preserved automatically.
-   Merge topology is preserved (`--rebase-merges`) and branch refs are
-   kept in sync (`--update-refs`), so woven feature branches survive the
-   rebase intact.
+   Merge topology is preserved and branch refs are kept in sync
+   (`--update-refs`), so woven feature branches survive the rebase intact.
+   Before rebasing, loom inspects each woven branch section:
+   - If **all** commits in the section are now reachable from the new
+     upstream (the branch was fully merged upstream), the entire section
+     and its merge commit are removed. The integration branch fast-forwards
+     cleanly to the new upstream tip.
+   - If **some** commits in the section are reachable from the new upstream
+     (partial integration), those commits are dropped from the section and
+     the remaining commits are rebased onto the new upstream. A fresh merge
+     commit is created (the original merge SHA is no longer valid once the
+     branch content changes).
 4. **Submodule update** (conditional): If the project uses submodules, they
    are initialized and updated recursively.
 5. **Gone upstream cleanup**: Any local branches whose configured upstream

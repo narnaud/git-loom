@@ -31,34 +31,6 @@ pub fn continue_rebase(workdir: &Path) -> Result<RebaseOutcome> {
     }
 }
 
-/// Run a plain `git rebase` with the given extra args.
-///
-/// Returns `RebaseOutcome::Completed` on success, or
-/// `RebaseOutcome::Conflicted` if the rebase stopped due to a conflict
-/// (detected by the presence of `rebase-merge/` or `rebase-apply/`).
-/// Any other failure (e.g., bad args) is returned as `Err`.
-pub fn rebase(git_dir: &Path, workdir: &Path, upstream: &str) -> Result<RebaseOutcome> {
-    match super::run_git(
-        workdir,
-        &[
-            "rebase",
-            "--autostash",
-            "--update-refs",
-            "--rebase-merges",
-            upstream,
-        ],
-    ) {
-        Ok(()) => Ok(RebaseOutcome::Completed),
-        Err(e) => {
-            if is_in_progress(git_dir) {
-                Ok(RebaseOutcome::Conflicted)
-            } else {
-                Err(e)
-            }
-        }
-    }
-}
-
 /// Rebase commits between `upstream` and HEAD onto `newbase`.
 ///
 /// Runs `git rebase --onto <newbase> <upstream> --update-refs`.
