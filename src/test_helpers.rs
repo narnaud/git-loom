@@ -536,7 +536,12 @@ impl TestRepo {
 
     /// Merge a branch into the current branch with --no-ff.
     pub fn merge_no_ff(&self, branch: &str) {
-        crate::git_commands::git_merge::merge_no_ff(self.workdir().as_path(), branch).unwrap();
+        crate::git_commands::git_merge::merge_no_ff(
+            self.workdir().as_path(),
+            self.repo.path(),
+            branch,
+        )
+        .unwrap();
     }
 
     /// Stage files in the working directory.

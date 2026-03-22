@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
-use crate::git_commands::{self, git_branch, git_commit, git_rebase};
+use crate::git_commands::{self, git_branch, git_commit, git_merge, git_rebase};
 
 /// Persistent state saved when a loom command is paused due to a rebase conflict.
 #[derive(Debug, Serialize, Deserialize)]
@@ -143,7 +143,15 @@ pub fn warn_conflict_paused(command: &str) {
 pub fn continue_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
     let state = load_required(git_dir)?;
 
-    if git_rebase::is_in_progress(git_dir) {
+    if git_merge::is_in_progress(git_dir) {
+        match git_merge::continue_merge(workdir, git_dir)? {
+            git_merge::MergeOutcome::Conflicted => {
+                crate::msg::warn("Conflicts remain — resolve them and run `loom continue` again");
+                return Ok(());
+            }
+            git_merge::MergeOutcome::Completed => {}
+        }
+    } else if git_rebase::is_in_progress(git_dir) {
         match git_rebase::continue_rebase(workdir)? {
             git_rebase::RebaseOutcome::Conflicted => {
                 crate::msg::warn("Conflicts remain — resolve them and run `loom continue` again");
@@ -169,7 +177,9 @@ pub fn continue_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
 pub fn abort_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
     let state = load_required(git_dir)?;
 
-    if git_rebase::is_in_progress(git_dir) {
+    if git_merge::is_in_progress(git_dir) {
+        let _ = git_merge::abort(workdir);
+    } else if git_rebase::is_in_progress(git_dir) {
         let _ = git_rebase::abort(workdir);
     }
 
@@ -192,6 +202,13 @@ fn dispatch_after_continue(workdir: &Path, state: &LoomState) -> Result<()> {
         "drop" => crate::drop::after_continue(workdir, &state.context),
         "fold" => crate::fold::after_continue(workdir, &state.context),
         "swap" => crate::swap::after_continue(workdir, &state.context),
+        "merge" => {
+            let ctx: crate::branch::merge::MergeContext =
+                serde_json::from_value(state.context.clone())
+                    .context("Failed to parse merge resume context")?;
+            crate::branch::merge::after_continue(&ctx.branch_name);
+            Ok(())
+        }
         other => bail!("Unknown command '{}' in loom state file", other),
     }
 }
