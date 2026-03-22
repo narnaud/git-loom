@@ -200,11 +200,8 @@ fn entity_priority(entity: &Entity) -> u8 {
 ///
 /// Entities are processed in priority order: Unstaged, then Commits, then
 /// Branches and Files. Within each priority group, the original ordering is
-/// preserved (stable sort). Each entity receives the first available candidate,
-/// with preference for candidates whose first letter hasn't been used yet.
-///
-/// This implements the smart collision avoidance where `feature-a` and `feature-b`
-/// get `fa` and `eb` (skipping 'f' for the second since 'f' is already used).
+/// preserved (stable sort). Each entity receives the first candidate that
+/// hasn't already been assigned to another entity.
 fn resolve_collisions(entities: Vec<Entity>) -> HashMap<Entity, String> {
     let mut items: Vec<(Entity, Vec<String>)> = entities
         .into_iter()
@@ -219,24 +216,12 @@ fn resolve_collisions(entities: Vec<Entity>) -> HashMap<Entity, String> {
     items.sort_by_key(|(e, _)| entity_priority(e));
 
     let mut used: HashSet<String> = HashSet::new();
-    let mut used_first_letters: HashSet<char> = HashSet::new();
     let mut result: HashMap<Entity, String> = HashMap::new();
 
     for (entity, candidates) in items {
-        // First, try to find a candidate whose first letter is not yet used
         let id = candidates
             .iter()
-            .find(|c| {
-                if let Some(first_char) = c.chars().next() {
-                    !used.contains(*c) && !used_first_letters.contains(&first_char)
-                } else {
-                    !used.contains(*c)
-                }
-            })
-            .or_else(|| {
-                // If all candidates have first letters that are taken, just find any unused candidate
-                candidates.iter().find(|c| !used.contains(*c))
-            })
+            .find(|c| !used.contains(*c))
             .cloned()
             .unwrap_or_else(|| {
                 // Fallback: numeric suffix on the first candidate
@@ -255,10 +240,6 @@ fn resolve_collisions(entities: Vec<Entity>) -> HashMap<Entity, String> {
                 }
             });
 
-        // Track the first letter of this ID
-        if let Some(first_char) = id.chars().next() {
-            used_first_letters.insert(first_char);
-        }
         used.insert(id.clone());
         result.insert(entity, id);
     }
