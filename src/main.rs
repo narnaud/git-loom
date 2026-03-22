@@ -340,7 +340,11 @@ fn main() {
     if should_log && let Ok(repo) = git::open_repo() {
         let git_dir = repo.path().to_path_buf();
         let cmd_line = std::env::args().collect::<Vec<_>>().join(" ");
-        trace::init(&git_dir, &cmd_line);
+        if matches!(cli.command, Some(Command::Abort) | Some(Command::Continue)) {
+            trace::init_appending(&git_dir, &cmd_line);
+        } else {
+            trace::init(&git_dir, &cmd_line);
+        }
     }
 
     // Check for a paused loom operation and block most commands if one exists.
