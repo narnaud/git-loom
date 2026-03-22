@@ -64,6 +64,7 @@ git-loom branch merge [branch] [--all]
 - Uses `git merge --no-ff` to create the merge topology
 - If a remote branch is selected (with `--all`), a local tracking branch is
   created automatically before weaving
+- On merge conflict, saves state and pauses for `loom continue` / `loom abort`
 - Errors if the branch is already woven or doesn't exist
 
 ### `branch unmerge`
@@ -178,6 +179,36 @@ HEAD and the upstream tracking branch. This is the most common use case: startin
 a new feature from the integration point.
 
 File targets are rejected with an error message.
+
+## Conflict Recovery
+
+### `branch new` (weaving)
+
+When `branch new` triggers a weave operation that encounters conflicts, it uses
+hard-fail: the rebase is automatically aborted and an error is reported. No
+state is saved — the user must resolve the situation and retry.
+
+### `branch merge`
+
+`branch merge` supports resumable conflict handling via `loom continue` and
+`loom abort` (see Spec 014).
+
+When the merge encounters a conflict:
+
+1. The state is saved to `.git/loom/state.json`
+2. loom reports that the operation is paused and exits
+
+The saved state contains:
+- `branch_name`: the branch being woven into integration
+
+After the user resolves the conflict:
+
+- `loom continue` — completes the merge and prints the success message
+- `loom abort` — calls `git merge --abort` and restores the original state
+
+While the operation is paused, most other loom commands are blocked. Only
+`loom show`, `loom diff`, `loom trace`, `loom continue`, and `loom abort`
+are permitted.
 
 ## Prerequisites
 

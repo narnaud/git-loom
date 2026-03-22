@@ -1,9 +1,17 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use git2::{BranchType, Repository};
+use serde::{Deserialize, Serialize};
 
 use crate::git;
 use crate::git_commands::git_branch;
+use crate::git_commands::git_merge::MergeOutcome;
 use crate::msg;
+use crate::transaction::{self, LoomState, Rollback};
+
+#[derive(Serialize, Deserialize)]
+struct MergeContext {
+    branch_name: String,
+}
 
 /// Weave an existing branch into the integration branch.
 ///
@@ -13,6 +21,7 @@ use crate::msg;
 pub fn run(branch: Option<String>, all: bool) -> Result<()> {
     let repo = git::open_repo()?;
     let workdir = git::require_workdir(&repo, "merge")?;
+    let git_dir = repo.path().to_path_buf();
     let info = git::gather_repo_info(&repo, false, 1)?;
 
     let branch_name = match branch {
@@ -22,7 +31,7 @@ pub fn run(branch: Option<String>, all: bool) -> Result<()> {
 
     // If this is a remote branch (contains '/'), create a local tracking branch
     let local_name = if branch_name.contains('/') {
-        let local = branch_name.split('/').skip(1).collect::<Vec<_>>().join("/");
+        let local = git::upstream_local_branch(&branch_name);
         git_branch::create(workdir, &local, &branch_name)?;
         // Set up tracking
         let mut local_branch = repo.find_branch(&local, BranchType::Local)?;
@@ -33,10 +42,34 @@ pub fn run(branch: Option<String>, all: bool) -> Result<()> {
     };
 
     // Merge the branch into integration (--no-ff) so it appears in the topology
-    crate::git_commands::git_merge::merge_no_ff(workdir, &local_name)?;
+    match crate::git_commands::git_merge::merge_no_ff(workdir, &git_dir, &local_name)? {
+        MergeOutcome::Completed => {
+            msg::success(&format!("Woven `{}` into integration branch", local_name));
+        }
+        MergeOutcome::Conflicted => {
+            let state = LoomState {
+                command: "merge".to_string(),
+                rollback: Rollback::default(),
+                context: serde_json::to_value(MergeContext {
+                    branch_name: local_name,
+                })?,
+            };
+            transaction::save(&git_dir, &state)?;
+            transaction::warn_conflict_paused("merge");
+        }
+    }
 
-    msg::success(&format!("Woven `{}` into integration branch", local_name));
+    Ok(())
+}
 
+/// Resume a `loom branch merge` after conflicts have been resolved.
+pub fn after_continue(context: &serde_json::Value) -> anyhow::Result<()> {
+    let ctx: MergeContext =
+        serde_json::from_value(context.clone()).context("Failed to parse merge resume context")?;
+    msg::success(&format!(
+        "Woven `{}` into integration branch",
+        ctx.branch_name
+    ));
     Ok(())
 }
 
@@ -87,7 +120,7 @@ fn pick_branch(repo: &Repository, info: &git::RepoInfo, include_remote: bool) ->
 
     // Remote branches without a local counterpart
     if include_remote {
-        let local_names: Vec<String> = repo
+        let local_names: std::collections::HashSet<String> = repo
             .branches(Some(BranchType::Local))?
             .filter_map(|b| b.ok())
             .filter_map(|(b, _)| b.name().ok().flatten().map(|n| n.to_string()))
@@ -107,8 +140,7 @@ fn pick_branch(repo: &Repository, info: &git::RepoInfo, include_remote: bool) ->
                     continue;
                 }
                 // Skip if a local branch with the same short name exists
-                let short_name = name.split('/').skip(1).collect::<Vec<_>>().join("/");
-                if !local_names.contains(&short_name) {
+                if !local_names.contains(&git::upstream_local_branch(name)) {
                     items.push(name.to_string());
                 }
             }
