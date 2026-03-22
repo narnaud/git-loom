@@ -231,4 +231,261 @@ assert_exit_ok $? "submodule_ok"
 assert_contains "$out" "Updating submodules" "submodule_spinner_start"
 assert_contains "$out" "Updated submodules"  "submodule_spinner_stop"
 
+# ══════════════════════════════════════════════════════════════════════════════
+# CHERRY-PICKED UPSTREAM COMMITS ARE FILTERED
+# ══════════════════════════════════════════════════════════════════════════════
+
+describe "cherry-picked feature commit is filtered from rebase"
+setup_repo_with_remote
+# Enable histogram diff algorithm — this triggers different hunk merging
+# between `git log -p` (respects config) and `git diff-tree -p` (ignores it,
+# always uses Myers). The resulting patch-IDs differ, which was the root cause
+# of the bug where cherry-picked commits weren't detected during update.
+git -C "$WORK" config diff.algorithm histogram
+
+# Push a doc file to upstream so the merge-base includes it.
+# The doc has sections that produce different diff hunks under histogram
+# vs Myers when rewritten — this is key to triggering the bug.
+SETUP="$TMPROOT/setup"
+git clone -q "$TMPROOT/remote.git" "$SETUP"
+git -C "$SETUP" config user.email "test@test.com"
+git -C "$SETUP" config user.name "Test"
+git -C "$SETUP" config core.autocrlf false
+cat > "$SETUP/doc.md" << 'ORIGINAL'
+# Title
+
+## Overview
+
+Some overview text here.
+
+## CLI
+
+```bash
+command [--yes]
+```
+
+**Arguments:**
+
+- `--yes` / `-y`: Skip the prompt.
+
+**Behavior:**
+
+- Validates the current state
+- Fetches all changes
+- Rebases local commits
+- Updates submodules
+- On conflict, reports the error
+- After success, proposes to remove branches
+
+## What Happens
+
+1. **Validation**:
+   - HEAD must be on a branch
+   - Must have upstream tracking
+
+2. **Fetch**:
+   - All changes are fetched
+   - Tags are force-updated
+
+## Conflict Handling
+
+When conflicts occur:
+- The operation pauses
+- User resolves manually
+
+## Prerequisites
+
+- Git 2.38 or later
+- Must be in a git repository
+ORIGINAL
+git -C "$SETUP" add doc.md
+git -C "$SETUP" commit -q -m "Add doc"
+git -C "$SETUP" push -q origin
+rm -rf "$SETUP"
+# Fetch so WORK sees the new upstream base
+git -C "$WORK" fetch -q origin
+git -C "$WORK" rebase -q "$(git -C "$WORK" rev-parse --abbrev-ref --symbolic-full-name @{u})"
+
+create_feature_branch "cherry-feat"
+switch_to cherry-feat
+# Rewrite the doc (produces different hunks under histogram vs Myers)
+cat > "$WORK/doc.md" << 'UPDATED'
+# Title
+
+## Overview
+
+Some overview text here.
+
+## CLI
+
+```bash
+command [--yes]
+```
+
+**Flags:**
+
+- `--yes` / `-y`: Skip the prompt.
+
+## What Happens
+
+### Normal Update
+
+**What changes:**
+
+1. **Validation**:
+   - HEAD must be on a branch
+   - Must have upstream tracking
+
+2. **Fetch**:
+   - All changes are fetched
+   - Tags are force-updated
+   - Deleted remote branches are pruned
+
+**What stays the same:**
+- Feature branch refs are kept in sync
+- Merge topology is preserved
+
+## Conflict Recovery
+
+When conflicts occur:
+- State is saved
+- User resolves manually
+- Continue or abort
+
+## Prerequisites
+
+- Git 2.38 or later
+- Must be in a git repository
+UPDATED
+git -C "$WORK" add doc.md
+git -C "$WORK" commit -q -m "Rewrite doc"
+switch_to integration
+weave_branch "cherry-feat"
+
+# Upstream recreates the same change (simulates cherry-pick with different OID)
+OTHER="$TMPROOT/other"
+git clone -q "$TMPROOT/remote.git" "$OTHER"
+git -C "$OTHER" config user.email "upstream@test.com"
+git -C "$OTHER" config user.name "Upstream"
+git -C "$OTHER" config core.autocrlf false
+base_branch=$(git -C "$OTHER" rev-parse --abbrev-ref HEAD)
+cat > "$OTHER/doc.md" << 'UPDATED'
+# Title
+
+## Overview
+
+Some overview text here.
+
+## CLI
+
+```bash
+command [--yes]
+```
+
+**Flags:**
+
+- `--yes` / `-y`: Skip the prompt.
+
+## What Happens
+
+### Normal Update
+
+**What changes:**
+
+1. **Validation**:
+   - HEAD must be on a branch
+   - Must have upstream tracking
+
+2. **Fetch**:
+   - All changes are fetched
+   - Tags are force-updated
+   - Deleted remote branches are pruned
+
+**What stays the same:**
+- Feature branch refs are kept in sync
+- Merge topology is preserved
+
+## Conflict Recovery
+
+When conflicts occur:
+- State is saved
+- User resolves manually
+- Continue or abort
+
+## Prerequisites
+
+- Git 2.38 or later
+- Must be in a git repository
+UPDATED
+git -C "$OTHER" add doc.md
+git -C "$OTHER" commit -q -m "Rewrite doc"
+git -C "$OTHER" push -q origin "$base_branch"
+
+out=$(gl update 2>&1)
+assert_exit_ok $? "cherry_pick_filter_ok"
+assert_contains "$out" "Rebased onto upstream" "cherry_pick_rebased"
+# The feature commit message should still be in history (from the upstream copy)
+assert_log_contains "Rewrite doc" "cherry_pick_commit_in_log"
+
+describe "partially cherry-picked branch keeps remaining commits"
+setup_repo_with_remote
+create_feature_branch "partial-cherry"
+switch_to partial-cherry
+commit_file "Partial F1" "pf1.txt"
+commit_file "Partial F2" "pf2.txt"
+commit_file "Partial F3" "pf3.txt"
+switch_to integration
+weave_branch "partial-cherry"
+
+# Upstream cherry-picks only F1
+OTHER="$TMPROOT/other"
+git clone -q "$TMPROOT/remote.git" "$OTHER"
+git -C "$OTHER" config user.email "upstream@test.com"
+git -C "$OTHER" config user.name "Upstream"
+git -C "$OTHER" config core.autocrlf false
+# Recreate F1's change on upstream (simulates cherry-pick with different OID)
+base_branch=$(git -C "$OTHER" rev-parse --abbrev-ref HEAD)
+echo "Partial F1" > "$OTHER/pf1.txt"
+git -C "$OTHER" add pf1.txt
+git -C "$OTHER" commit -q -m "Partial F1"
+git -C "$OTHER" push -q origin "$base_branch"
+
+out=$(gl update 2>&1)
+assert_exit_ok $? "partial_cherry_ok"
+assert_contains "$out" "Rebased onto upstream" "partial_cherry_rebased"
+# F2 and F3 should still be on the branch
+assert_contains "$(git -C "$WORK" log partial-cherry --oneline)" "Partial F2" "partial_cherry_f2_kept"
+assert_contains "$(git -C "$WORK" log partial-cherry --oneline)" "Partial F3" "partial_cherry_f3_kept"
+
+describe "fully cherry-picked branch is handled gracefully"
+setup_repo_with_remote
+create_feature_branch "full-cherry"
+switch_to full-cherry
+commit_file "Full F1" "ff1.txt"
+commit_file "Full F2" "ff2.txt"
+switch_to integration
+weave_branch "full-cherry"
+
+# Upstream cherry-picks both commits
+OTHER="$TMPROOT/other"
+git clone -q "$TMPROOT/remote.git" "$OTHER"
+git -C "$OTHER" config user.email "upstream@test.com"
+git -C "$OTHER" config user.name "Upstream"
+git -C "$OTHER" config core.autocrlf false
+# Recreate both changes on upstream (simulates cherry-pick with different OIDs)
+base_branch=$(git -C "$OTHER" rev-parse --abbrev-ref HEAD)
+echo "Full F1" > "$OTHER/ff1.txt"
+git -C "$OTHER" add ff1.txt
+git -C "$OTHER" commit -q -m "Full F1"
+echo "Full F2" > "$OTHER/ff2.txt"
+git -C "$OTHER" add ff2.txt
+git -C "$OTHER" commit -q -m "Full F2"
+git -C "$OTHER" push -q origin "$base_branch"
+
+out=$(gl update 2>&1)
+assert_exit_ok $? "full_cherry_ok"
+assert_contains "$out" "Rebased onto upstream" "full_cherry_rebased"
+assert_log_contains "Full F1" "full_cherry_f1_in_log"
+assert_log_contains "Full F2" "full_cherry_f2_in_log"
+
 pass
