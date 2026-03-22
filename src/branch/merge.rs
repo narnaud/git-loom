@@ -1,9 +1,17 @@
 use anyhow::{Result, bail};
 use git2::{BranchType, Repository};
+use serde::{Deserialize, Serialize};
 
 use crate::git;
 use crate::git_commands::git_branch;
+use crate::git_commands::git_merge::MergeOutcome;
 use crate::msg;
+use crate::transaction::{self, LoomState, Rollback};
+
+#[derive(Serialize, Deserialize)]
+pub struct MergeContext {
+    pub branch_name: String,
+}
 
 /// Weave an existing branch into the integration branch.
 ///
@@ -13,6 +21,7 @@ use crate::msg;
 pub fn run(branch: Option<String>, all: bool) -> Result<()> {
     let repo = git::open_repo()?;
     let workdir = git::require_workdir(&repo, "merge")?;
+    let git_dir = repo.path().to_path_buf();
     let info = git::gather_repo_info(&repo, false, 1)?;
 
     let branch_name = match branch {
@@ -33,11 +42,29 @@ pub fn run(branch: Option<String>, all: bool) -> Result<()> {
     };
 
     // Merge the branch into integration (--no-ff) so it appears in the topology
-    crate::git_commands::git_merge::merge_no_ff(workdir, &local_name)?;
-
-    msg::success(&format!("Woven `{}` into integration branch", local_name));
+    match crate::git_commands::git_merge::merge_no_ff(workdir, &git_dir, &local_name)? {
+        MergeOutcome::Completed => {
+            msg::success(&format!("Woven `{}` into integration branch", local_name));
+        }
+        MergeOutcome::Conflicted => {
+            let state = LoomState {
+                command: "merge".to_string(),
+                rollback: Rollback::default(),
+                context: serde_json::to_value(MergeContext {
+                    branch_name: local_name,
+                })?,
+            };
+            transaction::save(&git_dir, &state)?;
+            transaction::warn_conflict_paused("merge");
+        }
+    }
 
     Ok(())
+}
+
+/// Resume a `loom branch merge` after conflicts have been resolved.
+pub fn after_continue(branch_name: &str) {
+    msg::success(&format!("Woven `{}` into integration branch", branch_name));
 }
 
 /// Resolve a branch argument, ensuring it's NOT already woven.
