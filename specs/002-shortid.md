@@ -70,42 +70,38 @@ sort) for determinism.
 
 ## Collision Resolution
 
-IDs are assigned greedily in priority order using **first-letter collision
-avoidance**. Each entity receives its highest-priority available candidate,
-with preference for candidates whose first letter hasn't been used yet.
-
-**Basic rule:** When a candidate's first letter is already used by a previous
-entity, skip to the next candidate that starts with an unused letter.
+IDs are assigned greedily in priority order. Each entity receives its
+first candidate that is not already taken by another entity. Only **exact
+ID matches** are considered collisions — sharing a first letter is fine as
+long as the full 2-character IDs are distinct.
 
 ```
-feature-a        →  fa  ✓ (first candidate, 'f' not used)
-feature-b        →  eb  ✓ (skip 'fb' because 'f' used, take 'eb')
+feature-a        →  fa  ✓ (first candidate, not taken)
+feature-b        →  fb  ✓ (first candidate 'fb' ≠ 'fa', not taken)
 ```
 
-This keeps IDs visually distinct and easier to type:
+When two entities share the same first candidate, the second entity moves
+to its next candidate:
 
 ```
-feature-alpha    →  fa  ✓ (first candidate, 'f' not used)
-feature-awesome  →  ea  ✓ (skip 'fa', 'fe', 'fs'... because 'f' used, take 'ea')
+feature-alpha    →  fa  ✓ (first candidate, not taken)
+feature-awesome  →  fe  ✓ ('fa' taken, next candidate 'fe' is available)
 ```
 
 Single-word names work the same way:
 
 ```
-main             →  ma  ✓ ('m' not used)
-mainstream       →  ai  ✓ (skip 'ma', 'ms'... because 'm' used, take 'ai')
-master           →  st  ✓ (skip 'ms', 'mt', 'me', 'mr', 'as', 'at' because 'm' and 'a' used)
+main             →  ma  ✓ (not taken)
+mainstream       →  mi  ✓ ('ma' taken, next candidate 'mi' is available)
+master           →  ms  ✓ ('ma' taken, next candidate 'ms' is available)
 ```
 
-**Fallback strategies:**
-1. If all candidates starting with unused letters are taken, fall back to
-   any unused candidate (even if its first letter is used).
-2. If all candidates are exhausted (e.g. two entities with identical source
-   text), append a numeric suffix: `ab`, `ab1`, `ab2`, etc.
+**Fallback:** If all candidates are exhausted (e.g. two entities with
+identical source text), a numeric suffix is appended: `ab`, `ab1`, `ab2`, etc.
 
 Collision resolution operates **globally** across all entity types. A branch
-named `main` and a file named `main.rs` both generate `ma` candidates; the
-first gets `ma`, the second gets `ai` (skipping 'm').
+named `main` and a file named `main.rs` both generate `ma` as their first
+candidate; the first gets `ma`, the second gets `mi`.
 
 ## Display Format
 
@@ -179,7 +175,7 @@ not an actionable entity.
 │●   2ee61e1 Add feature A
 ├╯
 │
-│╭─ eb [feature-b]
+│╭─ fb [feature-b]
 │●   d0472f9 Fix bug in feature B
 │●   7a067a9 Start feature B
 ├╯
@@ -189,7 +185,7 @@ not an actionable entity.
 
 In this example:
 - `feature-a` gets `fa` (first letters: 'f' + 'a')
-- `feature-b` gets `eb` (skips 'fb' because 'f' is already used, takes 'e' + 'b')
+- `feature-b` gets `fb` (first letters: 'f' + 'b' — same first letter is fine)
 - `main.rs` gets `ma` (first two letters)
 - `new_file.txt` gets `nf` (first letters of words in stem: 'n' + 'f')
 
@@ -289,10 +285,11 @@ Available `TargetKind` values:
 - **Global collision resolution:** all entity types share one ID namespace.
   This avoids ambiguity when a future command receives an ID without an
   explicit type qualifier.
-- **First-letter collision avoidance:** when multiple entities have similar
-  names (like `feature-a` and `feature-b`), prioritizing candidates with
-  unused first letters produces more visually distinct IDs that are easier
-  to distinguish and type. This is more intuitive than sequential fallback.
+- **Exact-match collision only:** collisions are checked against the full
+  ID string, not just the first letter. This keeps IDs intuitive — for
+  example, `fix-merge` → `fm` and `fix-update` → `fu` rather than forcing
+  `fix-update` to a less obvious ID like `iu`. Shared first letters are
+  acceptable because the full 2-character ID is still unique and easy to type.
 - **Word-based candidates:** splitting on `-`, `_`, `/` and generating
   character combinations from different words produces many 2-char options,
   keeping IDs short even when names share long prefixes.
@@ -301,8 +298,7 @@ Available `TargetKind` values:
   prevents branches from "stealing" a commit's natural 2-char prefix.
 - **Greedy assignment with smart ordering:** within each priority group,
   entities are processed in order, each receiving the first available
-  candidate that prefers unused first letters. This is simple, deterministic,
-  and fast while producing better IDs.
+  candidate. This is simple, deterministic, and fast.
 - **File stem over full filename:** using the stem (without extension)
   means IDs reflect meaningful name parts, not `.rs` or `.txt` suffixes.
 - **Filename over full path:** gives shorter, more memorable IDs and

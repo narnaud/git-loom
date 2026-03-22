@@ -455,15 +455,15 @@ fn short_ids_for_files_use_filename() {
     ];
 
     let output = render_plain(info);
-    // "graph.rs" -> "gr", "git.rs" -> "it" (skip 'g' since already used)
+    // "graph.rs" -> "gr", "git.rs" -> "gi" (same first letter is fine, full IDs are unique)
     assert!(
         output.contains("gr  M src/graph.rs"),
         "expected file short ID 'gr', got:\n{}",
         output
     );
     assert!(
-        output.contains("it  M src/git.rs"),
-        "expected file short ID 'it', got:\n{}",
+        output.contains("gi  M src/git.rs"),
+        "expected file short ID 'gi', got:\n{}",
         output
     );
 }

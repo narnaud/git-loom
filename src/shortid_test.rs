@@ -57,13 +57,13 @@ fn file_uses_stem_not_extension() {
 
 #[test]
 fn common_prefix_resolved_at_two_chars() {
-    // feature-a gets "fa", feature-b gets "eb" (skip 'f' since already used)
+    // feature-a gets "fa", feature-b gets "fb" (same first letter is fine, full ID is unique)
     let alloc = IdAllocator::new(vec![
         Entity::Branch("feature-a".to_string()),
         Entity::Branch("feature-b".to_string()),
     ]);
     assert_eq!(alloc.get_branch("feature-a"), "fa");
-    assert_eq!(alloc.get_branch("feature-b"), "eb");
+    assert_eq!(alloc.get_branch("feature-b"), "fb");
 }
 
 #[test]
@@ -222,22 +222,22 @@ fn file_with_underscores_uses_word_initials() {
 
 #[test]
 fn collision_shifts_to_second_letter_multi_word() {
-    // feature-a and feature-b: first gets "fa", second gets "eb" (skip 'f', use 'e' from second word)
+    // feature-a and feature-b: first gets "fa", second gets "fb" (full ID is unique)
     let alloc = IdAllocator::new(vec![
         Entity::Branch("feature-a".to_string()),
         Entity::Branch("feature-b".to_string()),
     ]);
     assert_eq!(alloc.get_branch("feature-a"), "fa");
-    assert_eq!(alloc.get_branch("feature-b"), "eb");
+    assert_eq!(alloc.get_branch("feature-b"), "fb");
 }
 
 #[test]
 fn collision_shifts_forward_single_word() {
-    // main and mainstream: first gets "ma", second gets "ai" (skip 'm', use 'a' and 'i')
+    // main and mainstream: first gets "ma", second gets "mi" (next unused 2-char candidate)
     let alloc = IdAllocator::new(vec![
         Entity::Branch("main".to_string()),
         Entity::Branch("mainstream".to_string()),
     ]);
     assert_eq!(alloc.get_branch("main"), "ma");
-    assert_eq!(alloc.get_branch("mainstream"), "ai");
+    assert_eq!(alloc.get_branch("mainstream"), "mi");
 }
