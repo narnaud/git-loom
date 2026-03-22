@@ -20,6 +20,8 @@ struct LoomLogger {
     command_line: String,
     start_time: chrono::DateTime<Local>,
     entries: Vec<LogEntry>,
+    /// If set, append to this existing log file instead of creating a new one.
+    append_to: Option<PathBuf>,
 }
 
 thread_local! {
@@ -41,6 +43,28 @@ pub fn init(git_dir: &Path, command_line: &str) {
             command_line: command_line.to_string(),
             start_time: Local::now(),
             entries: Vec::new(),
+            append_to: None,
+        });
+    });
+}
+
+/// Initialize the logger in append mode: entries will be appended to the
+/// most recent existing log file rather than creating a new one.
+///
+/// Falls back to normal (new-file) mode if no prior log exists.
+pub fn init_appending(git_dir: &Path, command_line: &str) {
+    let append_to = latest_log_path(git_dir);
+    LOGGER.with(|cell| {
+        let mut logger = cell.borrow_mut();
+        if logger.is_some() {
+            return;
+        }
+        *logger = Some(LoomLogger {
+            git_dir: git_dir.to_path_buf(),
+            command_line: command_line.to_string(),
+            start_time: Local::now(),
+            entries: Vec::new(),
+            append_to,
         });
     });
 }
@@ -83,6 +107,7 @@ pub fn annotate(label: &str, content: &str) {
 /// Write the log file and prune old logs. Returns the path written.
 ///
 /// No-op if logger was never initialized. Consumes the logger state.
+/// If initialized with `init_appending`, appends to the existing log file.
 pub fn finalize() -> Option<PathBuf> {
     LOGGER.with(|cell| {
         let logger = cell.borrow_mut().take()?;
@@ -94,18 +119,23 @@ pub fn finalize() -> Option<PathBuf> {
         let logs_dir = logger.git_dir.join("loom").join("logs");
         std::fs::create_dir_all(&logs_dir).ok()?;
 
-        let filename = logger
-            .start_time
-            .format("%Y-%m-%d_%H-%M-%S_%3f.log")
-            .to_string();
-        let path = logs_dir.join(&filename);
-
-        let content = format_log(&logger);
-        std::fs::write(&path, content).ok()?;
-
-        prune_logs(&logs_dir, 10);
-
-        Some(path)
+        if let Some(ref path) = logger.append_to {
+            let suffix = format_log_suffix(&logger);
+            let mut file = std::fs::OpenOptions::new().append(true).open(path).ok()?;
+            use std::io::Write;
+            file.write_all(suffix.as_bytes()).ok()?;
+            Some(path.clone())
+        } else {
+            let filename = logger
+                .start_time
+                .format("%Y-%m-%d_%H-%M-%S_%3f.log")
+                .to_string();
+            let path = logs_dir.join(&filename);
+            let content = format_log(&logger);
+            std::fs::write(&path, content).ok()?;
+            prune_logs(&logs_dir, 10);
+            Some(path)
+        }
     })
 }
 
@@ -177,6 +207,42 @@ fn print_log_colored(content: &str) {
             println!("{}", line.dimmed());
         }
     }
+}
+
+/// Format log entries to append to an existing log (adds a sub-header for the new command).
+fn format_log_suffix(logger: &LoomLogger) -> String {
+    let mut out = String::new();
+    out.push('\n');
+    out.push_str(&format!(
+        "[{}] {}\n",
+        logger.start_time.format("%Y-%m-%d %H:%M:%S%.3f"),
+        logger.command_line
+    ));
+    out.push_str(&"-".repeat(80));
+    out.push('\n');
+    for entry in &logger.entries {
+        out.push('\n');
+        let status = if entry.success { "" } else { " FAILED" };
+        out.push_str(&format!(
+            "  [{}] {}  [{}ms]{}\n",
+            entry.program, entry.args, entry.duration_ms, status
+        ));
+        for (label, content) in &entry.annotations {
+            out.push_str(&format!("    [{}]\n", label));
+            for line in content.lines() {
+                out.push_str(line);
+                out.push('\n');
+            }
+        }
+        if !entry.success && !entry.stderr.is_empty() {
+            out.push_str("    [stderr]\n");
+            for line in entry.stderr.lines() {
+                out.push_str(line);
+                out.push('\n');
+            }
+        }
+    }
+    out
 }
 
 /// Format the entire log content (plain text for file storage).
