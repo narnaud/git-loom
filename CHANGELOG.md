@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.16.1](https://github.com/narnaud/git-loom/compare/v0.16.0...v0.16.1) (2026-03-22)
+
+
+### Bug Fixes 🐞
+
+* **shortid:** only avoid exact ID collisions, not shared first letters ([0b5d8d5](https://github.com/narnaud/git-loom/commit/0b5d8d5a32bb8d831bc32842702c57c75b47feae))
+* **trace:** append abort/continue to the originating command trace ([22561a4](https://github.com/narnaud/git-loom/commit/22561a4cf4ee3367ed5bae465d3842338aef5203))
+* **update:** use consistent diff engine for patch-ID matching ([e98d4f2](https://github.com/narnaud/git-loom/commit/e98d4f22443fe7f454342bed6f3e32549ed78902))
+* **update:** use weave-based rebase to prevent upstream commits leaking into feature branches ([7069d5c](https://github.com/narnaud/git-loom/commit/7069d5cf3d34d1656aa30011bd9e0f5ed83459ce))
+
 ## [0.16.0](https://github.com/narnaud/git-loom/compare/v0.15.1...v0.16.0) (2026-03-21)
 
 
