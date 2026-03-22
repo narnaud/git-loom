@@ -135,6 +135,9 @@ impl TestRepo {
         let mut config = repo.config().unwrap();
         config.set_str("user.name", "Test").unwrap();
         config.set_str("user.email", "test@test.com").unwrap();
+        // Prevent git from opening an interactive editor in tests (e.g. for
+        // `git merge --continue` which is equivalent to `git commit`).
+        config.set_str("core.editor", "true").unwrap();
     }
 
     /// Get the signature used for commits.
@@ -610,7 +613,19 @@ impl TestRepo {
 
     /// Merge a branch into the current branch with --no-ff.
     pub fn merge_no_ff(&self, branch: &str) {
-        crate::git_commands::git_merge::merge_no_ff(self.workdir().as_path(), branch).unwrap();
+        let outcome = crate::git_commands::git_merge::merge_no_ff(
+            self.workdir().as_path(),
+            self.repo.path(),
+            branch,
+        )
+        .unwrap();
+        assert!(
+            matches!(
+                outcome,
+                crate::git_commands::git_merge::MergeOutcome::Completed
+            ),
+            "merge_no_ff: expected Completed, got Conflicted"
+        );
     }
 
     /// Stage files in the working directory.

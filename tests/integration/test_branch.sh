@@ -155,6 +155,55 @@ gl_capture branch merge g-does-not-exist
 assert_exit_fail "$CODE" "merge_nonexistent_fail"
 
 # ══════════════════════════════════════════════════════════════════════════════
+# BRANCH MERGE — CONFLICT RECOVERY
+# ══════════════════════════════════════════════════════════════════════════════
+# Both branches modify the same file to trigger a conflict on merge.
+
+describe "branch merge: conflict → continue (resolving conflict) → success"
+setup_repo_with_remote
+create_feature_branch "g-conflict-cont"
+switch_to g-conflict-cont
+echo "feature content" > "$WORK/shared.txt"
+git -C "$WORK" add shared.txt
+git -C "$WORK" commit -q -m "Feature change"
+switch_to integration
+echo "integration content" > "$WORK/shared.txt"
+git -C "$WORK" add shared.txt
+git -C "$WORK" commit -q -m "Integration change"
+gl_capture branch merge g-conflict-cont
+assert_exit_ok  "$CODE"            "merge_cont_exit"
+assert_state_file                  "merge_cont_state"
+assert_contains "$OUT" "loom continue" "merge_cont_hint"
+echo "resolved" > "$WORK/shared.txt"
+git -C "$WORK" add shared.txt
+gl_capture continue
+assert_exit_ok  "$CODE"            "merge_cont_ok"
+assert_no_state_file               "merge_cont_state_removed"
+assert_contains "$OUT" "Woven"     "merge_cont_msg"
+assert_head_parent_count 2         "merge_cont_merge_commit"
+
+describe "branch merge: conflict → abort → HEAD restored"
+setup_repo_with_remote
+create_feature_branch "g-conflict-abort"
+switch_to g-conflict-abort
+echo "feature content" > "$WORK/shared.txt"
+git -C "$WORK" add shared.txt
+git -C "$WORK" commit -q -m "Feature change"
+switch_to integration
+echo "integration content" > "$WORK/shared.txt"
+git -C "$WORK" add shared.txt
+git -C "$WORK" commit -q -m "Integration change"
+old_head=$(head_hash)
+gl_capture branch merge g-conflict-abort
+assert_state_file                  "merge_abort_state"
+gl_capture abort
+assert_exit_ok  "$CODE"            "merge_abort_ok"
+assert_contains "$OUT" "Aborted"   "merge_abort_msg"
+assert_no_state_file               "merge_abort_state_removed"
+assert_eq "$old_head" "$(head_hash)" "merge_abort_head_restored"
+assert_head_parent_count 1         "merge_abort_not_merged"
+
+# ══════════════════════════════════════════════════════════════════════════════
 # BRANCH UNMERGE
 # ══════════════════════════════════════════════════════════════════════════════
 

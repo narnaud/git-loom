@@ -61,6 +61,9 @@ setup_repo_with_remote() {
     git -C "$WORK" config user.email "test@test.com"
     git -C "$WORK" config user.name "Test"
     git -C "$WORK" config core.autocrlf false
+    # Prevent git from opening an interactive editor in tests (e.g. for
+    # `git merge --continue` which is equivalent to `git commit`).
+    git -C "$WORK" config core.editor "true"
 
     # Integration branch tracking origin/<default>
     git -C "$WORK" checkout -q -b integration
