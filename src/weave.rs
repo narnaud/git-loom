@@ -288,56 +288,45 @@ impl Weave {
     ///
     /// Uses two strategies:
     /// 1. Exact OID ancestry (commit was directly merged)
-    /// 2. Patch-ID matching (commit was cherry-picked with a different OID)
+    /// 2. `git cherry` for cherry-pick detection (only when candidates remain)
     pub fn filter_upstream_commits(
         &mut self,
         repo: &Repository,
         workdir: &Path,
         new_upstream_oid: Oid,
     ) {
-        // Collect patch-IDs of new upstream commits (between old base and new upstream)
-        let upstream_patch_ids = collect_patch_ids(workdir, &self.base_oid, &new_upstream_oid);
-        if upstream_patch_ids.is_none() {
-            msg::warn(
-                "Could not compute patch-IDs for upstream commits — \
-                 cherry-picked commits may not be detected",
-            );
-        }
-
-        // Collect all branch-section commit OIDs that aren't trivially in upstream
-        let mut candidates: Vec<(Oid, bool)> = Vec::new(); // (oid, ancestor_match)
+        // Strategy 1: exact ancestor check (fast, no processes)
+        let mut candidates: Vec<Oid> = Vec::new();
         let mut to_drop = Vec::new();
         for section in &self.branch_sections {
             for commit in &section.commits {
-                // Strategy 1: exact ancestor check
                 if repo
                     .graph_descendant_of(new_upstream_oid, commit.oid)
                     .unwrap_or(false)
                 {
                     to_drop.push(commit.oid);
                 } else {
-                    candidates.push((commit.oid, false));
+                    candidates.push(commit.oid);
                 }
             }
         }
 
-        // Strategy 2: batch patch-ID match for remaining candidates
-        if let Some(ref upstream_ids) = upstream_patch_ids
-            && !candidates.is_empty()
-        {
-            let candidate_oids: Vec<Oid> = candidates.iter().map(|(oid, _)| *oid).collect();
-            let feature_ids = batch_patch_ids(workdir, &candidate_oids);
-            if feature_ids.is_none() {
-                msg::warn(
-                    "Could not compute patch-IDs for feature commits — \
-                     cherry-picked commits may not be detected",
-                );
-            }
-            if let Some(feature_ids) = feature_ids {
-                for (oid, pid) in &feature_ids {
-                    if upstream_ids.contains(pid) {
-                        to_drop.push(*oid);
+        // Strategy 2: git cherry for remaining candidates (O(feature commits), not O(upstream commits))
+        if !candidates.is_empty() {
+            let candidate_set: HashSet<Oid> = candidates.into_iter().collect();
+            match cherry_pick_equivalents(workdir, &new_upstream_oid, &self.base_oid) {
+                Some(equivalent) => {
+                    for oid in equivalent {
+                        if candidate_set.contains(&oid) {
+                            to_drop.push(oid);
+                        }
                     }
+                }
+                None => {
+                    msg::warn(
+                        "Could not run git cherry — \
+                         cherry-picked commits may not be detected",
+                    );
                 }
             }
         }
@@ -1217,117 +1206,34 @@ pub fn run_rebase(
     Ok(RebaseOutcome::Completed)
 }
 
-/// Collect patch-IDs for all commits in the range `base..head`.
+/// Returns OIDs in `base..HEAD` that have cherry-pick equivalents in `upstream`.
 ///
-/// Uses `git rev-list` to enumerate commits, then `git diff-tree -p --stdin`
-/// piped to `git patch-id --stable` — the same method used by `batch_patch_ids`
-/// for feature commits. Using the same diff engine for both sides is critical:
-/// `git diff-tree` ignores the `diff.algorithm` config (always uses Myers),
-/// while `git log -p` respects it. When the repo is configured with a
-/// non-default algorithm (e.g. `histogram`), the two commands produce
-/// different hunks for the same commit, leading to different patch-IDs.
-fn collect_patch_ids(workdir: &Path, base: &Oid, head: &Oid) -> Option<HashSet<String>> {
+/// Runs `git cherry <upstream> HEAD <base>`, which outputs one line per commit:
+///   `- <sha>` — equivalent already in upstream (cherry-picked)
+///   `+ <sha>` — not yet in upstream
+///
+/// This is O(feature commits), unlike the old patch-ID pipeline which was
+/// O(upstream commits). `git cherry` uses the same patch-ID logic internally
+/// and respects diff.algorithm consistently.
+fn cherry_pick_equivalents(workdir: &Path, upstream: &Oid, base: &Oid) -> Option<HashSet<Oid>> {
     use std::process::Command;
 
     let output = Command::new("git")
         .current_dir(workdir)
-        .args(["rev-list", &format!("{}..{}", base, head)])
+        .args(["cherry", &upstream.to_string(), "HEAD", &base.to_string()])
         .output()
         .ok()?;
 
-    if !output.status.success() || output.stdout.is_empty() {
-        return Some(HashSet::new());
-    }
-
-    let oids: Vec<Oid> = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| Oid::from_str(line.trim()).ok())
-        .collect();
-
-    if oids.is_empty() {
-        return Some(HashSet::new());
-    }
-
-    let pairs = batch_patch_ids(workdir, &oids)?;
-    Some(pairs.into_iter().map(|(_, pid)| pid).collect())
-}
-
-/// Compute patch-IDs for a list of specific commits in a single pipeline.
-/// Runs `git diff-tree -p --stdin | git patch-id --stable` (2 processes total).
-/// Returns `(oid, patch_id)` pairs, or `None` on failure.
-fn batch_patch_ids(workdir: &Path, oids: &[Oid]) -> Option<Vec<(Oid, String)>> {
-    use std::io::Write;
-    use std::process::{Command, Stdio};
-
-    // diff-tree --stdin reads commit OIDs from stdin (one per line) and
-    // outputs the diff for each.
-    let mut diff_tree = Command::new("git")
-        .current_dir(workdir)
-        .args(["diff-tree", "-p", "--stdin"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-
-    {
-        let stdin = diff_tree.stdin.as_mut()?;
-        for oid in oids {
-            writeln!(stdin, "{}", oid).ok()?;
-        }
-    }
-    diff_tree.stdin = None;
-
-    let diff_output = diff_tree.wait_with_output().ok()?;
-    if !diff_output.status.success() || diff_output.stdout.is_empty() {
-        return None;
-    }
-
-    let pairs = pipe_to_patch_id(workdir, &diff_output.stdout)?;
-    Some(
-        pairs
-            .into_iter()
-            .filter_map(|(oid_str, pid)| Oid::from_str(&oid_str).ok().map(|oid| (oid, pid)))
-            .collect(),
-    )
-}
-
-/// Pipe raw diff bytes into `git patch-id --stable` and parse the output.
-/// Each output line is `<patch-id> <commit-id>`.
-/// Returns `(commit_hex, patch_id)` pairs.
-fn pipe_to_patch_id(workdir: &Path, diff: &[u8]) -> Option<Vec<(String, String)>> {
-    use std::io::Write;
-    use std::process::{Command, Stdio};
-
-    let mut child = Command::new("git")
-        .current_dir(workdir)
-        .args(["patch-id", "--stable"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-
-    {
-        let stdin = child.stdin.as_mut()?;
-        stdin.write_all(diff).ok()?;
-    }
-    child.stdin = None;
-
-    let output = child.wait_with_output().ok()?;
     if !output.status.success() {
         return None;
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
     Some(
-        stdout
+        String::from_utf8_lossy(&output.stdout)
             .lines()
             .filter_map(|line| {
-                let mut parts = line.split_whitespace();
-                let pid = parts.next()?.to_string();
-                let oid = parts.next()?.to_string();
-                Some((oid, pid))
+                line.strip_prefix("- ")
+                    .and_then(|sha| Oid::from_str(sha.trim()).ok())
             })
             .collect(),
     )
