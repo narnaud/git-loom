@@ -35,8 +35,12 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
     // the target list so they don't accidentally end up in this commit).
     let saved_staged = resolve_staging(&repo, &workdir, &files)?;
 
-    // Step 2: Verify index has changes
-    verify_has_staged_changes(&repo)?;
+    // Step 2: Verify index has changes — restore saved staged on failure so
+    // pre-existing staged work is not lost.
+    if let Err(e) = verify_has_staged_changes(&repo) {
+        git_commands::restore_staged_patch(&workdir, &saved_staged)?;
+        return Err(e);
+    }
 
     // Loose commit: when no -b flag and local branch name matches the
     // upstream's local counterpart (e.g. "main" tracking "origin/main"),
@@ -49,11 +53,8 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
         } else {
             git_commit::commit_with_editor(&workdir)
         };
-        if let Err(e) = result {
-            let _ = git_commands::restore_staged_patch(&workdir, &saved_staged);
-            return Err(e);
-        }
         git_commands::restore_staged_patch(&workdir, &saved_staged)?;
+        result?;
         let new_head = git::head_oid(&repo)?;
         msg::success(&format!(
             "Created commit `{}`",
@@ -89,7 +90,7 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
         git_commit::commit_with_editor(&workdir)
     };
     if let Err(e) = commit_result {
-        let _ = git_commands::restore_staged_patch(&workdir, &saved_staged);
+        git_commands::restore_staged_patch(&workdir, &saved_staged)?;
         return Err(e);
     }
 

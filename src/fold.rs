@@ -1049,10 +1049,21 @@ pub fn after_continue(workdir: &Path, context: &serde_json::Value) -> Result<()>
             if !diff.is_empty()
                 && let Err(e) = git_commands::apply_patch(workdir, &diff)
             {
-                eprintln!(
-                    "Warning: could not re-apply changes to working directory: {}",
-                    e
-                );
+                // The rebase succeeded (commit is gone) but the diff can't be
+                // re-applied — typically because conflict resolution changed
+                // the surrounding context. Save the diff to a file so the user
+                // can recover it manually.
+                let patch_path = workdir.join(".git/loom/unapplied.patch");
+                if let Some(parent) = patch_path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let _ = std::fs::write(&patch_path, &diff);
+                msg::warn(&format!(
+                    "Could not re-apply changes to working directory: {}\n\
+                     The diff has been saved to {}",
+                    e,
+                    patch_path.display()
+                ));
             }
             msg::success(&format!(
                 "Uncommitted `{}` to working directory",
