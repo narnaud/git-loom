@@ -1049,8 +1049,12 @@ pub fn after_continue(workdir: &Path, context: &serde_json::Value) -> Result<()>
             if !diff.is_empty()
                 && let Err(e) = git_commands::apply_patch(workdir, &diff)
             {
-                eprintln!(
-                    "Warning: could not re-apply changes to working directory: {}",
+                bail!(
+                    "Commit `{}` was dropped but the changes could not be re-applied \
+                     to the working directory: {}\n\
+                     Run `loom continue` to retry, or `loom abort` to discard.\n\
+                     The diff is preserved in .git/loom/state.json.",
+                    git_commands::short_hash(&commit_hash),
                     e
                 );
             }
