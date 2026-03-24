@@ -316,11 +316,7 @@ impl Weave {
             let candidate_set: HashSet<Oid> = candidates.into_iter().collect();
             match cherry_pick_equivalents(workdir, &new_upstream_oid, &self.base_oid) {
                 Some(equivalent) => {
-                    for oid in equivalent {
-                        if candidate_set.contains(&oid) {
-                            to_drop.push(oid);
-                        }
-                    }
+                    to_drop.extend(equivalent.intersection(&candidate_set).copied());
                 }
                 None => {
                     msg::warn(
@@ -1269,20 +1265,14 @@ pub fn run_rebase(
 /// O(upstream commits). `git cherry` uses the same patch-ID logic internally
 /// and respects diff.algorithm consistently.
 fn cherry_pick_equivalents(workdir: &Path, upstream: &Oid, base: &Oid) -> Option<HashSet<Oid>> {
-    use std::process::Command;
-
-    let output = Command::new("git")
-        .current_dir(workdir)
-        .args(["cherry", &upstream.to_string(), "HEAD", &base.to_string()])
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
+    let stdout = git_commands::run_git_stdout(
+        workdir,
+        &["cherry", &upstream.to_string(), "HEAD", &base.to_string()],
+    )
+    .ok()?;
 
     Some(
-        String::from_utf8_lossy(&output.stdout)
+        stdout
             .lines()
             .filter_map(|line| {
                 line.strip_prefix("- ")
