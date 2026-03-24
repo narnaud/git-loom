@@ -1,3 +1,4 @@
+use std::io::Write as _;
 use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
@@ -496,6 +497,38 @@ fn find_existing_github_pr(workdir: &Path, gh_repo: &str, head_arg: &str) -> Opt
     prs.get(0)?.get("url")?.as_str().map(str::to_string)
 }
 
+/// Extract the Azure DevOps organization URL from a remote URL.
+///
+/// Supports:
+/// - HTTPS:  `https://dev.azure.com/<org>/...`       → `https://dev.azure.com/<org>`
+/// - SSH:    `git@ssh.dev.azure.com:v3/<org>/...`    → `https://dev.azure.com/<org>`
+/// - Legacy: `https://<org>.visualstudio.com/...`    → `https://<org>.visualstudio.com`
+///
+/// Returns `None` if the URL is unrecognised.
+fn extract_azure_org_url(repo: &Repository, remote: &str) -> Option<String> {
+    let remote = repo.find_remote(remote).ok()?;
+    let url = remote.url()?;
+
+    if let Some(rest) = url.strip_prefix("https://dev.azure.com/") {
+        let org = rest.split('/').next()?;
+        return Some(format!("https://dev.azure.com/{}", org));
+    }
+
+    if let Some(rest) = url.strip_prefix("git@ssh.dev.azure.com:v3/") {
+        let org = rest.split('/').next()?;
+        return Some(format!("https://dev.azure.com/{}", org));
+    }
+
+    if let Some(rest) = url.strip_prefix("https://")
+        && let Some(host) = rest.split('/').next()
+        && host.ends_with(".visualstudio.com")
+    {
+        return Some(format!("https://{}", host));
+    }
+
+    None
+}
+
 /// Build a `Command` for the Azure CLI.
 ///
 /// On Windows `az` is a `.cmd` batch script which `CreateProcess` cannot
@@ -539,13 +572,30 @@ fn push_azure(
         return Ok(());
     }
 
+    // Extract the org URL so we can pass --org explicitly rather than relying
+    // on --detect, which produces a misleading "need to login" error when it
+    // fails to infer the organisation from the remote URL.
+    let org_url = extract_azure_org_url(repo, remote);
+
     // If a PR already exists, show its URL instead of opening the browser
-    if let Some(pr_url) = find_existing_azure_pr(workdir, branch) {
+    if let Some(pr_url) = find_existing_azure_pr(workdir, branch, org_url.as_deref()) {
         msg::success(&format!("PR updated: {}", pr_url));
         return Ok(());
     }
 
     let (title, description) = pr_title_and_description(repo, branch, base_oid)?;
+
+    // Write description to a temp file and pass `--description @<path>` to az.
+    // This avoids any argument-parsing issues with lines that start with `-`
+    // (e.g., `---` separators) when the command is invoked through `cmd /C az`
+    // on Windows.
+    let mut desc_file = tempfile::Builder::new()
+        .suffix(".txt")
+        .tempfile()
+        .context("Failed to create temp file for PR description")?;
+    write!(desc_file, "{}", description).context("Failed to write PR description")?;
+    let desc_path = desc_file.path().to_string_lossy().into_owned();
+    let desc_arg = format!("@{}", desc_path);
 
     let mut args: Vec<&str> = vec![
         "repos",
@@ -556,20 +606,20 @@ fn push_azure(
         branch,
         "--target-branch",
         target_branch,
-        "--detect",
         "--title",
         &title,
     ];
 
-    // az CLI accepts multiple values after --description, one per line.
-    // This avoids passing a single multiline argument which breaks
-    // through cmd /C on Windows.
-    let desc_lines: Vec<&str> = description.lines().collect();
-    if !desc_lines.is_empty() {
+    if let Some(ref org) = org_url {
+        args.push("--org");
+        args.push(org);
+    } else {
+        args.push("--detect");
+    }
+
+    if !description.is_empty() {
         args.push("--description");
-        for line in &desc_lines {
-            args.push(line);
-        }
+        args.push(&desc_arg);
     }
 
     let start = Instant::now();
@@ -594,21 +644,24 @@ fn push_azure(
 /// Check if an Azure DevOps PR already exists for the given source branch.
 ///
 /// Returns the PR web URL if found, or `None` if no PR exists or the check fails.
-fn find_existing_azure_pr(workdir: &Path, branch: &str) -> Option<String> {
-    let output = az_command()
-        .current_dir(workdir)
-        .args([
-            "repos",
-            "pr",
-            "list",
-            "--detect",
-            "--source-branch",
-            branch,
-            "--output",
-            "json",
-        ])
-        .output()
-        .ok()?;
+fn find_existing_azure_pr(workdir: &Path, branch: &str, org_url: Option<&str>) -> Option<String> {
+    let mut cmd = az_command();
+    cmd.current_dir(workdir);
+    cmd.args([
+        "repos",
+        "pr",
+        "list",
+        "--source-branch",
+        branch,
+        "--output",
+        "json",
+    ]);
+    if let Some(org) = org_url {
+        cmd.args(["--org", org]);
+    } else {
+        cmd.arg("--detect");
+    }
+    let output = cmd.output().ok()?;
 
     if !output.status.success() {
         return None;
