@@ -777,3 +777,176 @@ fn update_handles_fully_cherry_picked_branch() {
         );
     }
 }
+
+/// When the integration branch has a merge with inverted parent ordering
+/// (feature as 1st parent, main as 2nd parent) and the feature branch was
+/// already merged upstream, the update should drop the redundant merge and
+/// produce linear history — not replay all feature commits and conflict.
+///
+/// Remote topology:
+///   R ── C1 ────────────── merge_up(C1,F1) ── C2(feature.txt="feat v2") ── C3
+///   └── F1(feature.txt="feat") ──┘
+///
+/// Integration topology (before update):
+///   merge_local(F1, C1) ← HEAD  [inverted: 1st=F1, 2nd=C1]
+///
+/// Without the fix, walk_first_parent_line follows F1 → R → root (never
+/// reaching the merge base). The fallback rebase replays F1 on top of C3,
+/// which CONFLICTS because F1 writes feature.txt="feat" while C3 already
+/// has feature.txt="feat v2" (modified in C2 after the upstream merge).
+///
+/// With the fix, inverted parents are detected and swapped. F1 goes to a
+/// branch section. filter_upstream_commits sees F1 is already in upstream
+/// (via merge_up) and drops it. Empty section → merge removed → linear.
+#[test]
+fn update_handles_inverted_parent_merge_on_integration() {
+    let test_repo = TestRepo::new_with_remote();
+    let remote_path = test_repo.remote_path().unwrap();
+    let sig = Signature::now("Test", "test@test.com").unwrap();
+
+    // Build remote: R ── C1 ── merge_up(C1,F1) ── C2
+    //               └── F1 ──┘
+    let (c1_oid, f1_oid) = {
+        let rr = Repository::open_bare(&remote_path).unwrap();
+        let root_oid = rr
+            .find_branch("main", BranchType::Local)
+            .unwrap()
+            .get()
+            .target()
+            .unwrap();
+        let root = rr.find_commit(root_oid).unwrap();
+
+        // C1: adds main.txt
+        let mut b = rr.treebuilder(Some(&root.tree().unwrap())).unwrap();
+        b.insert("main.txt", rr.blob(b"main").unwrap(), 0o100644)
+            .unwrap();
+        let c1_tree = rr.find_tree(b.write().unwrap()).unwrap();
+        let c1_oid = rr
+            .commit(
+                Some("refs/heads/main"),
+                &sig,
+                &sig,
+                "C1",
+                &c1_tree,
+                &[&root],
+            )
+            .unwrap();
+        let c1 = rr.find_commit(c1_oid).unwrap();
+
+        // F1: adds feature.txt (forked from root, before C1)
+        let mut b = rr.treebuilder(Some(&root.tree().unwrap())).unwrap();
+        b.insert("feature.txt", rr.blob(b"feat").unwrap(), 0o100644)
+            .unwrap();
+        let f1_tree = rr.find_tree(b.write().unwrap()).unwrap();
+        let f1_oid = rr
+            .commit(None, &sig, &sig, "F1", &f1_tree, &[&root])
+            .unwrap();
+        let f1 = rr.find_commit(f1_oid).unwrap();
+
+        // merge_up: normal merge of F1 into C1
+        let mut b = rr.treebuilder(Some(&c1_tree)).unwrap();
+        b.insert("feature.txt", rr.blob(b"feat").unwrap(), 0o100644)
+            .unwrap();
+        let mt = rr.find_tree(b.write().unwrap()).unwrap();
+        let mu_oid = rr
+            .commit(None, &sig, &sig, "Merge F1", &mt, &[&c1, &f1])
+            .unwrap();
+        rr.reference("refs/heads/main", mu_oid, true, "merge")
+            .unwrap();
+
+        // C2: post-merge work — modifies feature.txt so that replaying
+        // F1 (which writes "feat") on top of C2 (which has "feat v2")
+        // would CONFLICT without the fix.
+        let mu = rr.find_commit(mu_oid).unwrap();
+        let mut b = rr.treebuilder(Some(&mu.tree().unwrap())).unwrap();
+        b.insert("feature.txt", rr.blob(b"feat v2").unwrap(), 0o100644)
+            .unwrap();
+        let c2_tree = rr.find_tree(b.write().unwrap()).unwrap();
+        rr.commit(Some("refs/heads/main"), &sig, &sig, "C2", &c2_tree, &[&mu])
+            .unwrap();
+
+        (c1_oid, f1_oid)
+    };
+
+    // Fetch remote state
+    test_repo
+        .repo
+        .find_remote("origin")
+        .unwrap()
+        .fetch(&["main"], None, None)
+        .unwrap();
+
+    let c1 = test_repo.repo.find_commit(c1_oid).unwrap();
+    let f1 = test_repo.repo.find_commit(f1_oid).unwrap();
+
+    // Set integration to C1 (merge base)
+    test_repo
+        .repo
+        .reference("refs/heads/integration", c1_oid, true, "to C1")
+        .unwrap();
+
+    // Create INVERTED merge on integration: F1 (1st) + C1 (2nd)
+    let mut b = test_repo
+        .repo
+        .treebuilder(Some(&c1.tree().unwrap()))
+        .unwrap();
+    b.insert(
+        "feature.txt",
+        test_repo.repo.blob(b"feat").unwrap(),
+        0o100644,
+    )
+    .unwrap();
+    let mt = test_repo.repo.find_tree(b.write().unwrap()).unwrap();
+    let merge_oid = test_repo
+        .repo
+        .commit(
+            None,
+            &sig,
+            &sig,
+            "Merge main into feature",
+            &mt,
+            &[&f1, &c1],
+        )
+        .unwrap();
+
+    test_repo
+        .repo
+        .reference("refs/heads/integration", merge_oid, true, "merge")
+        .unwrap();
+    test_repo.repo.set_head("refs/heads/integration").unwrap();
+    test_repo
+        .repo
+        .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+
+    // Verify inverted parents
+    let head = test_repo.repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(head.parent_count(), 2);
+    assert_eq!(head.parent_id(0).unwrap(), f1_oid);
+
+    // Add one more remote commit
+    test_repo.add_remote_commits(&["C3"]);
+
+    // Run update — should succeed and flatten (no conflicts)
+    let result = test_repo.in_dir(|| super::run(false));
+    assert!(
+        result.is_ok(),
+        "update should handle inverted-parent merges: {:?}",
+        result.err()
+    );
+
+    // Verify the rebase fully completed (not paused on conflicts)
+    let git_dir = test_repo.repo.path().to_path_buf();
+    assert!(
+        !crate::git_commands::git_rebase::is_in_progress(&git_dir),
+        "rebase should not be in progress — expected clean completion, not conflict pause"
+    );
+
+    // HEAD should be linear (redundant merge dropped)
+    let new_head = test_repo.repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(
+        new_head.parent_count(),
+        1,
+        "HEAD should be linear after update (redundant merge dropped)"
+    );
+}
