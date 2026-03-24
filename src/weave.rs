@@ -905,6 +905,11 @@ struct FirstParentEntry {
 ///
 /// Returns entries in oldest-first order (reversed from the walk direction).
 /// Includes both regular and merge commits.
+///
+/// For merge commits with inverted parent ordering (feature branch as first
+/// parent instead of the integration line), the parents are swapped so that
+/// `merge_parent` always points to the branch side and the walk continues
+/// along the line that leads back to `stop`.
 fn walk_first_parent_line(
     repo: &Repository,
     head: Oid,
@@ -925,25 +930,60 @@ fn walk_first_parent_line(
         let message = commit.summary().unwrap_or("").to_string();
 
         let is_merge = commit.parent_count() > 1;
-        let merge_parent = if is_merge {
-            Some(commit.parent_id(1)?)
+
+        if is_merge {
+            let p0 = commit.parent_id(0)?;
+            let p1 = commit.parent_id(1)?;
+
+            // Determine which parent leads back to `stop` (the integration
+            // line) and which is the branch side. Loom merges always have
+            // p0 = integration, p1 = branch, but upstream merges may have
+            // inverted parent ordering.
+            let (continue_parent, branch_parent) =
+                if p0 == stop || repo.graph_descendant_of(p0, stop).unwrap_or(false) {
+                    // Normal: first parent leads to stop
+                    (p0, p1)
+                } else if p1 == stop || repo.graph_descendant_of(p1, stop).unwrap_or(false) {
+                    // Inverted: second parent leads to stop, swap
+                    (p1, p0)
+                } else {
+                    bail!(
+                        "Neither parent of merge {} leads to merge-base {}",
+                        current,
+                        stop
+                    );
+                };
+
+            entries.push(FirstParentEntry {
+                oid: current,
+                short_hash,
+                message,
+                is_merge,
+                merge_parent: Some(branch_parent),
+            });
+
+            current = continue_parent;
         } else {
-            None
-        };
+            entries.push(FirstParentEntry {
+                oid: current,
+                short_hash,
+                message,
+                is_merge,
+                merge_parent: None,
+            });
 
-        entries.push(FirstParentEntry {
-            oid: current,
-            short_hash,
-            message,
-            is_merge,
-            merge_parent,
-        });
-
-        // Follow first parent
-        current = match commit.parent_id(0) {
-            Ok(oid) => oid,
-            Err(_) => break, // reached root
-        };
+            // Follow first parent
+            current = match commit.parent_id(0) {
+                Ok(oid) => oid,
+                Err(_) => {
+                    bail!(
+                        "First-parent walk from {} did not reach merge-base {}",
+                        head,
+                        stop
+                    );
+                }
+            };
+        }
     }
 
     // Reverse to oldest-first
@@ -954,11 +994,24 @@ fn walk_first_parent_line(
 /// Walk branch commits from `tip` back to `stop` (exclusive), skipping merges.
 ///
 /// Returns entries in newest-first order (like a revwalk).
+///
+/// When the branch was forked from before `stop` (e.g. an upstream merge with
+/// inverted parent ordering), the actual fork point is computed via
+/// `merge_base(tip, stop)` and used as the stop instead.
 fn walk_branch_commits(repo: &Repository, tip: Oid, stop: Oid) -> Result<Vec<BranchCommitEntry>> {
+    // For loom-woven branches, tip descends from stop (the branch was forked
+    // from the merge base). For branches forked earlier, compute the actual
+    // fork point so we don't walk past it into shared history.
+    let actual_stop = if tip == stop {
+        stop
+    } else {
+        repo.merge_base(tip, stop).unwrap_or(stop)
+    };
+
     let mut entries = Vec::new();
     let mut current = tip;
 
-    while current != stop {
+    while current != actual_stop {
         let commit = repo.find_commit(current)?;
 
         // Skip merge commits
