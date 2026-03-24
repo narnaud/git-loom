@@ -35,6 +35,10 @@ fn split_commit(repo: &Repository, commit_hash: &str, message: Option<String>) -
     let commit_oid = repo.revparse_single(commit_hash)?.peel_to_commit()?.id();
     let commit = repo.find_commit(commit_oid)?;
 
+    if commit.parent_count() > 1 {
+        bail!("Cannot split a merge commit");
+    }
+
     // Get files changed in the commit
     let files = git::commit_file_paths(repo, commit_oid)?;
     if files.len() < 2 {
@@ -148,11 +152,21 @@ fn perform_split(
     let oid_str = commit_oid.to_string();
     let short_hash = git_commands::short_hash(&oid_str);
 
-    let (new_hash1, new_hash2) = if is_head {
-        perform_head_split(workdir, selected, remaining, msg1, msg2)?
+    // Save pre-existing staged changes so reset --mixed doesn't discard them.
+    // (For non-HEAD splits, the rebase autostash handles this, but saving
+    // here is harmless — it will be empty.)
+    let saved_staged = save_staged(repo, workdir)?;
+
+    let split_result = if is_head {
+        perform_head_split(workdir, selected, remaining, msg1, msg2)
     } else {
-        perform_non_head_split(repo, workdir, commit_oid, selected, remaining, msg1, msg2)?
+        perform_non_head_split(repo, workdir, commit_oid, selected, remaining, msg1, msg2)
     };
+
+    // Restore pre-existing staged changes regardless of outcome.
+    git_commands::restore_staged_patch(workdir, &saved_staged)?;
+
+    let (new_hash1, new_hash2) = split_result?;
 
     msg::success(&format!(
         "Split `{}` into `{}` and `{}`",
@@ -228,9 +242,22 @@ fn perform_non_head_split(
 
     // Continue the rebase — later commits are replayed on top of the split
     // commits, so hash1 and hash2 remain valid (they are ancestors).
-    git_rebase::continue_rebase(workdir)?;
+    // Abort automatically on conflict — split does not save LoomState.
+    git_rebase::continue_rebase_or_abort(workdir)?;
 
     Ok((hash1, hash2))
+}
+
+/// Save all staged changes aside so they can be restored after the split.
+fn save_staged(repo: &Repository, workdir: &std::path::Path) -> Result<String> {
+    let staged = git::get_staged_files(repo)?;
+    if staged.is_empty() {
+        return Ok(String::new());
+    }
+    let refs: Vec<&str> = staged.iter().map(|s| s.as_str()).collect();
+    let patch = git_commands::diff_cached_files(workdir, &refs)?;
+    git_commands::unstage_files(workdir, &refs)?;
+    Ok(patch)
 }
 
 #[cfg(test)]
