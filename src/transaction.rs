@@ -160,6 +160,8 @@ pub fn continue_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
             git_merge::MergeOutcome::Completed => {}
         }
     }
+    // else: no rebase or merge is in progress — the user already ran
+    // `git rebase --continue` manually, so move straight to dispatch.
 
     dispatch_after_continue(workdir, &state)?;
     delete(git_dir)?;
