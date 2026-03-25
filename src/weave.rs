@@ -294,19 +294,18 @@ impl Weave {
         repo: &Repository,
         workdir: &Path,
         new_upstream_oid: Oid,
-    ) {
+    ) -> Result<()> {
         // Strategy 1: exact ancestor check (fast, no processes)
         let mut candidates: Vec<Oid> = Vec::new();
         let mut to_drop = Vec::new();
         for section in &self.branch_sections {
             for commit in &section.commits {
-                if repo
-                    .graph_descendant_of(new_upstream_oid, commit.oid)
-                    .unwrap_or(false)
-                {
-                    to_drop.push(commit.oid);
-                } else {
-                    candidates.push(commit.oid);
+                match repo.graph_descendant_of(new_upstream_oid, commit.oid) {
+                    Ok(true) => to_drop.push(commit.oid),
+                    Ok(false) => candidates.push(commit.oid),
+                    Err(e) => {
+                        return Err(e.into());
+                    }
                 }
             }
         }
@@ -330,6 +329,7 @@ impl Weave {
         for oid in to_drop {
             self.drop_commit(oid);
         }
+        Ok(())
     }
 
     /// Remove a commit from the graph.

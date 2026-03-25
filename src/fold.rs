@@ -732,7 +732,9 @@ fn fold_commit_file_to_unstaged(repo: &Repository, commit_hash: &str, path: &str
         // Re-apply changes to working tree
         if let Err(e) = git_commands::apply_patch(workdir, &file_diff) {
             let _ = git_commit::reset_hard(workdir, &saved_head);
-            let _ = git::restore_branch_refs(workdir, &saved_refs);
+            if let Err(re) = git::restore_branch_refs(workdir, &saved_refs) {
+                msg::warn(&format!("failed to restore branch refs: {re}"));
+            }
             return Err(e).context("Failed to uncommit file, operation rolled back");
         }
     }
@@ -853,7 +855,9 @@ fn fold_commit_file_to_commit(
         {
             let _ = git_branch::delete(workdir, TRACK_BRANCH);
             let _ = git_commit::reset_hard(workdir, &saved_head);
-            let _ = git::restore_branch_refs(workdir, &saved_refs);
+            if let Err(re) = git::restore_branch_refs(workdir, &saved_refs) {
+                msg::warn(&format!("failed to restore branch refs: {re}"));
+            }
             return Err(e);
         }
 
@@ -864,7 +868,9 @@ fn fold_commit_file_to_commit(
             let _ = git_rebase::abort(workdir);
             let _ = git_branch::delete(workdir, TRACK_BRANCH);
             let _ = git_commit::reset_hard(workdir, &saved_head);
-            let _ = git::restore_branch_refs(workdir, &saved_refs);
+            if let Err(re) = git::restore_branch_refs(workdir, &saved_refs) {
+                msg::warn(&format!("failed to restore branch refs: {re}"));
+            }
             return Err(e);
         }
 
@@ -874,7 +880,9 @@ fn fold_commit_file_to_commit(
         if let Err(e) = git_rebase::continue_rebase_or_abort(workdir) {
             let _ = git_branch::delete(workdir, TRACK_BRANCH);
             let _ = git_commit::reset_hard(workdir, &saved_head);
-            let _ = git::restore_branch_refs(workdir, &saved_refs);
+            if let Err(re) = git::restore_branch_refs(workdir, &saved_refs) {
+                msg::warn(&format!("failed to restore branch refs: {re}"));
+            }
             return Err(e);
         }
 
@@ -978,7 +986,9 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
                     && let Err(e) = git_commands::apply_patch(workdir, &diff)
                 {
                     let _ = git_commit::reset_hard(workdir, &saved_head);
-                    let _ = git::restore_branch_refs(workdir, &saved_refs);
+                    if let Err(re) = git::restore_branch_refs(workdir, &saved_refs) {
+                        msg::warn(&format!("failed to restore branch refs: {re}"));
+                    }
                     return Err(e).context(
                         "Failed to apply changes to working directory, operation rolled back",
                     );

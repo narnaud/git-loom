@@ -101,7 +101,7 @@ pub fn run(skip_confirm: bool) -> Result<()> {
                 .revparse_single(&upstream_name)
                 .context("Failed to resolve upstream ref")?
                 .id();
-            graph.filter_upstream_commits(&repo, &workdir, new_upstream_oid);
+            graph.filter_upstream_commits(&repo, &workdir, new_upstream_oid)?;
             let todo = graph.to_todo();
             crate::weave::run_rebase(&workdir, Some(&upstream_name), &todo)
         }
