@@ -26,6 +26,8 @@ Managing feature branches in a stacked/integration branch workflow has friction:
 
 ## CLI
 
+**Alias:** `br`
+
 ### `branch new` (alias: `create`)
 
 ```bash
@@ -301,6 +303,22 @@ git-loom branch unmerge feature-auth
 # ✔ Unwoven 'feature-auth' from integration branch
 # Branch ref 'feature-auth' is preserved
 ```
+
+## Hidden Branch Warning
+
+When a branch is created with `branch new` and its name starts with the configured hidden
+prefix, loom emits a warning immediately after the creation success message:
+
+```
+⚠ Branch `local-secrets` is hidden from status by default. Use `--all` to show it.
+```
+
+The prefix is controlled by the `loom.hideBranchPattern` git config key (default: `local-`).
+Despite the config key name, this is a **prefix match**, not a glob or regex. Any branch whose
+name starts with the prefix is hidden from `git-loom status` unless `--all` is passed.
+
+Only `branch new` emits this warning — `branch merge` and `branch unmerge` do not, because
+an already-existing branch name was supplied by the user.
 
 ## Design Decisions
 

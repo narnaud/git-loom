@@ -12,7 +12,7 @@ Manage feature branches: create new branches, weave existing branches into the i
 | `merge` | Weave an existing branch into the integration branch |
 | `unmerge` | Remove a branch from integration (keeps the branch ref) |
 
-Running `git loom branch` without a subcommand defaults to `new`.
+Running `git-loom branch` without a subcommand defaults to `new`.
 
 ---
 
@@ -49,7 +49,7 @@ git-loom branch create [name] [-t <target>]
 
 #### Automatic Weaving
 
-When a branch is created at a commit between the merge-base and HEAD, git-loom automatically **weaves** it into the integration branch — restructuring the linear history into a merge-based topology.
+When a branch is created at a commit on the **first-parent line** from HEAD to the merge-base, git-loom automatically **weaves** it into the integration branch — restructuring the linear history into a merge-based topology.
 
 **Before** (linear):
 ```
@@ -58,23 +58,36 @@ origin/main → A1 → A2 → A3 → HEAD
 
 **After** `git-loom branch feature-a -t A2`:
 ```
-origin/main → A1 → A2 (feature-a)
-                         ↘
-              A3' -----→ merge (HEAD)
+              A1 → A2 (feature-a)
+             /          \
+origin/main               merge → A3' (HEAD)
 ```
 
-Weaving does **not** trigger when branching at HEAD or at the merge-base.
+All first-parent commits from the start up to (and including) the target move into the new branch section. Commits after the target are replayed on top of the resulting merge commit.
+
+**No-op cases** — weaving does not trigger and only the branch ref is created:
+
+- **Branch at merge-base** — no commits to move into the branch.
+- **Branch inside an existing side branch** — the target commit is already part of a merge topology (reachable through a merge second-parent), so no restructuring is needed.
+
+**Branching at HEAD** weaves all current first-parent commits into the new branch:
+
+```
+git-loom branch feature-a    # target = HEAD (all commits go into feature-a)
+```
 
 If the working tree has uncommitted changes, they are automatically stashed and restored after the operation.
+
+If a weave rebase encounters conflicts, it aborts automatically and reports an error — no state is saved and no `loom continue` is available. Resolve the situation and retry.
 
 ### Target Resolution
 
 The `-t` flag accepts:
 
-- **Branch names** — resolves to the branch's tip commit
-- **Git hashes** — full or partial commit hashes
-- **Short IDs** — the compact IDs shown in `git loom status`
-- **Default** — the merge-base between HEAD and upstream
+1. **Branch names** — resolves to the branch's tip commit
+2. **Git hashes** — full or partial commit hashes
+3. **Short IDs** — the compact IDs shown in `git-loom status`
+4. **Default** — the merge-base between HEAD and upstream
 
 ### Examples
 
@@ -84,28 +97,37 @@ The `-t` flag accepts:
 git-loom branch
 # ? Branch name ›
 # User types: feature-authentication
-# Created branch 'feature-authentication' at abc1234
+# ✓ Created branch `feature-authentication` at abc1234
 ```
 
 #### At merge-base (default)
 
 ```bash
 git-loom branch feature-auth
-# Created branch 'feature-auth' at abc1234 (merge-base)
+# ✓ Created branch `feature-auth` at abc1234
 ```
 
 #### At a specific commit by short ID
 
 ```bash
 git-loom branch feature-auth -t ab
-# Created branch 'feature-auth' at 72f9d3a
+# ✓ Created branch `feature-auth` at 72f9d3a
+# ✓ Woven `feature-auth` into integration branch
 ```
 
 #### At another branch's tip
 
 ```bash
 git-loom branch feature-b -t feature-a
-# Created branch 'feature-b' at feature-a's tip commit
+# ✓ Created branch `feature-b` at feature-a's tip commit
+```
+
+#### Branching at HEAD (weaves all commits)
+
+```bash
+git-loom branch feature-a
+# ✓ Created branch `feature-a` at HEAD
+# ✓ Woven `feature-a` into integration branch
 ```
 
 ---
@@ -145,7 +167,7 @@ git-loom branch merge [branch] [--all]
 
 ```bash
 git-loom branch merge feature-auth
-# ✔ Woven 'feature-auth' into integration branch
+# ✓ Woven `feature-auth` into integration branch
 ```
 
 #### Interactive picker
@@ -155,7 +177,7 @@ git-loom branch merge
 # ? Select branch to weave ›
 #   feature-auth
 #   feature-logging
-# ✔ Woven 'feature-auth' into integration branch
+# ✓ Woven `feature-auth` into integration branch
 ```
 
 #### Include remote branches
@@ -194,13 +216,15 @@ git-loom branch unmerge [branch]
 
 This is different from `drop`, which deletes the branch entirely.
 
+If the unweave rebase encounters conflicts, it aborts automatically and reports an error — no state is saved and no `loom continue` is available.
+
 ### Examples
 
 #### Unmerge a specific branch
 
 ```bash
 git-loom branch unmerge feature-auth
-# ✔ Unwoven 'feature-auth' from integration branch
+# ✓ Unwoven `feature-auth` from integration branch
 ```
 
 #### Interactive picker
@@ -210,8 +234,36 @@ git-loom branch unmerge
 # ? Select branch to unmerge ›
 #   feature-auth
 #   feature-logging
-# ✔ Unwoven 'feature-auth' from integration branch
+# ✓ Unwoven `feature-auth` from integration branch
 ```
+
+---
+
+## Conflicts
+
+### branch merge — supports pause/resume
+
+If the merge encounters a conflict, loom saves state and pauses:
+
+```bash
+git-loom branch merge feature-auth
+# ! Conflicts detected — resolve them with git, then run:
+#   loom continue   to complete the merge
+#   loom abort      to cancel and restore original state
+```
+
+After resolving:
+
+```bash
+git add <resolved-files> && git-loom continue
+# ✓ Woven `feature-auth` into integration branch
+```
+
+### branch new / branch unmerge — hard fail
+
+Neither subcommand supports pause/resume. If a rebase conflict occurs, the rebase is aborted automatically, the repository is left in its original state, and an error is reported. Retry after resolving the conflicting situation.
+
+See [`continue`](continue.md) and [`abort`](abort.md) for details.
 
 ---
 
@@ -234,3 +286,4 @@ The subcommand names `new`, `create`, `merge`, and `unmerge` are reserved and ca
 
 - Must be in a git repository with a working tree
 - For the default target: must have upstream tracking configured
+- For short ID targets: must have upstream tracking configured
