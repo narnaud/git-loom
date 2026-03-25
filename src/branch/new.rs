@@ -67,7 +67,9 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
         graph.weave_branch(&name);
 
         let todo = graph.to_todo();
-        if let Err(e) = weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo) {
+        if let Err(e) =
+            weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo)
+        {
             let _ = git_branch::delete(workdir, &name);
             return Err(e);
         }

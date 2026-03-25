@@ -35,6 +35,53 @@ fn unmerge_removes_branch_from_integration() {
     );
 }
 
+/// When replaying integration commits on top of the merge-base after removing a
+/// woven branch, a conflict can occur if those commits depended on the branch's
+/// content.  The rebase must be aborted automatically and the error propagated.
+///
+/// Conflict setup: feature-a creates `shared.txt`; integration commit B modifies
+/// it.  Unmerging feature-a requires replaying B on the merge-base (which has no
+/// `shared.txt`) → delete/modify conflict.
+#[test]
+fn unmerge_conflict_aborts() {
+    let test_repo = TestRepo::new_with_remote();
+
+    // feature-a creates shared.txt
+    let a_oid = test_repo.commit("from-a", "shared.txt");
+    test_repo
+        .in_dir(|| crate::branch::new::run(Some("feature-a".to_string()), Some(a_oid.to_string())))
+        .unwrap();
+
+    // Integration commit B modifies shared.txt — its diff expects "from-a" as
+    // context, which will be absent when replayed on the merge-base.
+    test_repo.write_file("shared.txt", "from-b");
+    test_repo.stage_files(&["shared.txt"]);
+    test_repo.commit_staged("Commit B");
+
+    let result = test_repo.in_dir(|| super::unmerge::run(Some("feature-a".to_string())));
+
+    assert!(
+        result.is_err(),
+        "unmerge should fail when the rebase conflicts"
+    );
+
+    // The rebase must be fully aborted — no stale git rebase state.
+    assert!(
+        !crate::git_commands::git_rebase::is_in_progress(test_repo.repo.path()),
+        "rebase should be aborted, not left paused"
+    );
+    // No loom state file should be left behind.
+    assert!(
+        !test_repo
+            .repo
+            .path()
+            .join("loom")
+            .join("state.json")
+            .exists(),
+        "no loom state should be written for a non-resumable command"
+    );
+}
+
 /// Unmerging a branch that isn't woven should error.
 #[test]
 fn unmerge_non_woven_branch_errors() {
