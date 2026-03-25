@@ -44,7 +44,7 @@ pub fn run(branch: Option<String>) -> Result<()> {
     graph.drop_branch(&branch_name);
 
     let todo = graph.to_todo();
-    weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
+    weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo)?;
 
     // Do NOT delete the branch ref — that's the key difference from `drop`
     msg::success(&format!(
