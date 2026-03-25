@@ -474,7 +474,7 @@ fn resolve_arg_branch_by_shortid() {
         let entities = info.collect_entities();
         let alloc = crate::shortid::IdAllocator::new(entities);
         let sid = alloc.get_branch("feature-a");
-        let result = git::resolve_arg(&test_repo.repo, &sid, &[TargetKind::Branch]).unwrap();
+        let result = git::resolve_arg(&test_repo.repo, sid, &[TargetKind::Branch]).unwrap();
         assert_eq!(result, Target::Branch("feature-a".to_string()));
     });
 }
@@ -488,7 +488,7 @@ fn resolve_arg_commit_by_shortid() {
         let entities = info.collect_entities();
         let alloc = crate::shortid::IdAllocator::new(entities);
         let sid = alloc.get_commit(oid);
-        let result = git::resolve_arg(&test_repo.repo, &sid, &[TargetKind::Commit]).unwrap();
+        let result = git::resolve_arg(&test_repo.repo, sid, &[TargetKind::Commit]).unwrap();
         assert!(matches!(result, Target::Commit(_)));
     });
 }

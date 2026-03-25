@@ -35,13 +35,15 @@ fn run_git_captured(workdir: &Path, args: &[&str]) -> Result<std::process::Outpu
 }
 
 /// Run a git command in the given working directory.
-/// On failure, returns an error containing stderr output.
+/// On failure, returns an error with the command name; stderr is recorded
+/// in the trace log via `loom_trace::log_command`.
 pub fn run_git(workdir: &Path, args: &[&str]) -> Result<()> {
     run_git_captured(workdir, args).map(|_| ())
 }
 
 /// Run a git command and return its stdout as a string.
-/// On failure, returns an error containing stderr output.
+/// On failure, returns an error with the command name; stderr is recorded
+/// in the trace log via `loom_trace::log_command`.
 pub fn run_git_stdout(workdir: &Path, args: &[&str]) -> Result<String> {
     let output = run_git_captured(workdir, args)?;
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
