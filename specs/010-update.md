@@ -29,6 +29,8 @@ todo where every branch section resets to the upstream tip.
 
 ## CLI
 
+**Alias:** `up`
+
 ```bash
 git-loom update [--yes]
 ```
@@ -59,7 +61,11 @@ git-loom update [--yes]
    initialized and updated recursively.
 6. **Gone upstream cleanup**: Any local branches whose configured upstream
    tracking branch no longer exists (pruned in step 2) are listed and the user
-   is prompted once to remove them. Use `--yes` to skip the prompt.
+   is prompted once to remove them. Use `--yes` to skip the prompt. Each branch
+   that is successfully deleted prints a success message. If a branch cannot be
+   deleted because it contains unmerged local commits, a warning is printed
+   instead: `"Skipped branch '<name>' — it has unmerged local commits. Use 'git branch -D <name>' to force-delete."` — the remaining branches are still
+   processed.
 
 **What stays the same:**
 - Feature branch refs are kept in sync via `--update-refs`
@@ -220,6 +226,22 @@ git-loom update
 # `loom continue`   to complete the update
 # `loom abort`      to cancel and restore original state
 ```
+
+### Update with a gone branch that has unmerged commits
+
+```bash
+git-loom update
+# ✓ Fetched latest changes
+# ✓ Rebased onto upstream
+# ✓ Updated branch `integration` with `origin/main` (abc1234 Latest upstream commit)
+# ⚠ 1 local branch with a gone upstream:
+# work-in-progress
+# Remove it? [y/N] y
+# ⚠ Skipped branch `work-in-progress` — it has unmerged local commits.
+#   Use `git branch -D work-in-progress` to force-delete.
+```
+
+The unmerged branch is skipped but the rest of the cleanup proceeds normally.
 
 ### Error: not on an integration branch
 
