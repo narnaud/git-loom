@@ -1246,7 +1246,19 @@ pub fn run_rebase(
         // Clean up the temp file — don't abort the rebase here; callers
         // decide whether to abort (out-of-scope) or pause (resumable).
         let _ = temp_path.close();
-        return Ok(RebaseOutcome::Conflicted);
+        // Distinguish a genuine merge conflict (git left rebase state on disk)
+        // from a generic failure (bad todo, missing ref, sequence-editor error).
+        // The plain `git rebase` wrapper uses the same check.
+        if let Ok(git_dir_str) =
+            git_commands::run_git_stdout(workdir, &["rev-parse", "--absolute-git-dir"])
+        {
+            let git_dir = std::path::Path::new(git_dir_str.trim());
+            if git_commands::git_rebase::is_in_progress(git_dir) {
+                return Ok(RebaseOutcome::Conflicted);
+            }
+        }
+        let stderr_msg = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("git rebase failed: {}", stderr_msg.trim());
     }
 
     // Clean up the temp file
