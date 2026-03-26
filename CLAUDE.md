@@ -94,6 +94,10 @@ git-loom must never discard user data — staged changes, working tree changes, 
 2. Register the command name in `transaction::dispatch_after_continue`
 3. There is no `dispatch_after_abort` — abort is handled automatically by `Rollback::apply_abort()`
 
+## Error Reporting Convention
+
+Git command failures (via `run_git`/`run_git_stdout`) log stderr to the trace only — do **not** include stderr in the `bail!` error message. The top-level error handler in `main.rs` already appends a hint to run `loom trace`. Never add stderr to user-facing error messages from git subprocess wrappers.
+
 ## Non-Negotiable: After Every Code Change
 
 After editing any code, you **must** run the following before considering the task done:
