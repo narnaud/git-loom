@@ -152,6 +152,13 @@ pub fn latest_log_path(git_dir: &Path) -> Option<PathBuf> {
     entries.last().map(|e| e.path())
 }
 
+/// Print the latest log file to stdout with colors (opens repo internally).
+pub fn run() -> anyhow::Result<()> {
+    let repo = crate::git::open_repo()?;
+    let git_dir = repo.path().to_path_buf();
+    print_latest_log(&git_dir)
+}
+
 /// Print the latest log file to stdout with colors.
 pub fn print_latest_log(git_dir: &Path) -> anyhow::Result<()> {
     let path = latest_log_path(git_dir).ok_or_else(|| {

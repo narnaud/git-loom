@@ -413,9 +413,9 @@ fn main() {
         Some(Command::Push { branch, no_pr }) => push::run(branch, no_pr),
         Some(Command::Update { yes }) => update::run(yes),
         Some(Command::Fold { create, args }) => fold::run(create, args),
-        Some(Command::Trace) => handle_trace(),
-        Some(Command::Continue) => handle_continue(),
-        Some(Command::Abort) => handle_abort(),
+        Some(Command::Trace) => trace::run(),
+        Some(Command::Continue) => transaction::continue_run(),
+        Some(Command::Abort) => transaction::abort_run(),
         Some(Command::Completions { .. }) => unreachable!(),
         Some(Command::InternalWriteTodo { source, todo_file }) => {
             handle_write_todo(&source, &todo_file)
@@ -428,26 +428,6 @@ fn main() {
         msg::error(&e.to_string());
         std::process::exit(1);
     }
-}
-
-fn handle_trace() -> anyhow::Result<()> {
-    let repo = git::open_repo()?;
-    let git_dir = repo.path().to_path_buf();
-    trace::print_latest_log(&git_dir)
-}
-
-fn handle_continue() -> anyhow::Result<()> {
-    let repo = git::open_repo()?;
-    let workdir = git::require_workdir(&repo, "continue")?.to_path_buf();
-    let git_dir = repo.path().to_path_buf();
-    transaction::continue_cmd(&workdir, &git_dir)
-}
-
-fn handle_abort() -> anyhow::Result<()> {
-    let repo = git::open_repo()?;
-    let workdir = git::require_workdir(&repo, "abort")?.to_path_buf();
-    let git_dir = repo.path().to_path_buf();
-    transaction::abort_cmd(&workdir, &git_dir)
 }
 
 fn resolve_theme(arg: ThemeArg) -> graph::Theme {
