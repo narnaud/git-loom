@@ -2,9 +2,11 @@ pub mod merge;
 pub mod new;
 pub mod unmerge;
 
+use std::collections::HashSet;
+
 use git2::Repository;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 
 use crate::git;
 use crate::msg;
@@ -70,9 +72,13 @@ pub fn is_on_first_parent_line(
     target: git2::Oid,
 ) -> Result<bool> {
     let mut current = from;
+    let mut visited: HashSet<git2::Oid> = HashSet::new();
     loop {
         if current == stop {
             return Ok(false);
+        }
+        if !visited.insert(current) {
+            bail!("cycle detected in commit graph at {}", current);
         }
         let commit = repo.find_commit(current)?;
         // Follow only the first parent
