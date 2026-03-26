@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.16.1](https://github.com/narnaud/git-loom/compare/v0.16.0...v0.16.1) (2026-03-26)
+
+
+### Bug Fixes 🐞
+
+* Clippy needless borrows and correct run_git comment ([7889dbd](https://github.com/narnaud/git-loom/commit/7889dbdb4d261851e81cc6a82ad5c72b43deb03f))
+* distinguish conflicts from generic failures in run_rebase ([4fb9670](https://github.com/narnaud/git-loom/commit/4fb9670ed4c04c7fd967b702fc98eba4dc5fffea))
+* handle RebaseOutcome::Conflicted in branch new and unmerge ([3a1680f](https://github.com/narnaud/git-loom/commit/3a1680fc36d0c872aa2ac53132abb80f8b994c19))
+* improve robustness in fold, transaction, and weave ([b81f38e](https://github.com/narnaud/git-loom/commit/b81f38e35cddf5bc52f2baf83c056b47198f5461))
+* **merge:** handle conflicts in loom branch merge with continue/abort support ([1cc14b6](https://github.com/narnaud/git-loom/commit/1cc14b6c72317e24f0e6826e9e91bd8787bc7ef3))
+* prevent data loss in split, commit, reword, and fold commands ([a4ce587](https://github.com/narnaud/git-loom/commit/a4ce587ebeee91e30e0c166ac699fae113de37be))
+* **push:** fix Azure DevOps PR creation on Windows ([c9fb030](https://github.com/narnaud/git-loom/commit/c9fb030c13af5ba13ca6913109937c4b81b0c0d2))
+* **shortid:** only avoid exact ID collisions, not shared first letters ([0b5d8d5](https://github.com/narnaud/git-loom/commit/0b5d8d5a32bb8d831bc32842702c57c75b47feae))
+* **trace:** append abort/continue to the originating command trace ([22561a4](https://github.com/narnaud/git-loom/commit/22561a4cf4ee3367ed5bae465d3842338aef5203))
+* **update:** handle inverted merge parent ordering in weave topology ([cce12a9](https://github.com/narnaud/git-loom/commit/cce12a97cdaff97d0be3a1e55d338003ec3d9b3d))
+* **update:** use consistent diff engine for patch-ID matching ([e98d4f2](https://github.com/narnaud/git-loom/commit/e98d4f22443fe7f454342bed6f3e32549ed78902))
+* **update:** use weave-based rebase to prevent upstream commits leaking into feature branches ([7069d5c](https://github.com/narnaud/git-loom/commit/7069d5cf3d34d1656aa30011bd9e0f5ed83459ce))
+
+
+### Performance Improvements ⚡
+
+* **update:** replace patch-ID pipeline with git cherry for cherry-pick detection ([daa6eae](https://github.com/narnaud/git-loom/commit/daa6eaeb55faaf521d81aab7512583ace00b5a01))
+
+
+### Documentation
+
+* update branch and update specs and command docs ([83291b9](https://github.com/narnaud/git-loom/commit/83291b958c08355c0f4f805bda4f535f245b8e36))
+
+
+### Changes
+
+* replace raw git calls with run_git_stdout ([c626733](https://github.com/narnaud/git-loom/commit/c626733ef8dcb839e1e17f70a6dde9a5193a0d17))
+
 ## [0.16.0](https://github.com/narnaud/git-loom/compare/v0.15.1...v0.16.0) (2026-03-21)
 
 
