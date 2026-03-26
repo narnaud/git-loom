@@ -134,6 +134,22 @@ pub fn warn_conflict_paused(command: &str) {
     ));
 }
 
+/// Run `loom continue` (opens repo internally).
+pub fn continue_run() -> Result<()> {
+    let repo = crate::git::open_repo()?;
+    let workdir = crate::git::require_workdir(&repo, "continue")?.to_path_buf();
+    let git_dir = repo.path().to_path_buf();
+    continue_cmd(&workdir, &git_dir)
+}
+
+/// Run `loom abort` (opens repo internally).
+pub fn abort_run() -> Result<()> {
+    let repo = crate::git::open_repo()?;
+    let workdir = crate::git::require_workdir(&repo, "abort")?.to_path_buf();
+    let git_dir = repo.path().to_path_buf();
+    abort_cmd(&workdir, &git_dir)
+}
+
 /// Implement `loom continue`.
 ///
 /// 1. If a rebase is still active, runs `git rebase --continue`.
