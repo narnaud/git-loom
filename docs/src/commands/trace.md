@@ -5,14 +5,14 @@ Show the latest command trace — a detailed audit trail of every git operation 
 ## Usage
 
 ```
-git-loom trace
+git loom trace
 ```
 
 No arguments.
 
 ## What It Does
 
-Every time you run a loom command that modifies the repository (e.g. `fold`, `commit`, `drop`, `reword`, `split`, `absorb`, `branch`, `push`, `update`), git-loom records a trace file to `.git/loom/logs/`. The trace captures:
+Every time you run a loom command that modifies the repository (e.g. `fold`, `commit`, `drop`, `reword`, `split`, `absorb`, `branch`, `push`, `update`), *git-loom* records a trace file to `.git/loom/logs/`. The trace captures:
 
 - **Every git command** executed, with the full argument list
 - **Timing** for each command (in milliseconds)

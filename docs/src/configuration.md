@@ -36,6 +36,7 @@ git config loom.push-remote personal
 ```
 
 For example, with remotes:
+
 - `origin` → upstream read-only repository
 - `personal` → your fork (where you push)
 
@@ -53,7 +54,7 @@ git config loom.hideBranchPattern ""         # disable hiding entirely
 
 Hidden branches remain fully accessible to all other loom commands (`fold`, `drop`, `commit`, `push`, etc.).
 
-When creating or renaming a branch to a name that matches this prefix, git-loom prints a warning.
+When creating or renaming a branch to a name that matches this prefix, *git-loom* prints a warning.
 
 ## Environment Variables
 

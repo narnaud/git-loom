@@ -5,9 +5,9 @@ Fold source(s) into a target — a polymorphic command that amends files into co
 ## Usage
 
 ```
-git-loom fold <target>
-git-loom fold <source>... <target>
-git-loom fold --create <commit> <new-branch>
+git loom fold <target>
+git loom fold <source>... <target>
+git loom fold --create <commit> <new-branch>
 ```
 
 When only a target is given, currently staged files are folded into the target commit. When two or more arguments are provided, the last argument is the target and all preceding arguments are sources.
@@ -38,7 +38,7 @@ When only a target is given, staged files are folded into the commit:
 
 ```bash
 git add src/auth.rs
-git-loom fold ab
+git loom fold ab
 # Folds staged changes into commit ab
 ```
 
@@ -47,21 +47,21 @@ Only files in the git index are folded — unstaged changes to the same files ar
 ### Amend files into a commit
 
 ```bash
-git-loom fold src/auth.rs ab
+git loom fold src/auth.rs ab
 # Stages src/auth.rs and amends it into commit ab
 ```
 
 Multiple files can be folded at once:
 
 ```bash
-git-loom fold src/main.rs src/lib.rs HEAD
+git loom fold src/main.rs src/lib.rs HEAD
 # Amends both files into the HEAD commit
 ```
 
 Use `zz` to fold all working tree changes at once (staged and unstaged):
 
 ```bash
-git-loom fold zz ab
+git loom fold zz ab
 # Stages all changed files and amends them into commit ab
 ```
 
@@ -72,7 +72,7 @@ If `zz` is mixed with individual file arguments, `zz` takes precedence and all c
 Absorbs the source commit's changes into the target. The source disappears from history; the target keeps its message.
 
 ```bash
-git-loom fold c2 c1
+git loom fold c2 c1
 # c2's changes are absorbed into c1, c2 disappears
 ```
 
@@ -83,7 +83,7 @@ The source commit must be newer than the target.
 Removes the commit from its current branch and appends it to the target branch's tip.
 
 ```bash
-git-loom fold d0 feature-b
+git loom fold d0 feature-b
 # Commit d0 moves to feature-b, removed from its original branch
 ```
 
@@ -92,14 +92,14 @@ git-loom fold d0 feature-b
 Use `--create` (`-c`) to create a new branch and move the commit in one step. Works whether the commit is a loose commit on the integration line or already on an existing branch.
 
 ```bash
-git-loom fold -c d0 new-feature
+git loom fold -c d0 new-feature
 # Creates new-feature and moves commit d0 into it
 ```
 
 If the branch already exists, a warning is printed and the commit is moved there anyway — same as a normal `fold <commit> <branch>`.
 
 ```bash
-git-loom fold -c d0 existing-branch
+git loom fold -c d0 existing-branch
 # ! Branch `existing-branch` already exists — moving commit to it
 ```
 
@@ -108,7 +108,7 @@ git-loom fold -c d0 existing-branch
 Removes a commit from history and places its changes as unstaged modifications.
 
 ```bash
-git-loom fold ab zz
+git loom fold ab zz
 # Removes commit ab, its changes appear as unstaged modifications
 ```
 
@@ -117,7 +117,7 @@ git-loom fold ab zz
 Removes one file's changes from a commit, preserving the rest of the commit.
 
 ```bash
-git-loom fold ab:1 zz
+git loom fold ab:1 zz
 # Removes the second file from commit ab to the working directory
 ```
 
@@ -126,7 +126,7 @@ git-loom fold ab:1 zz
 Moves one file's changes from one commit to another.
 
 ```bash
-git-loom fold c2:1 c1
+git loom fold c2:1 c1
 # Moves the second file from c2 to c1
 ```
 
@@ -153,14 +153,14 @@ The following fold operations support conflict recovery (pause/resume):
 If a supported fold hits a conflict, the operation is paused:
 
 ```bash
-git-loom fold d0 feature-b
+git loom fold d0 feature-b
 # ! Conflicts detected — resolve them with git, then run:
 #   loom continue   to complete the fold
 #   loom abort      to cancel and restore original state
 ```
 
 ```bash
-git add <resolved-files> && git-loom continue
+git add <resolved-files> && git loom continue
 # ✓ Moved `d0` to branch `feature-b` (now `e1f2a3b`)
 ```
 

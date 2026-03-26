@@ -5,7 +5,7 @@ Swap two commits within the same sequence.
 ## Usage
 
 ```
-git-loom swap <a> <b>
+git loom swap <a> <b>
 ```
 
 ### Arguments
@@ -30,21 +30,21 @@ Accepts full OID, partial OID prefix, or 2-char short ID. Branch names are not a
 ### Swap two commits on the integration line
 
 ```bash
-git-loom swap abc123 def456
+git loom swap abc123 def456
 # Swapped commits `abc123` and `def456`
 ```
 
 ### Swap two commits in a branch section using short IDs
 
 ```bash
-git-loom swap aa bb
+git loom swap aa bb
 # Swapped commits `aa` and `bb`
 ```
 
 ### Error: commits in different branch sections
 
 ```bash
-git-loom swap ca1 cb1
+git loom swap ca1 cb1
 # ! Cannot swap commits from different branch sections
 ```
 
@@ -53,14 +53,14 @@ git-loom swap ca1 cb1
 If a conflict occurs during the rebase, the operation is paused:
 
 ```bash
-git-loom swap abc123 def456
+git loom swap abc123 def456
 # ! Conflicts detected — resolve them with git, then run:
 #   loom continue   to complete the swap
 #   loom abort      to cancel and restore original state
 ```
 
 ```bash
-git add <resolved-files> && git-loom continue
+git add <resolved-files> && git loom continue
 # ✓ Swapped `abc123` and `def456`
 ```
 

@@ -5,7 +5,7 @@ Show the diff and metadata for a commit, like `git show`.
 ## Usage
 
 ```
-git-loom show <target>
+git loom show <target>
 ```
 
 ### Arguments
@@ -34,20 +34,20 @@ The target is resolved in this order:
 ### Show a commit by short ID
 
 ```bash
-git-loom show ab
+git loom show ab
 # Displays commit info and diff for the commit with short ID "ab"
 ```
 
 ### Show a commit by hash
 
 ```bash
-git-loom show 9f484b6
+git loom show 9f484b6
 ```
 
 ### Show the tip of a branch
 
 ```bash
-git-loom show feature-a
+git loom show feature-a
 # Shows the latest commit on feature-a
 ```
 

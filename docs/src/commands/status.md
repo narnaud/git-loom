@@ -1,11 +1,11 @@
 # status
 
-Show the branch-aware commit graph. This is the default command when running `git-loom` with no arguments.
+Show the branch-aware commit graph. This is the default command when running `git loom` with no arguments.
 
 ## Usage
 
 ```
-git-loom [status] [-f [COMMIT...]] [N]
+git loom [status] [-f [COMMIT...]] [N]
 ```
 
 ### Arguments
@@ -51,7 +51,7 @@ The graph is rendered top-to-bottom with these sections:
 1. **Local changes** — shown only if the working tree has modifications, new files, or deletions. Files are split into three groups:
    - **Conflicted files** are shown first with a `!!` marker in bold red (filename also bold red). These appear during an in-progress rebase or merge.
    - **Tracked changes** are listed next with a 2-char `XY` status matching `git status --short` (index green, worktree red).
-   - **Untracked files** are listed last with a ` ⁕` marker (magenta). When there are more than 5 untracked files, they are displayed in a multi-column grid layout sized to the terminal width.
+   - **Untracked files** are listed last with a `⁕` marker (magenta). When there are more than 5 untracked files, they are displayed in a multi-column grid layout sized to the terminal width.
 
 2. **Feature branches** — each branch is rendered as a side branch with its name in brackets, followed by its commits, closed with `├╯`. A remote tracking indicator appears after the closing `]` when an upstream has been configured for the branch.
 
@@ -70,7 +70,7 @@ The graph is rendered top-to-bottom with these sections:
 | `●` | A commit |
 | `├╯` | End of a side branch |
 | `!!` | Conflicted file marker (bold red) |
-| ` ⁕` | Untracked file marker (magenta) |
+| `⁕` | Untracked file marker (magenta) |
 | `⏫` | Upstream has new commits |
 | `·` | Context commit before the base (dimmed) |
 | `✓` | Branch remote is in sync (green) |
@@ -79,14 +79,14 @@ The graph is rendered top-to-bottom with these sections:
 
 ### Short IDs
 
-Each branch, commit, and file in the output is assigned a short ID — a compact identifier you can use with other git-loom commands. What you see in the status is what you type.
+Each branch, commit, and file in the output is assigned a short ID — a compact identifier you can use with other *git-loom* commands. What you see in the status is what you type.
 
 ## Showing Files
 
 Use `-f` to show the files changed in each commit:
 
 ```
-git-loom status -f
+git loom status -f
 ```
 
 ```
@@ -100,9 +100,9 @@ git-loom status -f
 To show files for specific commits only, pass their short IDs or git hashes after `-f`:
 
 ```
-git-loom status -f d0
-git-loom status -f d0 ab
-git-loom status -f abc1234
+git loom status -f d0
+git loom status -f d0 ab
+git loom status -f abc1234
 ```
 
 Only the listed commits display their file list; all other commits are rendered normally. Unknown identifiers are silently ignored.
@@ -179,8 +179,8 @@ Branches whose names start with the configured prefix (default: `local-`) are hi
 This is useful for keeping local-only branches (personal configuration, secrets) out of the status view without removing them from the integration branch.
 
 ```bash
-git-loom --all          # show all branches including hidden
-git-loom status --all   # same, explicit
+git loom --all          # show all branches including hidden
+git loom status --all   # same, explicit
 ```
 
 The hidden prefix is configurable (see [Configuration](../configuration.md#loomhidebranchpattern)).

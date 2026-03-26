@@ -5,7 +5,7 @@ Cancel a paused loom operation and restore the repository to its original state.
 ## Usage
 
 ```
-git-loom abort
+git loom abort
 ```
 
 ## When to Use It
@@ -15,10 +15,10 @@ to complete it, `loom abort` cancels the operation and rolls back all changes
 made so far:
 
 ```bash
-git-loom commit -b feature-auth -m "add auth" zz
+git loom commit -b feature-auth -m "add auth" zz
 # ! Conflicts detected...
 
-git-loom abort
+git loom abort
 # ✓ Aborted `loom commit` and restored original state
 ```
 
@@ -44,7 +44,7 @@ discarded. Your work is preserved; the commit is simply undone.
 ## Error: No Operation in Progress
 
 ```bash
-git-loom abort
+git loom abort
 # error: No loom operation is in progress
 ```
 

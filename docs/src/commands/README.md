@@ -38,6 +38,6 @@ Options:
   -V, --version        Print version
 ```
 
-Running `git-loom` with no command is equivalent to `git loom status`.
+Running `git loom` with no command is equivalent to `git loom status`.
 
 All commands that accept a target (commit, branch, or file) support [short IDs](status.md) — the compact identifiers shown in the status output. You can also use full git hashes, branch names, or partial hashes.

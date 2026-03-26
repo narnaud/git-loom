@@ -5,7 +5,7 @@ Push a feature branch to the remote. Automatically detects the remote type and u
 ## Usage
 
 ```
-git-loom push [branch] [--no-pr]
+git loom push [branch] [--no-pr]
 ```
 
 ### Arguments
@@ -86,7 +86,7 @@ Uses the `refs/for/` refspec and sets the topic to the branch name. After pushin
 
 ## PR Title and Description
 
-When creating a new PR (GitHub or Azure DevOps), git-loom auto-generates the title and description from the branch's commits:
+When creating a new PR (GitHub or Azure DevOps), *git-loom* auto-generates the title and description from the branch's commits:
 
 - **Single commit** — the commit subject becomes the PR title and the commit body becomes the description.
 - **Multiple commits** — you are prompted for a PR title. The description is built by concatenating all commit messages (oldest to newest), separated by `---` dividers.
@@ -125,14 +125,14 @@ If the branch already starts with `wip/`, no prompt is shown.
 ### Push to a plain remote
 
 ```bash
-git-loom push feature-a
+git loom push feature-a
 # Pushed 'feature-a' to origin
 ```
 
 ### Push to GitHub (new PR)
 
 ```bash
-git-loom push feature-a
+git loom push feature-a
 # Pushed 'feature-a' to origin
 # (browser opens to PR creation page)
 ```
@@ -140,7 +140,7 @@ git-loom push feature-a
 ### Push to GitHub (PR already exists)
 
 ```bash
-git-loom push feature-a
+git loom push feature-a
 # Pushed 'feature-a' to origin
 # PR updated: https://github.com/owner/repo/pull/42
 ```
@@ -148,7 +148,7 @@ git-loom push feature-a
 ### Push to Azure DevOps (new PR)
 
 ```bash
-git-loom push feature-a
+git loom push feature-a
 # Pushed 'feature-a' to origin
 # (browser opens to PR creation page)
 ```
@@ -156,7 +156,7 @@ git-loom push feature-a
 ### Push to Azure DevOps (PR already exists)
 
 ```bash
-git-loom push feature-a
+git loom push feature-a
 # Pushed 'feature-a' to origin
 # PR updated: https://dev.azure.com/org/project/_git/repo/pullrequest/42
 ```
@@ -164,7 +164,7 @@ git-loom push feature-a
 ### Push to Gerrit
 
 ```bash
-git-loom push feature-a
+git loom push feature-a
 # Pushed 'feature-a' to origin (Gerrit: refs/for/main)
 #   › https://gerrit.example.com/c/project/+/12345
 ```
@@ -172,7 +172,7 @@ git-loom push feature-a
 ### Interactive selection
 
 ```bash
-git-loom push
+git loom push
 # ? Select branch to push
 # > feature-a
 #   feature-b
@@ -182,14 +182,14 @@ git-loom push
 ### Push without opening a PR (GitHub)
 
 ```bash
-git-loom push feature-a --no-pr
+git loom push feature-a --no-pr
 # Pushed 'feature-a' to origin
 ```
 
 ### Push without a review, renaming to wip/ (Gerrit)
 
 ```bash
-git-loom push feature-a --no-pr
+git loom push feature-a --no-pr
 # ? Branch `feature-a` is not prefixed with `wip/`...
 # > Push as `wip/feature-a` instead
 # Pushed 'feature-a' to origin as 'wip/feature-a'
@@ -199,7 +199,7 @@ git-loom push feature-a --no-pr
 
 ```bash
 git config loom.remote-type gerrit
-git-loom push feature-a
+git loom push feature-a
 # Pushed 'feature-a' to origin (Gerrit: refs/for/main)
 #   › https://gerrit.example.com/c/project/+/12345
 ```
