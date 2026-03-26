@@ -170,7 +170,7 @@ fn post_update(workdir: &Path, repo: &git2::Repository, ctx: &UpdateContext) -> 
         .ok()
         .and_then(|obj| obj.peel_to_commit().ok())
         .map(|commit| {
-            let short_id = &commit.id().to_string()[..7];
+            let short_id = git_commands::short_hash(&commit.id().to_string()).to_string();
             let summary = commit.summary().unwrap_or("");
             format!(" ({} {})", short_id, summary)
         })
