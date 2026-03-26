@@ -3,7 +3,7 @@
 A commit touches multiple files that should really be separate commits. Let's look at the current state:
 
 ```bash
-$ git loom status -f d0
+git loom status -f d0
 ```
 
 ```
@@ -41,6 +41,6 @@ Select the files for the **first** commit — the remaining files stay in the **
 The commit must have at least two files — otherwise there's nothing to split. Both sides must get at least one file.
 
 > [!TIP]
-> If you omit `-m`, git-loom opens your editor for the first commit's message.
+> If you omit `-m`, *git-loom* opens your editor for the first commit's message.
 
 See also: [split reference](../commands/split.md)

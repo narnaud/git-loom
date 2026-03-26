@@ -1,6 +1,6 @@
 # ![Introduction](assets/banner-adaptive.svg)
 
-**git-loom** is a Git CLI tool that weaves your branches together into a single integration branch. Inspired by tools like [jujutsu](https://github.com/martinvonz/jj) and [Git Butler](https://gitbutler.com/), git-loom helps you work on multiple features simultaneously while keeping your branches organized and independent.
+*git-loom* is a Git CLI tool that weaves your branches together into a single integration branch. Inspired by tools like [jujutsu](https://github.com/martinvonz/jj) and [Git Butler](https://gitbutler.com/), *git-loom* helps you work on multiple features simultaneously while keeping your branches organized and independent.
 
 Think of it as a loom that weaves multiple threads (feature branches) into a single fabric (integration branch).
 
@@ -33,11 +33,11 @@ Feature branches are independent branches combined into the integration branch. 
 
 ### Weaving
 
-When a feature branch is created inside the integration branch, git-loom automatically **weaves** it into the topology — restructuring the linear history into a merge-based layout where each feature branch appears as a side branch joined by a merge commit. This is what makes `git loom status` able to display the clear branch-aware graph.
+When a feature branch is created inside the integration branch, *git-loom* automatically **weaves** it into the topology — restructuring the linear history into a merge-based layout where each feature branch appears as a side branch joined by a merge commit. This is what makes `git loom status` able to display the clear branch-aware graph.
 
 ### Short IDs
 
-git-loom assigns compact, human-friendly identifiers to branches, commits, and files shown in `git loom status`. You can use these short IDs with any command instead of typing full hashes or branch names. What you see in the status output is what you type.
+*git-loom* assigns compact, human-friendly identifiers to branches, commits, and files shown in `git loom status`. You can use these short IDs with any command instead of typing full hashes or branch names. What you see in the status output is what you type.
 
 ## Quick Start
 

@@ -5,7 +5,7 @@ Reword a commit message or rename a branch.
 ## Usage
 
 ```
-git-loom reword <target> [-m <message>]
+git loom reword <target> [-m <message>]
 ```
 
 ### Arguments
@@ -56,20 +56,20 @@ To reword the commit at a branch tip, use its commit hash or commit short ID (no
 ### Reword a commit with editor
 
 ```bash
-git-loom reword ab
+git loom reword ab
 # Opens editor with current message
 ```
 
 ### Reword a commit directly
 
 ```bash
-git-loom reword ab -m "Fix authentication bug in login flow"
+git loom reword ab -m "Fix authentication bug in login flow"
 ```
 
 ### Rename a branch interactively
 
 ```bash
-git-loom reword feature-a
+git loom reword feature-a
 # ? New branch name › feature-a
 # User types: feature-authentication
 ```
@@ -77,15 +77,15 @@ git-loom reword feature-a
 ### Rename a branch directly
 
 ```bash
-git-loom reword fa -m feature-authentication
+git loom reword fa -m feature-authentication
 ```
 
 ### Rename to a hidden branch name
 
-If the new name matches the configured hidden prefix (default: `local-`), git-loom prints a warning before the success message:
+If the new name matches the configured hidden prefix (default: `local-`), *git-loom* prints a warning before the success message:
 
 ```bash
-git-loom reword feature-secrets -m local-secrets
+git loom reword feature-secrets -m local-secrets
 # ! Branch `local-secrets` is hidden from status by default. Use `--all` to show it.
 # ✓ Renamed branch `feature-secrets` to `local-secrets`
 ```

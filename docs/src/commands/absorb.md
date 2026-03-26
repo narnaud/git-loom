@@ -5,7 +5,7 @@ Automatically distribute working tree changes into the commits that last touched
 ## Usage
 
 ```
-git-loom absorb [-n] [files...]
+git loom absorb [-n] [files...]
 ```
 
 ### Options
@@ -37,7 +37,7 @@ After analysis, all assigned hunks are folded into their target commits in a sin
 ### Absorb all changes
 
 ```bash
-git-loom absorb
+git loom absorb
 #   src/auth.rs -> a1b2c3d "Add authentication"
 #   src/utils.rs -> d4e5f6a "Add utility helpers"
 # Absorbed 2 hunk(s) from 2 file(s) into 2 commit(s)
@@ -48,7 +48,7 @@ git-loom absorb
 ```bash
 # src/shared.rs has changes in two separate regions,
 # each originating from a different commit
-git-loom absorb
+git loom absorb
 #   src/shared.rs [hunk 1/2] -> a1b2c3d "Add login form"
 #   src/shared.rs [hunk 2/2] -> d4e5f6a "Add dashboard"
 # Absorbed 2 hunk(s) from 1 file(s) into 2 commit(s)
@@ -57,7 +57,7 @@ git-loom absorb
 ### Dry run
 
 ```bash
-git-loom absorb --dry-run
+git loom absorb --dry-run
 #   src/auth.rs -> a1b2c3d "Add authentication"
 #   src/shared.rs [hunk 1/2] -> d4e5f6a "Add utility helpers"
 #   src/shared.rs [hunk 2/2] -- skipped (pure addition)
@@ -67,7 +67,7 @@ git-loom absorb --dry-run
 ### Restrict to specific files
 
 ```bash
-git-loom absorb src/auth.rs src/utils.rs
+git loom absorb src/auth.rs src/utils.rs
 #   src/auth.rs -> a1b2c3d "Add authentication"
 #   src/utils.rs -> d4e5f6a "Add utility helpers"
 # Absorbed 2 hunk(s) from 2 file(s) into 2 commit(s)
@@ -79,7 +79,7 @@ If the rebase that folds the fixup commits hits a conflict, the operation is
 **paused**. Pre-existing staged changes are saved aside automatically.
 
 ```bash
-git-loom absorb
+git loom absorb
 #   src/auth.rs -> a1b2c3d "Add authentication"
 # ! Conflicts detected — resolve them with git, then run:
 #   loom continue   to complete the absorb
@@ -87,7 +87,7 @@ git-loom absorb
 ```
 
 ```bash
-git add <resolved-files> && git-loom continue
+git add <resolved-files> && git loom continue
 # ✓ Absorbed 1 hunk(s) from 1 file(s) into 1 commit(s)
 ```
 

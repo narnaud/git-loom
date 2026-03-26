@@ -5,7 +5,7 @@ Resume a paused loom operation after resolving rebase conflicts.
 ## Usage
 
 ```
-git-loom continue
+git loom continue
 ```
 
 ## When to Use It
@@ -27,7 +27,7 @@ Once you've resolved conflicts and staged the resolution:
 ```bash
 # resolve conflicts in your editor, then:
 git add <resolved-files>
-git-loom continue
+git loom continue
 ```
 
 ## What It Does
@@ -47,13 +47,13 @@ a new conflict at the next commit. Repeat the resolve-and-continue cycle as
 many times as needed:
 
 ```bash
-git-loom commit -b feature-auth -m "add auth" zz
+git loom commit -b feature-auth -m "add auth" zz
 # ! Conflicts detected...
 
-git add auth.rs && git-loom continue
+git add auth.rs && git loom continue
 # ! Conflicts remain — resolve them and run `loom continue` again
 
-git add shared.rs && git-loom continue
+git add shared.rs && git loom continue
 # ✓ Created commit `a1b2c3d` on branch `feature-auth`
 ```
 
@@ -83,7 +83,7 @@ While a loom operation is paused, most commands are blocked. The following are s
 ## Error: No Operation in Progress
 
 ```bash
-git-loom continue
+git loom continue
 # error: No loom operation is in progress
 ```
 

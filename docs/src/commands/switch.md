@@ -5,8 +5,8 @@ Check out any branch for testing without weaving it into the integration branch.
 ## Usage
 
 ```
-git-loom switch [<branch>]
-git-loom sw     [<branch>]
+git loom switch [<branch>]
+git loom sw     [<branch>]
 ```
 
 If no branch is given, an interactive picker lists all local branches and all remote-only branches.
@@ -42,21 +42,21 @@ Shows all local branches except the current one, followed by all remote-only bra
 ### Switch to a local branch
 
 ```bash
-git-loom switch feature-x
+git loom switch feature-x
 # ✓ Switched to `feature-x`
 ```
 
 ### Switch using a short ID
 
 ```bash
-git-loom switch fx
+git loom switch fx
 # ✓ Switched to `feature-x`
 ```
 
 ### Inspect a remote-only branch
 
 ```bash
-git-loom switch origin/colleague-work
+git loom switch origin/colleague-work
 # ✓ Detached HEAD at `origin/colleague-work`
 # No local branch is created.
 ```
@@ -64,7 +64,7 @@ git-loom switch origin/colleague-work
 ### Return to the integration branch
 
 ```bash
-git-loom switch integration
+git loom switch integration
 # ✓ Switched to `integration`
 ```
 

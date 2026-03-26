@@ -1,9 +1,9 @@
 # Auto-absorbing Changes
 
-You've been tweaking code across several files — fixing a typo in `src/auth.rs`, adjusting a layout in `templates/dashboard.html`. Each change was last touched by a different commit. Instead of manually folding each one, let git-loom figure it out:
+You've been tweaking code across several files — fixing a typo in `src/auth.rs`, adjusting a layout in `templates/dashboard.html`. Each change was last touched by a different commit. Instead of manually folding each one, let *git-loom* figure it out:
 
 ```bash
-$ git loom absorb
+git loom absorb
 ```
 
 For each changed file, absorb splits the diff into hunks, blames each hunk's original lines to find the originating commit, and folds each hunk into the right place — even when a single file has changes belonging to different commits.
@@ -27,7 +27,7 @@ When a file has hunks going to different commits, each hunk is absorbed independ
 You can also restrict absorption to specific files:
 
 ```bash
-$ git loom absorb src/auth.rs
+git loom absorb src/auth.rs
 ```
 
 See also: [absorb reference](../commands/absorb.md)

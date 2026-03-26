@@ -5,7 +5,7 @@ Create a commit on a feature branch without leaving the integration branch.
 ## Usage
 
 ```
-git-loom commit [-b <branch>] [-m <message>] [files...]
+git loom commit [-b <branch>] [-m <message>] [files...]
 ```
 
 ### Options
@@ -50,14 +50,14 @@ When the integration branch has diverged (woven branches exist):
 
 ### New Branch Creation
 
-When the target branch doesn't exist, git-loom validates the name, creates the branch at the merge-base, and weaves it into the integration topology — all automatically.
+When the target branch doesn't exist, *git-loom* validates the name, creates the branch at the merge-base, and weaves it into the integration topology — all automatically.
 
 ## Examples
 
 ### Interactive
 
 ```bash
-git-loom commit
+git loom commit
 # ? Select target branch
 # > feature-auth
 #   feature-ui
@@ -67,28 +67,28 @@ git-loom commit
 ### Fully specified
 
 ```bash
-git-loom commit -b feature-auth -m "add password validation" zz
+git loom commit -b feature-auth -m "add password validation" zz
 # Stages all changes, commits to feature-auth
 ```
 
 ### Specific files by short ID
 
 ```bash
-git-loom commit -b feature-auth ar -m "fix auth check"
+git loom commit -b feature-auth ar -m "fix auth check"
 # Stages only src/auth.rs (short ID: ar), commits to feature-auth
 ```
 
 ### To a new branch
 
 ```bash
-git-loom commit -b feature-logging -m "add request logging" zz
+git loom commit -b feature-logging -m "add request logging" zz
 # Creates feature-logging, weaves it, stages all, commits
 ```
 
 ### Loose commit on a fresh integration branch
 
 ```bash
-git-loom commit -m "initial scaffold" zz
+git loom commit -m "initial scaffold" zz
 # No -b flag, branch matches remote → creates loose commit directly
 ```
 
@@ -100,7 +100,7 @@ git history; loom saves recovery state to `.git/loom/state.json` and exits
 with code 0.
 
 ```bash
-git-loom commit -b feature-auth -m "add auth" zz
+git loom commit -b feature-auth -m "add auth" zz
 # ✓ Created branch `feature-auth` at `a1b2c3d`
 # ! Conflicts detected — resolve them with git, then run:
 #   loom continue   to complete the commit
@@ -111,7 +111,7 @@ Resolve conflicts, then:
 
 ```bash
 git add <resolved-files>
-git-loom continue
+git loom continue
 # ✓ Created commit `b4c5d6e` on branch `feature-auth`
 ```
 
@@ -119,7 +119,7 @@ Or cancel and return to the original state (the commit content comes back as
 unstaged working-tree changes):
 
 ```bash
-git-loom abort
+git loom abort
 # ✓ Aborted `loom commit` and restored original state
 ```
 

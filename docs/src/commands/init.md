@@ -1,11 +1,11 @@
 # init
 
-Initialize a new integration branch tracking a remote upstream. This is the entry point for starting a git-loom workflow.
+Initialize a new integration branch tracking a remote upstream. This is the entry point for starting a *git-loom* workflow.
 
 ## Usage
 
 ```
-git-loom init [name]
+git loom init [name]
 ```
 
 ### Arguments
@@ -36,28 +36,28 @@ The upstream is resolved automatically in priority order:
 ### Default
 
 ```bash
-git-loom init
+git loom init
 # Initialized integration branch 'integration' tracking origin/main
 ```
 
 ### Custom name
 
 ```bash
-git-loom init my-integration
+git loom init my-integration
 # Initialized integration branch 'my-integration' tracking origin/main
 ```
 
 ### Error: branch already exists
 
 ```bash
-git-loom init
+git loom init
 # error: Branch 'integration' already exists
 ```
 
 ### Error: no remotes
 
 ```bash
-git-loom init
+git loom init
 # error: No remote tracking branches found.
 # Set up a remote with: git remote add origin <url>
 ```

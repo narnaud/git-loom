@@ -7,7 +7,7 @@ Pull-rebase the integration branch onto the latest upstream and update submodule
 ## Usage
 
 ```
-git-loom update [-y]
+git loom update [-y]
 ```
 
 ### Options
@@ -50,7 +50,7 @@ Lists any local branches whose upstream tracking ref was pruned in the fetch ste
 ### Standard update
 
 ```bash
-git-loom update
+git loom update
 # ✓ Fetched latest changes
 # ✓ Rebased onto upstream
 # ✓ Updated branch `integration` with `origin/main` (abc1234 Latest commit)
@@ -60,7 +60,7 @@ git-loom update
 
 ```bash
 # feature-a had commits F1, F2, F3 — upstream cherry-picked F1 and F2
-git-loom update
+git loom update
 # ✓ Fetched latest changes
 # ✓ Rebased onto upstream
 # ✓ Updated branch `integration` with `origin/main` (abc1234 Latest commit)
@@ -70,7 +70,7 @@ git-loom update
 ### With submodules
 
 ```bash
-git-loom update
+git loom update
 # ✓ Fetched latest changes
 # ✓ Rebased onto upstream
 # ✓ Updated submodules
@@ -80,7 +80,7 @@ git-loom update
 ### Gone upstream branches
 
 ```bash
-git-loom update
+git loom update
 # ✓ Fetched latest changes
 # ✓ Rebased onto upstream
 # ✓ Updated branch `integration` with `origin/main` (abc1234 Latest commit)
@@ -93,7 +93,7 @@ git-loom update
 ### Skip gone-upstream prompt
 
 ```bash
-git-loom update -y
+git loom update -y
 # ✓ Fetched latest changes
 # ✓ Rebased onto upstream
 # ✓ Updated branch `integration` with `origin/main` (abc1234 Latest commit)
@@ -104,7 +104,7 @@ git-loom update -y
 ### Gone branch with unmerged commits
 
 ```bash
-git-loom update
+git loom update
 # ✓ Fetched latest changes
 # ✓ Rebased onto upstream
 # ✓ Updated branch `integration` with `origin/main` (abc1234 Latest commit)
@@ -120,7 +120,7 @@ git-loom update
 If the rebase encounters a conflict, loom saves state and pauses:
 
 ```bash
-git-loom update
+git loom update
 # ✓ Fetched latest changes
 # ! Conflicts detected — resolve them with git, then run:
 #   loom continue   to complete the update
@@ -130,14 +130,14 @@ git-loom update
 After resolving:
 
 ```bash
-git add <resolved-files> && git-loom continue
+git add <resolved-files> && git loom continue
 # ✓ Updated branch `integration` with `origin/main` (abc1234 Latest commit)
 ```
 
 Or cancel:
 
 ```bash
-git-loom abort
+git loom abort
 # ✓ Aborted `loom update` and restored original state
 ```
 

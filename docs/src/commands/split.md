@@ -5,7 +5,7 @@ Split a commit into two sequential commits by selecting which files go into each
 ## Usage
 
 ```
-git-loom split [-m <message>] <target>
+git loom split [-m <message>] <target>
 ```
 
 ### Arguments
@@ -46,7 +46,7 @@ Both paths are atomic — if anything fails, the operation is aborted and the or
 ### Split the HEAD commit
 
 ```bash
-git-loom split HEAD
+git loom split HEAD
 # ? Select files for the first commit
 # > [x] src/auth.rs
 #   [ ] src/main.rs
@@ -57,7 +57,7 @@ git-loom split HEAD
 ### Split a commit by short ID with a message
 
 ```bash
-git-loom split ab -m "refactor: extract helpers"
+git loom split ab -m "refactor: extract helpers"
 # ? Select files for the first commit
 # > [x] src/helpers.rs
 #   [ ] src/lib.rs

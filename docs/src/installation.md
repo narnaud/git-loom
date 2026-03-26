@@ -43,5 +43,5 @@ cargo install --path .
 
 ## Requirements
 
-- **Git 2.38 or later** — git-loom checks the Git version at startup and will report an error if the version is too old.
+- **Git 2.38 or later** — *git-loom* checks the Git version at startup and will report an error if the version is too old.
 - **`gh` CLI** (optional) — needed for automatic GitHub PR creation with `git loom push`. Install from [cli.github.com](https://cli.github.com).

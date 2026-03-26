@@ -5,7 +5,7 @@ Drop a commit, branch, file, or all local changes.
 ## Usage
 
 ```
-git-loom drop [-y] <target>
+git loom drop [-y] <target>
 ```
 
 ### Arguments
@@ -69,35 +69,35 @@ If there are no local changes, the command errors with `"No local changes to dis
 ### Drop a commit by short ID
 
 ```bash
-git-loom drop ab
+git loom drop ab
 # Removes the commit from history
 ```
 
 ### Drop a commit by hash
 
 ```bash
-git-loom drop abc123d
+git loom drop abc123d
 # Removes the commit from history
 ```
 
 ### Drop a branch
 
 ```bash
-git-loom drop feature-a
+git loom drop feature-a
 # Removes all commits, unweaves merge topology, deletes branch ref
 ```
 
 ### Drop a branch by short ID
 
 ```bash
-git-loom drop fa
+git loom drop fa
 # Same as above, using the short ID
 ```
 
 ### Drop a file (discard changes)
 
 ```bash
-git-loom drop ma
+git loom drop ma
 # Discard changes to `src/main.rs`? (y/n)
 # Restored `src/main.rs`
 ```
@@ -105,7 +105,7 @@ git-loom drop ma
 ### Drop a new or untracked file
 
 ```bash
-git-loom drop nf
+git loom drop nf
 # Delete `new_feature.rs`? (y/n)
 # Deleted `new_feature.rs`
 ```
@@ -113,7 +113,7 @@ git-loom drop nf
 ### Drop all local changes
 
 ```bash
-git-loom drop zz
+git loom drop zz
 # Discard all local changes? (y/n)
 # Discarded all local changes
 ```
@@ -121,7 +121,7 @@ git-loom drop zz
 ### Drop a co-located branch
 
 ```bash
-git-loom drop feature-a
+git loom drop feature-a
 # Removes feature-a ref, reassigns section to sibling branch
 # Commits preserved for the surviving branch
 ```
@@ -132,14 +132,14 @@ git-loom drop feature-a
 the operation is paused:
 
 ```bash
-git-loom drop ab
+git loom drop ab
 # ! Conflicts detected — resolve them with git, then run:
 #   loom continue   to complete the drop
 #   loom abort      to cancel and restore original state
 ```
 
 ```bash
-git add <resolved-files> && git-loom continue
+git add <resolved-files> && git loom continue
 # ✓ Dropped commit `ab`
 ```
 
