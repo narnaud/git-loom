@@ -11,6 +11,13 @@ use crate::msg;
 use crate::transaction::{self, LoomState, Rollback};
 use crate::weave::{self, RebaseOutcome, Weave};
 
+struct PreRebaseState<'a> {
+    saved_head: &'a str,
+    saved_refs: &'a HashMap<String, git2::Oid>,
+    saved_staged: &'a str,
+    saved_worktree: &'a str,
+}
+
 #[derive(Serialize, Deserialize)]
 struct AbsorbContext {
     skipped_patch: Option<String>,
@@ -226,13 +233,16 @@ fn apply_plan(repo: &Repository, workdir: &Path, git_dir: &Path, plan: AbsorbPla
 
     // Create fixup commits; rolls back to pre-mutation state on any failure.
     let fixup_pairs = create_fixup_commits(
+        repo,
         workdir,
         &groups,
         &hunk_groups,
-        &saved_head,
-        &saved_refs,
-        &saved_staged,
-        &saved_worktree,
+        &PreRebaseState {
+            saved_head: &saved_head,
+            saved_refs: &saved_refs,
+            saved_staged: &saved_staged,
+            saved_worktree: &saved_worktree,
+        },
     )?;
 
     // Save diffs for skipped files and restore their working-tree state before the rebase.
@@ -292,37 +302,28 @@ fn apply_plan(repo: &Repository, workdir: &Path, git_dir: &Path, plan: AbsorbPla
 /// On any failure, rolls back to the pre-mutation state (reset hard, restore refs and patches)
 /// before returning the error.
 fn create_fixup_commits(
+    repo: &Repository,
     workdir: &Path,
     groups: &HashMap<Oid, Vec<String>>,
     hunk_groups: &HashMap<Oid, Vec<(String, Vec<DiffHunk>)>>,
-    saved_head: &str,
-    saved_refs: &HashMap<String, git2::Oid>,
-    saved_staged: &str,
-    saved_worktree: &str,
+    pre_rebase: &PreRebaseState<'_>,
 ) -> Result<Vec<(Oid, Oid)>> {
     let mut fixup_pairs: Vec<(Oid, Oid)> = Vec::new();
 
     for (target_oid, files) in groups {
         let file_refs: Vec<&str> = files.iter().map(|s| s.as_str()).collect();
         if let Err(e) = git_commands::stage_files(workdir, &file_refs) {
-            rollback_pre_rebase(
-                workdir,
-                saved_head,
-                saved_refs,
-                saved_staged,
-                saved_worktree,
-            );
+            rollback_pre_rebase(workdir, pre_rebase);
             return Err(e);
         }
-        let msg = format!("fixup! absorb into {}", target_oid);
+        let subject = repo
+            .find_commit(*target_oid)
+            .ok()
+            .and_then(|c| c.summary().map(str::to_owned))
+            .unwrap_or_else(|| target_oid.to_string());
+        let msg = format!("fixup! {}", subject);
         if let Err(e) = git_commands::commit(workdir, &msg) {
-            rollback_pre_rebase(
-                workdir,
-                saved_head,
-                saved_refs,
-                saved_staged,
-                saved_worktree,
-            );
+            rollback_pre_rebase(workdir, pre_rebase);
             return Err(e);
         }
         let fixup_hash = git_commands::rev_parse(workdir, "HEAD")?;
@@ -336,24 +337,17 @@ fn create_fixup_commits(
             combined_patch.push_str(&build_hunk_patch(path, hunks));
         }
         if let Err(e) = git_commands::apply_cached_patch(workdir, &combined_patch) {
-            rollback_pre_rebase(
-                workdir,
-                saved_head,
-                saved_refs,
-                saved_staged,
-                saved_worktree,
-            );
+            rollback_pre_rebase(workdir, pre_rebase);
             return Err(e);
         }
-        let msg = format!("fixup! absorb into {}", target_oid);
+        let subject = repo
+            .find_commit(*target_oid)
+            .ok()
+            .and_then(|c| c.summary().map(str::to_owned))
+            .unwrap_or_else(|| target_oid.to_string());
+        let msg = format!("fixup! {}", subject);
         if let Err(e) = git_commands::commit(workdir, &msg) {
-            rollback_pre_rebase(
-                workdir,
-                saved_head,
-                saved_refs,
-                saved_staged,
-                saved_worktree,
-            );
+            rollback_pre_rebase(workdir, pre_rebase);
             return Err(e);
         }
         let fixup_hash = git_commands::rev_parse(workdir, "HEAD")?;
@@ -384,20 +378,14 @@ fn save_skipped_patch(workdir: &Path, skipped_files: &[String]) -> Result<Option
 /// Used when a failure occurs during fixup commit creation, before any rebase has started.
 /// This is distinct from `Rollback::apply_abort()`, which handles post-conflict abort and
 /// trusts `git rebase --abort --update-refs` to restore branch refs.
-fn rollback_pre_rebase(
-    workdir: &Path,
-    saved_head: &str,
-    saved_refs: &HashMap<String, git2::Oid>,
-    saved_staged: &str,
-    saved_worktree: &str,
-) {
-    let _ = git_commands::reset_hard(workdir, saved_head);
-    let _ = git::restore_branch_refs(workdir, saved_refs);
-    if !saved_staged.is_empty() {
-        let _ = git_commands::apply_cached_patch(workdir, saved_staged);
+fn rollback_pre_rebase(workdir: &Path, state: &PreRebaseState<'_>) {
+    let _ = git_commands::reset_hard(workdir, state.saved_head);
+    let _ = git::restore_branch_refs(workdir, state.saved_refs);
+    if !state.saved_staged.is_empty() {
+        let _ = git_commands::apply_cached_patch(workdir, state.saved_staged);
     }
-    if !saved_worktree.is_empty()
-        && let Err(e) = git_commands::apply_patch(workdir, saved_worktree)
+    if !state.saved_worktree.is_empty()
+        && let Err(e) = git_commands::apply_patch(workdir, state.saved_worktree)
     {
         eprintln!("Warning: could not restore working tree changes: {}", e);
     }
