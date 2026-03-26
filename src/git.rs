@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use chrono::{DateTime, Utc};
+use chrono::DateTime;
 use git2::{BranchType, Repository, StatusOptions};
 
 use crate::git_commands;
@@ -318,7 +318,7 @@ fn try_resolve_shortid(
                                 }));
                             }
                             bail!(
-                                "Commit has no file at index {}\nRun `git-loom status -f` to see available IDs",
+                                "Commit has no file at index {}\nRun `loom status -f` to see available IDs",
                                 index
                             );
                         }
@@ -672,7 +672,7 @@ fn walk_context_commits(
 
 /// Format a Unix epoch timestamp as YYYY-MM-DD.
 fn format_epoch(epoch: i64) -> String {
-    DateTime::<Utc>::from_timestamp(epoch, 0)
+    DateTime::from_timestamp(epoch, 0)
         .map(|dt| dt.format("%Y-%m-%d").to_string())
         .unwrap_or_else(|| "????-??-??".to_string())
 }
