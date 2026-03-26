@@ -5,8 +5,8 @@ use git2::BranchType;
 use serde::{Deserialize, Serialize};
 
 use crate::git;
-use crate::git_commands::git_rebase::RebaseOutcome;
-use crate::git_commands::{self, git_branch, git_rebase};
+
+use crate::git_commands::{self, RebaseOutcome};
 use crate::msg;
 use crate::transaction::{self, LoomState, Rollback};
 use crate::weave::Weave;
@@ -108,7 +108,7 @@ pub fn run(skip_confirm: bool) -> Result<()> {
         Err(_) => {
             // Fallback: no integration topology (e.g., plain branch with no weave).
             // Use plain rebase.
-            git_rebase::rebase(&git_dir, &workdir, &upstream_name)
+            git_commands::rebase(&git_dir, &workdir, &upstream_name)
         }
     };
 
@@ -125,7 +125,7 @@ pub fn run(skip_confirm: bool) -> Result<()> {
             transaction::warn_conflict_paused("update");
         }
         Err(e) => {
-            let _ = git_rebase::abort(&workdir);
+            let _ = git_commands::rebase_abort(&workdir);
             transaction::delete(&git_dir)?;
             spinner.error("Rebase failed");
             return Err(e);
@@ -206,7 +206,7 @@ fn post_update(workdir: &Path, repo: &git2::Repository, ctx: &UpdateContext) -> 
             })?;
         if confirmed {
             for name in &gone {
-                match git_branch::delete(workdir, name) {
+                match git_commands::branch_delete(workdir, name) {
                     Ok(()) => msg::success(&format!("Removed branch `{}`", name)),
                     Err(_) => {
                         msg::warn(&format!(

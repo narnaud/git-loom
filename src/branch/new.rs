@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use git2::Repository;
 
 use crate::git;
-use crate::git_commands::{self, git_branch};
+use crate::git_commands;
 use crate::msg;
 use crate::weave::{self, Weave};
 
@@ -38,7 +38,7 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
         bail!("Branch name cannot be empty");
     }
 
-    git_branch::validate_name(&name)?;
+    git_commands::branch_validate_name(&name)?;
 
     git::ensure_branch_not_exists(&repo, &name)?;
 
@@ -48,7 +48,7 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
 
     let commit_hash = resolve_commit(&repo, &info, target.as_deref())?;
 
-    git_branch::create(workdir, &name, &commit_hash)?;
+    git_commands::branch_create(workdir, &name, &commit_hash)?;
 
     warn_if_hidden(&repo, &name);
     msg::success(&format!(
@@ -70,7 +70,7 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
         if let Err(e) =
             weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo)
         {
-            let _ = git_branch::delete(workdir, &name);
+            let _ = git_commands::branch_delete(workdir, &name);
             return Err(e);
         }
 

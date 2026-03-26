@@ -29,7 +29,7 @@ fn run_merge_cmd(workdir: &Path, git_dir: &Path, args: &[&str]) -> Result<MergeO
     match super::run_git(workdir, args) {
         Ok(()) => Ok(MergeOutcome::Completed),
         Err(e) => {
-            if is_in_progress(git_dir) {
+            if merge_is_in_progress(git_dir) {
                 Ok(MergeOutcome::Conflicted)
             } else {
                 Err(e)
@@ -39,13 +39,13 @@ fn run_merge_cmd(workdir: &Path, git_dir: &Path, args: &[&str]) -> Result<MergeO
 }
 
 /// Abort an in-progress merge.
-pub fn abort(workdir: &Path) -> Result<()> {
+pub fn merge_abort(workdir: &Path) -> Result<()> {
     super::run_git(workdir, &["merge", "--abort"])
 }
 
 /// Check whether a merge is currently in progress.
 ///
 /// Detects the presence of `MERGE_HEAD`, which git creates when a merge is paused.
-pub fn is_in_progress(git_dir: &Path) -> bool {
+pub fn merge_is_in_progress(git_dir: &Path) -> bool {
     git_dir.join("MERGE_HEAD").exists()
 }

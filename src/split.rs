@@ -2,15 +2,15 @@ use anyhow::{Result, bail};
 use git2::{Oid, Repository};
 
 use crate::git::{self, Target, TargetKind};
-use crate::git_commands::{self, git_commit, git_rebase};
+use crate::git_commands;
 use crate::msg;
 use crate::weave;
 
 /// Commit with `-m` message or open the editor.
 fn commit_or_editor(workdir: &std::path::Path, message: Option<&str>) -> Result<()> {
     match message {
-        Some(m) => git_commit::commit(workdir, m),
-        None => git_commit::commit_with_editor(workdir),
+        Some(m) => git_commands::commit(workdir, m),
+        None => git_commands::commit_with_editor(workdir),
     }
 }
 
@@ -191,15 +191,15 @@ fn perform_head_split(
     msg1: Option<&str>,
     msg2: &str,
 ) -> Result<(String, String)> {
-    git_commit::reset_mixed(workdir, "HEAD~1")?;
+    git_commands::reset_mixed(workdir, "HEAD~1")?;
 
     let selected_refs: Vec<&str> = selected.iter().map(|s| s.as_str()).collect();
-    git_commit::stage_files(workdir, &selected_refs)?;
+    git_commands::stage_files(workdir, &selected_refs)?;
     commit_or_editor(workdir, msg1)?;
 
     let remaining_refs: Vec<&str> = remaining.iter().map(|s| s.as_str()).collect();
-    git_commit::stage_files(workdir, &remaining_refs)?;
-    git_commit::commit(workdir, msg2)?;
+    git_commands::stage_files(workdir, &remaining_refs)?;
+    git_commands::commit(workdir, msg2)?;
 
     // HEAD is the second commit, HEAD~1 is the first
     let hash2 = git_commands::rev_parse(workdir, "HEAD")?;
@@ -235,7 +235,7 @@ fn perform_non_head_split(
     let (hash1, hash2) = match perform_head_split(workdir, selected, remaining, msg1, msg2) {
         Ok(hashes) => hashes,
         Err(e) => {
-            let _ = git_rebase::abort(workdir);
+            let _ = git_commands::rebase_abort(workdir);
             return Err(e);
         }
     };
@@ -243,7 +243,7 @@ fn perform_non_head_split(
     // Continue the rebase — later commits are replayed on top of the split
     // commits, so hash1 and hash2 remain valid (they are ancestors).
     // Abort automatically on conflict — split does not save LoomState.
-    git_rebase::continue_rebase_or_abort(workdir)?;
+    git_commands::continue_rebase_or_abort(workdir)?;
 
     Ok((hash1, hash2))
 }

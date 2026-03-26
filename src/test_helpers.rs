@@ -383,7 +383,7 @@ impl TestRepo {
     /// Delete a local branch (including its tracking config).
     pub fn delete_branch(&self, name: &str) {
         let workdir = self.workdir();
-        crate::git_commands::run_git(workdir.as_path(), &["branch", "-D", name]).unwrap();
+        crate::git_commands::branch_delete(workdir.as_path(), name).unwrap();
     }
 
     /// Get the current HEAD commit OID.
@@ -607,35 +607,28 @@ impl TestRepo {
 
     /// Create a branch at a specific commit hash.
     pub fn create_branch_at(&self, name: &str, commit_hash: &str) {
-        crate::git_commands::git_branch::create(self.workdir().as_path(), name, commit_hash)
-            .unwrap();
+        crate::git_commands::branch_create(self.workdir().as_path(), name, commit_hash).unwrap();
     }
 
     /// Merge a branch into the current branch with --no-ff.
     pub fn merge_no_ff(&self, branch: &str) {
-        let outcome = crate::git_commands::git_merge::merge_no_ff(
-            self.workdir().as_path(),
-            self.repo.path(),
-            branch,
-        )
-        .unwrap();
+        let outcome =
+            crate::git_commands::merge_no_ff(self.workdir().as_path(), self.repo.path(), branch)
+                .unwrap();
         assert!(
-            matches!(
-                outcome,
-                crate::git_commands::git_merge::MergeOutcome::Completed
-            ),
+            matches!(outcome, crate::git_commands::MergeOutcome::Completed),
             "merge_no_ff: expected Completed, got Conflicted"
         );
     }
 
     /// Stage files in the working directory.
     pub fn stage_files(&self, files: &[&str]) {
-        crate::git_commands::git_commit::stage_files(self.workdir().as_path(), files).unwrap();
+        crate::git_commands::stage_files(self.workdir().as_path(), files).unwrap();
     }
 
     /// Commit already-staged files with a message.
     pub fn commit_staged(&self, message: &str) {
-        crate::git_commands::git_commit::commit(self.workdir().as_path(), message).unwrap();
+        crate::git_commands::commit(self.workdir().as_path(), message).unwrap();
     }
 
     /// Get the names of files that differ from HEAD.
@@ -661,8 +654,7 @@ impl TestRepo {
 
     /// Rebase commits between `upstream` and HEAD onto `newbase` with --update-refs.
     pub fn rebase_onto(&self, newbase: &str, upstream: &str) {
-        crate::git_commands::git_rebase::rebase_onto(self.workdir().as_path(), newbase, upstream)
-            .unwrap();
+        crate::git_commands::rebase_onto(self.workdir().as_path(), newbase, upstream).unwrap();
     }
 
     /// Get all non-merge commit messages between HEAD and merge-base.

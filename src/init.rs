@@ -2,7 +2,7 @@ use anyhow::{Result, bail};
 use git2::{BranchType, Repository};
 
 use crate::git;
-use crate::git_commands::git_branch;
+use crate::git_commands;
 use crate::msg;
 
 /// Initialize a new integration branch tracking a remote upstream.
@@ -20,13 +20,13 @@ pub fn run(name: Option<String>) -> Result<()> {
         bail!("Branch name cannot be empty");
     }
 
-    git_branch::validate_name(&name)?;
+    git_commands::branch_validate_name(&name)?;
 
     git::ensure_branch_not_exists(&repo, &name)?;
 
     let upstream = detect_upstream(&repo)?;
 
-    git_branch::switch_create_tracking(workdir, &name, &upstream)?;
+    git_commands::branch_switch_create_tracking(workdir, &name, &upstream)?;
 
     msg::success(&format!(
         "Initialized integration branch `{}` tracking `{}`",

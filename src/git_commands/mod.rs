@@ -1,7 +1,30 @@
+pub mod git_apply;
 pub mod git_branch;
 pub mod git_commit;
+pub mod git_diff;
 pub mod git_merge;
 pub mod git_rebase;
+
+pub use git_apply::{apply_cached_patch, apply_patch, apply_patch_reverse, restore_staged_patch};
+pub use git_branch::{
+    branch_create, branch_delete, branch_force_create, branch_rename, branch_switch,
+    branch_switch_create_tracking, branch_switch_detach, branch_validate_name,
+};
+pub use git_commit::{
+    commit, commit_amend, commit_amend_no_edit, commit_with_editor, reset_hard, reset_mixed,
+    stage_all, stage_files, stage_path,
+};
+pub use git_diff::{
+    diff_cached_files, diff_commit, diff_commit_file, diff_head, diff_head_file, diff_head_files,
+    diff_head_name_only,
+};
+pub use git_merge::{MergeOutcome, continue_merge, merge_abort, merge_is_in_progress, merge_no_ff};
+#[cfg(test)]
+pub use git_rebase::rebase_onto;
+pub use git_rebase::{
+    RebaseOutcome, continue_rebase, continue_rebase_or_abort, rebase, rebase_abort,
+    rebase_is_in_progress,
+};
 
 use std::path::Path;
 use std::process::Command;
@@ -106,91 +129,6 @@ pub fn run_git_interactive(workdir: &Path, args: &[&str]) -> Result<()> {
     Ok(())
 }
 
-/// Get the diff for a single commit (its changes relative to its parent).
-///
-/// Wraps `git diff <oid>^..<oid>`.
-pub fn diff_commit(workdir: &Path, oid: &str) -> Result<String> {
-    run_git_stdout(workdir, &["diff", &format!("{}^..{}", oid, oid)])
-}
-
-/// Get the diff for a single file within a commit (relative to its parent).
-///
-/// Wraps `git diff <oid>^..<oid> -- <path>`.
-pub fn diff_commit_file(workdir: &Path, oid: &str, path: &str) -> Result<String> {
-    run_git_stdout(
-        workdir,
-        &["diff", &format!("{}^..{}", oid, oid), "--", path],
-    )
-}
-
-/// Apply a patch from stdin.
-///
-/// Wraps `git apply` with the patch passed via stdin.
-pub fn apply_patch(workdir: &Path, patch: &str) -> Result<()> {
-    apply_patch_with_flags(workdir, patch, &[])
-}
-
-/// Apply a patch in reverse from stdin.
-///
-/// Wraps `git apply --reverse` with the patch passed via stdin.
-pub fn apply_patch_reverse(workdir: &Path, patch: &str) -> Result<()> {
-    apply_patch_with_flags(workdir, patch, &["--reverse"])
-}
-
-/// Apply a patch to the index only (not the working tree).
-///
-/// Wraps `git apply --cached` with the patch passed via stdin.
-pub fn apply_cached_patch(workdir: &Path, patch: &str) -> Result<()> {
-    apply_patch_with_flags(workdir, patch, &["--cached"])
-}
-
-fn apply_patch_with_flags(workdir: &Path, patch: &str, flags: &[&str]) -> Result<()> {
-    let mut args = vec!["apply"];
-    args.extend(flags);
-
-    let start = Instant::now();
-    let mut child = Command::new("git")
-        .current_dir(workdir)
-        .args(&args)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()?;
-
-    if let Some(mut stdin) = child.stdin.take() {
-        use std::io::Write;
-        stdin.write_all(patch.as_bytes())?;
-    }
-
-    let output = child.wait_with_output()?;
-    let duration_ms = start.elapsed().as_millis();
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    loom_trace::log_command(
-        "git",
-        &args.join(" "),
-        duration_ms,
-        output.status.success(),
-        &stderr,
-    );
-
-    if !output.status.success() {
-        let flag = args[1..].join(" ");
-        bail!("Git apply {} failed", flag);
-    }
-
-    Ok(())
-}
-
-/// Get the staged (cached) diff for specific files.
-///
-/// Wraps `git diff --cached -- <files>`. Returns an empty string if the
-/// files have no staged changes.
-pub fn diff_cached_files(workdir: &Path, files: &[&str]) -> Result<String> {
-    let mut args = vec!["diff", "--cached", "--"];
-    args.extend(files);
-    run_git_stdout(workdir, &args)
-}
-
 /// Unstage specific files (remove from index without touching the working tree).
 ///
 /// Wraps `git reset HEAD -- <files>`.
@@ -209,42 +147,12 @@ pub fn restore_files_to_head(workdir: &Path, files: &[&str]) -> Result<()> {
     run_git(workdir, &args)
 }
 
-/// Get the diff of all tracked files against HEAD (name-only).
-///
-/// Wraps `git diff HEAD --name-only`. Returns one filename per line.
-pub fn diff_head_name_only(workdir: &Path) -> Result<String> {
-    run_git_stdout(workdir, &["diff", "HEAD", "--name-only"])
-}
-
-/// Get the unified diff for a single file against HEAD.
-///
-/// Wraps `git diff HEAD -- <path>`.
-pub fn diff_head_file(workdir: &Path, path: &str) -> Result<String> {
-    run_git_stdout(workdir, &["diff", "HEAD", "--", path])
-}
-
 /// Resolve a git ref to its full commit hash.
 ///
 /// Wraps `git rev-parse <ref>` and trims the output.
 pub fn rev_parse(workdir: &Path, reference: &str) -> Result<String> {
     let out = run_git_stdout(workdir, &["rev-parse", reference])?;
     Ok(out.trim().to_string())
-}
-
-/// Re-apply a previously saved staged patch, warning on failure.
-///
-/// No-ops if `patch` is empty. On failure, emits a warning to stderr — the
-/// primary operation has already succeeded, so this is best-effort.
-pub fn restore_staged_patch(workdir: &Path, patch: &str) -> Result<()> {
-    if !patch.is_empty()
-        && let Err(e) = apply_cached_patch(workdir, patch)
-    {
-        eprintln!(
-            "Warning: could not restore pre-existing staged changes: {}",
-            e
-        );
-    }
-    Ok(())
 }
 
 /// Truncate a full commit hash to a short display form (7 chars).

@@ -7,7 +7,7 @@ use anyhow::Result;
 /// Wraps `git commit --allow-empty --amend --only [-m msg]`.
 /// Uses `--only` so that staged changes are not accidentally included.
 /// When `message` is `None`, inherits stdio so git can open the user's editor.
-pub fn amend(workdir: &Path, message: Option<&str>) -> Result<()> {
+pub fn commit_amend(workdir: &Path, message: Option<&str>) -> Result<()> {
     if let Some(msg) = message {
         super::run_git(
             workdir,
@@ -22,7 +22,7 @@ pub fn amend(workdir: &Path, message: Option<&str>) -> Result<()> {
 ///
 /// Wraps `git commit --amend --no-edit --allow-empty`.
 /// Unlike `amend()`, this does NOT use `--only`, so staged changes are included.
-pub fn amend_no_edit(workdir: &Path) -> Result<()> {
+pub fn commit_amend_no_edit(workdir: &Path) -> Result<()> {
     super::run_git(
         workdir,
         &["commit", "--amend", "--no-edit", "--allow-empty"],

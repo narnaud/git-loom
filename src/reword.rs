@@ -3,8 +3,8 @@ use git2::Repository;
 
 use crate::branch;
 use crate::git::{self, Target};
-use crate::git_commands::git_rebase;
-use crate::git_commands::{self, git_branch, git_commit};
+
+use crate::git_commands;
 use crate::msg;
 use crate::weave;
 
@@ -38,7 +38,7 @@ pub fn run(target: String, message: Option<String>) -> Result<()> {
             if new_name == name {
                 return Ok(());
             }
-            git_branch::validate_name(&new_name)?;
+            git_commands::branch_validate_name(&new_name)?;
             reword_branch(&repo, &name, &new_name)
         }
         _ => unreachable!(),
@@ -61,8 +61,8 @@ pub fn reword_commit(repo: &Repository, commit_hash: &str, message: Option<Strin
     weave::start_edit_rebase(repo, workdir, commit_oid)?;
 
     // Step 2: Amend the commit message
-    if let Err(e) = git_commit::amend(workdir, message.as_deref()) {
-        let _ = git_rebase::abort(workdir);
+    if let Err(e) = git_commands::commit_amend(workdir, message.as_deref()) {
+        let _ = git_commands::rebase_abort(workdir);
         return Err(e);
     }
 
@@ -70,7 +70,7 @@ pub fn reword_commit(repo: &Repository, commit_hash: &str, message: Option<Strin
     let new_hash = repo.head()?.peel_to_commit()?.id().to_string();
 
     // Step 3: Continue the rebase (abort automatically on conflict)
-    git_rebase::continue_rebase_or_abort(workdir)?;
+    git_commands::continue_rebase_or_abort(workdir)?;
 
     msg::success(&format!(
         "Updated commit message for `{}` (now `{}`)",
@@ -85,7 +85,7 @@ pub fn reword_commit(repo: &Repository, commit_hash: &str, message: Option<Strin
 pub fn reword_branch(repo: &Repository, old_name: &str, new_name: &str) -> Result<()> {
     let workdir = git::require_workdir(repo, "rename branch")?;
 
-    git_branch::rename(workdir, old_name, new_name)?;
+    git_commands::branch_rename(workdir, old_name, new_name)?;
 
     branch::warn_if_hidden(repo, new_name);
     msg::success(&format!("Renamed branch `{}` to `{}`", old_name, new_name));

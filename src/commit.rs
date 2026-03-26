@@ -5,7 +5,7 @@ use git2::{Repository, StatusOptions};
 use serde::{Deserialize, Serialize};
 
 use crate::git::{self, Target};
-use crate::git_commands::{self, git_branch, git_commit};
+use crate::git_commands;
 use crate::msg;
 use crate::transaction::{self, LoomState, Rollback};
 use crate::weave::{self, RebaseOutcome, Weave};
@@ -49,9 +49,9 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
     // branches already exist.
     if branch.is_none() && info.branch_name == git::upstream_local_branch(&info.upstream.label) {
         let result = if let Some(msg) = &message {
-            git_commit::commit(&workdir, msg)
+            git_commands::commit(&workdir, msg)
         } else {
-            git_commit::commit_with_editor(&workdir)
+            git_commands::commit_with_editor(&workdir)
         };
         git_commands::restore_staged_patch(&workdir, &saved_staged)?;
         result?;
@@ -85,9 +85,9 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
 
     // Step 5: Create commit at HEAD
     let commit_result = if let Some(msg) = &message {
-        git_commit::commit(&workdir, msg)
+        git_commands::commit(&workdir, msg)
     } else {
-        git_commit::commit_with_editor(&workdir)
+        git_commands::commit_with_editor(&workdir)
     };
     if let Err(e) = commit_result {
         git_commands::restore_staged_patch(&workdir, &saved_staged)?;
@@ -190,7 +190,7 @@ fn resolve_staging(
     }
 
     if files.iter().any(|f| f == "zz") {
-        git_commit::stage_all(workdir)?;
+        git_commands::stage_all(workdir)?;
         return Ok(String::new());
     }
 
@@ -205,7 +205,7 @@ fn resolve_staging(
     // Save and unstage any pre-existing staged files not in our target list.
     let saved_staged = save_and_unstage_other_staged(repo, workdir, &path_refs)?;
 
-    git_commit::stage_files(workdir, &path_refs)?;
+    git_commands::stage_files(workdir, &path_refs)?;
 
     Ok(saved_staged)
 }
@@ -305,7 +305,7 @@ fn resolve_explicit_branch(
             if name.is_empty() {
                 bail!("Branch name cannot be empty");
             }
-            git_branch::validate_name(&name)?;
+            git_commands::branch_validate_name(&name)?;
 
             if repo.find_branch(&name, git2::BranchType::Local).is_ok() {
                 bail!(
@@ -346,7 +346,7 @@ fn pick_branch(
 
     // If user typed a name that isn't an existing woven branch, create it
     if !branch_names.contains(&name) {
-        git_branch::validate_name(&name)?;
+        git_commands::branch_validate_name(&name)?;
         git::ensure_branch_not_exists(repo, &name)?;
         create_branch_at_merge_base(workdir, &name, info.upstream.merge_base_oid)?;
     }
@@ -376,7 +376,7 @@ fn create_branch_at_merge_base(
 ) -> Result<()> {
     let merge_base_hash = merge_base_oid.to_string();
 
-    git_branch::create(workdir, name, &merge_base_hash)?;
+    git_commands::branch_create(workdir, name, &merge_base_hash)?;
 
     msg::success(&format!(
         "Created branch `{}` at `{}`",
