@@ -1121,7 +1121,7 @@ fn build_and_run_linear_edit(repo: &Repository, workdir: &Path, commit_oid: Oid)
 }
 
 /// Outcome of a weave-based rebase.
-pub use crate::git_commands::git_rebase::RebaseOutcome;
+pub use crate::git_commands::RebaseOutcome;
 
 /// Execute a weave-based rebase, aborting automatically on conflict.
 ///
@@ -1135,7 +1135,7 @@ pub fn run_rebase_or_abort(
     match run_rebase(workdir, upstream, todo_content)? {
         RebaseOutcome::Completed => Ok(()),
         RebaseOutcome::Conflicted => {
-            let _ = git_commands::git_rebase::abort(workdir);
+            let _ = git_commands::rebase_abort(workdir);
             bail!("Rebase failed with conflicts — aborted");
         }
     }
@@ -1253,7 +1253,7 @@ pub fn run_rebase(
             git_commands::run_git_stdout(workdir, &["rev-parse", "--absolute-git-dir"])
         {
             let git_dir = std::path::Path::new(git_dir_str.trim());
-            if git_commands::git_rebase::is_in_progress(git_dir) {
+            if git_commands::rebase_is_in_progress(git_dir) {
                 return Ok(RebaseOutcome::Conflicted);
             }
         }

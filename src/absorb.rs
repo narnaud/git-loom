@@ -6,7 +6,7 @@ use git2::{Oid, Repository};
 use serde::{Deserialize, Serialize};
 
 use crate::git::{self, CommitInfo, RepoInfo};
-use crate::git_commands::{self, git_commit};
+use crate::git_commands;
 use crate::msg;
 use crate::transaction::{self, LoomState, Rollback};
 use crate::weave::{self, RebaseOutcome, Weave};
@@ -222,7 +222,7 @@ fn apply_plan(repo: &Repository, workdir: &Path, git_dir: &Path, plan: AbsorbPla
     };
 
     // Snapshot full working-tree diff before any mutations (needed for pre-rebase rollback).
-    let saved_worktree = git_commands::run_git_stdout(workdir, &["diff", "HEAD"])?;
+    let saved_worktree = git_commands::diff_head(workdir)?;
 
     // Create fixup commits; rolls back to pre-mutation state on any failure.
     let fixup_pairs = create_fixup_commits(
@@ -304,7 +304,7 @@ fn create_fixup_commits(
 
     for (target_oid, files) in groups {
         let file_refs: Vec<&str> = files.iter().map(|s| s.as_str()).collect();
-        if let Err(e) = git_commit::stage_files(workdir, &file_refs) {
+        if let Err(e) = git_commands::stage_files(workdir, &file_refs) {
             rollback_pre_rebase(
                 workdir,
                 saved_head,
@@ -315,7 +315,7 @@ fn create_fixup_commits(
             return Err(e);
         }
         let msg = format!("fixup! absorb into {}", target_oid);
-        if let Err(e) = git_commit::commit(workdir, &msg) {
+        if let Err(e) = git_commands::commit(workdir, &msg) {
             rollback_pre_rebase(
                 workdir,
                 saved_head,
@@ -346,7 +346,7 @@ fn create_fixup_commits(
             return Err(e);
         }
         let msg = format!("fixup! absorb into {}", target_oid);
-        if let Err(e) = git_commit::commit(workdir, &msg) {
+        if let Err(e) = git_commands::commit(workdir, &msg) {
             rollback_pre_rebase(
                 workdir,
                 saved_head,
@@ -374,9 +374,7 @@ fn save_skipped_patch(workdir: &Path, skipped_files: &[String]) -> Result<Option
     if dirty.trim().is_empty() {
         return Ok(None);
     }
-    let mut diff_args = vec!["diff", "HEAD", "--"];
-    diff_args.extend(refs.iter().copied());
-    let patch = git_commands::run_git_stdout(workdir, &diff_args)?;
+    let patch = git_commands::diff_head_files(workdir, &refs)?;
     let _ = git_commands::restore_files_to_head(workdir, &refs);
     Ok(Some(patch))
 }
@@ -393,7 +391,7 @@ fn rollback_pre_rebase(
     saved_staged: &str,
     saved_worktree: &str,
 ) {
-    let _ = git_commit::reset_hard(workdir, saved_head);
+    let _ = git_commands::reset_hard(workdir, saved_head);
     let _ = git::restore_branch_refs(workdir, saved_refs);
     if !saved_staged.is_empty() {
         let _ = git_commands::apply_cached_patch(workdir, saved_staged);

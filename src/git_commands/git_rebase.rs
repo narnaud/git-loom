@@ -50,7 +50,7 @@ pub fn rebase(git_dir: &Path, workdir: &Path, upstream: &str) -> Result<RebaseOu
     ) {
         Ok(()) => Ok(RebaseOutcome::Completed),
         Err(e) => {
-            if is_in_progress(git_dir) {
+            if rebase_is_in_progress(git_dir) {
                 Ok(RebaseOutcome::Conflicted)
             } else {
                 Err(e)
@@ -79,7 +79,7 @@ pub fn rebase_onto(workdir: &Path, newbase: &str, upstream: &str) -> Result<()> 
 }
 
 /// Abort an in-progress rebase.
-pub fn abort(workdir: &Path) -> Result<()> {
+pub fn rebase_abort(workdir: &Path) -> Result<()> {
     super::run_git(workdir, &["rebase", "--abort"])
 }
 
@@ -87,7 +87,7 @@ pub fn abort(workdir: &Path) -> Result<()> {
 ///
 /// Detects the presence of `rebase-merge/` or `rebase-apply/` directories
 /// under the git dir, which git creates when a rebase is paused.
-pub fn is_in_progress(git_dir: &Path) -> bool {
+pub fn rebase_is_in_progress(git_dir: &Path) -> bool {
     git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists()
 }
 
@@ -99,7 +99,7 @@ pub fn continue_rebase_or_abort(workdir: &Path) -> Result<()> {
     match continue_rebase(workdir)? {
         RebaseOutcome::Completed => Ok(()),
         RebaseOutcome::Conflicted => {
-            let _ = abort(workdir);
+            let _ = rebase_abort(workdir);
             bail!("Rebase failed with conflicts — aborted");
         }
     }

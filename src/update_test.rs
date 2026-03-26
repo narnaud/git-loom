@@ -938,7 +938,7 @@ fn update_handles_inverted_parent_merge_on_integration() {
     // Verify the rebase fully completed (not paused on conflicts)
     let git_dir = test_repo.repo.path().to_path_buf();
     assert!(
-        !crate::git_commands::git_rebase::is_in_progress(&git_dir),
+        !crate::git_commands::rebase_is_in_progress(&git_dir),
         "rebase should not be in progress — expected clean completion, not conflict pause"
     );
 

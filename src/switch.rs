@@ -4,7 +4,7 @@ use anyhow::{Result, bail};
 use git2::{BranchType, Repository, StatusOptions};
 
 use crate::git;
-use crate::git_commands::git_branch;
+use crate::git_commands;
 use crate::msg;
 
 /// Switch to any branch (local or remote) for testing without weaving it into
@@ -22,10 +22,10 @@ pub fn run(branch: Option<String>) -> Result<()> {
     };
 
     if is_remote {
-        git_branch::switch_detach(workdir, &branch_name)?;
+        git_commands::branch_switch_detach(workdir, &branch_name)?;
         msg::success(&format!("Detached HEAD at `{}`", branch_name));
     } else {
-        git_branch::switch(workdir, &branch_name)?;
+        git_commands::branch_switch(workdir, &branch_name)?;
         msg::success(&format!("Switched to `{}`", branch_name));
     }
 

@@ -67,7 +67,7 @@ fn unmerge_conflict_aborts() {
 
     // The rebase must be fully aborted — no stale git rebase state.
     assert!(
-        !crate::git_commands::git_rebase::is_in_progress(test_repo.repo.path()),
+        !crate::git_commands::rebase_is_in_progress(test_repo.repo.path()),
         "rebase should be aborted, not left paused"
     );
     // No loom state file should be left behind.

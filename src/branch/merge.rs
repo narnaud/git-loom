@@ -3,8 +3,7 @@ use git2::{BranchType, Repository};
 use serde::{Deserialize, Serialize};
 
 use crate::git;
-use crate::git_commands::git_branch;
-use crate::git_commands::git_merge::MergeOutcome;
+use crate::git_commands::{self, MergeOutcome};
 use crate::msg;
 use crate::transaction::{self, LoomState, Rollback};
 
@@ -32,7 +31,7 @@ pub fn run(branch: Option<String>, all: bool) -> Result<()> {
     // If this is a remote branch (contains '/'), create a local tracking branch
     let local_name = if branch_name.contains('/') {
         let local = git::upstream_local_branch(&branch_name);
-        git_branch::create(workdir, &local, &branch_name)?;
+        git_commands::branch_create(workdir, &local, &branch_name)?;
         // Set up tracking
         let mut local_branch = repo.find_branch(&local, BranchType::Local)?;
         local_branch.set_upstream(Some(&branch_name))?;
@@ -42,7 +41,7 @@ pub fn run(branch: Option<String>, all: bool) -> Result<()> {
     };
 
     // Merge the branch into integration (--no-ff) so it appears in the topology
-    match crate::git_commands::git_merge::merge_no_ff(workdir, &git_dir, &local_name)? {
+    match crate::git_commands::merge_no_ff(workdir, &git_dir, &local_name)? {
         MergeOutcome::Completed => {
             msg::success(&format!("Woven `{}` into integration branch", local_name));
         }

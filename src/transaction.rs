@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
-use crate::git_commands::{self, git_branch, git_commit, git_merge, git_rebase};
+use crate::git_commands;
 
 /// Persistent state saved when a loom command is paused due to a rebase conflict.
 #[derive(Debug, Serialize, Deserialize)]
@@ -52,13 +52,13 @@ impl Rollback {
     /// - `saved_worktree_patch` → re-apply saved working-tree changes
     pub fn apply_abort(&self, workdir: &Path) -> Result<()> {
         if !self.reset_mixed_to.is_empty() {
-            git_commit::reset_mixed(workdir, &self.reset_mixed_to)?;
+            git_commands::reset_mixed(workdir, &self.reset_mixed_to)?;
         }
         if !self.reset_hard_to.is_empty() {
-            git_commit::reset_hard(workdir, &self.reset_hard_to)?;
+            git_commands::reset_hard(workdir, &self.reset_hard_to)?;
         }
         for branch in &self.delete_branches {
-            let _ = git_branch::delete(workdir, branch);
+            let _ = git_commands::branch_delete(workdir, branch);
         }
         git_commands::restore_staged_patch(workdir, &self.saved_staged_patch)?;
         if !self.saved_worktree_patch.is_empty()
@@ -159,21 +159,21 @@ pub fn abort_run() -> Result<()> {
 pub fn continue_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
     let state = load_required(git_dir)?;
 
-    if git_rebase::is_in_progress(git_dir) {
-        match git_rebase::continue_rebase(workdir)? {
-            git_rebase::RebaseOutcome::Conflicted => {
+    if git_commands::rebase_is_in_progress(git_dir) {
+        match git_commands::continue_rebase(workdir)? {
+            git_commands::RebaseOutcome::Conflicted => {
                 crate::msg::warn("Conflicts remain — resolve them and run `loom continue` again");
                 return Ok(());
             }
-            git_rebase::RebaseOutcome::Completed => {}
+            git_commands::RebaseOutcome::Completed => {}
         }
-    } else if git_merge::is_in_progress(git_dir) {
-        match git_merge::continue_merge(workdir, git_dir)? {
-            git_merge::MergeOutcome::Conflicted => {
+    } else if git_commands::merge_is_in_progress(git_dir) {
+        match git_commands::continue_merge(workdir, git_dir)? {
+            git_commands::MergeOutcome::Conflicted => {
                 crate::msg::warn("Conflicts remain — resolve them and run `loom continue` again");
                 return Ok(());
             }
-            git_merge::MergeOutcome::Completed => {}
+            git_commands::MergeOutcome::Completed => {}
         }
     }
     // else: no rebase or merge is in progress — the user already ran
@@ -195,10 +195,10 @@ pub fn continue_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
 pub fn abort_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
     let state = load_required(git_dir)?;
 
-    if git_rebase::is_in_progress(git_dir) {
-        let _ = git_rebase::abort(workdir);
-    } else if git_merge::is_in_progress(git_dir) {
-        let _ = git_merge::abort(workdir);
+    if git_commands::rebase_is_in_progress(git_dir) {
+        let _ = git_commands::rebase_abort(workdir);
+    } else if git_commands::merge_is_in_progress(git_dir) {
+        let _ = git_commands::merge_abort(workdir);
     }
 
     state.rollback.apply_abort(workdir)?;

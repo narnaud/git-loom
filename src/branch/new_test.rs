@@ -41,13 +41,13 @@ fn branch_ownership_splits_commits() {
 
 #[test]
 fn branch_invalid_name_fails() {
-    let result = crate::git_commands::git_branch::validate_name("my..branch");
+    let result = crate::git_commands::branch_validate_name("my..branch");
     assert!(result.is_err(), "double dots should be invalid");
 
-    let result = crate::git_commands::git_branch::validate_name("has space");
+    let result = crate::git_commands::branch_validate_name("has space");
     assert!(result.is_err(), "spaces should be invalid");
 
-    let result = crate::git_commands::git_branch::validate_name("valid-name");
+    let result = crate::git_commands::branch_validate_name("valid-name");
     assert!(result.is_ok(), "valid name should pass");
 }
 

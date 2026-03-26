@@ -596,7 +596,7 @@ fn absorb_abort_preserves_working_state() {
     // 2. Unstage everything so that git diff HEAD captures all working changes.
     crate::git_commands::run_git(&workdir, &["restore", "--staged", "."]).unwrap();
     // 3. Save full working-tree diff (other-staged.txt unstaged + other-unstaged.txt + feature.txt).
-    let saved_worktree = crate::git_commands::run_git_stdout(&workdir, &["diff", "HEAD"]).unwrap();
+    let saved_worktree = crate::git_commands::diff_head(&workdir).unwrap();
     // 4. Clear the working tree back to HEAD (absorb does this before creating fixup commits).
     //    new-file.txt is untracked and is not touched by `restore`.
     crate::git_commands::run_git(&workdir, &["restore", "--staged", "--worktree", "."]).unwrap();

@@ -68,7 +68,7 @@ pub fn restore_branch_refs(workdir: &Path, snapshot: &HashMap<String, git2::Oid>
     for name in current_branches.keys() {
         if !snapshot.contains_key(name)
             && Some(name.as_str()) != head_branch.as_deref()
-            && let Err(e) = git_commands::run_git(workdir, &["branch", "-D", name])
+            && let Err(e) = git_commands::branch_delete(workdir, name)
         {
             failures.push(format!("delete '{}': {}", name, e));
         }
@@ -80,7 +80,7 @@ pub fn restore_branch_refs(workdir: &Path, snapshot: &HashMap<String, git2::Oid>
             continue; // HEAD's branch is handled by reset --hard
         }
         let oid_str = oid.to_string();
-        if let Err(e) = git_commands::run_git(workdir, &["branch", "-f", name, &oid_str]) {
+        if let Err(e) = git_commands::branch_force_create(workdir, name, &oid_str) {
             failures.push(format!("restore '{}': {}", name, e));
         }
     }

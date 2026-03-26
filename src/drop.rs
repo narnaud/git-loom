@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::branch::is_on_first_parent_line;
 use crate::git::{self, Target, TargetKind};
-use crate::git_commands::{self, git_branch};
+use crate::git_commands;
 use crate::msg;
 use crate::transaction::{self, LoomState, Rollback};
 use crate::weave::{self, RebaseOutcome, Weave};
@@ -252,7 +252,7 @@ fn drop_branch_with_info(
         if !skip_confirm && !msg::confirm(&format!("Drop empty branch `{}`?", branch_name))? {
             bail!("Cancelled");
         }
-        git_branch::delete(workdir, branch_name)?;
+        git_commands::branch_delete(workdir, branch_name)?;
         msg::success(&format!("Dropped branch `{}`", branch_name));
         return Ok(());
     }
@@ -301,7 +301,7 @@ fn drop_branch_with_info(
         }
     } else if owned.is_empty() {
         // Co-located non-woven: no commits to drop, just delete the ref
-        git_branch::delete(workdir, branch_name)?;
+        git_commands::branch_delete(workdir, branch_name)?;
         msg::success(&format!("Dropped branch `{}`", branch_name));
         return Ok(());
     } else {
@@ -315,7 +315,7 @@ fn drop_branch_with_info(
     weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo)?;
 
     // Delete the branch ref (warn on failure — extremely unlikely)
-    if let Err(e) = git_branch::delete(workdir, branch_name) {
+    if let Err(e) = git_commands::branch_delete(workdir, branch_name) {
         eprintln!(
             "warning: Could not delete branch ref '{}': {} (may have been cleaned up automatically)",
             branch_name, e
