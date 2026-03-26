@@ -538,17 +538,17 @@ fn analyze_file(
     path: &str,
     in_scope: &HashMap<Oid, &CommitInfo>,
 ) -> Result<FileAnalysis> {
+    if git_commands::diff_head_file_is_binary(workdir, path)? {
+        return Ok(FileAnalysis::Skipped {
+            reason: "binary file".to_string(),
+        });
+    }
+
     let diff = git_commands::diff_head_file(workdir, path)?;
 
     if diff.is_empty() {
         return Ok(FileAnalysis::Skipped {
             reason: "no changes".to_string(),
-        });
-    }
-
-    if diff.contains("Binary files") {
-        return Ok(FileAnalysis::Skipped {
-            reason: "binary file".to_string(),
         });
     }
 
