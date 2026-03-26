@@ -913,8 +913,12 @@ fn walk_first_parent_line(
 ) -> Result<Vec<FirstParentEntry>> {
     let mut entries = Vec::new();
     let mut current = head;
+    let mut visited: HashSet<Oid> = HashSet::new();
 
     while current != stop {
+        if !visited.insert(current) {
+            bail!("cycle detected in commit graph at {}", current);
+        }
         let commit = repo.find_commit(current)?;
 
         let short_hash = commit
@@ -1006,8 +1010,12 @@ fn walk_branch_commits(repo: &Repository, tip: Oid, stop: Oid) -> Result<Vec<Bra
 
     let mut entries = Vec::new();
     let mut current = tip;
+    let mut visited: HashSet<Oid> = HashSet::new();
 
     while current != actual_stop {
+        if !visited.insert(current) {
+            bail!("cycle detected in commit graph at {}", current);
+        }
         let commit = repo.find_commit(current)?;
 
         // Skip merge commits
@@ -1081,10 +1089,14 @@ fn build_and_run_linear_edit(repo: &Repository, workdir: &Path, commit_oid: Oid)
     // Walk from HEAD backward, collecting commits in the range
     let mut entries = Vec::new();
     let mut current = head_oid;
+    let mut visited: HashSet<Oid> = HashSet::new();
 
     loop {
         if Some(current) == stop {
             break;
+        }
+        if !visited.insert(current) {
+            bail!("cycle detected in commit graph at {}", current);
         }
 
         let c = repo.find_commit(current)?;
