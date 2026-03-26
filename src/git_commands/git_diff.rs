@@ -45,6 +45,16 @@ pub fn diff_head_file(workdir: &Path, path: &str) -> Result<String> {
     run_git_stdout(workdir, &["diff", "HEAD", "--", path])
 }
 
+/// Check whether a file is binary (has working-tree changes vs HEAD that git cannot diff as text).
+///
+/// Uses `git diff --numstat HEAD -- <path>`: binary files are reported with `-\t-` instead of
+/// numeric insertion/deletion counts. This is locale-independent, unlike the "Binary files"
+/// string in the standard diff output.
+pub fn diff_head_file_is_binary(workdir: &Path, path: &str) -> Result<bool> {
+    let out = run_git_stdout(workdir, &["diff", "--numstat", "HEAD", "--", path])?;
+    Ok(out.starts_with("-\t"))
+}
+
 /// Get the full unified diff of all working-tree changes against HEAD.
 ///
 /// Wraps `git diff HEAD`.
