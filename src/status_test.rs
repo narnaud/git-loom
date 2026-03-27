@@ -1,6 +1,6 @@
-use crate::git::gather_repo_info;
-use crate::shortid::IdAllocator;
-use crate::test_helpers::TestRepo;
+use crate::core::repo::gather_repo_info;
+use crate::core::shortid::IdAllocator;
+use crate::core::test_helpers::TestRepo;
 
 use super::{hide_branches, resolve_commit_filter};
 

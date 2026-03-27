@@ -1,5 +1,5 @@
-use crate::git;
-use crate::test_helpers::TestRepo;
+use crate::core::repo;
+use crate::core::test_helpers::TestRepo;
 
 /// Unmerging a woven branch removes it from integration but keeps the ref.
 #[test]
@@ -26,7 +26,7 @@ fn unmerge_removes_branch_from_integration() {
     assert!(test_repo.branch_exists("feature-a"));
 
     // feature-a should not be in the woven branches list
-    let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
+    let info = repo::gather_repo_info(&test_repo.repo, false, 1).unwrap();
     let branch_names: Vec<&str> = info.branches.iter().map(|b| b.name.as_str()).collect();
     assert!(
         !branch_names.contains(&"feature-a"),
@@ -67,7 +67,7 @@ fn unmerge_conflict_aborts() {
 
     // The rebase must be fully aborted — no stale git rebase state.
     assert!(
-        !crate::git_commands::rebase_is_in_progress(test_repo.repo.path()),
+        !crate::git::rebase_is_in_progress(test_repo.repo.path()),
         "rebase should be aborted, not left paused"
     );
     // No loom state file should be left behind.

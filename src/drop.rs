@@ -6,11 +6,11 @@ use git2::Repository;
 use serde::{Deserialize, Serialize};
 
 use crate::branch::is_on_first_parent_line;
-use crate::git::{self, Target, TargetKind};
-use crate::git_commands;
-use crate::msg;
-use crate::transaction::{self, LoomState, Rollback};
-use crate::weave::{self, RebaseOutcome, Weave};
+use crate::core::msg;
+use crate::core::repo::{self, Target, TargetKind};
+use crate::core::transaction::{self, LoomState, Rollback};
+use crate::core::weave::{self, RebaseOutcome, Weave};
+use crate::git;
 
 #[derive(Serialize, Deserialize)]
 struct DropContext {
@@ -25,9 +25,9 @@ struct DropContext {
 /// - File → restore/delete the file (tracked: restore, new: delete)
 /// - Unstaged (`zz`) → discard all local changes (restore + clean)
 pub fn run(target: String, skip_confirm: bool) -> Result<()> {
-    let repo = git::open_repo()?;
+    let repo = repo::open_repo()?;
 
-    let resolved = git::resolve_arg(
+    let resolved = repo::resolve_arg(
         &repo,
         &target,
         &[
@@ -49,7 +49,7 @@ pub fn run(target: String, skip_confirm: bool) -> Result<()> {
 
 /// Drop a file or directory: restore tracked changes, or delete new/untracked entries.
 fn drop_file(repo: &Repository, path: &str, skip_confirm: bool) -> Result<()> {
-    let workdir = git::require_workdir(repo, "drop")?;
+    let workdir = repo::require_workdir(repo, "drop")?;
     let full_path = workdir.join(path);
 
     // Directory — restore tracked changes and clean untracked files inside
@@ -67,14 +67,14 @@ fn drop_file(repo: &Repository, path: &str, skip_confirm: bool) -> Result<()> {
             if !skip_confirm && !msg::confirm(&format!("Discard all changes in `{}`?", path))? {
                 bail!("Cancelled");
             }
-            git_commands::run_git(workdir, &["restore", "--staged", "--worktree", path])?;
-            git_commands::run_git(workdir, &["clean", "-fd", "--", path])?;
+            git::run_git(workdir, &["restore", "--staged", "--worktree", path])?;
+            git::run_git(workdir, &["clean", "-fd", "--", path])?;
             msg::success(&format!("Restored `{}`", path));
         } else {
             if !skip_confirm && !msg::confirm(&format!("Delete `{}`?", path))? {
                 bail!("Cancelled");
             }
-            git_commands::run_git(workdir, &["clean", "-fd", "--", path])?;
+            git::run_git(workdir, &["clean", "-fd", "--", path])?;
             msg::success(&format!("Deleted `{}`", path));
         }
         return Ok(());
@@ -97,14 +97,14 @@ fn drop_file(repo: &Repository, path: &str, skip_confirm: bool) -> Result<()> {
         if !skip_confirm && !msg::confirm(&format!("Delete `{}`?", path))? {
             bail!("Cancelled");
         }
-        git_commands::run_git(workdir, &["rm", "--force", path])?;
+        git::run_git(workdir, &["rm", "--force", path])?;
         msg::success(&format!("Deleted `{}`", path));
     } else {
         // Tracked file with modifications — restore it
         if !skip_confirm && !msg::confirm(&format!("Discard changes to `{}`?", path))? {
             bail!("Cancelled");
         }
-        git_commands::run_git(workdir, &["restore", "--staged", "--worktree", path])?;
+        git::run_git(workdir, &["restore", "--staged", "--worktree", path])?;
         msg::success(&format!("Restored `{}`", path));
     }
 
@@ -113,7 +113,7 @@ fn drop_file(repo: &Repository, path: &str, skip_confirm: bool) -> Result<()> {
 
 /// Drop all local changes: restore tracked files and delete untracked files.
 fn drop_all(repo: &Repository, skip_confirm: bool) -> Result<()> {
-    let workdir = git::require_workdir(repo, "drop")?;
+    let workdir = repo::require_workdir(repo, "drop")?;
 
     let mut opts = git2::StatusOptions::new();
     opts.include_untracked(true).recurse_untracked_dirs(false);
@@ -127,8 +127,8 @@ fn drop_all(repo: &Repository, skip_confirm: bool) -> Result<()> {
         bail!("Cancelled");
     }
 
-    git_commands::run_git(workdir, &["restore", "--staged", "--worktree", "."])?;
-    git_commands::run_git(workdir, &["clean", "-fd"])?;
+    git::run_git(workdir, &["restore", "--staged", "--worktree", "."])?;
+    git::run_git(workdir, &["clean", "-fd"])?;
 
     msg::success("Discarded all local changes");
     Ok(())
@@ -139,11 +139,11 @@ fn drop_all(repo: &Repository, skip_confirm: bool) -> Result<()> {
 /// If the commit is the only commit on a branch, delegates to `drop_branch`
 /// to properly remove the entire branch section and merge topology.
 fn drop_commit(repo: &Repository, commit_hash: &str, skip_confirm: bool) -> Result<()> {
-    let workdir = git::require_workdir(repo, "drop")?;
+    let workdir = repo::require_workdir(repo, "drop")?;
     let git_dir = repo.path().to_path_buf();
 
     let commit_oid = git2::Oid::from_str(commit_hash)?;
-    let info = git::gather_repo_info(repo, false, 1)?;
+    let info = repo::gather_repo_info(repo, false, 1)?;
 
     // Check if this commit is the only commit on a branch.
     // If so, delegate to drop_branch for clean section removal.
@@ -166,7 +166,7 @@ fn drop_commit(repo: &Repository, commit_hash: &str, skip_confirm: bool) -> Resu
     }
 
     // Confirm with the user
-    let short_hash = git_commands::short_hash(commit_hash);
+    let short_hash = git::short_hash(commit_hash);
     let summary = repo
         .find_commit(commit_oid)?
         .summary()
@@ -211,25 +211,25 @@ pub fn after_continue(_workdir: &Path, context: &serde_json::Value) -> Result<()
         serde_json::from_value(context.clone()).context("Failed to parse drop resume context")?;
     msg::success(&format!(
         "Dropped commit `{}`",
-        git_commands::short_hash(&ctx.commit_hash)
+        git::short_hash(&ctx.commit_hash)
     ));
     Ok(())
 }
 
 /// Drop a branch: remove all its commits, unweave merge topology, delete the ref.
 fn drop_branch(repo: &Repository, branch_name: &str, skip_confirm: bool) -> Result<()> {
-    let info = git::gather_repo_info(repo, false, 1)?;
+    let info = repo::gather_repo_info(repo, false, 1)?;
     drop_branch_with_info(repo, &info, branch_name, skip_confirm)
 }
 
 /// Drop a branch using pre-gathered `RepoInfo`.
 fn drop_branch_with_info(
     repo: &Repository,
-    info: &git::RepoInfo,
+    info: &repo::RepoInfo,
     branch_name: &str,
     skip_confirm: bool,
 ) -> Result<()> {
-    let workdir = git::require_workdir(repo, "drop")?;
+    let workdir = repo::require_workdir(repo, "drop")?;
 
     // Verify the branch is in the integration range
     let branch_info = info
@@ -244,7 +244,7 @@ fn drop_branch_with_info(
             )
         })?;
 
-    let head_oid = git::head_oid(repo)?;
+    let head_oid = repo::head_oid(repo)?;
     let merge_base_oid = info.upstream.merge_base_oid;
 
     // Check if branch is at the merge-base with no owned commits
@@ -252,7 +252,7 @@ fn drop_branch_with_info(
         if !skip_confirm && !msg::confirm(&format!("Drop empty branch `{}`?", branch_name))? {
             bail!("Cancelled");
         }
-        git_commands::branch_delete(workdir, branch_name)?;
+        git::branch_delete(workdir, branch_name)?;
         msg::success(&format!("Dropped branch `{}`", branch_name));
         return Ok(());
     }
@@ -301,7 +301,7 @@ fn drop_branch_with_info(
         }
     } else if owned.is_empty() {
         // Co-located non-woven: no commits to drop, just delete the ref
-        git_commands::branch_delete(workdir, branch_name)?;
+        git::branch_delete(workdir, branch_name)?;
         msg::success(&format!("Dropped branch `{}`", branch_name));
         return Ok(());
     } else {
@@ -315,7 +315,7 @@ fn drop_branch_with_info(
     weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo)?;
 
     // Delete the branch ref (warn on failure — extremely unlikely)
-    if let Err(e) = git_commands::branch_delete(workdir, branch_name) {
+    if let Err(e) = git::branch_delete(workdir, branch_name) {
         eprintln!(
             "warning: Could not delete branch ref '{}': {} (may have been cleaned up automatically)",
             branch_name, e
@@ -331,7 +331,7 @@ fn drop_branch_with_info(
 /// Walks from each branch tip along parent links, stopping at another branch's
 /// tip or the edge of the commit range. Returns the branch name if found.
 fn find_branch_owning_commit_from_info(
-    info: &git::RepoInfo,
+    info: &repo::RepoInfo,
     target_oid: git2::Oid,
 ) -> Option<String> {
     let parent_map: HashMap<git2::Oid, Option<git2::Oid>> =
@@ -370,7 +370,7 @@ fn find_owned_commits(
     repo: &Repository,
     branch_tip: git2::Oid,
     merge_base_oid: git2::Oid,
-    all_branches: &[git::BranchInfo],
+    all_branches: &[repo::BranchInfo],
     dropping_branch_name: &str,
 ) -> Result<Vec<git2::Oid>> {
     let mut revwalk = repo.revwalk()?;

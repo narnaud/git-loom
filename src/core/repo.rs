@@ -5,8 +5,8 @@ use anyhow::{Context, Result, bail};
 use chrono::DateTime;
 use git2::{BranchType, Repository, StatusOptions};
 
-use crate::git_commands;
-use crate::msg;
+use crate::core::msg;
+use crate::git;
 
 /// Open a `Repository` by discovering it from the current working directory.
 pub fn open_repo() -> Result<Repository> {
@@ -73,7 +73,7 @@ pub fn restore_branch_refs(workdir: &Path, snapshot: &HashMap<String, git2::Oid>
     for name in current_branches.keys() {
         if !snapshot.contains_key(name)
             && Some(name.as_str()) != head_branch.as_deref()
-            && let Err(e) = git_commands::branch_delete(workdir, name)
+            && let Err(e) = git::branch_delete(workdir, name)
         {
             failures.push(format!("delete '{}': {}", name, e));
         }
@@ -85,7 +85,7 @@ pub fn restore_branch_refs(workdir: &Path, snapshot: &HashMap<String, git2::Oid>
             continue; // HEAD's branch is handled by reset --hard
         }
         let oid_str = oid.to_string();
-        if let Err(e) = git_commands::branch_force_create(workdir, name, &oid_str) {
+        if let Err(e) = git::branch_force_create(workdir, name, &oid_str) {
             failures.push(format!("restore '{}': {}", name, e));
         }
     }
@@ -231,7 +231,7 @@ fn try_resolve_file(repo: &Repository, arg: &str) -> Result<Option<Target>> {
         return Ok(Some(Target::File(repo_path)));
     }
     // Check for deleted files (removed from disk but changed vs HEAD)
-    let diff = crate::git_commands::diff_head_file(workdir, &repo_path)?;
+    let diff = crate::git::diff_head_file(workdir, &repo_path)?;
     if !diff.is_empty() {
         return Ok(Some(Target::File(repo_path)));
     }
@@ -279,7 +279,7 @@ fn try_resolve_shortid(
     let needs_files = arg.contains(':');
     let info = gather_repo_info(repo, needs_files, 1)?;
     let entities = info.collect_entities();
-    let allocator = crate::shortid::IdAllocator::new(entities);
+    let allocator = crate::core::shortid::IdAllocator::new(entities);
 
     for kind in accept {
         match kind {
@@ -434,19 +434,19 @@ pub struct RepoInfo {
 impl RepoInfo {
     /// Build a list of entities for shortid allocation.
     /// Returns entities in the order: Unstaged, Branches, Commits, Files.
-    pub fn collect_entities(&self) -> Vec<crate::shortid::Entity> {
-        let mut entities = vec![crate::shortid::Entity::Unstaged];
+    pub fn collect_entities(&self) -> Vec<crate::core::shortid::Entity> {
+        let mut entities = vec![crate::core::shortid::Entity::Unstaged];
 
         for branch in &self.branches {
-            entities.push(crate::shortid::Entity::Branch(branch.name.clone()));
+            entities.push(crate::core::shortid::Entity::Branch(branch.name.clone()));
         }
 
         for commit in &self.commits {
-            entities.push(crate::shortid::Entity::Commit(commit.oid));
+            entities.push(crate::core::shortid::Entity::Commit(commit.oid));
         }
 
         for file in &self.working_changes {
-            entities.push(crate::shortid::Entity::File(file.path.clone()));
+            entities.push(crate::core::shortid::Entity::File(file.path.clone()));
         }
 
         entities
@@ -918,5 +918,5 @@ fn get_working_changes(repo: &Repository) -> Result<Vec<FileChange>> {
 }
 
 #[cfg(test)]
-#[path = "git_test.rs"]
+#[path = "repo_test.rs"]
 mod tests;

@@ -4,11 +4,11 @@ use anyhow::{Context, Result, bail};
 use git2::{Repository, StatusOptions};
 use serde::{Deserialize, Serialize};
 
-use crate::git::{self, Target};
-use crate::git_commands;
-use crate::msg;
-use crate::transaction::{self, LoomState, Rollback};
-use crate::weave::{self, RebaseOutcome, Weave};
+use crate::core::msg;
+use crate::core::repo::{self, Target};
+use crate::core::transaction::{self, LoomState, Rollback};
+use crate::core::weave::{self, RebaseOutcome, Weave};
+use crate::git;
 
 #[derive(Serialize, Deserialize)]
 struct CommitContext {
@@ -20,13 +20,13 @@ struct CommitContext {
 /// Stages files, creates the commit at HEAD, then uses Weave to relocate
 /// it to the target feature branch (creating merge topology if needed).
 pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) -> Result<()> {
-    let repo = git::open_repo()?;
-    let workdir = git::require_workdir(&repo, "commit")?.to_path_buf();
+    let repo = repo::open_repo()?;
+    let workdir = repo::require_workdir(&repo, "commit")?.to_path_buf();
     let git_dir = repo.path().to_path_buf();
 
     // Gather repo info once — also serves as verification that we're on an
     // integration branch (gather_repo_info requires an upstream).
-    let info = git::gather_repo_info(&repo, false, 1).context(
+    let info = repo::gather_repo_info(&repo, false, 1).context(
         "Must be on an integration branch to use commit\n\
          Use `git commit` directly on feature branches",
     )?;
@@ -38,7 +38,7 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
     // Step 2: Verify index has changes — restore saved staged on failure so
     // pre-existing staged work is not lost.
     if let Err(e) = verify_has_staged_changes(&repo) {
-        git_commands::restore_staged_patch(&workdir, &saved_staged)?;
+        git::restore_staged_patch(&workdir, &saved_staged)?;
         return Err(e);
     }
 
@@ -47,24 +47,24 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
     // commit directly on the integration branch without targeting a feature
     // branch. This works regardless of whether local commits or woven
     // branches already exist.
-    if branch.is_none() && info.branch_name == git::upstream_local_branch(&info.upstream.label) {
+    if branch.is_none() && info.branch_name == repo::upstream_local_branch(&info.upstream.label) {
         let result = if let Some(msg) = &message {
-            git_commands::commit(&workdir, msg)
+            git::commit(&workdir, msg)
         } else {
-            git_commands::commit_with_editor(&workdir)
+            git::commit_with_editor(&workdir)
         };
-        git_commands::restore_staged_patch(&workdir, &saved_staged)?;
+        git::restore_staged_patch(&workdir, &saved_staged)?;
         result?;
-        let new_head = git::head_oid(&repo)?;
+        let new_head = repo::head_oid(&repo)?;
         msg::success(&format!(
             "Created commit `{}`",
-            git_commands::short_hash(&new_head.to_string())
+            git::short_hash(&new_head.to_string())
         ));
         return Ok(());
     }
 
     // Step 3: Save HEAD for rollback
-    let saved_head = git::head_oid(&repo)?.to_string();
+    let saved_head = repo::head_oid(&repo)?.to_string();
 
     // Step 4: Resolve branch target (may create a new branch at merge-base)
     // Snapshot existing branch names so we can detect newly-created branches.
@@ -85,17 +85,17 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
 
     // Step 5: Create commit at HEAD
     let commit_result = if let Some(msg) = &message {
-        git_commands::commit(&workdir, msg)
+        git::commit(&workdir, msg)
     } else {
-        git_commands::commit_with_editor(&workdir)
+        git::commit_with_editor(&workdir)
     };
     if let Err(e) = commit_result {
-        git_commands::restore_staged_patch(&workdir, &saved_staged)?;
+        git::restore_staged_patch(&workdir, &saved_staged)?;
         return Err(e);
     }
 
     // Step 6: Move commit to branch via Weave
-    let head_oid = git::head_oid(&repo)?;
+    let head_oid = repo::head_oid(&repo)?;
 
     let mut graph = Weave::from_repo_with_info(&repo, &info)?;
 
@@ -150,7 +150,7 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
 /// Resume a `commit` operation after a conflict has been resolved.
 pub fn after_continue(
     workdir: &Path,
-    rollback: &crate::transaction::Rollback,
+    rollback: &crate::core::transaction::Rollback,
     context: &serde_json::Value,
 ) -> Result<()> {
     let ctx: CommitContext =
@@ -160,13 +160,13 @@ pub fn after_continue(
 
 /// Post-rebase work: restore staged changes and print success message.
 fn post_commit(workdir: &Path, branch_name: &str, saved_staged: &str) -> Result<()> {
-    git_commands::restore_staged_patch(workdir, saved_staged)?;
+    git::restore_staged_patch(workdir, saved_staged)?;
 
-    let new_hash = git_commands::rev_parse(workdir, branch_name)?;
+    let new_hash = git::rev_parse(workdir, branch_name)?;
 
     msg::success(&format!(
         "Created commit `{}` on branch `{}`",
-        git_commands::short_hash(&new_hash),
+        git::short_hash(&new_hash),
         branch_name
     ));
 
@@ -190,7 +190,7 @@ fn resolve_staging(
     }
 
     if files.iter().any(|f| f == "zz") {
-        git_commands::stage_all(workdir)?;
+        git::stage_all(workdir)?;
         return Ok(String::new());
     }
 
@@ -205,7 +205,7 @@ fn resolve_staging(
     // Save and unstage any pre-existing staged files not in our target list.
     let saved_staged = save_and_unstage_other_staged(repo, workdir, &path_refs)?;
 
-    git_commands::stage_files(workdir, &path_refs)?;
+    git::stage_files(workdir, &path_refs)?;
 
     Ok(saved_staged)
 }
@@ -219,7 +219,7 @@ fn save_and_unstage_other_staged(
     workdir: &std::path::Path,
     target_files: &[&str],
 ) -> Result<String> {
-    let staged = git::get_staged_files(repo)?;
+    let staged = repo::get_staged_files(repo)?;
     let other: Vec<&str> = staged
         .iter()
         .filter(|f| !target_files.contains(&f.as_str()))
@@ -230,14 +230,14 @@ fn save_and_unstage_other_staged(
         return Ok(String::new());
     }
 
-    let patch = git_commands::diff_cached_files(workdir, &other)?;
-    git_commands::unstage_files(workdir, &other)?;
+    let patch = git::diff_cached_files(workdir, &other)?;
+    git::unstage_files(workdir, &other)?;
     Ok(patch)
 }
 
 /// Resolve a file argument using the centralized resolver.
 fn resolve_file_arg(repo: &Repository, arg: &str) -> Result<String> {
-    match git::resolve_arg(repo, arg, &[git::TargetKind::File])? {
+    match repo::resolve_arg(repo, arg, &[repo::TargetKind::File])? {
         Target::File(path) => Ok(path),
         _ => unreachable!(),
     }
@@ -269,7 +269,7 @@ pub fn verify_has_staged_changes(repo: &Repository) -> Result<()> {
 /// Resolve the target branch: explicit name/shortID, or interactive picker.
 fn resolve_branch_target(
     repo: &Repository,
-    info: &git::RepoInfo,
+    info: &repo::RepoInfo,
     workdir: &std::path::Path,
     branch: Option<&str>,
 ) -> Result<String> {
@@ -286,11 +286,11 @@ fn resolve_branch_target(
 /// - Unknown: treat as new branch name, validate, create at merge-base, weave
 fn resolve_explicit_branch(
     repo: &Repository,
-    info: &git::RepoInfo,
+    info: &repo::RepoInfo,
     workdir: &std::path::Path,
     branch: &str,
 ) -> Result<String> {
-    match git::resolve_arg(repo, branch, &[git::TargetKind::Branch]) {
+    match repo::resolve_arg(repo, branch, &[repo::TargetKind::Branch]) {
         Ok(target) => {
             let name = target.expect_branch()?;
             if info.branches.iter().any(|b| b.name == name) {
@@ -305,7 +305,7 @@ fn resolve_explicit_branch(
             if name.is_empty() {
                 bail!("Branch name cannot be empty");
             }
-            git_commands::branch_validate_name(&name)?;
+            git::branch_validate_name(&name)?;
 
             if repo.find_branch(&name, git2::BranchType::Local).is_ok() {
                 bail!(
@@ -323,7 +323,7 @@ fn resolve_explicit_branch(
 /// Interactive branch picker: select an existing woven branch or type a new name.
 fn pick_branch(
     repo: &Repository,
-    info: &git::RepoInfo,
+    info: &repo::RepoInfo,
     workdir: &std::path::Path,
 ) -> Result<String> {
     let branch_names: Vec<String> = info.branches.iter().map(|b| b.name.clone()).collect();
@@ -346,8 +346,8 @@ fn pick_branch(
 
     // If user typed a name that isn't an existing woven branch, create it
     if !branch_names.contains(&name) {
-        git_commands::branch_validate_name(&name)?;
-        git::ensure_branch_not_exists(repo, &name)?;
+        git::branch_validate_name(&name)?;
+        repo::ensure_branch_not_exists(repo, &name)?;
         create_branch_at_merge_base(workdir, &name, info.upstream.merge_base_oid)?;
     }
 
@@ -376,12 +376,12 @@ fn create_branch_at_merge_base(
 ) -> Result<()> {
     let merge_base_hash = merge_base_oid.to_string();
 
-    git_commands::branch_create(workdir, name, &merge_base_hash)?;
+    git::branch_create(workdir, name, &merge_base_hash)?;
 
     msg::success(&format!(
         "Created branch `{}` at `{}`",
         name,
-        git_commands::short_hash(&merge_base_hash)
+        git::short_hash(&merge_base_hash)
     ));
 
     Ok(())

@@ -5,11 +5,11 @@ use anyhow::{Context, Result, bail};
 use git2::{Oid, Repository};
 use serde::{Deserialize, Serialize};
 
-use crate::git::{self, CommitInfo, RepoInfo};
-use crate::git_commands;
-use crate::msg;
-use crate::transaction::{self, LoomState, Rollback};
-use crate::weave::{self, RebaseOutcome, Weave};
+use crate::core::msg;
+use crate::core::repo::{self, CommitInfo, RepoInfo};
+use crate::core::transaction::{self, LoomState, Rollback};
+use crate::core::weave::{self, RebaseOutcome, Weave};
+use crate::git;
 
 struct PreRebaseState<'a> {
     saved_head: &'a str,
@@ -61,10 +61,10 @@ struct AbsorbPlan {
 
 /// Absorb working tree changes into the commits that last touched the affected lines.
 pub fn run(dry_run: bool, user_files: Vec<String>) -> Result<()> {
-    let repo = git::open_repo()?;
-    let workdir = git::require_workdir(&repo, "absorb")?;
+    let repo = repo::open_repo()?;
+    let workdir = repo::require_workdir(&repo, "absorb")?;
     let git_dir = repo.path().to_path_buf();
-    let info = git::gather_repo_info(&repo, false, 1)?;
+    let info = repo::gather_repo_info(&repo, false, 1)?;
 
     if info.commits.is_empty() {
         bail!("No commits in scope — nothing to absorb into");
@@ -194,8 +194,8 @@ fn build_plan(
 
 /// Apply an absorb plan: create fixup commits and run the rebase.
 fn apply_plan(repo: &Repository, workdir: &Path, git_dir: &Path, plan: AbsorbPlan) -> Result<()> {
-    let saved_head = git::head_oid(repo)?.to_string();
-    let saved_refs = git::snapshot_branch_refs(repo)?;
+    let saved_head = repo::head_oid(repo)?.to_string();
+    let saved_refs = repo::snapshot_branch_refs(repo)?;
 
     // Group assignments by target commit.
     let mut groups: HashMap<Oid, Vec<String>> = HashMap::new();
@@ -214,7 +214,7 @@ fn apply_plan(repo: &Repository, workdir: &Path, git_dir: &Path, plan: AbsorbPla
         .map(|s| s.as_str())
         .chain(hunk_groups.values().flatten().map(|(p, _)| p.as_str()))
         .collect();
-    let pre_staged = git::get_staged_files(repo)?;
+    let pre_staged = repo::get_staged_files(repo)?;
     let non_absorbed_staged: Vec<&str> = pre_staged
         .iter()
         .filter(|f| !absorbed_files.contains(f.as_str()))
@@ -223,13 +223,13 @@ fn apply_plan(repo: &Repository, workdir: &Path, git_dir: &Path, plan: AbsorbPla
     let saved_staged = if non_absorbed_staged.is_empty() {
         String::new()
     } else {
-        let patch = git_commands::diff_cached_files(workdir, &non_absorbed_staged)?;
-        git_commands::unstage_files(workdir, &non_absorbed_staged)?;
+        let patch = git::diff_cached_files(workdir, &non_absorbed_staged)?;
+        git::unstage_files(workdir, &non_absorbed_staged)?;
         patch
     };
 
     // Snapshot full working-tree diff before any mutations (needed for pre-rebase rollback).
-    let saved_worktree = git_commands::diff_head(workdir)?;
+    let saved_worktree = git::diff_head(workdir)?;
 
     // Create fixup commits; rolls back to pre-mutation state on any failure.
     let fixup_pairs = create_fixup_commits(
@@ -312,21 +312,21 @@ fn create_fixup_commits(
 
     for (target_oid, files) in groups {
         let file_refs: Vec<&str> = files.iter().map(|s| s.as_str()).collect();
-        if let Err(e) = git_commands::stage_files(workdir, &file_refs) {
+        if let Err(e) = git::stage_files(workdir, &file_refs) {
             rollback_pre_rebase(workdir, pre_rebase);
             return Err(e);
         }
         let subject = repo
             .find_commit(*target_oid)
             .ok()
-            .map(|c| git::commit_subject(&c))
+            .map(|c| repo::commit_subject(&c))
             .unwrap_or_else(|| target_oid.to_string());
         let msg = format!("fixup! {}", subject);
-        if let Err(e) = git_commands::commit(workdir, &msg) {
+        if let Err(e) = git::commit(workdir, &msg) {
             rollback_pre_rebase(workdir, pre_rebase);
             return Err(e);
         }
-        let fixup_hash = git_commands::rev_parse(workdir, "HEAD")?;
+        let fixup_hash = git::rev_parse(workdir, "HEAD")?;
         let fixup_oid = git2::Oid::from_str(&fixup_hash)?;
         fixup_pairs.push((fixup_oid, *target_oid));
     }
@@ -336,21 +336,21 @@ fn create_fixup_commits(
         for (path, hunks) in file_hunks {
             combined_patch.push_str(&build_hunk_patch(path, hunks));
         }
-        if let Err(e) = git_commands::apply_cached_patch(workdir, &combined_patch) {
+        if let Err(e) = git::apply_cached_patch(workdir, &combined_patch) {
             rollback_pre_rebase(workdir, pre_rebase);
             return Err(e);
         }
         let subject = repo
             .find_commit(*target_oid)
             .ok()
-            .map(|c| git::commit_subject(&c))
+            .map(|c| repo::commit_subject(&c))
             .unwrap_or_else(|| target_oid.to_string());
         let msg = format!("fixup! {}", subject);
-        if let Err(e) = git_commands::commit(workdir, &msg) {
+        if let Err(e) = git::commit(workdir, &msg) {
             rollback_pre_rebase(workdir, pre_rebase);
             return Err(e);
         }
-        let fixup_hash = git_commands::rev_parse(workdir, "HEAD")?;
+        let fixup_hash = git::rev_parse(workdir, "HEAD")?;
         let fixup_oid = git2::Oid::from_str(&fixup_hash)?;
         fixup_pairs.push((fixup_oid, *target_oid));
     }
@@ -364,12 +364,12 @@ fn save_skipped_patch(workdir: &Path, skipped_files: &[String]) -> Result<Option
         return Ok(None);
     }
     let refs: Vec<&str> = skipped_files.iter().map(|f| f.as_str()).collect();
-    let dirty = git_commands::diff_head_name_only(workdir)?;
+    let dirty = git::diff_head_name_only(workdir)?;
     if dirty.trim().is_empty() {
         return Ok(None);
     }
-    let patch = git_commands::diff_head_files(workdir, &refs)?;
-    let _ = git_commands::restore_files_to_head(workdir, &refs);
+    let patch = git::diff_head_files(workdir, &refs)?;
+    let _ = git::restore_files_to_head(workdir, &refs);
     Ok(Some(patch))
 }
 
@@ -379,13 +379,13 @@ fn save_skipped_patch(workdir: &Path, skipped_files: &[String]) -> Result<Option
 /// This is distinct from `Rollback::apply_abort()`, which handles post-conflict abort and
 /// trusts `git rebase --abort --update-refs` to restore branch refs.
 fn rollback_pre_rebase(workdir: &Path, state: &PreRebaseState<'_>) {
-    let _ = git_commands::reset_hard(workdir, state.saved_head);
-    let _ = git::restore_branch_refs(workdir, state.saved_refs);
+    let _ = git::reset_hard(workdir, state.saved_head);
+    let _ = repo::restore_branch_refs(workdir, state.saved_refs);
     if !state.saved_staged.is_empty() {
-        let _ = git_commands::apply_cached_patch(workdir, state.saved_staged);
+        let _ = git::apply_cached_patch(workdir, state.saved_staged);
     }
     if !state.saved_worktree.is_empty()
-        && let Err(e) = git_commands::apply_patch(workdir, state.saved_worktree)
+        && let Err(e) = git::apply_patch(workdir, state.saved_worktree)
     {
         eprintln!("Warning: could not restore working tree changes: {}", e);
     }
@@ -418,10 +418,10 @@ fn post_absorb(
     num_files: usize,
     num_commits: usize,
 ) -> Result<()> {
-    git_commands::restore_staged_patch(workdir, saved_staged)?;
+    git::restore_staged_patch(workdir, saved_staged)?;
 
     if let Some(patch) = skipped_patch
-        && let Err(e) = git_commands::apply_patch(workdir, patch)
+        && let Err(e) = git::apply_patch(workdir, patch)
     {
         eprintln!("Warning: could not re-apply skipped changes: {}", e);
     }
@@ -441,7 +441,7 @@ fn commit_label(
     weave_graph: &Weave,
 ) -> String {
     let oid_str = commit_oid.to_string();
-    let short = git_commands::short_hash(&oid_str);
+    let short = git::short_hash(&oid_str);
     let message = in_scope
         .get(&commit_oid)
         .map(|c| c.message.as_str())
@@ -495,7 +495,7 @@ fn get_changed_files(
 ) -> Result<Vec<String>> {
     if user_files.is_empty() {
         // All tracked files with uncommitted changes
-        let output = git_commands::diff_head_name_only(workdir)?;
+        let output = git::diff_head_name_only(workdir)?;
         Ok(output
             .lines()
             .filter(|l| !l.is_empty())
@@ -513,8 +513,8 @@ fn get_changed_files(
 
 /// Resolve a user argument to a file path using the centralized resolver.
 fn resolve_file_arg(repo: &Repository, arg: &str) -> Result<String> {
-    match git::resolve_arg(repo, arg, &[git::TargetKind::File])? {
-        git::Target::File(path) => Ok(path),
+    match repo::resolve_arg(repo, arg, &[repo::TargetKind::File])? {
+        repo::Target::File(path) => Ok(path),
         _ => unreachable!(),
     }
 }
@@ -526,13 +526,13 @@ fn analyze_file(
     path: &str,
     in_scope: &HashMap<Oid, &CommitInfo>,
 ) -> Result<FileAnalysis> {
-    if git_commands::diff_head_file_is_binary(workdir, path)? {
+    if git::diff_head_file_is_binary(workdir, path)? {
         return Ok(FileAnalysis::Skipped {
             reason: "binary file".to_string(),
         });
     }
 
-    let diff = git_commands::diff_head_file(workdir, path)?;
+    let diff = git::diff_head_file(workdir, path)?;
 
     if diff.is_empty() {
         return Ok(FileAnalysis::Skipped {

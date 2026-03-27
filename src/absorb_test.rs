@@ -1,4 +1,4 @@
-use crate::test_helpers::TestRepo;
+use crate::core::test_helpers::TestRepo;
 
 // ── Unit tests for diff parsing ──────────────────────────────────────
 
@@ -484,8 +484,7 @@ fn absorb_skipped_patch_only_contains_skipped_files() {
 
         // absorbable.txt should be clean (absorbed into its commit)
         let abs_diff =
-            crate::git_commands::diff_head_file(&std::path::PathBuf::from("."), "absorbable.txt")
-                .unwrap();
+            crate::git::diff_head_file(&std::path::PathBuf::from("."), "absorbable.txt").unwrap();
         assert!(
             abs_diff.is_empty(),
             "absorbable.txt should be clean after absorb, but has diff:\n{}",
@@ -591,15 +590,14 @@ fn absorb_abort_preserves_working_state() {
 
     // Mirror absorb's pre-rebase cleanup sequence:
     // 1. Save staged diff (other-staged.txt).
-    let saved_staged =
-        crate::git_commands::diff_cached_files(&workdir, &["other-staged.txt"]).unwrap();
+    let saved_staged = crate::git::diff_cached_files(&workdir, &["other-staged.txt"]).unwrap();
     // 2. Unstage everything so that git diff HEAD captures all working changes.
-    crate::git_commands::run_git(&workdir, &["restore", "--staged", "."]).unwrap();
+    crate::git::run_git(&workdir, &["restore", "--staged", "."]).unwrap();
     // 3. Save full working-tree diff (other-staged.txt unstaged + other-unstaged.txt + feature.txt).
-    let saved_worktree = crate::git_commands::diff_head(&workdir).unwrap();
+    let saved_worktree = crate::git::diff_head(&workdir).unwrap();
     // 4. Clear the working tree back to HEAD (absorb does this before creating fixup commits).
     //    new-file.txt is untracked and is not touched by `restore`.
-    crate::git_commands::run_git(&workdir, &["restore", "--staged", "--worktree", "."]).unwrap();
+    crate::git::run_git(&workdir, &["restore", "--staged", "--worktree", "."]).unwrap();
 
     // 5. Simulate absorb creating a fixup commit (HEAD moves past pre_absorb_oid).
     test_repo.write_file("feature.txt", "modified\n");
@@ -607,9 +605,9 @@ fn absorb_abort_preserves_working_state() {
     test_repo.commit_staged("fixup! Initial setup");
 
     // Inject LoomState as absorb would save it before the rebase.
-    let state = crate::transaction::LoomState {
+    let state = crate::core::transaction::LoomState {
         command: "absorb".to_string(),
-        rollback: crate::transaction::Rollback {
+        rollback: crate::core::transaction::Rollback {
             reset_hard_to: pre_absorb_oid.to_string(),
             saved_staged_patch: saved_staged,
             saved_worktree_patch: saved_worktree,
@@ -617,10 +615,10 @@ fn absorb_abort_preserves_working_state() {
         },
         context: serde_json::json!({ "dry_run": false }),
     };
-    crate::transaction::save(&git_dir, &state).unwrap();
+    crate::core::transaction::save(&git_dir, &state).unwrap();
 
     // Abort (no active rebase; just applies rollback fields).
-    crate::transaction::abort_cmd(&workdir, &git_dir).unwrap();
+    crate::core::transaction::abort_cmd(&workdir, &git_dir).unwrap();
 
     // HEAD must be at the pre-absorb position (reset_hard_to undo the fixup commit).
     assert_eq!(

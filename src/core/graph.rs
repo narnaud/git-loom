@@ -1,5 +1,7 @@
-use crate::git::{CommitInfo, ContextCommit, FileChange, RemoteStatus, RepoInfo, UpstreamInfo};
-use crate::shortid::IdAllocator;
+use crate::core::repo::{
+    CommitInfo, ContextCommit, FileChange, RemoteStatus, RepoInfo, UpstreamInfo,
+};
+use crate::core::shortid::IdAllocator;
 use colored::{Color, Colorize};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
@@ -149,7 +151,7 @@ pub fn default_render_opts(theme: Theme, cwd_prefix: String) -> RenderOpts {
 
 /// Convert a repo-relative path to CWD-relative for display.
 fn display_path(repo_path: &str, cwd_prefix: &str) -> String {
-    crate::git::cwd_relative_path(repo_path, cwd_prefix)
+    crate::core::repo::cwd_relative_path(repo_path, cwd_prefix)
 }
 
 // ── Section building ────────────────────────────────────────────────────

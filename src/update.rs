@@ -4,12 +4,12 @@ use anyhow::{Context, Result, bail};
 use git2::BranchType;
 use serde::{Deserialize, Serialize};
 
-use crate::git;
+use crate::core::repo;
 
-use crate::git_commands::{self, RebaseOutcome};
-use crate::msg;
-use crate::transaction::{self, LoomState, Rollback};
-use crate::weave::Weave;
+use crate::core::msg;
+use crate::core::transaction::{self, LoomState, Rollback};
+use crate::core::weave::Weave;
+use crate::git::{self, RebaseOutcome};
 
 #[derive(Serialize, Deserialize)]
 struct UpdateContext {
@@ -20,8 +20,8 @@ struct UpdateContext {
 
 /// Update the integration branch by fetching and rebasing from upstream.
 pub fn run(skip_confirm: bool) -> Result<()> {
-    let repo = git::open_repo()?;
-    let workdir = git::require_workdir(&repo, "update")?.to_path_buf();
+    let repo = repo::open_repo()?;
+    let workdir = repo::require_workdir(&repo, "update")?.to_path_buf();
     let git_dir = repo.path().to_path_buf();
 
     // Validate that we're on a branch with an upstream tracking ref
@@ -52,7 +52,7 @@ pub fn run(skip_confirm: bool) -> Result<()> {
     let spinner = msg::spinner();
     spinner.start("Fetching latest changes...");
 
-    let result = git_commands::run_git(&workdir, &["fetch", "--tags", "--force", "--prune"]);
+    let result = git::run_git(&workdir, &["fetch", "--tags", "--force", "--prune"]);
 
     match result {
         Ok(()) => {
@@ -103,12 +103,12 @@ pub fn run(skip_confirm: bool) -> Result<()> {
                 .id();
             graph.filter_upstream_commits(&repo, &workdir, new_upstream_oid)?;
             let todo = graph.to_todo();
-            crate::weave::run_rebase(&workdir, Some(&upstream_name), &todo)
+            crate::core::weave::run_rebase(&workdir, Some(&upstream_name), &todo)
         }
         Err(_) => {
             // Fallback: no integration topology (e.g., plain branch with no weave).
             // Use plain rebase.
-            git_commands::rebase(&git_dir, &workdir, &upstream_name)
+            git::rebase(&git_dir, &workdir, &upstream_name)
         }
     };
 
@@ -125,7 +125,7 @@ pub fn run(skip_confirm: bool) -> Result<()> {
             transaction::warn_conflict_paused("update");
         }
         Err(e) => {
-            let _ = git_commands::rebase_abort(&workdir);
+            let _ = git::rebase_abort(&workdir);
             transaction::delete(&git_dir)?;
             spinner.error("Rebase failed");
             return Err(e);
@@ -150,8 +150,7 @@ fn post_update(workdir: &Path, repo: &git2::Repository, ctx: &UpdateContext) -> 
         let spinner = msg::spinner();
         spinner.start("Updating submodules...");
 
-        let result =
-            git_commands::run_git(workdir, &["submodule", "update", "--init", "--recursive"]);
+        let result = git::run_git(workdir, &["submodule", "update", "--init", "--recursive"]);
 
         match result {
             Ok(()) => {
@@ -170,8 +169,8 @@ fn post_update(workdir: &Path, repo: &git2::Repository, ctx: &UpdateContext) -> 
         .ok()
         .and_then(|obj| obj.peel_to_commit().ok())
         .map(|commit| {
-            let short_id = git_commands::short_hash(&commit.id().to_string()).to_string();
-            let summary = git::commit_subject(&commit);
+            let short_id = git::short_hash(&commit.id().to_string()).to_string();
+            let summary = repo::commit_subject(&commit);
             format!(" ({} {})", short_id, summary)
         })
         .unwrap_or_default();
@@ -206,7 +205,7 @@ fn post_update(workdir: &Path, repo: &git2::Repository, ctx: &UpdateContext) -> 
             })?;
         if confirmed {
             for name in &gone {
-                match git_commands::branch_delete(workdir, name) {
+                match git::branch_delete(workdir, name) {
                     Ok(()) => msg::success(&format!("Removed branch `{}`", name)),
                     Err(_) => {
                         msg::warn(&format!(

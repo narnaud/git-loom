@@ -1,16 +1,16 @@
 use anyhow::{Result, bail};
 use git2::{Oid, Repository};
 
-use crate::git::{self, Target, TargetKind};
-use crate::git_commands;
-use crate::msg;
-use crate::weave;
+use crate::core::msg;
+use crate::core::repo::{self, Target, TargetKind};
+use crate::core::weave;
+use crate::git;
 
 /// Commit with `-m` message or open the editor.
 fn commit_or_editor(workdir: &std::path::Path, message: Option<&str>) -> Result<()> {
     match message {
-        Some(m) => git_commands::commit(workdir, m),
-        None => git_commands::commit_with_editor(workdir),
+        Some(m) => git::commit(workdir, m),
+        None => git::commit_with_editor(workdir),
     }
 }
 
@@ -19,9 +19,9 @@ fn commit_or_editor(workdir: &std::path::Path, message: Option<&str>) -> Result<
 /// Dispatches based on the resolved target type:
 /// - Commit → split the commit by selecting files for the first commit
 pub fn run(target: String, message: Option<String>) -> Result<()> {
-    let repo = git::open_repo()?;
+    let repo = repo::open_repo()?;
 
-    let resolved = git::resolve_arg(&repo, &target, &[TargetKind::Commit])?;
+    let resolved = repo::resolve_arg(&repo, &target, &[TargetKind::Commit])?;
 
     match resolved {
         Target::Commit(hash) => split_commit(&repo, &hash, message),
@@ -31,7 +31,7 @@ pub fn run(target: String, message: Option<String>) -> Result<()> {
 
 /// Split a commit by showing an interactive file picker.
 fn split_commit(repo: &Repository, commit_hash: &str, message: Option<String>) -> Result<()> {
-    let workdir = git::require_workdir(repo, "split")?;
+    let workdir = repo::require_workdir(repo, "split")?;
     let commit_oid = repo.revparse_single(commit_hash)?.peel_to_commit()?.id();
     let commit = repo.find_commit(commit_oid)?;
 
@@ -40,7 +40,7 @@ fn split_commit(repo: &Repository, commit_hash: &str, message: Option<String>) -
     }
 
     // Get files changed in the commit
-    let files = git::commit_file_paths(repo, commit_oid)?;
+    let files = repo::commit_file_paths(repo, commit_oid)?;
     if files.len() < 2 {
         bail!("Cannot split a commit with only one file");
     }
@@ -77,7 +77,7 @@ pub fn split_commit_with_selection(
     selected: Vec<String>,
     message: String,
 ) -> Result<()> {
-    let workdir = git::require_workdir(repo, "split")?;
+    let workdir = repo::require_workdir(repo, "split")?;
     let commit_oid = repo.revparse_single(commit_hash)?.peel_to_commit()?.id();
     let commit = repo.find_commit(commit_oid)?;
 
@@ -86,7 +86,7 @@ pub fn split_commit_with_selection(
     }
 
     // Get files changed in the commit
-    let all_files = git::commit_file_paths(repo, commit_oid)?;
+    let all_files = repo::commit_file_paths(repo, commit_oid)?;
     if all_files.len() < 2 {
         bail!("Cannot split a commit with only one file");
     }
@@ -147,10 +147,10 @@ fn perform_split(
     msg1: Option<&str>,
     msg2: &str,
 ) -> Result<()> {
-    let head_oid = git::head_oid(repo)?;
+    let head_oid = repo::head_oid(repo)?;
     let is_head = head_oid == commit_oid;
     let oid_str = commit_oid.to_string();
-    let short_hash = git_commands::short_hash(&oid_str);
+    let short_hash = git::short_hash(&oid_str);
 
     // Save pre-existing staged changes so reset --mixed doesn't discard them.
     // (For non-HEAD splits, the rebase autostash handles this, but saving
@@ -164,15 +164,15 @@ fn perform_split(
     };
 
     // Restore pre-existing staged changes regardless of outcome.
-    git_commands::restore_staged_patch(workdir, &saved_staged)?;
+    git::restore_staged_patch(workdir, &saved_staged)?;
 
     let (new_hash1, new_hash2) = split_result?;
 
     msg::success(&format!(
         "Split `{}` into `{}` and `{}`",
         short_hash,
-        git_commands::short_hash(&new_hash1),
-        git_commands::short_hash(&new_hash2)
+        git::short_hash(&new_hash1),
+        git::short_hash(&new_hash2)
     ));
     Ok(())
 }
@@ -191,19 +191,19 @@ fn perform_head_split(
     msg1: Option<&str>,
     msg2: &str,
 ) -> Result<(String, String)> {
-    git_commands::reset_mixed(workdir, "HEAD~1")?;
+    git::reset_mixed(workdir, "HEAD~1")?;
 
     let selected_refs: Vec<&str> = selected.iter().map(|s| s.as_str()).collect();
-    git_commands::stage_files(workdir, &selected_refs)?;
+    git::stage_files(workdir, &selected_refs)?;
     commit_or_editor(workdir, msg1)?;
 
     let remaining_refs: Vec<&str> = remaining.iter().map(|s| s.as_str()).collect();
-    git_commands::stage_files(workdir, &remaining_refs)?;
-    git_commands::commit(workdir, msg2)?;
+    git::stage_files(workdir, &remaining_refs)?;
+    git::commit(workdir, msg2)?;
 
     // HEAD is the second commit, HEAD~1 is the first
-    let hash2 = git_commands::rev_parse(workdir, "HEAD")?;
-    let hash1 = git_commands::rev_parse(workdir, "HEAD~1")?;
+    let hash2 = git::rev_parse(workdir, "HEAD")?;
+    let hash1 = git::rev_parse(workdir, "HEAD~1")?;
 
     Ok((hash1, hash2))
 }
@@ -235,7 +235,7 @@ fn perform_non_head_split(
     let (hash1, hash2) = match perform_head_split(workdir, selected, remaining, msg1, msg2) {
         Ok(hashes) => hashes,
         Err(e) => {
-            let _ = git_commands::rebase_abort(workdir);
+            let _ = git::rebase_abort(workdir);
             return Err(e);
         }
     };
@@ -243,20 +243,20 @@ fn perform_non_head_split(
     // Continue the rebase — later commits are replayed on top of the split
     // commits, so hash1 and hash2 remain valid (they are ancestors).
     // Abort automatically on conflict — split does not save LoomState.
-    git_commands::continue_rebase_or_abort(workdir)?;
+    git::continue_rebase_or_abort(workdir)?;
 
     Ok((hash1, hash2))
 }
 
 /// Save all staged changes aside so they can be restored after the split.
 fn save_staged(repo: &Repository, workdir: &std::path::Path) -> Result<String> {
-    let staged = git::get_staged_files(repo)?;
+    let staged = repo::get_staged_files(repo)?;
     if staged.is_empty() {
         return Ok(String::new());
     }
     let refs: Vec<&str> = staged.iter().map(|s| s.as_str()).collect();
-    let patch = git_commands::diff_cached_files(workdir, &refs)?;
-    git_commands::unstage_files(workdir, &refs)?;
+    let patch = git::diff_cached_files(workdir, &refs)?;
+    git::unstage_files(workdir, &refs)?;
     Ok(patch)
 }
 

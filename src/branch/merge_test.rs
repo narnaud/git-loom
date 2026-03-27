@@ -1,5 +1,5 @@
-use crate::git;
-use crate::test_helpers::TestRepo;
+use crate::core::repo;
+use crate::core::test_helpers::TestRepo;
 
 /// Merging a non-woven local branch weaves it into integration.
 #[test]
@@ -31,7 +31,7 @@ fn merge_weaves_existing_branch() {
     );
 
     // feature-a should now be in the woven branches
-    let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
+    let info = repo::gather_repo_info(&test_repo.repo, false, 1).unwrap();
     let branch_names: Vec<&str> = info.branches.iter().map(|b| b.name.as_str()).collect();
     assert!(
         branch_names.contains(&"feature-a"),
@@ -76,7 +76,7 @@ fn merge_then_unmerge_round_trip() {
         .in_dir(|| super::merge::run(Some("feature-rt".to_string()), false))
         .unwrap();
 
-    let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
+    let info = repo::gather_repo_info(&test_repo.repo, false, 1).unwrap();
     let woven: Vec<&str> = info.branches.iter().map(|b| b.name.as_str()).collect();
     assert!(
         woven.contains(&"feature-rt"),
@@ -88,7 +88,7 @@ fn merge_then_unmerge_round_trip() {
         .in_dir(|| super::unmerge::run(Some("feature-rt".to_string())))
         .unwrap();
 
-    let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
+    let info = repo::gather_repo_info(&test_repo.repo, false, 1).unwrap();
     let woven: Vec<&str> = info.branches.iter().map(|b| b.name.as_str()).collect();
     assert!(
         !woven.contains(&"feature-rt"),
@@ -160,7 +160,7 @@ fn merge_conflict_continue_weaves_branch() {
     // Resolve conflict and continue.
     test_repo.write_file("shared.txt", "resolved");
     test_repo.stage_files(&["shared.txt"]);
-    crate::transaction::continue_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
+    crate::core::transaction::continue_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
 
     assert!(
         !state_path.exists(),
@@ -172,7 +172,7 @@ fn merge_conflict_continue_weaves_branch() {
         "HEAD must be a merge commit after continue"
     );
 
-    let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
+    let info = repo::gather_repo_info(&test_repo.repo, false, 1).unwrap();
     let branch_names: Vec<&str> = info.branches.iter().map(|b| b.name.as_str()).collect();
     assert!(
         branch_names.contains(&"feature-conflict"),
@@ -215,7 +215,7 @@ fn merge_conflict_abort_restores_state() {
         "state file must exist when merge is paused"
     );
 
-    crate::transaction::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
+    crate::core::transaction::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
 
     assert!(
         !state_path.exists(),
@@ -232,7 +232,7 @@ fn merge_conflict_abort_restores_state() {
         "HEAD must not be a merge commit after abort"
     );
 
-    let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
+    let info = repo::gather_repo_info(&test_repo.repo, false, 1).unwrap();
     let branch_names: Vec<&str> = info.branches.iter().map(|b| b.name.as_str()).collect();
     assert!(
         !branch_names.contains(&"feature-abort"),

@@ -4,9 +4,9 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 use git2::{Oid, Repository};
 
+use crate::core::msg;
+use crate::core::repo;
 use crate::git;
-use crate::git_commands;
-use crate::msg;
 
 /// Command for a commit in the todo file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,7 +123,7 @@ impl Weave {
                     if let Some(oid) = original_oid {
                         out.push_str(&format!(
                             "merge -C {} {} # Merge branch '{}'\n",
-                            git_commands::short_hash(&oid.to_string()),
+                            git::short_hash(&oid.to_string()),
                             label,
                             label
                         ));
@@ -144,7 +144,7 @@ impl Weave {
     /// When `RepoInfo` is already available, prefer `from_repo_with_info`
     /// to avoid a redundant graph walk.
     pub fn from_repo(repo: &Repository) -> Result<Self> {
-        let info = git::gather_repo_info(repo, false, 1)?;
+        let info = repo::gather_repo_info(repo, false, 1)?;
         Self::from_repo_with_info(repo, &info)
     }
 
@@ -152,8 +152,8 @@ impl Weave {
     ///
     /// Walks the first-parent line from HEAD to the merge-base, collecting
     /// branch sections (from merge commits) and integration-line entries.
-    pub fn from_repo_with_info(repo: &Repository, info: &git::RepoInfo) -> Result<Self> {
-        let head_oid = git::head_oid(repo)?;
+    pub fn from_repo_with_info(repo: &Repository, info: &repo::RepoInfo) -> Result<Self> {
+        let head_oid = repo::head_oid(repo)?;
         let merge_base_oid = info.upstream.merge_base_oid;
 
         // Walk the first-parent line from HEAD to merge-base
@@ -199,10 +199,7 @@ impl Weave {
                             branch_names_at_tip[0].clone()
                         } else {
                             // No branch ref at the merge parent — use a generated label
-                            format!(
-                                "section-{}",
-                                git_commands::short_hash(&merge_parent_oid.to_string())
-                            )
+                            format!("section-{}", git::short_hash(&merge_parent_oid.to_string()))
                         };
 
                         // Convert to CommitEntry (oldest first)
@@ -927,7 +924,7 @@ fn walk_first_parent_line(
             .as_str()
             .context("short_id is not valid UTF-8")?
             .to_string();
-        let message = git::commit_subject(&commit);
+        let message = repo::commit_subject(&commit);
 
         let is_merge = commit.parent_count() > 1;
 
@@ -1026,7 +1023,7 @@ fn walk_branch_commits(repo: &Repository, tip: Oid, stop: Oid) -> Result<Vec<Bra
                 .as_str()
                 .context("short_id is not valid UTF-8")?
                 .to_string();
-            let message = git::commit_subject(&commit);
+            let message = repo::commit_subject(&commit);
 
             entries.push(BranchCommitEntry {
                 oid: current,
@@ -1074,7 +1071,7 @@ pub fn start_edit_rebase(repo: &Repository, workdir: &Path, commit_oid: Oid) -> 
 /// Used for non-integration repos where `Weave::from_repo()` is not available.
 /// Walks the first-parent line from HEAD to the target's parent (or root).
 fn build_and_run_linear_edit(repo: &Repository, workdir: &Path, commit_oid: Oid) -> Result<()> {
-    let head_oid = git::head_oid(repo)?;
+    let head_oid = repo::head_oid(repo)?;
     let commit = repo.find_commit(commit_oid)?;
 
     // Determine upstream (parent of target, or --root for root commits)
@@ -1106,7 +1103,7 @@ fn build_and_run_linear_edit(repo: &Repository, workdir: &Path, commit_oid: Oid)
             .as_str()
             .context("Short ID is not valid UTF-8")?
             .to_string();
-        let msg = git::commit_subject(&c);
+        let msg = repo::commit_subject(&c);
         let cmd = if current == commit_oid {
             "edit"
         } else {
@@ -1133,7 +1130,7 @@ fn build_and_run_linear_edit(repo: &Repository, workdir: &Path, commit_oid: Oid)
 }
 
 /// Outcome of a weave-based rebase.
-pub use crate::git_commands::RebaseOutcome;
+pub use crate::git::RebaseOutcome;
 
 /// Execute a weave-based rebase, aborting automatically on conflict.
 ///
@@ -1147,7 +1144,7 @@ pub fn run_rebase_or_abort(
     match run_rebase(workdir, upstream, todo_content)? {
         RebaseOutcome::Completed => Ok(()),
         RebaseOutcome::Conflicted => {
-            let _ = git_commands::rebase_abort(workdir);
+            let _ = git::rebase_abort(workdir);
             bail!("Rebase failed with conflicts — aborted");
         }
     }
@@ -1176,7 +1173,7 @@ pub fn run_rebase(
 
     use crate::trace as loom_trace;
 
-    let self_exe = git_commands::loom_exe_path()?;
+    let self_exe = git::loom_exe_path()?;
 
     // Write todo content to a temp file
     let mut temp_file = tempfile::NamedTempFile::new()?;
@@ -1261,11 +1258,10 @@ pub fn run_rebase(
         // Distinguish a genuine merge conflict (git left rebase state on disk)
         // from a generic failure (bad todo, missing ref, sequence-editor error).
         // The plain `git rebase` wrapper uses the same check.
-        if let Ok(git_dir_str) =
-            git_commands::run_git_stdout(workdir, &["rev-parse", "--absolute-git-dir"])
+        if let Ok(git_dir_str) = git::run_git_stdout(workdir, &["rev-parse", "--absolute-git-dir"])
         {
             let git_dir = std::path::Path::new(git_dir_str.trim());
-            if git_commands::rebase_is_in_progress(git_dir) {
+            if git::rebase_is_in_progress(git_dir) {
                 return Ok(RebaseOutcome::Conflicted);
             }
         }
@@ -1289,7 +1285,7 @@ pub fn run_rebase(
 /// O(upstream commits). `git cherry` uses the same patch-ID logic internally
 /// and respects diff.algorithm consistently.
 fn cherry_pick_equivalents(workdir: &Path, upstream: &Oid, base: &Oid) -> Option<HashSet<Oid>> {
-    let stdout = git_commands::run_git_stdout(
+    let stdout = git::run_git_stdout(
         workdir,
         &["cherry", &upstream.to_string(), "HEAD", &base.to_string()],
     )

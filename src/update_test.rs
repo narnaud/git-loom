@@ -1,4 +1,4 @@
-use crate::test_helpers::TestRepo;
+use crate::core::test_helpers::TestRepo;
 use git2::{BranchType, Repository, Signature};
 
 #[test]
@@ -938,7 +938,7 @@ fn update_handles_inverted_parent_merge_on_integration() {
     // Verify the rebase fully completed (not paused on conflicts)
     let git_dir = test_repo.repo.path().to_path_buf();
     assert!(
-        !crate::git_commands::rebase_is_in_progress(&git_dir),
+        !crate::git::rebase_is_in_progress(&git_dir),
         "rebase should not be in progress — expected clean completion, not conflict pause"
     );
 

@@ -1,4 +1,4 @@
-use crate::test_helpers::TestRepo;
+use crate::core::test_helpers::TestRepo;
 
 fn no_pager() {
     // SAFETY: tests are serialized via `in_dir`'s global mutex.

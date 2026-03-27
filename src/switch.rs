@@ -3,16 +3,16 @@ use std::collections::HashSet;
 use anyhow::{Result, bail};
 use git2::{BranchType, Repository, StatusOptions};
 
+use crate::core::msg;
+use crate::core::repo;
 use crate::git;
-use crate::git_commands;
-use crate::msg;
 
 /// Switch to any branch (local or remote) for testing without weaving it into
 /// the integration branch. Remote-only branches detach HEAD at the remote ref.
 /// Fails if the working tree has staged or unstaged changes to tracked files.
 pub fn run(branch: Option<String>) -> Result<()> {
-    let repo = git::open_repo()?;
-    let workdir = git::require_workdir(&repo, "switch")?;
+    let repo = repo::open_repo()?;
+    let workdir = repo::require_workdir(&repo, "switch")?;
 
     check_clean(&repo)?;
 
@@ -22,10 +22,10 @@ pub fn run(branch: Option<String>) -> Result<()> {
     };
 
     if is_remote {
-        git_commands::branch_switch_detach(workdir, &branch_name)?;
+        git::branch_switch_detach(workdir, &branch_name)?;
         msg::success(&format!("Detached HEAD at `{}`", branch_name));
     } else {
-        git_commands::branch_switch(workdir, &branch_name)?;
+        git::branch_switch(workdir, &branch_name)?;
         msg::success(&format!("Switched to `{}`", branch_name));
     }
 
@@ -60,7 +60,9 @@ fn resolve_branch(repo: &Repository, arg: &str) -> Result<(String, bool)> {
     }
 
     // Short ID resolution via gather_repo_info (best-effort)
-    if let Ok(git::Target::Branch(name)) = git::resolve_arg(repo, arg, &[git::TargetKind::Branch]) {
+    if let Ok(repo::Target::Branch(name)) =
+        repo::resolve_arg(repo, arg, &[repo::TargetKind::Branch])
+    {
         return Ok((name, false));
     }
 
@@ -98,7 +100,7 @@ fn pick_branch(repo: &Repository) -> Result<(String, bool)> {
             if name.ends_with("/HEAD") {
                 continue;
             }
-            let short_name = git::upstream_local_branch(name);
+            let short_name = repo::upstream_local_branch(name);
             if !local_names.contains(&short_name) {
                 items.push((name.to_string(), true));
             }

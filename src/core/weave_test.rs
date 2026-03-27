@@ -608,7 +608,7 @@ fn reassign_branch_renames_section() {
 
 #[test]
 fn from_repo_linear_integration() {
-    use crate::test_helpers::TestRepo;
+    use crate::core::test_helpers::TestRepo;
 
     let test_repo = TestRepo::new_with_remote();
     test_repo.commit("C1", "c1.txt");
@@ -634,7 +634,7 @@ fn from_repo_linear_integration() {
 
 #[test]
 fn from_repo_with_woven_branch() {
-    use crate::test_helpers::TestRepo;
+    use crate::core::test_helpers::TestRepo;
 
     let test_repo = TestRepo::new_with_remote();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
@@ -686,7 +686,7 @@ fn from_repo_with_woven_branch() {
 
 #[test]
 fn from_repo_with_non_woven_branch() {
-    use crate::test_helpers::TestRepo;
+    use crate::core::test_helpers::TestRepo;
 
     let test_repo = TestRepo::new_with_remote();
 
@@ -716,7 +716,7 @@ fn from_repo_with_non_woven_branch() {
 
 #[test]
 fn from_repo_round_trip_preserves_identity() {
-    use crate::test_helpers::TestRepo;
+    use crate::core::test_helpers::TestRepo;
 
     let test_repo = TestRepo::new_with_remote();
     let workdir = test_repo.workdir();
@@ -732,7 +732,7 @@ fn from_repo_round_trip_preserves_identity() {
 
     // Record state before round-trip
     let messages_before: Vec<String> = {
-        let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
+        let info = repo::gather_repo_info(&test_repo.repo, false, 1).unwrap();
         info.commits.iter().map(|c| c.message.clone()).collect()
     };
 
@@ -745,7 +745,7 @@ fn from_repo_round_trip_preserves_identity() {
 
     // Verify identity: same commits after round-trip
     let messages_after: Vec<String> = {
-        let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
+        let info = repo::gather_repo_info(&test_repo.repo, false, 1).unwrap();
         info.commits.iter().map(|c| c.message.clone()).collect()
     };
 

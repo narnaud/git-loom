@@ -1,5 +1,5 @@
-use crate::git;
-use crate::test_helpers::TestRepo;
+use crate::core::repo;
+use crate::core::test_helpers::TestRepo;
 
 #[test]
 fn branch_shows_in_status() {
@@ -9,7 +9,7 @@ fn branch_shows_in_status() {
 
     test_repo.create_branch_at("feature-a", &a1_oid.to_string());
 
-    let info = git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
+    let info = repo::gather_repo_info(&test_repo.repo, false, 1).unwrap();
     let branch_names: Vec<&str> = info.branches.iter().map(|b| b.name.as_str()).collect();
     assert!(
         branch_names.contains(&"feature-a"),
@@ -41,13 +41,13 @@ fn branch_ownership_splits_commits() {
 
 #[test]
 fn branch_invalid_name_fails() {
-    let result = crate::git_commands::branch_validate_name("my..branch");
+    let result = crate::git::branch_validate_name("my..branch");
     assert!(result.is_err(), "double dots should be invalid");
 
-    let result = crate::git_commands::branch_validate_name("has space");
+    let result = crate::git::branch_validate_name("has space");
     assert!(result.is_err(), "spaces should be invalid");
 
-    let result = crate::git_commands::branch_validate_name("valid-name");
+    let result = crate::git::branch_validate_name("valid-name");
     assert!(result.is_ok(), "valid name should pass");
 }
 

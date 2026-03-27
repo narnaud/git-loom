@@ -1,6 +1,6 @@
-use crate::git;
-use crate::test_helpers::TestRepo;
-use crate::weave::Weave;
+use crate::core::repo;
+use crate::core::test_helpers::TestRepo;
+use crate::core::weave::Weave;
 
 // ── Case 1: File(s) + Commit (Amend) ────────────────────────────────────
 
@@ -348,8 +348,8 @@ fn fold_commit_to_branch_via_short_ids() {
 
     // Get short IDs for the commit and branch
     let (commit_sid, branch_sid) = test_repo.in_dir(|| {
-        let info = crate::git::gather_repo_info(&test_repo.repo, false, 1).unwrap();
-        let alloc = crate::shortid::IdAllocator::new(info.collect_entities());
+        let info = crate::core::repo::gather_repo_info(&test_repo.repo, false, 1).unwrap();
+        let alloc = crate::core::shortid::IdAllocator::new(info.collect_entities());
         (
             alloc.get_commit(c1_oid).to_string(),
             alloc.get_branch("feature-a").to_string(),
@@ -590,32 +590,32 @@ fn fold_commit_to_existing_out_of_scope_branch_fails() {
 
 #[test]
 fn classify_files_into_commit() {
-    let sources = vec![git::Target::File("f1.txt".into())];
-    let target = git::Target::Commit("abc123".into());
+    let sources = vec![repo::Target::File("f1.txt".into())];
+    let target = repo::Target::Commit("abc123".into());
     let result = super::classify(&sources, &target);
     assert!(result.is_ok());
 }
 
 #[test]
 fn classify_commit_into_commit() {
-    let sources = vec![git::Target::Commit("abc123".into())];
-    let target = git::Target::Commit("def456".into());
+    let sources = vec![repo::Target::Commit("abc123".into())];
+    let target = repo::Target::Commit("def456".into());
     let result = super::classify(&sources, &target);
     assert!(result.is_ok());
 }
 
 #[test]
 fn classify_commit_into_branch() {
-    let sources = vec![git::Target::Commit("abc123".into())];
-    let target = git::Target::Branch("feature-a".into());
+    let sources = vec![repo::Target::Commit("abc123".into())];
+    let target = repo::Target::Branch("feature-a".into());
     let result = super::classify(&sources, &target);
     assert!(result.is_ok());
 }
 
 #[test]
 fn classify_branch_source_rejected() {
-    let sources = vec![git::Target::Branch("feature-a".into())];
-    let target = git::Target::Commit("abc123".into());
+    let sources = vec![repo::Target::Branch("feature-a".into())];
+    let target = repo::Target::Commit("abc123".into());
     let result = super::classify(&sources, &target);
     assert!(result.is_err());
     assert!(
@@ -628,8 +628,8 @@ fn classify_branch_source_rejected() {
 
 #[test]
 fn classify_files_into_branch_rejected() {
-    let sources = vec![git::Target::File("f1.txt".into())];
-    let target = git::Target::Branch("feature-a".into());
+    let sources = vec![repo::Target::File("f1.txt".into())];
+    let target = repo::Target::Branch("feature-a".into());
     let result = super::classify(&sources, &target);
     assert!(result.is_err());
     assert!(
@@ -643,10 +643,10 @@ fn classify_files_into_branch_rejected() {
 #[test]
 fn classify_mixed_sources_rejected() {
     let sources = vec![
-        git::Target::File("f1.txt".into()),
-        git::Target::Commit("abc123".into()),
+        repo::Target::File("f1.txt".into()),
+        repo::Target::Commit("abc123".into()),
     ];
-    let target = git::Target::Commit("def456".into());
+    let target = repo::Target::Commit("def456".into());
     let result = super::classify(&sources, &target);
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("Cannot mix"));
@@ -655,10 +655,10 @@ fn classify_mixed_sources_rejected() {
 #[test]
 fn classify_multiple_commit_sources_rejected() {
     let sources = vec![
-        git::Target::Commit("abc123".into()),
-        git::Target::Commit("def456".into()),
+        repo::Target::Commit("abc123".into()),
+        repo::Target::Commit("def456".into()),
     ];
-    let target = git::Target::Commit("ghi789".into());
+    let target = repo::Target::Commit("ghi789".into());
     let result = super::classify(&sources, &target);
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("Only one commit"));
@@ -744,8 +744,8 @@ fn fold_commit_to_unstaged_dirty_autostashed() {
 
 #[test]
 fn classify_commit_into_unstaged() {
-    let sources = vec![git::Target::Commit("abc123".into())];
-    let target = git::Target::Unstaged;
+    let sources = vec![repo::Target::Commit("abc123".into())];
+    let target = repo::Target::Unstaged;
     let result = super::classify(&sources, &target);
     assert!(result.is_ok());
     assert!(matches!(
@@ -756,8 +756,8 @@ fn classify_commit_into_unstaged() {
 
 #[test]
 fn classify_files_into_unstaged_rejected() {
-    let sources = vec![git::Target::File("f1.txt".into())];
-    let target = git::Target::Unstaged;
+    let sources = vec![repo::Target::File("f1.txt".into())];
+    let target = repo::Target::Unstaged;
     let result = super::classify(&sources, &target);
     assert!(result.is_err());
     assert!(
@@ -1257,11 +1257,11 @@ fn fold_commit_file_to_commit_woven_branches() {
 
 #[test]
 fn classify_commit_file_into_unstaged() {
-    let sources = vec![git::Target::CommitFile {
+    let sources = vec![repo::Target::CommitFile {
         commit: "abc123".into(),
         path: "file.txt".into(),
     }];
-    let target = git::Target::Unstaged;
+    let target = repo::Target::Unstaged;
     let result = super::classify(&sources, &target);
     assert!(result.is_ok());
     assert!(matches!(
@@ -1272,11 +1272,11 @@ fn classify_commit_file_into_unstaged() {
 
 #[test]
 fn classify_commit_file_into_commit() {
-    let sources = vec![git::Target::CommitFile {
+    let sources = vec![repo::Target::CommitFile {
         commit: "abc123".into(),
         path: "file.txt".into(),
     }];
-    let target = git::Target::Commit("def456".into());
+    let target = repo::Target::Commit("def456".into());
     let result = super::classify(&sources, &target);
     assert!(result.is_ok());
     assert!(matches!(
@@ -1287,11 +1287,11 @@ fn classify_commit_file_into_commit() {
 
 #[test]
 fn classify_commit_file_into_branch_rejected() {
-    let sources = vec![git::Target::CommitFile {
+    let sources = vec![repo::Target::CommitFile {
         commit: "abc123".into(),
         path: "file.txt".into(),
     }];
-    let target = git::Target::Branch("feature-a".into());
+    let target = repo::Target::Branch("feature-a".into());
     let result = super::classify(&sources, &target);
     assert!(result.is_err());
     assert!(
@@ -1304,8 +1304,8 @@ fn classify_commit_file_into_branch_rejected() {
 
 #[test]
 fn classify_commit_file_target_rejected() {
-    let sources = vec![git::Target::Commit("abc123".into())];
-    let target = git::Target::CommitFile {
+    let sources = vec![repo::Target::Commit("abc123".into())];
+    let target = repo::Target::CommitFile {
         commit: "def456".into(),
         path: "file.txt".into(),
     };
@@ -1330,9 +1330,9 @@ fn resolve_fold_arg_filesystem_path() {
     test_repo.write_file("file1.txt", "changed");
 
     let result = test_repo
-        .in_dir(|| git::resolve_arg(&test_repo.repo, "file1.txt", &[git::TargetKind::File]));
+        .in_dir(|| repo::resolve_arg(&test_repo.repo, "file1.txt", &[repo::TargetKind::File]));
     assert!(result.is_ok(), "resolve failed: {:?}", result);
-    assert!(matches!(result.unwrap(), git::Target::File(_)));
+    assert!(matches!(result.unwrap(), repo::Target::File(_)));
 }
 
 #[test]
@@ -1341,14 +1341,14 @@ fn resolve_fold_arg_commit_hash() {
     let c1_oid = test_repo.commit_empty("commit");
 
     let result = test_repo.in_dir(|| {
-        git::resolve_arg(
+        repo::resolve_arg(
             &test_repo.repo,
             &c1_oid.to_string(),
-            &[git::TargetKind::Commit],
+            &[repo::TargetKind::Commit],
         )
     });
     assert!(result.is_ok());
-    assert!(matches!(result.unwrap(), git::Target::Commit(_)));
+    assert!(matches!(result.unwrap(), repo::Target::Commit(_)));
 }
 
 #[test]
@@ -1359,9 +1359,9 @@ fn resolve_fold_arg_branch_name() {
     test_repo.create_branch_at_commit("feature-a", a1_oid);
 
     let result = test_repo
-        .in_dir(|| git::resolve_arg(&test_repo.repo, "feature-a", &[git::TargetKind::Branch]));
+        .in_dir(|| repo::resolve_arg(&test_repo.repo, "feature-a", &[repo::TargetKind::Branch]));
     assert!(result.is_ok());
-    assert!(matches!(result.unwrap(), git::Target::Branch(_)));
+    assert!(matches!(result.unwrap(), repo::Target::Branch(_)));
 }
 
 #[test]
@@ -1369,10 +1369,10 @@ fn resolve_fold_arg_head() {
     let test_repo = TestRepo::new_with_remote();
     test_repo.commit_empty("commit");
 
-    let result =
-        test_repo.in_dir(|| git::resolve_arg(&test_repo.repo, "HEAD", &[git::TargetKind::Commit]));
+    let result = test_repo
+        .in_dir(|| repo::resolve_arg(&test_repo.repo, "HEAD", &[repo::TargetKind::Commit]));
     assert!(result.is_ok());
-    assert!(matches!(result.unwrap(), git::Target::Commit(_)));
+    assert!(matches!(result.unwrap(), repo::Target::Commit(_)));
 }
 
 // ── fold --create ─────────────────────────────────────────────────────────
@@ -1585,7 +1585,7 @@ fn fold_abort_preserves_working_state() {
 
     let workdir = test_repo.workdir();
     let git_dir = test_repo.repo.path().to_path_buf();
-    crate::transaction::abort_cmd(&workdir, &git_dir).unwrap();
+    crate::core::transaction::abort_cmd(&workdir, &git_dir).unwrap();
 
     assert_eq!(test_repo.read_file("other-staged.txt"), "staged-content");
     assert_eq!(

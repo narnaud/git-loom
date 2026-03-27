@@ -6,9 +6,9 @@ use std::time::Instant;
 use anyhow::{Context, Result, bail};
 use git2::{BranchType, Repository, Sort};
 
+use crate::core::msg;
+use crate::core::repo;
 use crate::git;
-use crate::git_commands;
-use crate::msg;
 use crate::trace as loom_trace;
 
 /// Remote type detected for the push operation.
@@ -29,9 +29,9 @@ enum RemoteType {
 /// When `no_pr` is true, skips PR/review creation for all remote types.
 /// For Gerrit, branches without a `wip/` prefix get a confirmation prompt.
 pub fn run(branch: Option<String>, no_pr: bool) -> Result<()> {
-    let repo = git::open_repo()?;
-    let workdir = git::require_workdir(&repo, "push")?.to_path_buf();
-    let info = git::gather_repo_info(&repo, false, 1)?;
+    let repo = repo::open_repo()?;
+    let workdir = repo::require_workdir(&repo, "push")?.to_path_buf();
+    let info = repo::gather_repo_info(&repo, false, 1)?;
 
     if info.branches.is_empty() {
         bail!("No woven branches to push\nCreate a branch with `git loom branch` first");
@@ -82,8 +82,8 @@ pub fn run(branch: Option<String>, no_pr: bool) -> Result<()> {
 }
 
 /// Resolve an explicit branch argument to a woven branch name.
-fn resolve_branch(repo: &Repository, info: &git::RepoInfo, branch_arg: &str) -> Result<String> {
-    let name = git::resolve_arg(repo, branch_arg, &[git::TargetKind::Branch])?.expect_branch()?;
+fn resolve_branch(repo: &Repository, info: &repo::RepoInfo, branch_arg: &str) -> Result<String> {
+    let name = repo::resolve_arg(repo, branch_arg, &[repo::TargetKind::Branch])?.expect_branch()?;
     if info.branches.iter().any(|b| b.name == name) {
         Ok(name)
     } else {
@@ -92,7 +92,7 @@ fn resolve_branch(repo: &Repository, info: &git::RepoInfo, branch_arg: &str) -> 
 }
 
 /// Interactive branch picker: list woven branches.
-fn pick_branch(info: &git::RepoInfo) -> Result<String> {
+fn pick_branch(info: &repo::RepoInfo) -> Result<String> {
     let items: Vec<String> = info.branches.iter().map(|b| b.name.clone()).collect();
     msg::select("Select branch to push", items)
 }
@@ -107,8 +107,7 @@ fn detect_remote_type(
     upstream_label: &str,
 ) -> Result<RemoteType> {
     // 1. Check explicit config override
-    if let Ok(config_value) =
-        git_commands::run_git_stdout(workdir, &["config", "--get", "loom.remote-type"])
+    if let Ok(config_value) = git::run_git_stdout(workdir, &["config", "--get", "loom.remote-type"])
     {
         let value = config_value.trim().to_lowercase();
         if value == "github" {
@@ -211,7 +210,7 @@ fn extract_gh_repo(repo: &Repository, remote: &str) -> Option<String> {
 
 /// Extract the target branch from an upstream label like "origin/main" → "main".
 fn extract_target_branch(upstream_label: &str) -> String {
-    let branch = git::upstream_local_branch(upstream_label);
+    let branch = repo::upstream_local_branch(upstream_label);
     if branch.is_empty() {
         "main".to_string()
     } else {
@@ -235,8 +234,7 @@ fn resolve_push_remote(
     remote_type: &RemoteType,
 ) -> String {
     // 1. Check explicit config override
-    if let Ok(push_remote) =
-        git_commands::run_git_stdout(workdir, &["config", "--get", "loom.push-remote"])
+    if let Ok(push_remote) = git::run_git_stdout(workdir, &["config", "--get", "loom.push-remote"])
     {
         let remote = push_remote.trim();
         if !remote.is_empty() && repo.find_remote(remote).is_ok() {
@@ -258,7 +256,7 @@ fn resolve_push_remote(
 
 /// Force-with-lease push a branch to remote.
 fn git_push(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
-    git_commands::run_git(
+    git::run_git(
         workdir,
         &[
             "push",
@@ -298,7 +296,7 @@ fn gather_branch_commits(
         if commit.parent_count() > 1 {
             continue; // skip merge commits
         }
-        let subject = git::commit_subject(&commit);
+        let subject = repo::commit_subject(&commit);
         let body = commit.body().unwrap_or("").to_string();
         commits.push((subject, body));
     }
@@ -719,7 +717,7 @@ fn push_gerrit_no_pr(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
     } else if choice == opt_wip {
         let wip_name = format!("wip/{}", branch);
         let refspec = format!("{}:{}", branch, wip_name);
-        git_commands::run_git(
+        git::run_git(
             workdir,
             &[
                 "push",

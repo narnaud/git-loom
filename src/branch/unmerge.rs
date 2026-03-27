@@ -1,18 +1,18 @@
 use anyhow::{Result, bail};
 
 use crate::branch::is_on_first_parent_line;
-use crate::git;
-use crate::msg;
-use crate::weave::{self, Weave};
+use crate::core::msg;
+use crate::core::repo;
+use crate::core::weave::{self, Weave};
 
 /// Remove a branch from the integration branch without deleting it.
 ///
 /// The branch's commits are removed from the integration topology,
 /// but the branch ref is preserved.
 pub fn run(branch: Option<String>) -> Result<()> {
-    let repo = git::open_repo()?;
-    let workdir = git::require_workdir(&repo, "unmerge")?;
-    let info = git::gather_repo_info(&repo, false, 1)?;
+    let repo = repo::open_repo()?;
+    let workdir = repo::require_workdir(&repo, "unmerge")?;
+    let info = repo::gather_repo_info(&repo, false, 1)?;
 
     let branch_name = match branch {
         Some(name) => resolve_woven_branch(&repo, &info, &name)?,
@@ -26,7 +26,7 @@ pub fn run(branch: Option<String>) -> Result<()> {
         .find(|b| b.name == branch_name)
         .expect("branch guaranteed to exist after resolve_woven_branch");
 
-    let head_oid = git::head_oid(&repo)?;
+    let head_oid = repo::head_oid(&repo)?;
     let merge_base_oid = info.upstream.merge_base_oid;
 
     let is_woven = branch_info.tip_oid != head_oid
@@ -58,10 +58,10 @@ pub fn run(branch: Option<String>) -> Result<()> {
 /// Resolve a branch argument to a woven branch name.
 fn resolve_woven_branch(
     repo: &git2::Repository,
-    info: &git::RepoInfo,
+    info: &repo::RepoInfo,
     branch_arg: &str,
 ) -> Result<String> {
-    let name = git::resolve_arg(repo, branch_arg, &[git::TargetKind::Branch])?.expect_branch()?;
+    let name = repo::resolve_arg(repo, branch_arg, &[repo::TargetKind::Branch])?.expect_branch()?;
     if info.branches.iter().any(|b| b.name == name) {
         Ok(name)
     } else {
@@ -70,7 +70,7 @@ fn resolve_woven_branch(
 }
 
 /// Interactive picker: list woven branches.
-fn pick_woven_branch(info: &git::RepoInfo) -> Result<String> {
+fn pick_woven_branch(info: &repo::RepoInfo) -> Result<String> {
     let items: Vec<String> = info.branches.iter().map(|b| b.name.clone()).collect();
     if items.is_empty() {
         bail!("No woven branches to unmerge");
