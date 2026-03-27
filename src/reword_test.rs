@@ -1,6 +1,6 @@
 // ── Test Helpers ───────────────────────────────────────────────────────
 
-use crate::test_helpers::TestRepo;
+use crate::core::test_helpers::TestRepo;
 
 // ── Integration tests ──────────────────────────────────────────────────
 // These tests require full git command execution and call the actual reword

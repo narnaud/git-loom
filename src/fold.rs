@@ -4,11 +4,11 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 use crate::commit;
-use crate::git::{self, Target, TargetKind};
-use crate::git_commands;
-use crate::msg;
-use crate::transaction::{self, LoomState, Rollback};
-use crate::weave::{self, RebaseOutcome, Weave};
+use crate::core::msg;
+use crate::core::repo::{self, Target, TargetKind};
+use crate::core::transaction::{self, LoomState, Rollback};
+use crate::core::weave::{self, RebaseOutcome, Weave};
+use crate::git;
 
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "op")]
@@ -51,7 +51,7 @@ pub fn run(create: bool, args: Vec<String>) -> Result<()> {
         );
     }
 
-    let repo = git::open_repo()?;
+    let repo = repo::open_repo()?;
 
     if create {
         return run_create(&repo, &args);
@@ -81,7 +81,7 @@ pub fn run(create: bool, args: Vec<String>) -> Result<()> {
     let resolved_sources: Vec<Target> = source_args
         .iter()
         .map(|s| {
-            git::resolve_arg(
+            repo::resolve_arg(
                 &repo,
                 s,
                 &[
@@ -93,7 +93,7 @@ pub fn run(create: bool, args: Vec<String>) -> Result<()> {
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let resolved_target = git::resolve_arg(
+    let resolved_target = repo::resolve_arg(
         &repo,
         target_arg,
         &[
@@ -138,16 +138,16 @@ fn run_create(repo: &Repository, args: &[String]) -> Result<()> {
     }
 
     let (source_arg, branch_name) = (&args[0], &args[1]);
-    let workdir = git::require_workdir(repo, "fold")?;
+    let workdir = repo::require_workdir(repo, "fold")?;
 
     // Resolve source — must be a commit
-    let source = git::resolve_arg(repo, source_arg, &[TargetKind::Commit])?;
+    let source = repo::resolve_arg(repo, source_arg, &[TargetKind::Commit])?;
     let commit_hash = match source {
         Target::Commit(hash) => hash,
         _ => unreachable!(),
     };
 
-    git_commands::branch_validate_name(branch_name)?;
+    git::branch_validate_name(branch_name)?;
 
     // If the branch already exists, warn and fall through to a normal move.
     let branch_exists = repo
@@ -163,7 +163,7 @@ fn run_create(repo: &Repository, args: &[String]) -> Result<()> {
 
     // Create the branch at the merge-base so it has no commits of its own yet;
     // move_commit_to_branch will add a section for it in the Weave graph.
-    let info = git::gather_repo_info(repo, false, 1).ok();
+    let info = repo::gather_repo_info(repo, false, 1).ok();
     let base_hash = match &info {
         Some(info) => info.upstream.merge_base_oid.to_string(),
         None => bail!(
@@ -183,27 +183,27 @@ fn create_branch_and_move(
     branch_name: &str,
     base_hash: &str,
 ) -> Result<()> {
-    git_commands::branch_create(workdir, branch_name, base_hash)?;
+    git::branch_create(workdir, branch_name, base_hash)?;
 
     match move_commit_to_branch(repo, commit_hash, branch_name) {
         Ok(RebaseOutcome::Completed) => {}
         Ok(RebaseOutcome::Conflicted) => {
-            let _ = git_commands::rebase_abort(workdir);
-            let _ = git_commands::branch_delete(workdir, branch_name);
+            let _ = git::rebase_abort(workdir);
+            let _ = git::branch_delete(workdir, branch_name);
             bail!("Rebase failed with conflicts — aborted");
         }
         Err(e) => {
-            let _ = git_commands::branch_delete(workdir, branch_name);
+            let _ = git::branch_delete(workdir, branch_name);
             return Err(e);
         }
     }
 
-    let new_hash = git_commands::rev_parse(workdir, branch_name)?;
+    let new_hash = git::rev_parse(workdir, branch_name)?;
     msg::success(&format!(
         "Created branch `{}` and moved `{}` to it (now `{}`)",
         branch_name,
-        git_commands::short_hash(commit_hash),
-        git_commands::short_hash(&new_hash)
+        git::short_hash(commit_hash),
+        git::short_hash(&new_hash)
     ));
 
     Ok(())
@@ -214,7 +214,7 @@ fn create_branch_and_move(
 /// Single-argument form: `loom fold <target>`. The target must resolve to a
 /// commit. If nothing is staged, bails with the same message as `loom commit`.
 fn run_staged(repo: &Repository, target_arg: &str) -> Result<()> {
-    let resolved = git::resolve_arg(repo, target_arg, &[TargetKind::Commit])?;
+    let resolved = repo::resolve_arg(repo, target_arg, &[TargetKind::Commit])?;
     let commit_hash = match resolved {
         Target::Commit(hash) => hash,
         _ => unreachable!(),
@@ -222,7 +222,7 @@ fn run_staged(repo: &Repository, target_arg: &str) -> Result<()> {
 
     commit::verify_has_staged_changes(repo)?;
 
-    let staged = git::get_staged_files(repo)?;
+    let staged = repo::get_staged_files(repo)?;
     fold_files_into_commit(repo, &staged, &commit_hash)
 }
 
@@ -399,16 +399,16 @@ fn collect_changed_files(repo: &Repository) -> Result<Vec<String>> {
 
 /// Fold file changes into a commit (Case 1: File(s) + Commit).
 fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str) -> Result<()> {
-    let workdir = git::require_workdir(repo, "fold")?;
+    let workdir = repo::require_workdir(repo, "fold")?;
 
     // Validate all files have changes
     for file in files {
-        if !git::path_has_changes(repo, file)? {
+        if !repo::path_has_changes(repo, file)? {
             bail!("File '{}' has no changes to fold", file);
         }
     }
 
-    let head_oid = git::head_oid(repo)?;
+    let head_oid = repo::head_oid(repo)?;
     let target_oid = git2::Oid::from_str(commit_hash)?;
     let is_head = head_oid == target_oid;
 
@@ -416,7 +416,7 @@ fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str
 
     // Save and unstage any pre-existing staged files not in our target list,
     // so they don't accidentally end up in this commit/amend.
-    let staged = git::get_staged_files(repo)?;
+    let staged = repo::get_staged_files(repo)?;
     let other_staged: Vec<&str> = staged
         .iter()
         .filter(|f| !file_refs.contains(&f.as_str()))
@@ -425,8 +425,8 @@ fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str
     let saved_staged = if other_staged.is_empty() {
         String::new()
     } else {
-        let patch = git_commands::diff_cached_files(workdir, &other_staged)?;
-        git_commands::unstage_files(workdir, &other_staged)?;
+        let patch = git::diff_cached_files(workdir, &other_staged)?;
+        git::unstage_files(workdir, &other_staged)?;
         patch
     };
 
@@ -434,14 +434,14 @@ fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str
 
     if is_head {
         // Simple case: stage files and amend HEAD
-        git_commands::stage_files(workdir, &file_refs)?;
-        if let Err(e) = git_commands::commit_amend_no_edit(workdir) {
-            let _ = git_commands::unstage_files(workdir, &file_refs);
-            let _ = git_commands::restore_staged_patch(workdir, &saved_staged);
+        git::stage_files(workdir, &file_refs)?;
+        if let Err(e) = git::commit_amend_no_edit(workdir) {
+            let _ = git::unstage_files(workdir, &file_refs);
+            let _ = git::restore_staged_patch(workdir, &saved_staged);
             return Err(e);
         }
-        git_commands::restore_staged_patch(workdir, &saved_staged)?;
-        new_hash = git_commands::rev_parse(workdir, "HEAD")?;
+        git::restore_staged_patch(workdir, &saved_staged)?;
+        new_hash = git::rev_parse(workdir, "HEAD")?;
     } else {
         // Create a fixup commit on HEAD with only the changed files, then
         // use the weave machinery to squash it into the target commit.
@@ -451,15 +451,15 @@ fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str
         let subject = target_commit.summary().unwrap_or("fixup");
         let message = format!("fixup! {}", subject);
 
-        git_commands::stage_files(workdir, &file_refs)?;
-        if let Err(e) = git_commands::commit(workdir, &message) {
-            let _ = git_commands::unstage_files(workdir, &file_refs);
-            let _ = git_commands::restore_staged_patch(workdir, &saved_staged);
+        git::stage_files(workdir, &file_refs)?;
+        if let Err(e) = git::commit(workdir, &message) {
+            let _ = git::unstage_files(workdir, &file_refs);
+            let _ = git::restore_staged_patch(workdir, &saved_staged);
             return Err(e);
         }
 
         // Re-read state after creating the fixup commit
-        let fixup_hash = git_commands::rev_parse(workdir, "HEAD")?;
+        let fixup_hash = git::rev_parse(workdir, "HEAD")?;
         let fixup_oid = git2::Oid::from_str(&fixup_hash)?;
 
         let repo = git2::Repository::discover(workdir)?;
@@ -469,7 +469,7 @@ fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str
         // Track target commit through the rebase via a temp branch.
         // The branch must exist before the rebase AND have an update-ref
         // line in the todo so git keeps it in sync.
-        git_commands::branch_force_create(workdir, TRACK_BRANCH, commit_hash)?;
+        git::branch_force_create(workdir, TRACK_BRANCH, commit_hash)?;
         graph.track_commit(target_oid, TRACK_BRANCH);
 
         // Save LoomState before the rebase.
@@ -494,9 +494,9 @@ fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str
         match weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)? {
             RebaseOutcome::Completed => {
                 transaction::delete(&git_dir)?;
-                git_commands::restore_staged_patch(workdir, &saved_staged)?;
-                new_hash = git_commands::rev_parse(workdir, TRACK_BRANCH)?;
-                let _ = git_commands::branch_delete(workdir, TRACK_BRANCH);
+                git::restore_staged_patch(workdir, &saved_staged)?;
+                new_hash = git::rev_parse(workdir, TRACK_BRANCH)?;
+                let _ = git::branch_delete(workdir, TRACK_BRANCH);
             }
             RebaseOutcome::Conflicted => {
                 transaction::warn_conflict_paused("fold");
@@ -508,8 +508,8 @@ fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str
     msg::success(&format!(
         "Folded {} file(s) into `{}` (now `{}`)",
         files.len(),
-        git_commands::short_hash(commit_hash),
-        git_commands::short_hash(&new_hash)
+        git::short_hash(commit_hash),
+        git::short_hash(&new_hash)
     ));
 
     Ok(())
@@ -517,7 +517,7 @@ fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str
 
 /// Fold a commit into another commit (Case 2: Commit + Commit → Fixup).
 fn fold_commit_into_commit(repo: &Repository, source_hash: &str, target_hash: &str) -> Result<()> {
-    let workdir = git::require_workdir(repo, "fold")?;
+    let workdir = repo::require_workdir(repo, "fold")?;
 
     // Validate source is a descendant of target (source is newer)
     let source_oid = git2::Oid::from_str(source_hash)?;
@@ -535,7 +535,7 @@ fn fold_commit_into_commit(repo: &Repository, source_hash: &str, target_hash: &s
     graph.fixup_commit(source_oid, target_oid)?;
 
     // Track target commit through the rebase via a temp branch.
-    git_commands::branch_force_create(workdir, TRACK_BRANCH, target_hash)?;
+    git::branch_force_create(workdir, TRACK_BRANCH, target_hash)?;
     graph.track_commit(target_oid, TRACK_BRANCH);
 
     // Save LoomState before the rebase.
@@ -558,13 +558,13 @@ fn fold_commit_into_commit(repo: &Repository, source_hash: &str, target_hash: &s
     match weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)? {
         RebaseOutcome::Completed => {
             transaction::delete(&git_dir)?;
-            let new_hash = git_commands::rev_parse(workdir, TRACK_BRANCH)?;
-            let _ = git_commands::branch_delete(workdir, TRACK_BRANCH);
+            let new_hash = git::rev_parse(workdir, TRACK_BRANCH)?;
+            let _ = git::branch_delete(workdir, TRACK_BRANCH);
             msg::success(&format!(
                 "Folded `{}` into `{}` (now `{}`)",
-                git_commands::short_hash(source_hash),
-                git_commands::short_hash(target_hash),
-                git_commands::short_hash(&new_hash)
+                git::short_hash(source_hash),
+                git::short_hash(target_hash),
+                git::short_hash(&new_hash)
             ));
         }
         RebaseOutcome::Conflicted => {
@@ -577,7 +577,7 @@ fn fold_commit_into_commit(repo: &Repository, source_hash: &str, target_hash: &s
 
 /// Move a commit to a branch (Case 3: Commit + Branch → Move).
 fn fold_commit_to_branch(repo: &Repository, commit_hash: &str, branch_name: &str) -> Result<()> {
-    let workdir = git::require_workdir(repo, "fold")?;
+    let workdir = repo::require_workdir(repo, "fold")?;
     let git_dir = repo.path().to_path_buf();
 
     let ctx = serde_json::to_value(FoldVariant::CommitToBranch {
@@ -594,12 +594,12 @@ fn fold_commit_to_branch(repo: &Repository, commit_hash: &str, branch_name: &str
     match move_commit_to_branch(repo, commit_hash, branch_name)? {
         RebaseOutcome::Completed => {
             transaction::delete(&git_dir)?;
-            let new_hash = git_commands::rev_parse(workdir, branch_name)?;
+            let new_hash = git::rev_parse(workdir, branch_name)?;
             msg::success(&format!(
                 "Moved `{}` to branch `{}` (now `{}`)",
-                git_commands::short_hash(commit_hash),
+                git::short_hash(commit_hash),
                 branch_name,
-                git_commands::short_hash(&new_hash)
+                git::short_hash(&new_hash)
             ));
         }
         RebaseOutcome::Conflicted => {
@@ -619,7 +619,7 @@ pub fn move_commit_to_branch(
     commit_hash: &str,
     branch_name: &str,
 ) -> Result<RebaseOutcome> {
-    let workdir = git::require_workdir(repo, "fold")?;
+    let workdir = repo::require_workdir(repo, "fold")?;
 
     let commit_oid = git2::Oid::from_str(commit_hash)?;
 
@@ -674,19 +674,19 @@ pub fn move_commit_to_branch(
 /// directory as unstaged modifications. The commit itself is preserved (minus
 /// the file's changes).
 fn fold_commit_file_to_unstaged(repo: &Repository, commit_hash: &str, path: &str) -> Result<()> {
-    let workdir = git::require_workdir(repo, "fold")?;
+    let workdir = repo::require_workdir(repo, "fold")?;
 
-    let head_oid = git::head_oid(repo)?;
+    let head_oid = repo::head_oid(repo)?;
     let target_oid = git2::Oid::from_str(commit_hash)?;
     let is_head = head_oid == target_oid;
 
     // Get the file's diff from the commit
-    let file_diff = git_commands::diff_commit_file(workdir, commit_hash, path)?;
+    let file_diff = git::diff_commit_file(workdir, commit_hash, path)?;
     if file_diff.is_empty() {
         bail!(
             "File '{}' has no changes in commit {}",
             path,
-            git_commands::short_hash(commit_hash)
+            git::short_hash(commit_hash)
         );
     }
 
@@ -695,18 +695,18 @@ fn fold_commit_file_to_unstaged(repo: &Repository, commit_hash: &str, path: &str
     if is_head {
         // Simple case: reverse the file's changes, amend HEAD, then re-apply
         let saved_head = head_oid.to_string();
-        git_commands::apply_patch_reverse(workdir, &file_diff)?;
-        git_commands::stage_path(workdir, path)?;
-        git_commands::commit_amend_no_edit(workdir)?;
-        new_hash = git_commands::rev_parse(workdir, "HEAD")?;
-        if let Err(e) = git_commands::apply_patch(workdir, &file_diff) {
-            let _ = git_commands::reset_hard(workdir, &saved_head);
+        git::apply_patch_reverse(workdir, &file_diff)?;
+        git::stage_path(workdir, path)?;
+        git::commit_amend_no_edit(workdir)?;
+        new_hash = git::rev_parse(workdir, "HEAD")?;
+        if let Err(e) = git::apply_patch(workdir, &file_diff) {
+            let _ = git::reset_hard(workdir, &saved_head);
             return Err(e).context("Failed to uncommit file, operation rolled back");
         }
     } else {
         // Non-HEAD: edit+continue pattern with save-head rollback
         let saved_head = head_oid.to_string();
-        let saved_refs = git::snapshot_branch_refs(repo)?;
+        let saved_refs = repo::snapshot_branch_refs(repo)?;
 
         let mut graph = Weave::from_repo(repo)?;
         graph.edit_commit(target_oid);
@@ -715,24 +715,24 @@ fn fold_commit_file_to_unstaged(repo: &Repository, commit_hash: &str, path: &str
         weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo)?;
 
         // Paused at target — reverse the file, stage, amend
-        if let Err(e) = git_commands::apply_patch_reverse(workdir, &file_diff)
-            .and_then(|()| git_commands::stage_path(workdir, path))
-            .and_then(|()| git_commands::commit_amend_no_edit(workdir))
+        if let Err(e) = git::apply_patch_reverse(workdir, &file_diff)
+            .and_then(|()| git::stage_path(workdir, path))
+            .and_then(|()| git::commit_amend_no_edit(workdir))
         {
-            let _ = git_commands::rebase_abort(workdir);
+            let _ = git::rebase_abort(workdir);
             return Err(e);
         }
 
         // Capture new hash after amend, before continue moves HEAD
-        new_hash = git_commands::rev_parse(workdir, "HEAD")?;
+        new_hash = git::rev_parse(workdir, "HEAD")?;
 
         // Continue the rebase
-        git_commands::continue_rebase_or_abort(workdir)?;
+        git::continue_rebase_or_abort(workdir)?;
 
         // Re-apply changes to working tree
-        if let Err(e) = git_commands::apply_patch(workdir, &file_diff) {
-            let _ = git_commands::reset_hard(workdir, &saved_head);
-            if let Err(re) = git::restore_branch_refs(workdir, &saved_refs) {
+        if let Err(e) = git::apply_patch(workdir, &file_diff) {
+            let _ = git::reset_hard(workdir, &saved_head);
+            if let Err(re) = repo::restore_branch_refs(workdir, &saved_refs) {
                 msg::warn(&format!("failed to restore branch refs: {re}"));
             }
             return Err(e).context("Failed to uncommit file, operation rolled back");
@@ -742,8 +742,8 @@ fn fold_commit_file_to_unstaged(repo: &Repository, commit_hash: &str, path: &str
     msg::success(&format!(
         "Uncommitted `{}` from `{}` (now `{}`) to working directory",
         path,
-        git_commands::short_hash(commit_hash),
-        git_commands::short_hash(&new_hash)
+        git::short_hash(commit_hash),
+        git::short_hash(&new_hash)
     ));
 
     Ok(())
@@ -759,7 +759,7 @@ fn fold_commit_file_to_commit(
     path: &str,
     target_hash: &str,
 ) -> Result<()> {
-    let workdir = git::require_workdir(repo, "fold")?;
+    let workdir = repo::require_workdir(repo, "fold")?;
 
     let source_oid = git2::Oid::from_str(source_hash)?;
     let target_oid = git2::Oid::from_str(target_hash)?;
@@ -769,12 +769,12 @@ fn fold_commit_file_to_commit(
     }
 
     // Get the file's diff from the source commit
-    let file_diff = git_commands::diff_commit_file(workdir, source_hash, path)?;
+    let file_diff = git::diff_commit_file(workdir, source_hash, path)?;
     if file_diff.is_empty() {
         bail!(
             "File '{}' has no changes in commit {}",
             path,
-            git_commands::short_hash(source_hash)
+            git::short_hash(source_hash)
         );
     }
 
@@ -792,8 +792,8 @@ fn fold_commit_file_to_commit(
         //   Phase 1: Remove the file from source via edit+continue.
         //   Phase 2: Add the file to target via edit+continue.
         // On phase 2 failure, roll back to pre-phase-1 state.
-        let saved_head = git::head_oid(repo)?.to_string();
-        let saved_refs = git::snapshot_branch_refs(repo)?;
+        let saved_head = repo::head_oid(repo)?.to_string();
+        let saved_refs = repo::snapshot_branch_refs(repo)?;
 
         // Create a temp branch on target so --update-refs tracks its new OID
         // through the phase 1 rebase. Created BEFORE from_repo() would include
@@ -806,36 +806,36 @@ fn fold_commit_file_to_commit(
         let todo = graph.to_todo();
 
         // Create temp branch AFTER from_repo to avoid polluting the Weave graph
-        git_commands::branch_force_create(workdir, TRACK_BRANCH, target_hash)?;
+        git::branch_force_create(workdir, TRACK_BRANCH, target_hash)?;
 
         let phase1_rebase =
             weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo);
         if let Err(e) = phase1_rebase {
-            let _ = git_commands::branch_delete(workdir, TRACK_BRANCH);
+            let _ = git::branch_delete(workdir, TRACK_BRANCH);
             return Err(e);
         }
 
-        if let Err(e) = git_commands::apply_patch_reverse(workdir, &file_diff)
-            .and_then(|()| git_commands::stage_path(workdir, path))
-            .and_then(|()| git_commands::commit_amend_no_edit(workdir))
+        if let Err(e) = git::apply_patch_reverse(workdir, &file_diff)
+            .and_then(|()| git::stage_path(workdir, path))
+            .and_then(|()| git::commit_amend_no_edit(workdir))
         {
-            let _ = git_commands::rebase_abort(workdir);
-            let _ = git_commands::branch_delete(workdir, TRACK_BRANCH);
+            let _ = git::rebase_abort(workdir);
+            let _ = git::branch_delete(workdir, TRACK_BRANCH);
             return Err(e);
         }
 
         // Capture source new hash after amend, before continue moves HEAD.
         // This hash will be tracked through phase 2 via a temp branch.
-        let phase1_source_hash = git_commands::rev_parse(workdir, "HEAD")?;
+        let phase1_source_hash = git::rev_parse(workdir, "HEAD")?;
 
-        if let Err(e) = git_commands::continue_rebase_or_abort(workdir) {
-            let _ = git_commands::branch_delete(workdir, TRACK_BRANCH);
+        if let Err(e) = git::continue_rebase_or_abort(workdir) {
+            let _ = git::branch_delete(workdir, TRACK_BRANCH);
             return Err(e);
         }
 
         // Phase 2: Resolve the target's new OID via the temp branch.
-        let phase2_target_hash = git_commands::rev_parse(workdir, TRACK_BRANCH)?;
-        let _ = git_commands::branch_delete(workdir, TRACK_BRANCH);
+        let phase2_target_hash = git::rev_parse(workdir, TRACK_BRANCH)?;
+        let _ = git::branch_delete(workdir, TRACK_BRANCH);
         let phase2_target_oid = git2::Oid::from_str(&phase2_target_hash)?;
 
         let repo2 = git2::Repository::discover(workdir)?;
@@ -845,7 +845,7 @@ fn fold_commit_file_to_commit(
         // Track source through phase 2 — it will be rewritten when the
         // graph is replayed from base_oid.
         let phase1_source_oid = git2::Oid::from_str(&phase1_source_hash)?;
-        git_commands::branch_force_create(workdir, TRACK_BRANCH, &phase1_source_hash)?;
+        git::branch_force_create(workdir, TRACK_BRANCH, &phase1_source_hash)?;
         graph.track_commit(phase1_source_oid, TRACK_BRANCH);
 
         let todo = graph.to_todo();
@@ -853,42 +853,42 @@ fn fold_commit_file_to_commit(
         if let Err(e) =
             weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo)
         {
-            let _ = git_commands::branch_delete(workdir, TRACK_BRANCH);
-            let _ = git_commands::reset_hard(workdir, &saved_head);
-            if let Err(re) = git::restore_branch_refs(workdir, &saved_refs) {
+            let _ = git::branch_delete(workdir, TRACK_BRANCH);
+            let _ = git::reset_hard(workdir, &saved_head);
+            if let Err(re) = repo::restore_branch_refs(workdir, &saved_refs) {
                 msg::warn(&format!("failed to restore branch refs: {re}"));
             }
             return Err(e);
         }
 
-        if let Err(e) = git_commands::apply_patch(workdir, &file_diff)
-            .and_then(|()| git_commands::stage_path(workdir, path))
-            .and_then(|()| git_commands::commit_amend_no_edit(workdir))
+        if let Err(e) = git::apply_patch(workdir, &file_diff)
+            .and_then(|()| git::stage_path(workdir, path))
+            .and_then(|()| git::commit_amend_no_edit(workdir))
         {
-            let _ = git_commands::rebase_abort(workdir);
-            let _ = git_commands::branch_delete(workdir, TRACK_BRANCH);
-            let _ = git_commands::reset_hard(workdir, &saved_head);
-            if let Err(re) = git::restore_branch_refs(workdir, &saved_refs) {
+            let _ = git::rebase_abort(workdir);
+            let _ = git::branch_delete(workdir, TRACK_BRANCH);
+            let _ = git::reset_hard(workdir, &saved_head);
+            if let Err(re) = repo::restore_branch_refs(workdir, &saved_refs) {
                 msg::warn(&format!("failed to restore branch refs: {re}"));
             }
             return Err(e);
         }
 
         // Capture target new hash after amend, before continue moves HEAD
-        new_target_hash = git_commands::rev_parse(workdir, "HEAD")?;
+        new_target_hash = git::rev_parse(workdir, "HEAD")?;
 
-        if let Err(e) = git_commands::continue_rebase_or_abort(workdir) {
-            let _ = git_commands::branch_delete(workdir, TRACK_BRANCH);
-            let _ = git_commands::reset_hard(workdir, &saved_head);
-            if let Err(re) = git::restore_branch_refs(workdir, &saved_refs) {
+        if let Err(e) = git::continue_rebase_or_abort(workdir) {
+            let _ = git::branch_delete(workdir, TRACK_BRANCH);
+            let _ = git::reset_hard(workdir, &saved_head);
+            if let Err(re) = repo::restore_branch_refs(workdir, &saved_refs) {
                 msg::warn(&format!("failed to restore branch refs: {re}"));
             }
             return Err(e);
         }
 
         // Resolve source's final hash after phase 2
-        new_source_hash = git_commands::rev_parse(workdir, TRACK_BRANCH)?;
-        let _ = git_commands::branch_delete(workdir, TRACK_BRANCH);
+        new_source_hash = git::rev_parse(workdir, TRACK_BRANCH)?;
+        let _ = git::branch_delete(workdir, TRACK_BRANCH);
     } else {
         // Source is older than target: single rebase with two edit pauses.
         // Source is picked first (older), target second (newer). Removing
@@ -901,42 +901,42 @@ fn fold_commit_file_to_commit(
         weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo)?;
 
         // First pause: at source — remove file
-        if let Err(e) = git_commands::apply_patch_reverse(workdir, &file_diff)
-            .and_then(|()| git_commands::stage_path(workdir, path))
-            .and_then(|()| git_commands::commit_amend_no_edit(workdir))
+        if let Err(e) = git::apply_patch_reverse(workdir, &file_diff)
+            .and_then(|()| git::stage_path(workdir, path))
+            .and_then(|()| git::commit_amend_no_edit(workdir))
         {
-            let _ = git_commands::rebase_abort(workdir);
+            let _ = git::rebase_abort(workdir);
             return Err(e);
         }
 
         // Capture source new hash after amend, before continue moves HEAD
-        new_source_hash = git_commands::rev_parse(workdir, "HEAD")?;
+        new_source_hash = git::rev_parse(workdir, "HEAD")?;
 
         // Continue to second pause: at target
-        git_commands::continue_rebase_or_abort(workdir)?;
+        git::continue_rebase_or_abort(workdir)?;
 
         // Second pause: at target — add file
-        if let Err(e) = git_commands::apply_patch(workdir, &file_diff)
-            .and_then(|()| git_commands::stage_path(workdir, path))
-            .and_then(|()| git_commands::commit_amend_no_edit(workdir))
+        if let Err(e) = git::apply_patch(workdir, &file_diff)
+            .and_then(|()| git::stage_path(workdir, path))
+            .and_then(|()| git::commit_amend_no_edit(workdir))
         {
-            let _ = git_commands::rebase_abort(workdir);
+            let _ = git::rebase_abort(workdir);
             return Err(e);
         }
 
         // Capture target new hash after amend, before continue moves HEAD
-        new_target_hash = git_commands::rev_parse(workdir, "HEAD")?;
+        new_target_hash = git::rev_parse(workdir, "HEAD")?;
 
-        git_commands::continue_rebase_or_abort(workdir)?;
+        git::continue_rebase_or_abort(workdir)?;
     }
 
     msg::success(&format!(
         "Moved `{}` from `{}` (now `{}`) to `{}` (now `{}`)",
         path,
-        git_commands::short_hash(source_hash),
-        git_commands::short_hash(&new_source_hash),
-        git_commands::short_hash(target_hash),
-        git_commands::short_hash(&new_target_hash)
+        git::short_hash(source_hash),
+        git::short_hash(&new_source_hash),
+        git::short_hash(target_hash),
+        git::short_hash(&new_target_hash)
     ));
 
     Ok(())
@@ -947,20 +947,20 @@ fn fold_commit_file_to_commit(
 /// Removes the commit from history and places its changes in the working
 /// directory as unstaged modifications.
 fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
-    let workdir = git::require_workdir(repo, "fold")?;
+    let workdir = repo::require_workdir(repo, "fold")?;
 
-    let head_oid = git::head_oid(repo)?;
+    let head_oid = repo::head_oid(repo)?;
     let target_oid = git2::Oid::from_str(commit_hash)?;
     let is_head = head_oid == target_oid;
 
     if is_head {
         // Simple case: mixed reset to HEAD~1
-        git_commands::reset_mixed(workdir, "HEAD~1")?;
+        git::reset_mixed(workdir, "HEAD~1")?;
     } else {
         // Non-HEAD: capture the diff, drop the commit, then apply the diff
-        let diff = git_commands::diff_commit(workdir, commit_hash)?;
+        let diff = git::diff_commit(workdir, commit_hash)?;
         let saved_head = head_oid.to_string();
-        let saved_refs = git::snapshot_branch_refs(repo)?;
+        let saved_refs = repo::snapshot_branch_refs(repo)?;
 
         let mut graph = Weave::from_repo(repo)?;
         graph.drop_commit(target_oid);
@@ -983,10 +983,10 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
             RebaseOutcome::Completed => {
                 transaction::delete(&git_dir)?;
                 if !diff.is_empty()
-                    && let Err(e) = git_commands::apply_patch(workdir, &diff)
+                    && let Err(e) = git::apply_patch(workdir, &diff)
                 {
-                    let _ = git_commands::reset_hard(workdir, &saved_head);
-                    if let Err(re) = git::restore_branch_refs(workdir, &saved_refs) {
+                    let _ = git::reset_hard(workdir, &saved_head);
+                    if let Err(re) = repo::restore_branch_refs(workdir, &saved_refs) {
                         msg::warn(&format!("failed to restore branch refs: {re}"));
                     }
                     return Err(e).context(
@@ -1003,7 +1003,7 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
 
     msg::success(&format!(
         "Uncommitted `{}` to working directory",
-        git_commands::short_hash(commit_hash)
+        git::short_hash(commit_hash)
     ));
 
     Ok(())
@@ -1020,44 +1020,44 @@ pub fn after_continue(workdir: &Path, context: &serde_json::Value) -> Result<()>
             files_count,
             saved_staged,
         } => {
-            let new_hash = git_commands::rev_parse(workdir, TRACK_BRANCH)?;
-            let _ = git_commands::branch_delete(workdir, TRACK_BRANCH);
-            git_commands::restore_staged_patch(workdir, &saved_staged)?;
+            let new_hash = git::rev_parse(workdir, TRACK_BRANCH)?;
+            let _ = git::branch_delete(workdir, TRACK_BRANCH);
+            git::restore_staged_patch(workdir, &saved_staged)?;
             msg::success(&format!(
                 "Folded {} file(s) into `{}` (now `{}`)",
                 files_count,
-                git_commands::short_hash(&original_commit_hash),
-                git_commands::short_hash(&new_hash)
+                git::short_hash(&original_commit_hash),
+                git::short_hash(&new_hash)
             ));
         }
         FoldVariant::CommitIntoCommit {
             source_hash,
             target_hash,
         } => {
-            let new_hash = git_commands::rev_parse(workdir, TRACK_BRANCH)?;
-            let _ = git_commands::branch_delete(workdir, TRACK_BRANCH);
+            let new_hash = git::rev_parse(workdir, TRACK_BRANCH)?;
+            let _ = git::branch_delete(workdir, TRACK_BRANCH);
             msg::success(&format!(
                 "Folded `{}` into `{}` (now `{}`)",
-                git_commands::short_hash(&source_hash),
-                git_commands::short_hash(&target_hash),
-                git_commands::short_hash(&new_hash)
+                git::short_hash(&source_hash),
+                git::short_hash(&target_hash),
+                git::short_hash(&new_hash)
             ));
         }
         FoldVariant::CommitToBranch {
             commit_hash,
             branch_name,
         } => {
-            let new_hash = git_commands::rev_parse(workdir, &branch_name)?;
+            let new_hash = git::rev_parse(workdir, &branch_name)?;
             msg::success(&format!(
                 "Moved `{}` to branch `{}` (now `{}`)",
-                git_commands::short_hash(&commit_hash),
+                git::short_hash(&commit_hash),
                 branch_name,
-                git_commands::short_hash(&new_hash)
+                git::short_hash(&new_hash)
             ));
         }
         FoldVariant::CommitToUnstaged { commit_hash, diff } => {
             if !diff.is_empty()
-                && let Err(e) = git_commands::apply_patch(workdir, &diff)
+                && let Err(e) = git::apply_patch(workdir, &diff)
             {
                 // The rebase succeeded (commit is gone) but the diff can't be
                 // re-applied — typically because conflict resolution changed
@@ -1077,7 +1077,7 @@ pub fn after_continue(workdir: &Path, context: &serde_json::Value) -> Result<()>
             }
             msg::success(&format!(
                 "Uncommitted `{}` to working directory",
-                git_commands::short_hash(&commit_hash)
+                git::short_hash(&commit_hash)
             ));
         }
     }

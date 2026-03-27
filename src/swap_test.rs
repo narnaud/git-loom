@@ -1,5 +1,5 @@
-use crate::test_helpers::TestRepo;
-use crate::weave::Weave;
+use crate::core::test_helpers::TestRepo;
+use crate::core::weave::Weave;
 
 // ── swap commits ──────────────────────────────────────────────────────────
 
@@ -112,7 +112,7 @@ fn swap_abort_preserves_working_state() {
 
     let workdir = test_repo.workdir();
     let git_dir = test_repo.repo.path().to_path_buf();
-    crate::transaction::abort_cmd(&workdir, &git_dir).unwrap();
+    crate::core::transaction::abort_cmd(&workdir, &git_dir).unwrap();
 
     assert_eq!(test_repo.read_file("shared.txt"), "working-edit");
     assert_eq!(test_repo.read_file("other-staged.txt"), "staged-content");

@@ -2,29 +2,23 @@ mod absorb;
 mod branch;
 mod commit;
 mod completions;
+mod core;
 mod diff;
 mod drop;
 mod fold;
 mod git;
-mod git_commands;
-mod graph;
 mod init;
-mod msg;
 mod push;
 mod reword;
-mod shortid;
 mod show;
 mod split;
 mod status;
 mod swap;
 mod switch;
 mod trace;
-mod transaction;
 mod update;
-mod weave;
 
-#[cfg(test)]
-mod test_helpers;
+use crate::core::{graph, msg, repo, transaction};
 
 use std::io::IsTerminal;
 
@@ -332,7 +326,7 @@ fn main() {
         return;
     }
 
-    if let Err(e) = git_commands::check_git_version() {
+    if let Err(e) = git::check_git_version() {
         msg::error(&e.to_string());
         std::process::exit(1);
     }
@@ -346,7 +340,7 @@ fn main() {
             | Some(Command::Show { .. })
             | Some(Command::Diff { .. })
     );
-    if should_log && let Ok(repo) = git::open_repo() {
+    if should_log && let Ok(repo) = repo::open_repo() {
         let git_dir = repo.path().to_path_buf();
         let cmd_line = std::env::args().collect::<Vec<_>>().join(" ");
         if matches!(cli.command, Some(Command::Abort) | Some(Command::Continue)) {
@@ -368,7 +362,7 @@ fn main() {
             | Some(Command::Completions { .. })
             | Some(Command::InternalWriteTodo { .. })
     );
-    if !is_exempt && let Ok(repo) = git::open_repo() {
+    if !is_exempt && let Ok(repo) = repo::open_repo() {
         let git_dir = repo.path().to_path_buf();
         if let Ok(Some(state)) = transaction::load(&git_dir) {
             msg::error(&format!(

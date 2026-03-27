@@ -1,4 +1,4 @@
-use crate::test_helpers::TestRepo;
+use crate::core::test_helpers::TestRepo;
 
 // ── HEAD split tests ──────────────────────────────────────────────────
 

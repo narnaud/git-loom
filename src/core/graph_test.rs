@@ -1,9 +1,9 @@
 use git2::Oid;
 
-use crate::git::{
+use crate::core::graph::{self, RenderOpts, Theme};
+use crate::core::repo::{
     BranchInfo, CommitInfo, ContextCommit, FileChange, RemoteStatus, RepoInfo, UpstreamInfo,
 };
-use crate::graph::{self, RenderOpts, Theme};
 
 /// Strip ANSI escape codes so tests can compare plain text.
 fn strip_ansi(s: &str) -> String {
@@ -34,7 +34,7 @@ fn default_opts() -> RenderOpts {
 
 /// Render and strip ANSI codes for plain-text comparison.
 fn render_plain(info: RepoInfo) -> String {
-    let ids = crate::shortid::IdAllocator::new(info.collect_entities());
+    let ids = crate::core::shortid::IdAllocator::new(info.collect_entities());
     strip_ansi(&graph::render(info, &ids, &default_opts()))
 }
 
@@ -45,7 +45,7 @@ fn render_plain_with_width(info: RepoInfo, width: u16) -> String {
         theme: Theme::dark(),
         cwd_prefix: String::new(),
     };
-    let ids = crate::shortid::IdAllocator::new(info.collect_entities());
+    let ids = crate::core::shortid::IdAllocator::new(info.collect_entities());
     strip_ansi(&graph::render(info, &ids, &opts))
 }
 

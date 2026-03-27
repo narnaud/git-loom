@@ -4,11 +4,11 @@ use anyhow::{Context, Result};
 use git2::{Oid, Repository};
 use serde::{Deserialize, Serialize};
 
-use crate::git::{self, Target, TargetKind};
-use crate::git_commands;
-use crate::msg;
-use crate::transaction::{self, LoomState, Rollback};
-use crate::weave::{self, RebaseOutcome, Weave};
+use crate::core::msg;
+use crate::core::repo::{self, Target, TargetKind};
+use crate::core::transaction::{self, LoomState, Rollback};
+use crate::core::weave::{self, RebaseOutcome, Weave};
+use crate::git;
 
 #[derive(Serialize, Deserialize)]
 struct SwapContext {
@@ -18,10 +18,10 @@ struct SwapContext {
 
 /// Swap two commits within the same sequence.
 pub fn run(a: String, b: String) -> Result<()> {
-    let repo = git::open_repo()?;
+    let repo = repo::open_repo()?;
 
-    let resolved_a = git::resolve_arg(&repo, &a, &[TargetKind::Commit])?;
-    let resolved_b = git::resolve_arg(&repo, &b, &[TargetKind::Commit])?;
+    let resolved_a = repo::resolve_arg(&repo, &a, &[TargetKind::Commit])?;
+    let resolved_b = repo::resolve_arg(&repo, &b, &[TargetKind::Commit])?;
 
     match (resolved_a, resolved_b) {
         (Target::Commit(hash_a), Target::Commit(hash_b)) => swap_two_commits(&repo, hash_a, hash_b),
@@ -30,14 +30,14 @@ pub fn run(a: String, b: String) -> Result<()> {
 }
 
 fn swap_two_commits(repo: &Repository, hash_a: String, hash_b: String) -> Result<()> {
-    let workdir = git::require_workdir(repo, "swap")?;
+    let workdir = repo::require_workdir(repo, "swap")?;
     let git_dir = repo.path().to_path_buf();
 
     let oid_a = Oid::from_str(&hash_a)?;
     let oid_b = Oid::from_str(&hash_b)?;
 
-    let display_a = git_commands::short_hash(&hash_a);
-    let display_b = git_commands::short_hash(&hash_b);
+    let display_a = git::short_hash(&hash_a);
+    let display_b = git::short_hash(&hash_b);
 
     let mut graph = Weave::from_repo(repo)?;
     graph.swap_commits(oid_a, oid_b)?;

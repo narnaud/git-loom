@@ -8,15 +8,15 @@ use git2::Repository;
 
 use anyhow::{Result, bail};
 
-use crate::git;
-use crate::msg;
+use crate::core::msg;
+use crate::core::repo;
 
 /// Emit a warning if `name` starts with the configured hidden branch prefix.
 /// Despite the config key name `loom.hideBranchPattern`, this performs
 /// prefix matching, not glob matching.
 pub(crate) fn warn_if_hidden(repo: &Repository, name: &str) {
     let pattern =
-        git::hide_branch_pattern(repo).unwrap_or_else(|| git::DEFAULT_HIDE_PATTERN.to_string());
+        repo::hide_branch_pattern(repo).unwrap_or_else(|| repo::DEFAULT_HIDE_PATTERN.to_string());
     if !pattern.is_empty() && name.starts_with(&pattern) {
         msg::warn(&format!(
             "Branch `{}` is hidden from status by default. Use `--all` to show it.",
@@ -33,11 +33,11 @@ pub(crate) fn warn_if_hidden(repo: &Repository, name: &str) {
 /// since no topology change is needed. Branching at HEAD weaves all first-parent
 /// commits into the new branch section with a merge commit.
 pub(crate) fn should_weave(
-    info: &git::RepoInfo,
+    info: &repo::RepoInfo,
     repo: &Repository,
     commit_hash: &str,
 ) -> Result<bool> {
-    let head_oid = git::head_oid(repo)?;
+    let head_oid = repo::head_oid(repo)?;
     let branch_oid = git2::Oid::from_str(commit_hash)?;
 
     let merge_base_oid = info.upstream.merge_base_oid;

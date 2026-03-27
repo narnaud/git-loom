@@ -383,7 +383,7 @@ impl TestRepo {
     /// Delete a local branch (including its tracking config).
     pub fn delete_branch(&self, name: &str) {
         let workdir = self.workdir();
-        crate::git_commands::branch_delete(workdir.as_path(), name).unwrap();
+        crate::git::branch_delete(workdir.as_path(), name).unwrap();
     }
 
     /// Get the current HEAD commit OID.
@@ -607,65 +607,63 @@ impl TestRepo {
 
     /// Create a branch at a specific commit hash.
     pub fn create_branch_at(&self, name: &str, commit_hash: &str) {
-        crate::git_commands::branch_create(self.workdir().as_path(), name, commit_hash).unwrap();
+        crate::git::branch_create(self.workdir().as_path(), name, commit_hash).unwrap();
     }
 
     /// Merge a branch into the current branch with --no-ff.
     pub fn merge_no_ff(&self, branch: &str) {
         let outcome =
-            crate::git_commands::merge_no_ff(self.workdir().as_path(), self.repo.path(), branch)
-                .unwrap();
+            crate::git::merge_no_ff(self.workdir().as_path(), self.repo.path(), branch).unwrap();
         assert!(
-            matches!(outcome, crate::git_commands::MergeOutcome::Completed),
+            matches!(outcome, crate::git::MergeOutcome::Completed),
             "merge_no_ff: expected Completed, got Conflicted"
         );
     }
 
     /// Stage files in the working directory.
     pub fn stage_files(&self, files: &[&str]) {
-        crate::git_commands::stage_files(self.workdir().as_path(), files).unwrap();
+        crate::git::stage_files(self.workdir().as_path(), files).unwrap();
     }
 
     /// Commit already-staged files with a message.
     pub fn commit_staged(&self, message: &str) {
-        crate::git_commands::commit(self.workdir().as_path(), message).unwrap();
+        crate::git::commit(self.workdir().as_path(), message).unwrap();
     }
 
     /// Get the names of files that differ from HEAD.
     pub fn diff_head_name_only(&self) -> String {
-        crate::git_commands::diff_head_name_only(self.workdir().as_path()).unwrap()
+        crate::git::diff_head_name_only(self.workdir().as_path()).unwrap()
     }
 
     /// Get the diff of a single commit.
     pub fn diff_commit(&self, oid: &str) -> String {
-        crate::git_commands::diff_commit(self.workdir().as_path(), oid).unwrap()
+        crate::git::diff_commit(self.workdir().as_path(), oid).unwrap()
     }
 
     /// Set a git config value.
     pub fn set_config(&self, key: &str, value: &str) {
-        crate::git_commands::run_git(self.workdir().as_path(), &["config", key, value]).unwrap();
+        crate::git::run_git(self.workdir().as_path(), &["config", key, value]).unwrap();
     }
 
     /// Get porcelain status output.
     pub fn status_porcelain(&self) -> String {
-        crate::git_commands::run_git_stdout(self.workdir().as_path(), &["status", "--porcelain"])
-            .unwrap()
+        crate::git::run_git_stdout(self.workdir().as_path(), &["status", "--porcelain"]).unwrap()
     }
 
     /// Rebase commits between `upstream` and HEAD onto `newbase` with --update-refs.
     pub fn rebase_onto(&self, newbase: &str, upstream: &str) {
-        crate::git_commands::rebase_onto(self.workdir().as_path(), newbase, upstream).unwrap();
+        crate::git::rebase_onto(self.workdir().as_path(), newbase, upstream).unwrap();
     }
 
     /// Get all non-merge commit messages between HEAD and merge-base.
     pub fn commit_messages(&self) -> Vec<String> {
-        let info = crate::git::gather_repo_info(&self.repo, false, 1).unwrap();
+        let info = crate::core::repo::gather_repo_info(&self.repo, false, 1).unwrap();
         info.commits.iter().map(|c| c.message.clone()).collect()
     }
 
     /// Get all branch names in the commit range.
     pub fn branch_names(&self) -> Vec<String> {
-        let info = crate::git::gather_repo_info(&self.repo, false, 1).unwrap();
+        let info = crate::core::repo::gather_repo_info(&self.repo, false, 1).unwrap();
         info.branches.iter().map(|b| b.name.clone()).collect()
     }
 
@@ -678,7 +676,7 @@ impl TestRepo {
 
     /// Get the file paths changed in a commit.
     pub fn commit_file_paths(&self, oid: git2::Oid) -> Vec<String> {
-        crate::git::commit_file_paths(&self.repo, oid).unwrap()
+        crate::core::repo::commit_file_paths(&self.repo, oid).unwrap()
     }
 
     /// Create a commit touching multiple files at once.

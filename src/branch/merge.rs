@@ -2,10 +2,10 @@ use anyhow::{Context, Result, bail};
 use git2::{BranchType, Repository};
 use serde::{Deserialize, Serialize};
 
-use crate::git;
-use crate::git_commands::{self, MergeOutcome};
-use crate::msg;
-use crate::transaction::{self, LoomState, Rollback};
+use crate::core::msg;
+use crate::core::repo;
+use crate::core::transaction::{self, LoomState, Rollback};
+use crate::git::{self, MergeOutcome};
 
 #[derive(Serialize, Deserialize)]
 struct MergeContext {
@@ -18,10 +18,10 @@ struct MergeContext {
 /// not currently woven. With `--all`, also shows remote branches without a
 /// local counterpart.
 pub fn run(branch: Option<String>, all: bool) -> Result<()> {
-    let repo = git::open_repo()?;
-    let workdir = git::require_workdir(&repo, "merge")?;
+    let repo = repo::open_repo()?;
+    let workdir = repo::require_workdir(&repo, "merge")?;
     let git_dir = repo.path().to_path_buf();
-    let info = git::gather_repo_info(&repo, false, 1)?;
+    let info = repo::gather_repo_info(&repo, false, 1)?;
 
     let branch_name = match branch {
         Some(name) => resolve_non_woven_branch(&repo, &info, &name)?,
@@ -30,8 +30,8 @@ pub fn run(branch: Option<String>, all: bool) -> Result<()> {
 
     // If this is a remote branch (contains '/'), create a local tracking branch
     let local_name = if branch_name.contains('/') {
-        let local = git::upstream_local_branch(&branch_name);
-        git_commands::branch_create(workdir, &local, &branch_name)?;
+        let local = repo::upstream_local_branch(&branch_name);
+        git::branch_create(workdir, &local, &branch_name)?;
         // Set up tracking
         let mut local_branch = repo.find_branch(&local, BranchType::Local)?;
         local_branch.set_upstream(Some(&branch_name))?;
@@ -41,7 +41,7 @@ pub fn run(branch: Option<String>, all: bool) -> Result<()> {
     };
 
     // Merge the branch into integration (--no-ff) so it appears in the topology
-    match crate::git_commands::merge_no_ff(workdir, &git_dir, &local_name)? {
+    match crate::git::merge_no_ff(workdir, &git_dir, &local_name)? {
         MergeOutcome::Completed => {
             msg::success(&format!("Woven `{}` into integration branch", local_name));
         }
@@ -75,7 +75,7 @@ pub fn after_continue(context: &serde_json::Value) -> anyhow::Result<()> {
 /// Resolve a branch argument, ensuring it's NOT already woven.
 fn resolve_non_woven_branch(
     repo: &Repository,
-    info: &git::RepoInfo,
+    info: &repo::RepoInfo,
     branch_arg: &str,
 ) -> Result<String> {
     // Check if it's already woven
@@ -100,7 +100,7 @@ fn resolve_non_woven_branch(
 }
 
 /// Interactive picker: list non-woven local branches, optionally with remotes.
-fn pick_branch(repo: &Repository, info: &git::RepoInfo, include_remote: bool) -> Result<String> {
+fn pick_branch(repo: &Repository, info: &repo::RepoInfo, include_remote: bool) -> Result<String> {
     let woven_names: Vec<&str> = info.branches.iter().map(|b| b.name.as_str()).collect();
     let current_branch = &info.branch_name;
 
@@ -139,7 +139,7 @@ fn pick_branch(repo: &Repository, info: &git::RepoInfo, include_remote: bool) ->
                     continue;
                 }
                 // Skip if a local branch with the same short name exists
-                if !local_names.contains(&git::upstream_local_branch(name)) {
+                if !local_names.contains(&repo::upstream_local_branch(name)) {
                     items.push(name.to_string());
                 }
             }

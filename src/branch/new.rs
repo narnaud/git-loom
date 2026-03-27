@@ -1,10 +1,10 @@
 use anyhow::{Context, Result, bail};
 use git2::Repository;
 
+use crate::core::msg;
+use crate::core::repo;
+use crate::core::weave::{self, Weave};
 use crate::git;
-use crate::git_commands;
-use crate::msg;
-use crate::weave::{self, Weave};
 
 use super::{should_weave, warn_if_hidden};
 
@@ -19,8 +19,8 @@ use super::{should_weave, warn_if_hidden};
 /// the topology is restructured: commits after the branch point are rebased onto
 /// the merge-base, and a merge commit joins them with the branch.
 pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
-    let repo = git::open_repo()?;
-    let workdir = git::require_workdir(&repo, "create branch")?;
+    let repo = repo::open_repo()?;
+    let workdir = repo::require_workdir(&repo, "create branch")?;
 
     let name = match name {
         Some(n) => n,
@@ -38,23 +38,23 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
         bail!("Branch name cannot be empty");
     }
 
-    git_commands::branch_validate_name(&name)?;
+    git::branch_validate_name(&name)?;
 
-    git::ensure_branch_not_exists(&repo, &name)?;
+    repo::ensure_branch_not_exists(&repo, &name)?;
 
     // Gather repo info once (needed for merge-base default and weave check).
     // May fail if not on an integration branch — that's OK for plain branch creation.
-    let info = git::gather_repo_info(&repo, false, 1).ok();
+    let info = repo::gather_repo_info(&repo, false, 1).ok();
 
     let commit_hash = resolve_commit(&repo, &info, target.as_deref())?;
 
-    git_commands::branch_create(workdir, &name, &commit_hash)?;
+    git::branch_create(workdir, &name, &commit_hash)?;
 
     warn_if_hidden(&repo, &name);
     msg::success(&format!(
         "Created branch `{}` at `{}`",
         name,
-        git_commands::short_hash(&commit_hash)
+        git::short_hash(&commit_hash)
     ));
 
     // Check if weaving is needed (only possible when repo info is available)
@@ -70,7 +70,7 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
         if let Err(e) =
             weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo)
         {
-            let _ = git_commands::branch_delete(workdir, &name);
+            let _ = git::branch_delete(workdir, &name);
             return Err(e);
         }
 
@@ -84,7 +84,7 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
 /// If no target, defaults to the merge-base (upstream base).
 fn resolve_commit(
     repo: &Repository,
-    info: &Option<git::RepoInfo>,
+    info: &Option<repo::RepoInfo>,
     target: Option<&str>,
 ) -> Result<String> {
     match target {
@@ -96,11 +96,14 @@ fn resolve_commit(
             Ok(info.upstream.merge_base_oid.to_string())
         }
         Some(t) => {
-            let resolved =
-                git::resolve_arg(repo, t, &[git::TargetKind::Commit, git::TargetKind::Branch])?;
+            let resolved = repo::resolve_arg(
+                repo,
+                t,
+                &[repo::TargetKind::Commit, repo::TargetKind::Branch],
+            )?;
             match resolved {
-                git::Target::Commit(hash) => Ok(hash),
-                git::Target::Branch(name) => {
+                repo::Target::Commit(hash) => Ok(hash),
+                repo::Target::Branch(name) => {
                     // Resolve branch to its tip commit
                     let branch = repo.find_branch(&name, git2::BranchType::Local)?;
                     let oid = branch

@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 
-use crate::{git, graph, shortid};
+use crate::core::{graph, repo, shortid};
 
 pub fn run(
     file_filter: Option<Vec<String>>,
@@ -10,21 +10,21 @@ pub fn run(
     show_all: bool,
     theme: graph::Theme,
 ) -> Result<()> {
-    let repo = git::open_repo()?;
-    let _ = git::require_workdir(&repo, "display status")?;
+    let repo = repo::open_repo()?;
+    let _ = repo::require_workdir(&repo, "display status")?;
 
-    let cwd_prefix = git::cwd_relative_to_repo(&repo).unwrap_or_default();
+    let cwd_prefix = repo::cwd_relative_to_repo(&repo).unwrap_or_default();
     let opts = graph::default_render_opts(theme, cwd_prefix);
     let show_files = file_filter.is_some();
-    let mut info = git::gather_repo_info(&repo, show_files, context)?;
+    let mut info = repo::gather_repo_info(&repo, show_files, context)?;
 
     // Collect entities from the full info BEFORE filtering so that short IDs
     // are stable regardless of which branches are hidden.
     let ids = shortid::IdAllocator::new(info.collect_entities());
 
     if !show_all {
-        let pattern = git::hide_branch_pattern(&repo)
-            .unwrap_or_else(|| git::DEFAULT_HIDE_PATTERN.to_string());
+        let pattern = repo::hide_branch_pattern(&repo)
+            .unwrap_or_else(|| repo::DEFAULT_HIDE_PATTERN.to_string());
         if !pattern.is_empty() {
             hide_branches(&mut info, &pattern);
         }
@@ -53,7 +53,7 @@ pub fn run(
 fn resolve_commit_filter(
     repo: &git2::Repository,
     ids: &[String],
-    info: &git::RepoInfo,
+    info: &repo::RepoInfo,
     allocator: &shortid::IdAllocator,
 ) -> HashSet<git2::Oid> {
     let mut filter_oids = HashSet::new();
@@ -85,7 +85,7 @@ fn resolve_commit_filter(
 
 /// Remove branches matching `pattern` (prefix match) and their owned commits
 /// from `info` so they are fully invisible in the status display.
-fn hide_branches(info: &mut git::RepoInfo, pattern: &str) {
+fn hide_branches(info: &mut repo::RepoInfo, pattern: &str) {
     let hidden_tips: HashSet<git2::Oid> = info
         .branches
         .iter()

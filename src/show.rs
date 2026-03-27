@@ -1,15 +1,15 @@
 use anyhow::Result;
 
-use crate::git::{self, Target};
-use crate::git_commands;
+use crate::core::repo::{self, Target};
+use crate::git;
 
 /// Show the diff and metadata for a commit (like `git show`), using short IDs.
 pub fn run(target: String) -> Result<()> {
-    let repo = git::open_repo()?;
-    let resolved = git::resolve_arg(
+    let repo = repo::open_repo()?;
+    let resolved = repo::resolve_arg(
         &repo,
         &target,
-        &[git::TargetKind::Commit, git::TargetKind::Branch],
+        &[repo::TargetKind::Commit, repo::TargetKind::Branch],
     )?;
 
     let git_ref = match resolved {
@@ -18,8 +18,8 @@ pub fn run(target: String) -> Result<()> {
         _ => unreachable!(),
     };
 
-    let workdir = git::require_workdir(&repo, "show")?;
-    git_commands::run_git_interactive(workdir, &["show", &git_ref])
+    let workdir = repo::require_workdir(&repo, "show")?;
+    git::run_git_interactive(workdir, &["show", &git_ref])
 }
 
 #[cfg(test)]

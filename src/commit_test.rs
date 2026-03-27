@@ -1,4 +1,4 @@
-use crate::test_helpers::TestRepo;
+use crate::core::test_helpers::TestRepo;
 
 /// Helper: set up a test repo with an empty feature branch at the merge-base.
 ///
@@ -653,7 +653,7 @@ fn commit_abort_preserves_working_state() {
 
     let workdir = test_repo.workdir();
     let git_dir = test_repo.repo.path().to_path_buf();
-    crate::transaction::abort_cmd(&workdir, &git_dir).unwrap();
+    crate::core::transaction::abort_cmd(&workdir, &git_dir).unwrap();
 
     // reset --mixed undoes the pre-rebase commit; shared.txt comes back as unstaged.
     assert_eq!(test_repo.read_file("shared.txt"), "conflicting-write");

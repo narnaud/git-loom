@@ -1,4 +1,4 @@
-use crate::test_helpers::TestRepo;
+use crate::core::test_helpers::TestRepo;
 
 /// Disable the pager so `git show` doesn't block or pollute test output.
 fn no_pager() {
