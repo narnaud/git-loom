@@ -27,6 +27,11 @@ pub fn head_oid(repo: &Repository) -> Result<git2::Oid> {
     repo.head()?.target().context("HEAD has no target")
 }
 
+/// Return the subject line (first line) of a commit message.
+pub fn commit_subject(commit: &git2::Commit) -> String {
+    commit.summary().unwrap_or("").to_string()
+}
+
 /// Capture all local branch name→OID mappings for rollback.
 pub fn snapshot_branch_refs(repo: &Repository) -> Result<HashMap<String, git2::Oid>> {
     let mut refs = HashMap::new();
@@ -562,7 +567,7 @@ pub fn gather_repo_info(repo: &Repository, show_files: bool, context: usize) -> 
         .as_str()
         .context("Base commit short_id is not valid UTF-8")?
         .to_string();
-    let base_message = base_commit.summary().unwrap_or("").to_string();
+    let base_message = commit_subject(&base_commit);
     let base_time = base_commit.time();
     let base_date = format_epoch(base_time.seconds());
 
@@ -658,7 +663,7 @@ fn walk_context_commits(
             .as_str()
             .context("Context commit short_id is not valid UTF-8")?
             .to_string();
-        let message = commit.summary().unwrap_or("").to_string();
+        let message = commit_subject(&commit);
         let date = format_epoch(commit.time().seconds());
         commits.push(ContextCommit {
             short_hash,
@@ -704,7 +709,7 @@ fn walk_commits(
             .as_str()
             .context("Commit short_id is not valid UTF-8")?
             .to_string();
-        let message = commit.summary().unwrap_or("").to_string();
+        let message = commit_subject(&commit);
         let parent_oid = commit.parent_id(0).ok();
         let files = if show_files {
             get_commit_files(repo, &commit)?
