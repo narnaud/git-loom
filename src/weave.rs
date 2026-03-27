@@ -927,7 +927,7 @@ fn walk_first_parent_line(
             .as_str()
             .context("short_id is not valid UTF-8")?
             .to_string();
-        let message = commit.summary().unwrap_or("").to_string();
+        let message = git::commit_subject(&commit);
 
         let is_merge = commit.parent_count() > 1;
 
@@ -1026,7 +1026,7 @@ fn walk_branch_commits(repo: &Repository, tip: Oid, stop: Oid) -> Result<Vec<Bra
                 .as_str()
                 .context("short_id is not valid UTF-8")?
                 .to_string();
-            let message = commit.summary().unwrap_or("").to_string();
+            let message = git::commit_subject(&commit);
 
             entries.push(BranchCommitEntry {
                 oid: current,
@@ -1106,7 +1106,7 @@ fn build_and_run_linear_edit(repo: &Repository, workdir: &Path, commit_oid: Oid)
             .as_str()
             .context("Short ID is not valid UTF-8")?
             .to_string();
-        let msg = c.summary().unwrap_or("").to_string();
+        let msg = git::commit_subject(&c);
         let cmd = if current == commit_oid {
             "edit"
         } else {

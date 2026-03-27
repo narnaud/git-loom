@@ -39,7 +39,7 @@ pub fn run(skip_confirm: bool) -> Result<()> {
     let upstream = local_branch.upstream().with_context(|| {
         format!(
             "Branch `{}` has no upstream tracking branch\n\
-             Run `git-loom init` to set up an integration branch",
+             Run `loom init` to set up an integration branch",
             branch_name
         )
     })?;
@@ -171,7 +171,7 @@ fn post_update(workdir: &Path, repo: &git2::Repository, ctx: &UpdateContext) -> 
         .and_then(|obj| obj.peel_to_commit().ok())
         .map(|commit| {
             let short_id = git_commands::short_hash(&commit.id().to_string()).to_string();
-            let summary = commit.summary().unwrap_or("");
+            let summary = git::commit_subject(&commit);
             format!(" ({} {})", short_id, summary)
         })
         .unwrap_or_default();

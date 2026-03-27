@@ -298,7 +298,7 @@ fn gather_branch_commits(
         if commit.parent_count() > 1 {
             continue; // skip merge commits
         }
-        let subject = commit.summary().unwrap_or("").to_string();
+        let subject = git::commit_subject(&commit);
         let body = commit.body().unwrap_or("").to_string();
         commits.push((subject, body));
     }

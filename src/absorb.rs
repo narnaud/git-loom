@@ -319,7 +319,7 @@ fn create_fixup_commits(
         let subject = repo
             .find_commit(*target_oid)
             .ok()
-            .and_then(|c| c.summary().map(str::to_owned))
+            .map(|c| git::commit_subject(&c))
             .unwrap_or_else(|| target_oid.to_string());
         let msg = format!("fixup! {}", subject);
         if let Err(e) = git_commands::commit(workdir, &msg) {
@@ -343,7 +343,7 @@ fn create_fixup_commits(
         let subject = repo
             .find_commit(*target_oid)
             .ok()
-            .and_then(|c| c.summary().map(str::to_owned))
+            .map(|c| git::commit_subject(&c))
             .unwrap_or_else(|| target_oid.to_string());
         let msg = format!("fixup! {}", subject);
         if let Err(e) = git_commands::commit(workdir, &msg) {
