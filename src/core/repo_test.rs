@@ -1,4 +1,6 @@
-use crate::core::repo::{self, Target, TargetKind, gather_repo_info};
+use crate::core::repo::{
+    self, Target, TargetKind, gather_repo_info, get_working_changes, get_working_changes_recurse,
+};
 use crate::core::test_helpers::TestRepo;
 
 // ── Tests ──────────────────────────────────────────────────────────────
@@ -192,6 +194,41 @@ fn working_tree_changes_detected() {
         .unwrap();
     assert_eq!(untracked.index, '?');
     assert_eq!(untracked.worktree, '?');
+}
+
+#[test]
+fn recurse_untracked_subdirs() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("base", "tracked.txt");
+
+    // Create untracked files in a subdirectory.
+    let subdir = test_repo.workdir().join("subdir");
+    std::fs::create_dir_all(&subdir).unwrap();
+    std::fs::write(subdir.join("a.txt"), "aaa").unwrap();
+    std::fs::write(subdir.join("b.txt"), "bbb").unwrap();
+
+    // Non-recursive: directory appears as a single entry.
+    let flat = get_working_changes(&test_repo.repo).unwrap();
+    let flat_paths: Vec<&str> = flat.iter().map(|c| c.path.as_str()).collect();
+    assert!(
+        flat_paths.contains(&"subdir/") || flat_paths.len() == 1,
+        "expected collapsed dir, got: {:?}",
+        flat_paths,
+    );
+
+    // Recursive: individual files appear.
+    let deep = get_working_changes_recurse(&test_repo.repo).unwrap();
+    let deep_paths: Vec<&str> = deep.iter().map(|c| c.path.as_str()).collect();
+    assert!(
+        deep_paths.contains(&"subdir/a.txt"),
+        "expected subdir/a.txt, got: {:?}",
+        deep_paths,
+    );
+    assert!(
+        deep_paths.contains(&"subdir/b.txt"),
+        "expected subdir/b.txt, got: {:?}",
+        deep_paths,
+    );
 }
 
 #[test]

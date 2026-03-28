@@ -55,6 +55,36 @@ pub fn diff_head_file_is_binary(workdir: &Path, path: &str) -> Result<bool> {
     Ok(out.starts_with("-\t"))
 }
 
+/// Get the unified diff for a single file (unstaged changes only: index → worktree).
+///
+/// Wraps `git diff -- <path>`.
+pub fn diff_file(workdir: &Path, path: &str) -> Result<String> {
+    run_git_stdout(workdir, &["diff", "--", path])
+}
+
+/// Get the staged diff for a single file (HEAD → index).
+///
+/// Wraps `git diff --cached -- <path>`.
+pub fn diff_cached_file(workdir: &Path, path: &str) -> Result<String> {
+    run_git_stdout(workdir, &["diff", "--cached", "--", path])
+}
+
+/// Check whether a file's unstaged changes are binary.
+///
+/// Uses `git diff --numstat -- <path>`.
+pub fn diff_file_is_binary(workdir: &Path, path: &str) -> Result<bool> {
+    let out = run_git_stdout(workdir, &["diff", "--numstat", "--", path])?;
+    Ok(out.starts_with("-\t"))
+}
+
+/// Check whether a file's staged changes are binary.
+///
+/// Uses `git diff --cached --numstat -- <path>`.
+pub fn diff_cached_file_is_binary(workdir: &Path, path: &str) -> Result<bool> {
+    let out = run_git_stdout(workdir, &["diff", "--cached", "--numstat", "--", path])?;
+    Ok(out.starts_with("-\t"))
+}
+
 /// Get the full unified diff of all working-tree changes against HEAD.
 ///
 /// Wraps `git diff HEAD`.

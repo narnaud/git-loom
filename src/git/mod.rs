@@ -5,7 +5,10 @@ pub mod git_diff;
 pub mod git_merge;
 pub mod git_rebase;
 
-pub use git_apply::{apply_cached_patch, apply_patch, apply_patch_reverse, restore_staged_patch};
+pub use git_apply::{
+    apply_cached_patch, apply_cached_patch_reverse, apply_patch, apply_patch_reverse,
+    restore_staged_patch,
+};
 pub use git_branch::{
     branch_create, branch_delete, branch_force_create, branch_rename, branch_switch,
     branch_switch_create_tracking, branch_switch_detach, branch_validate_name,
@@ -15,8 +18,9 @@ pub use git_commit::{
     stage_all, stage_files, stage_path,
 };
 pub use git_diff::{
-    diff_cached_files, diff_commit, diff_commit_file, diff_head, diff_head_file,
-    diff_head_file_is_binary, diff_head_files, diff_head_name_only,
+    diff_cached_file, diff_cached_file_is_binary, diff_cached_files, diff_commit, diff_commit_file,
+    diff_file, diff_file_is_binary, diff_head, diff_head_file, diff_head_file_is_binary,
+    diff_head_files, diff_head_name_only,
 };
 pub use git_merge::{MergeOutcome, continue_merge, merge_abort, merge_is_in_progress, merge_no_ff};
 #[cfg(test)]
