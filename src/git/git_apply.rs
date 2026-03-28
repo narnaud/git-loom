@@ -28,6 +28,13 @@ pub fn apply_cached_patch(workdir: &Path, patch: &str) -> Result<()> {
     apply_patch_with_flags(workdir, patch, &["--cached"])
 }
 
+/// Reverse-apply a patch from the index only (unstage specific hunks).
+///
+/// Wraps `git apply --cached --reverse` with the patch passed via stdin.
+pub fn apply_cached_patch_reverse(workdir: &Path, patch: &str) -> Result<()> {
+    apply_patch_with_flags(workdir, patch, &["--cached", "--reverse"])
+}
+
 fn apply_patch_with_flags(workdir: &Path, patch: &str, flags: &[&str]) -> Result<()> {
     let mut args = vec!["apply"];
     args.extend(flags);

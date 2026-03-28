@@ -1,4 +1,5 @@
 /// A single hunk extracted from a unified diff.
+#[derive(Clone, Debug)]
 pub(crate) struct DiffHunk {
     /// The raw diff text for this hunk (starting with the @@ header, ending before the next hunk
     /// or EOF).
@@ -79,12 +80,14 @@ pub(crate) fn parse_hunk_start(line: &str) -> Option<usize> {
 ///
 /// Produces a patch with one file header (`--- a/` / `+++ b/`) followed by
 /// the raw text of each hunk (which includes the `@@` header).
-pub(crate) fn build_hunk_patch(path: &str, hunks: &[DiffHunk]) -> String {
+///
+/// Accepts both `&[DiffHunk]` and `&[&DiffHunk]` via `Borrow`.
+pub(crate) fn build_hunk_patch(path: &str, hunks: &[impl std::borrow::Borrow<DiffHunk>]) -> String {
     let mut patch = String::new();
     patch.push_str(&format!("--- a/{}\n", path));
     patch.push_str(&format!("+++ b/{}\n", path));
     for hunk in hunks {
-        patch.push_str(&hunk.text);
+        patch.push_str(&hunk.borrow().text);
     }
     patch
 }

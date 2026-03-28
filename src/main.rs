@@ -17,6 +17,7 @@ mod status;
 mod swap;
 mod switch;
 mod trace;
+mod tui;
 mod update;
 
 use crate::core::{graph, msg, repo, transaction};
@@ -52,7 +53,7 @@ const GROUPED_COMMANDS: &str = "\
   \x1b[32mpush\x1b[0m, \x1b[32mpr\x1b[0m          Push a branch to remote
 
 \x1b[1;33mStaging:\x1b[0m
-  \x1b[32madd\x1b[0m               Stage files using short IDs or paths
+  \x1b[32madd\x1b[0m               Stage files using short IDs or paths [\x1b[32m-p\x1b[0m for interactive hunks]
 
 \x1b[1;33mCommits:\x1b[0m
   \x1b[32mcommit\x1b[0m, \x1b[32mci\x1b[0m        Create a commit on a feature branch
@@ -140,8 +141,11 @@ enum Command {
     /// Stage files using short IDs, paths, or 'zz' for all
     Add {
         /// Files to stage (short IDs, filenames, or 'zz' for all)
-        #[arg(required = true, num_args = 1..)]
+        #[arg(num_args = 0..)]
         files: Vec<String>,
+        /// Interactively select hunks to stage
+        #[arg(short = 'p', long = "patch")]
+        patch: bool,
     },
 
     // -- Commits --
@@ -397,7 +401,7 @@ fn main() {
             all,
         }) => status::run(files, context, all, theme),
         Some(Command::Init { name }) => init::run(name),
-        Some(Command::Add { files }) => add::run(files),
+        Some(Command::Add { files, patch }) => add::run(files, patch, &theme),
         Some(Command::Switch { branch }) => switch::run(branch),
         Some(Command::Branch(cmd)) => match cmd.action {
             Some(BranchAction::New(args)) => branch::new::run(args.name, args.target),

@@ -1,3 +1,4 @@
+use crate::core::graph::Theme;
 use crate::core::test_helpers::TestRepo;
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -33,6 +34,12 @@ fn is_staged(porcelain: &str, filename: &str) -> bool {
     })
 }
 
+/// Shorthand: call `run()` in non-patch mode with the default dark theme.
+fn run_add(files: Vec<String>) -> anyhow::Result<()> {
+    let theme = Theme::dark();
+    super::run(files, false, &theme)
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────
 
 /// R004: Stage a single file by its plain filename.
@@ -42,7 +49,7 @@ fn add_single_file_by_name() {
 
     test_repo.write_file("hello.txt", "hello world");
 
-    let result = test_repo.in_dir(|| super::run(vec!["hello.txt".to_string()]));
+    let result = test_repo.in_dir(|| run_add(vec!["hello.txt".to_string()]));
 
     assert!(result.is_ok(), "add failed: {:?}", result);
 
@@ -73,7 +80,7 @@ fn add_single_file_by_shortid() {
         allocator.get_file("feature.txt").to_string()
     });
 
-    let result = test_repo.in_dir(|| super::run(vec![short_id.clone()]));
+    let result = test_repo.in_dir(|| run_add(vec![short_id.clone()]));
     assert!(
         result.is_ok(),
         "add by short ID '{}' failed: {:?}",
@@ -97,7 +104,7 @@ fn add_multiple_files() {
     test_repo.write_file("a.txt", "aaa");
     test_repo.write_file("b.txt", "bbb");
 
-    let result = test_repo.in_dir(|| super::run(vec!["a.txt".to_string(), "b.txt".to_string()]));
+    let result = test_repo.in_dir(|| run_add(vec!["a.txt".to_string(), "b.txt".to_string()]));
 
     assert!(result.is_ok(), "add multiple failed: {:?}", result);
 
@@ -123,7 +130,7 @@ fn add_zz_stages_all() {
     test_repo.write_file("two.txt", "2");
     test_repo.write_file("three.txt", "3");
 
-    let result = test_repo.in_dir(|| super::run(vec!["zz".to_string()]));
+    let result = test_repo.in_dir(|| run_add(vec!["zz".to_string()]));
 
     assert!(result.is_ok(), "add zz failed: {:?}", result);
 
@@ -150,7 +157,7 @@ fn add_zz_stages_all() {
 fn add_nonexistent_file_errors() {
     let test_repo = TestRepo::new();
 
-    let result = test_repo.in_dir(|| super::run(vec!["nope.txt".to_string()]));
+    let result = test_repo.in_dir(|| run_add(vec!["nope.txt".to_string()]));
 
     assert!(result.is_err(), "expected error for nonexistent file");
 }
@@ -160,10 +167,106 @@ fn add_nonexistent_file_errors() {
 fn add_invalid_shortid_errors() {
     let test_repo = TestRepo::new();
 
-    let result = test_repo.in_dir(|| super::run(vec!["zq".to_string()]));
+    let result = test_repo.in_dir(|| run_add(vec!["zq".to_string()]));
 
     assert!(result.is_err(), "expected error for invalid short ID");
 }
 
-// Note: R013 (no-args error) is enforced by clap's `required = true` at
-// parse time, so it cannot be tested through `add::run()` directly.
+/// R013: no-args error — `loom add` with no files and no `-p` flag must error.
+#[test]
+fn add_no_args_errors() {
+    let test_repo = TestRepo::new();
+
+    let result = test_repo.in_dir(|| run_add(vec![]));
+
+    assert!(result.is_err(), "expected error when no files given");
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("No files specified"),
+        "unexpected error: {}",
+        msg
+    );
+}
+
+/// `loom add -p` with patch flag should not crash (placeholder).
+#[test]
+fn add_patch_flag_placeholder() {
+    let test_repo = TestRepo::new();
+    let theme = Theme::dark();
+
+    let result = test_repo.in_dir(|| super::run(vec![], true, &theme));
+
+    assert!(result.is_ok(), "add -p should not crash: {:?}", result);
+}
+
+/// Untracked files in subdirectories should appear in collect_file_entries.
+#[test]
+fn collect_entries_includes_untracked_subdirs() {
+    let test_repo = TestRepo::new();
+
+    // Create untracked files in a subdirectory (with content).
+    let subdir = test_repo.workdir().join("subdir");
+    std::fs::create_dir_all(&subdir).unwrap();
+    std::fs::write(subdir.join("a.txt"), "aaa\n").unwrap();
+    std::fs::write(subdir.join("b.txt"), "bbb\n").unwrap();
+    // Also one root-level file.
+    test_repo.write_file("root.txt", "root\n");
+
+    let workdir = test_repo.repo.workdir().expect("not bare").to_path_buf();
+    let entries = test_repo.in_dir(|| super::collect_file_entries(&test_repo.repo, &workdir, &[]));
+    let entries = entries.unwrap();
+
+    let paths: Vec<&str> = entries.iter().map(|e| e.path.as_str()).collect();
+    assert!(
+        paths.contains(&"root.txt"),
+        "expected root.txt, got: {:?}",
+        paths
+    );
+    assert!(
+        paths.contains(&"subdir/a.txt"),
+        "expected subdir/a.txt, got: {:?}",
+        paths
+    );
+    assert!(
+        paths.contains(&"subdir/b.txt"),
+        "expected subdir/b.txt, got: {:?}",
+        paths
+    );
+
+    // Each file should have exactly one hunk.
+    for entry in &entries {
+        assert!(
+            !entry.hunks.is_empty(),
+            "file '{}' should have at least one hunk",
+            entry.path
+        );
+    }
+}
+
+/// Empty untracked files should still appear in collect_file_entries.
+#[test]
+fn collect_entries_includes_empty_untracked_files() {
+    let test_repo = TestRepo::new();
+
+    // Create empty untracked files.
+    test_repo.write_file("empty.txt", "");
+    let subdir = test_repo.workdir().join("newdir");
+    std::fs::create_dir_all(&subdir).unwrap();
+    std::fs::write(subdir.join("also_empty.txt"), "").unwrap();
+
+    let workdir = test_repo.repo.workdir().expect("not bare").to_path_buf();
+    let entries = test_repo.in_dir(|| super::collect_file_entries(&test_repo.repo, &workdir, &[]));
+    let entries = entries.unwrap();
+
+    let paths: Vec<&str> = entries.iter().map(|e| e.path.as_str()).collect();
+    assert!(
+        paths.contains(&"empty.txt"),
+        "expected empty.txt, got: {:?}",
+        paths
+    );
+    assert!(
+        paths.contains(&"newdir/also_empty.txt"),
+        "expected newdir/also_empty.txt, got: {:?}",
+        paths
+    );
+}

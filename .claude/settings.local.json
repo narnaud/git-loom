@@ -25,7 +25,8 @@
       "Bash(git commit:*)",
       "Bash(gh issue:*)",
       "Bash(bash:*)",
-      "Bash(git:*)"
+      "Bash(git:*)",
+      "Bash(gh pr:*)"
     ]
   }
 }

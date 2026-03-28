@@ -860,9 +860,20 @@ fn detect_remote_status(
     }
 }
 
-fn get_working_changes(repo: &Repository) -> Result<Vec<FileChange>> {
+pub(crate) fn get_working_changes(repo: &Repository) -> Result<Vec<FileChange>> {
+    get_working_changes_opts(repo, false)
+}
+
+/// Like `get_working_changes` but with the option to recurse into untracked directories
+/// so that individual files are listed instead of the directory as a single entry.
+pub(crate) fn get_working_changes_recurse(repo: &Repository) -> Result<Vec<FileChange>> {
+    get_working_changes_opts(repo, true)
+}
+
+fn get_working_changes_opts(repo: &Repository, recurse_untracked: bool) -> Result<Vec<FileChange>> {
     let mut opts = StatusOptions::new();
-    opts.include_untracked(true).recurse_untracked_dirs(false);
+    opts.include_untracked(true)
+        .recurse_untracked_dirs(recurse_untracked);
 
     let statuses = repo.statuses(Some(&mut opts))?;
     let mut changes = Vec::new();
