@@ -1,4 +1,5 @@
 mod absorb;
+mod add;
 mod branch;
 mod commit;
 mod completions;
@@ -49,6 +50,9 @@ const GROUPED_COMMANDS: &str = "\
   \x1b[32minit\x1b[0m              Initialize a new integration branch
   \x1b[32mupdate\x1b[0m, \x1b[32mup\x1b[0m        Pull-rebase and update submodules
   \x1b[32mpush\x1b[0m, \x1b[32mpr\x1b[0m          Push a branch to remote
+
+\x1b[1;33mStaging:\x1b[0m
+  \x1b[32madd\x1b[0m               Stage files using short IDs or paths
 
 \x1b[1;33mCommits:\x1b[0m
   \x1b[32mcommit\x1b[0m, \x1b[32mci\x1b[0m        Create a commit on a feature branch
@@ -130,6 +134,14 @@ enum Command {
         /// Push branch without creating a PR or Gerrit review
         #[arg(long)]
         no_pr: bool,
+    },
+
+    // -- Staging --
+    /// Stage files using short IDs, paths, or 'zz' for all
+    Add {
+        /// Files to stage (short IDs, filenames, or 'zz' for all)
+        #[arg(required = true, num_args = 1..)]
+        files: Vec<String>,
     },
 
     // -- Commits --
@@ -385,6 +397,7 @@ fn main() {
             all,
         }) => status::run(files, context, all, theme),
         Some(Command::Init { name }) => init::run(name),
+        Some(Command::Add { files }) => add::run(files),
         Some(Command::Switch { branch }) => switch::run(branch),
         Some(Command::Branch(cmd)) => match cmd.action {
             Some(BranchAction::New(args)) => branch::new::run(args.name, args.target),
