@@ -1,3 +1,4 @@
+pub mod diff;
 pub mod graph;
 pub mod msg;
 pub mod repo;
