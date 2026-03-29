@@ -26,6 +26,7 @@
 - [init](commands/init.md)
 - [update](commands/update.md)
 - [push](commands/push.md)
+- [add](commands/add.md)
 - [commit](commands/commit.md)
 - [fold](commands/fold.md)
 - [absorb](commands/absorb.md)

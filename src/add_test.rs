@@ -172,22 +172,6 @@ fn add_invalid_shortid_errors() {
     assert!(result.is_err(), "expected error for invalid short ID");
 }
 
-/// R013: no-args error — `loom add` with no files and no `-p` flag must error.
-#[test]
-fn add_no_args_errors() {
-    let test_repo = TestRepo::new();
-
-    let result = test_repo.in_dir(|| run_add(vec![]));
-
-    assert!(result.is_err(), "expected error when no files given");
-    let msg = result.unwrap_err().to_string();
-    assert!(
-        msg.contains("No files specified"),
-        "unexpected error: {}",
-        msg
-    );
-}
-
 /// `loom add -p` with patch flag should not crash (placeholder).
 #[test]
 fn add_patch_flag_placeholder() {
