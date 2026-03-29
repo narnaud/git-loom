@@ -24,6 +24,9 @@ Workflow:
   update, up        Pull-rebase and update submodules
   push, pr          Push a branch to remote
 
+Staging:
+  add               Stage files using short IDs or paths [-p for interactive hunks]
+
 Commits:
   commit, ci        Create a commit on a feature branch
   fold              Amend, fixup, or move commits [amend, am, fixup, mv, rub]
