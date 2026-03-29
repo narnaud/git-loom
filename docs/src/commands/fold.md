@@ -7,10 +7,18 @@ Fold source(s) into a target — a polymorphic command that amends files into co
 ```
 git loom fold <target>
 git loom fold <source>... <target>
+git loom fold --patch [<files>...] <target>
 git loom fold --create <commit> <new-branch>
 ```
 
 When only a target is given, currently staged files are folded into the target commit. When two or more arguments are provided, the last argument is the target and all preceding arguments are sources.
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `-p, --patch` | Interactively select hunks to stage, then fold them into the target commit. |
+| `-c, --create` | Create a new branch and move the source commit into it. |
 
 ## Type Dispatch
 
@@ -66,6 +74,24 @@ git loom fold zz ab
 ```
 
 If `zz` is mixed with individual file arguments, `zz` takes precedence and all changed files are folded.
+
+### Interactive hunk selection (`-p`)
+
+With `-p`, an interactive TUI opens letting you pick individual hunks to fold into the target commit. The last argument is always the target commit.
+
+```bash
+git loom fold -p ab
+# Opens hunk picker for all working tree changes
+# Selected hunks are staged and folded into commit ab
+```
+
+Provide file arguments before the target to narrow the picker:
+
+```bash
+git loom fold -p src/auth.rs ab
+# Opens hunk picker filtered to src/auth.rs
+# Selected hunks are folded into commit ab
+```
 
 ### Fixup a commit into another
 

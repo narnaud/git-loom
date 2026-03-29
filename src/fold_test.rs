@@ -356,8 +356,14 @@ fn fold_commit_to_branch_via_short_ids() {
         )
     });
 
-    let result =
-        test_repo.in_dir(|| super::run(false, vec![commit_sid.clone(), branch_sid.clone()]));
+    let result = test_repo.in_dir(|| {
+        super::run(
+            false,
+            false,
+            vec![commit_sid.clone(), branch_sid.clone()],
+            &crate::core::graph::Theme::dark(),
+        )
+    });
 
     assert!(result.is_ok(), "fold via short IDs failed: {:?}", result);
     assert_eq!(
@@ -781,7 +787,14 @@ fn fold_unstaged_into_commit() {
     let head_oid = test_repo.head_oid();
 
     // fold zz HEAD — should amend all changed files into HEAD
-    let result = test_repo.in_dir(|| super::run(false, vec!["zz".into(), "HEAD".into()]));
+    let result = test_repo.in_dir(|| {
+        super::run(
+            false,
+            false,
+            vec!["zz".into(), "HEAD".into()],
+            &crate::core::graph::Theme::dark(),
+        )
+    });
     assert!(result.is_ok(), "fold zz HEAD failed: {:?}", result);
 
     assert_ne!(test_repo.head_oid(), head_oid, "Hash should have changed");
@@ -794,7 +807,14 @@ fn fold_unstaged_clean_tree_fails() {
     let test_repo = TestRepo::new();
     test_repo.commit("First commit", "file1.txt");
 
-    let result = test_repo.in_dir(|| super::run(false, vec!["zz".into(), "HEAD".into()]));
+    let result = test_repo.in_dir(|| {
+        super::run(
+            false,
+            false,
+            vec!["zz".into(), "HEAD".into()],
+            &crate::core::graph::Theme::dark(),
+        )
+    });
     assert!(result.is_err());
     assert!(
         result

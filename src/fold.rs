@@ -4,8 +4,10 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 use crate::commit;
+use crate::core::graph;
 use crate::core::msg;
 use crate::core::repo::{self, Target, TargetKind};
+use crate::core::staging;
 use crate::core::transaction::{self, LoomState, Rollback};
 use crate::core::weave::{self, RebaseOutcome, Weave};
 use crate::git;
@@ -43,7 +45,7 @@ const TRACK_BRANCH: &str = "_loom-track";
 /// - Commit + Branch   → move commit to the branch
 ///
 /// With `--create` (`-c`): create a new branch and move the source commit into it.
-pub fn run(create: bool, args: Vec<String>) -> Result<()> {
+pub fn run(create: bool, patch: bool, args: Vec<String>, theme: &graph::Theme) -> Result<()> {
     if args.is_empty() {
         bail!(
             "At least one argument required\n\
@@ -55,6 +57,10 @@ pub fn run(create: bool, args: Vec<String>) -> Result<()> {
 
     if create {
         return run_create(&repo, &args);
+    }
+
+    if patch {
+        return run_patch_fold(&repo, &args, theme);
     }
 
     // Single argument: fold staged files into the target commit
@@ -207,6 +213,55 @@ fn create_branch_and_move(
     ));
 
     Ok(())
+}
+
+/// Fold interactively-selected hunks into a target commit.
+///
+/// `args` is `[<target>]` or `[<files...>, <target>]`.
+/// The last argument is the target commit; all others are file filters for the
+/// hunk picker. If no files are given, all working-tree changes are shown.
+fn run_patch_fold(repo: &Repository, args: &[String], theme: &graph::Theme) -> Result<()> {
+    let workdir = repo::require_workdir(repo, "fold")?;
+
+    let (target_arg, file_args) = args.split_last().expect("args is non-empty");
+
+    // Validate file args: reject commit / branch sources (out of scope for -p).
+    for arg in file_args {
+        if arg == "zz" {
+            continue;
+        }
+        match repo::resolve_arg(
+            repo,
+            arg,
+            &[TargetKind::File, TargetKind::Commit, TargetKind::Branch],
+        ) {
+            Ok(Target::Commit(_)) | Ok(Target::Branch(_)) => bail!(
+                "fold -p does not support commit or branch sources\n\
+                 Use file paths, short IDs, or 'zz' to filter the hunk picker"
+            ),
+            Ok(_) => {}
+            Err(e) => return Err(e),
+        }
+    }
+
+    // Resolve target commit.
+    let resolved = repo::resolve_arg(repo, target_arg, &[TargetKind::Commit])?;
+    let commit_hash = match resolved {
+        Target::Commit(hash) => hash,
+        _ => unreachable!(),
+    };
+
+    // Open the hunk picker (filtered to file_args if provided, else all changes).
+    let confirmed = staging::run_hunk_picker(repo, workdir, file_args, theme)?;
+    if !confirmed {
+        msg::error("Fold cancelled");
+        return Ok(());
+    }
+
+    // Fold whatever is now staged into the target commit.
+    commit::verify_has_staged_changes(repo)?;
+    let staged = repo::get_staged_files(repo)?;
+    fold_files_into_commit(repo, &staged, &commit_hash)
 }
 
 /// Fold currently staged files into a target commit.
