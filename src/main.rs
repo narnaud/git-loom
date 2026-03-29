@@ -186,6 +186,8 @@ enum Command {
         /// Message for the first commit (prompts if omitted)
         #[arg(short, long)]
         message: Option<String>,
+        /// Files for the first commit (shows interactive picker if omitted)
+        files: Vec<String>,
     },
     /// Reword a commit message or rename a branch
     #[command(visible_alias = "rw")]
@@ -420,7 +422,11 @@ fn main() {
         Some(Command::Absorb { dry_run, files }) => absorb::run(dry_run, files),
         Some(Command::Show { target }) => show::run(target),
         Some(Command::Diff { args }) => diff::run(args),
-        Some(Command::Split { target, message }) => split::run(target, message),
+        Some(Command::Split {
+            target,
+            message,
+            files,
+        }) => split::run(target, message, files),
         Some(Command::Push { branch, no_pr }) => push::run(branch, no_pr),
         Some(Command::Update { yes }) => update::run(yes),
         Some(Command::Fold { create, args }) => fold::run(create, args),
