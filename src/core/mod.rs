@@ -3,6 +3,7 @@ pub mod graph;
 pub mod msg;
 pub mod repo;
 pub mod shortid;
+pub mod staging;
 pub mod transaction;
 pub mod weave;
 

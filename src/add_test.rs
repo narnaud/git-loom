@@ -197,7 +197,8 @@ fn collect_entries_includes_untracked_subdirs() {
     test_repo.write_file("root.txt", "root\n");
 
     let workdir = test_repo.repo.workdir().expect("not bare").to_path_buf();
-    let entries = test_repo.in_dir(|| super::collect_file_entries(&test_repo.repo, &workdir, &[]));
+    let entries = test_repo
+        .in_dir(|| crate::core::staging::collect_file_entries(&test_repo.repo, &workdir, &[]));
     let entries = entries.unwrap();
 
     let paths: Vec<&str> = entries.iter().map(|e| e.path.as_str()).collect();
@@ -239,7 +240,8 @@ fn collect_entries_includes_empty_untracked_files() {
     std::fs::write(subdir.join("also_empty.txt"), "").unwrap();
 
     let workdir = test_repo.repo.workdir().expect("not bare").to_path_buf();
-    let entries = test_repo.in_dir(|| super::collect_file_entries(&test_repo.repo, &workdir, &[]));
+    let entries = test_repo
+        .in_dir(|| crate::core::staging::collect_file_entries(&test_repo.repo, &workdir, &[]));
     let entries = entries.unwrap();
 
     let paths: Vec<&str> = entries.iter().map(|e| e.path.as_str()).collect();
