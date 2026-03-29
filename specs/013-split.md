@@ -9,11 +9,12 @@ This is the inverse of `fold` (commit + commit fixup). While file-level splittin
 ## CLI
 
 ```
-git-loom split <target> [-m <message>]
+git-loom split <target> [-m <message>] [<files>...]
 ```
 
 - **`<target>`** — Commit hash, short ID, or `HEAD`.
 - **`-m <message>`** — Message for the **first** (new) commit. If omitted, opens the git editor.
+- **`<files>...`** — Files for the **first** commit. If omitted, an interactive file picker is shown.
 
 The **second** commit keeps the original commit message.
 
@@ -23,7 +24,7 @@ The **second** commit keeps the original commit message.
 2. **Validate** — The commit must:
    - Not be a merge commit (parent count must be ≤ 1).
    - Touch at least 2 files (a single-file commit cannot be split).
-3. **File picker** — Display an `inquire::MultiSelect` prompt listing all files changed in the commit. The user selects files for the **first** commit; the rest go into the **second** commit.
+3. **File selection** — If `<files>` are provided, use them directly. Otherwise, display an `inquire::MultiSelect` prompt listing all files changed in the commit. The user selects files for the **first** commit; the rest go into the **second** commit.
 4. **Get first commit message** — From `-m` flag or interactive prompt.
 5. **Perform the split** — Two paths depending on whether the target is HEAD:
 
@@ -93,7 +94,7 @@ git loom split abc1234
 
 2. **First commit gets the new message** — The second commit keeps the original message because it represents the "remainder" of the original work. The first commit is the extracted piece that needs a new description.
 
-3. **Interactive picker by default** — No `--files` flag to pre-select files. The interactive picker ensures the user sees and confirms the split. The testable core (`split_commit_with_selection`) bypasses the picker for automated testing.
+3. **Optional file arguments** — Files for the first commit can be passed directly on the command line, bypassing the interactive picker. This is useful for scripting and integration testing. When no files are provided, the interactive picker is shown.
 
 4. **Reuses edit-and-continue pattern** — Same approach as `reword` and `fold`: Weave-based rebase with `edit` command, manual commit manipulation, then `continue`. Falls back to linear todo for non-integration repos.
 

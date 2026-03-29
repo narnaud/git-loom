@@ -5,7 +5,7 @@ Split a commit into two sequential commits by selecting which files go into each
 ## Usage
 
 ```
-git loom split [-m <message>] <target>
+git loom split <target> [-m <message>] [<files>...]
 ```
 
 ### Arguments
@@ -13,6 +13,7 @@ git loom split [-m <message>] <target>
 | Argument | Description |
 |----------|-------------|
 | `<target>` | Commit hash, short ID, or `HEAD` |
+| `<files>...` | Files for the first commit. Shows an interactive picker if omitted. |
 
 ### Options
 
@@ -23,7 +24,7 @@ git loom split [-m <message>] <target>
 ## What It Does
 
 1. **Resolve** — finds the target commit
-2. **File picker** — shows an interactive multi-select of the files changed in the commit
+2. **File selection** — if `<files>` are given, uses them directly; otherwise shows an interactive multi-select of the files changed in the commit
 3. **First commit** — creates a new commit with the selected files and the provided message (or opens the git editor if `-m` was omitted)
 4. **Second commit** — creates a second commit with the remaining files, reusing the original commit message
 
@@ -38,12 +39,12 @@ Both paths are atomic — if anything fails, the operation is aborted and the or
 
 - The commit must change **at least two files** (otherwise there is nothing to split)
 - **Merge commits** cannot be split
-- You must select at least one file for each side (cannot put everything in one commit)
+- You must assign at least one file to each side (cannot put everything in one commit)
 - Branch and file targets are rejected — only commits are accepted
 
 ## Examples
 
-### Split the HEAD commit
+### Split HEAD interactively
 
 ```bash
 git loom split HEAD
@@ -51,7 +52,14 @@ git loom split HEAD
 # > [x] src/auth.rs
 #   [ ] src/main.rs
 # (opens editor for the first commit message)
-# ✔ Split `abc123d` into 2 commits
+# ✓ Split `abc123d` into `def456a` and `789bcd0`
+```
+
+### Split HEAD non-interactively
+
+```bash
+git loom split HEAD -m "refactor: extract auth" src/auth.rs
+# ✓ Split `abc123d` into `def456a` and `789bcd0`
 ```
 
 ### Split a commit by short ID with a message
@@ -61,7 +69,14 @@ git loom split ab -m "refactor: extract helpers"
 # ? Select files for the first commit
 # > [x] src/helpers.rs
 #   [ ] src/lib.rs
-# ✔ Split `ab12345` into 2 commits
+# ✓ Split `ab12345` into `cd67890` and `ef01234`
+```
+
+### Split a commit non-interactively
+
+```bash
+git loom split ab -m "refactor: extract helpers" src/helpers.rs
+# ✓ Split `ab12345` into `cd67890` and `ef01234`
 ```
 
 ## Prerequisites

@@ -18,19 +18,24 @@ fn commit_or_editor(workdir: &std::path::Path, message: Option<&str>) -> Result<
 ///
 /// Dispatches based on the resolved target type:
 /// - Commit → split the commit by selecting files for the first commit
-pub fn run(target: String, message: Option<String>) -> Result<()> {
+pub fn run(target: String, message: Option<String>, files: Vec<String>) -> Result<()> {
     let repo = repo::open_repo()?;
 
     let resolved = repo::resolve_arg(&repo, &target, &[TargetKind::Commit])?;
 
     match resolved {
-        Target::Commit(hash) => split_commit(&repo, &hash, message),
+        Target::Commit(hash) => split_commit(&repo, &hash, message, files),
         _ => unreachable!(),
     }
 }
 
-/// Split a commit by showing an interactive file picker.
-fn split_commit(repo: &Repository, commit_hash: &str, message: Option<String>) -> Result<()> {
+/// Split a commit, using provided files or an interactive picker if none are given.
+fn split_commit(
+    repo: &Repository,
+    commit_hash: &str,
+    message: Option<String>,
+    files: Vec<String>,
+) -> Result<()> {
     let workdir = repo::require_workdir(repo, "split")?;
     let commit_oid = repo.revparse_single(commit_hash)?.peel_to_commit()?.id();
     let commit = repo.find_commit(commit_oid)?;
@@ -40,18 +45,25 @@ fn split_commit(repo: &Repository, commit_hash: &str, message: Option<String>) -
     }
 
     // Get files changed in the commit
-    let files = repo::commit_file_paths(repo, commit_oid)?;
-    if files.len() < 2 {
+    let all_files = repo::commit_file_paths(repo, commit_oid)?;
+    if all_files.len() < 2 {
         bail!("Cannot split a commit with only one file");
     }
 
-    // Show interactive file picker
-    let selected = pick_files(&files)?;
+    let selected = if files.is_empty() {
+        pick_files(&all_files)?
+    } else {
+        let remaining_count = all_files.iter().filter(|f| !files.contains(f)).count();
+        if remaining_count == 0 {
+            bail!("Must leave at least one file for the second commit");
+        }
+        files
+    };
 
     let original_msg = commit.message().unwrap_or("").trim().to_string();
 
     // Compute remaining files
-    let remaining: Vec<String> = files
+    let remaining: Vec<String> = all_files
         .into_iter()
         .filter(|f| !selected.contains(f))
         .collect();
@@ -69,7 +81,7 @@ fn split_commit(repo: &Repository, commit_hash: &str, message: Option<String>) -
 
 /// Split a commit with pre-selected files (no interactive picker).
 ///
-/// This is the testable core that bypasses the interactive file picker.
+/// Bypasses the interactive file picker — useful for tests.
 #[cfg(test)]
 pub fn split_commit_with_selection(
     repo: &Repository,
@@ -77,44 +89,7 @@ pub fn split_commit_with_selection(
     selected: Vec<String>,
     message: String,
 ) -> Result<()> {
-    let workdir = repo::require_workdir(repo, "split")?;
-    let commit_oid = repo.revparse_single(commit_hash)?.peel_to_commit()?.id();
-    let commit = repo.find_commit(commit_oid)?;
-
-    if commit.parent_count() > 1 {
-        bail!("Cannot split a merge commit");
-    }
-
-    // Get files changed in the commit
-    let all_files = repo::commit_file_paths(repo, commit_oid)?;
-    if all_files.len() < 2 {
-        bail!("Cannot split a commit with only one file");
-    }
-
-    if selected.is_empty() {
-        bail!("Must select at least one file for the first commit");
-    }
-
-    let remaining: Vec<String> = all_files
-        .into_iter()
-        .filter(|f| !selected.contains(f))
-        .collect();
-
-    if remaining.is_empty() {
-        bail!("Must leave at least one file for the second commit");
-    }
-
-    let original_msg = commit.message().unwrap_or("").trim().to_string();
-
-    perform_split(
-        repo,
-        workdir,
-        commit_oid,
-        &selected,
-        &remaining,
-        Some(message.as_str()),
-        &original_msg,
-    )
+    split_commit(repo, commit_hash, Some(message), selected)
 }
 
 /// Show an interactive file picker for splitting.
