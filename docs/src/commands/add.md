@@ -38,31 +38,6 @@ Opens a two-pane TUI showing all staged and unstaged hunks across the affected f
 
 On confirm, prints `"Applied N change(s) across M file(s)"` or `"No changes to apply"` if nothing was toggled.
 
-### TUI Layout
-
-```
-╭─ Files ──────────╮╭─ Diff ─────────────────────────╮
-│ M  main.rs       ││ [✓] Hunk 1/3 (staged)          │
-│ ▼ src/           ││ @@ -10,4 +10,6 @@              │
-│   MM lib.rs      ││ -old line                       │
-│   A  new.rs      ││ +new line                       │
-│ ?? README.md     ││                                 │
-╰──────────────────╯╰────────────────────────────────╯
- Navigate: ↑/↓ or j/k | Switch Pane: tab | Toggle: space | Confirm: c or Enter | Quit: q or Esc
-```
-
-The left pane shows files grouped by directory with live `git status`–style codes (`M`, `MM`, `A`, `??`, `D`). The right pane shows the diff for the focused file with hunk checkboxes.
-
-### TUI Keyboard Bindings
-
-| Key | Action |
-|-----|--------|
-| `↑` / `k`, `↓` / `j` | Navigate up/down |
-| `Tab` / `Shift+Tab` | Switch between left and right pane |
-| `Space` | Toggle focused hunk (right pane) or all hunks in file/directory (left pane) |
-| `c` / `Enter` | Confirm and apply selections |
-| `q` / `Esc` / `Ctrl+C` | Cancel without changes |
-
 ## File Resolution
 
 Arguments (in both plain and `-p` modes) are resolved in this order:

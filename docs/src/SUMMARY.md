@@ -17,6 +17,7 @@
 - [Moving Files Between Commits](guides/moving-files.md)
 - [Uncommitting Changes](guides/uncommitting.md)
 - [Auto-absorbing Changes](guides/absorbing.md)
+- [Selecting Hunks with -p](guides/hunk-selection.md)
 - [Pushing for Review](guides/pushing.md)
 - [Resolving Conflicts](guides/conflict-resolution.md)
 
