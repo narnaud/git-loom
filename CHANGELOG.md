@@ -1,5 +1,49 @@
 # Changelog
 
+## [0.17.0](https://github.com/narnaud/git-loom/compare/v0.16.1...v0.17.0) (2026-03-29)
+
+
+### Features ✨
+
+* add -p flag to commit and fold for interactive hunk picking ([a3123ee](https://github.com/narnaud/git-loom/commit/a3123eef4700b839268662919790e57423b87d36))
+* add files argument to split command ([ae2a832](https://github.com/narnaud/git-loom/commit/ae2a832f17c51799b0ab51e24760c49ea6c638bc)), closes [#102](https://github.com/narnaud/git-loom/issues/102)
+* Added `loom add` subcommand that stages files like git ([b652920](https://github.com/narnaud/git-loom/commit/b652920ca78383b9a5bee5c6cf673767594bfc78))
+* hint users to run loom trace on error; document stderr convention ([dbf9a31](https://github.com/narnaud/git-loom/commit/dbf9a314b32e609c69527bbd771a0c81b70976e1))
+* implement TUI for hunks selection ([f4a5f46](https://github.com/narnaud/git-loom/commit/f4a5f46ecd7120ad97a7a9e2171526a7760bff9d))
+* **switch:** add loom switch command for testing branches without weaving ([fc4c4a3](https://github.com/narnaud/git-loom/commit/fc4c4a3130ae95df30c02bbe1d305867c4275967))
+
+
+### Bug Fixes 🐞
+
+* **absorb:** use locale-independent binary file detection ([d0d8e0e](https://github.com/narnaud/git-loom/commit/d0d8e0e6bfe5aeb02acb024ec75ca566a462059d))
+* **absorb:** use standard autosquash fixup message format ([bd09cd0](https://github.com/narnaud/git-loom/commit/bd09cd06600bc412ac26bf3c474737a1eb4f0b40))
+* add cycle guards to all unbounded commit graph walks ([5d39b4d](https://github.com/narnaud/git-loom/commit/5d39b4dd7b92e92fbd13099d3027bb1d58231c1d))
+* **git:** replace deprecated DateTime::&lt;Utc&gt;::from_timestamp with DateTime::from_timestamp ([50d469e](https://github.com/narnaud/git-loom/commit/50d469e6ac3f388e6cea6e2d33090578eedbc87e))
+* **update:** use short_hash() helper instead of hardcoded [..7] slice ([ef65e94](https://github.com/narnaud/git-loom/commit/ef65e94ddba8b8771d33582fa5887d7b0b1d800d))
+
+
+### Documentation
+
+* add documentation for add command ([71001ce](https://github.com/narnaud/git-loom/commit/71001ceb8d4c938772992aa78aa2ccab634fdc7a))
+* use git loom for commands, git-loom for product name ([7a8ca7a](https://github.com/narnaud/git-loom/commit/7a8ca7a4f1178253ae42bacc0d645e22a00bed36))
+
+
+### Changes
+
+* add a commit_subject method and use it when needed ([14d3370](https://github.com/narnaud/git-loom/commit/14d3370ac9a918d284acdd1f794b9a279cb1f81c))
+* Extract hunk handling into diff.rs for reusability ([3d48c7c](https://github.com/narnaud/git-loom/commit/3d48c7c4238312c6508fe1feeb5e6c6dec21501a))
+* extract hunk picker pipeline into core/staging.rs ([d062b18](https://github.com/narnaud/git-loom/commit/d062b18e07f55f2dc10d405379e06693a1584060))
+* **git_commands:** extract git_diff and git_apply modules, flatten submodule API ([d6410b1](https://github.com/narnaud/git-loom/commit/d6410b17b6b231beb6fb3ea73892336355ae16ac))
+* move core modules into core/ and rename git_commands to git ([911ff76](https://github.com/narnaud/git-loom/commit/911ff76742836a7fdfeaaae08e525e84bd4ce898))
+* trace and transaction continue/abort follow the same patterns as other commands in main ([a15f346](https://github.com/narnaud/git-loom/commit/a15f34610238e61258a88b0fadd55c482c5a9e72))
+
+
+### Other
+
+* add ratatui/crossterm ([f04cc67](https://github.com/narnaud/git-loom/commit/f04cc671747e0b615c1e524fc7f79078a82e5446))
+* **deps:** bump actions/deploy-pages from 4 to 5 ([10a80af](https://github.com/narnaud/git-loom/commit/10a80afefd8805e2d18dcb8b402c8d283e201aff))
+* **deps:** bump terminal_size from 0.4.3 to 0.4.4 ([526ef1a](https://github.com/narnaud/git-loom/commit/526ef1aa71b28397e5b096516edeb314921040ea))
+
 ## [0.16.1](https://github.com/narnaud/git-loom/compare/v0.16.0...v0.16.1) (2026-03-26)
 
 
