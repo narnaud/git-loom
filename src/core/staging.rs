@@ -268,7 +268,7 @@ fn collect_unstaged_hunks(
         let raw_bytes = match std::fs::read(&full_path) {
             Ok(b) => b,
             Err(_) => {
-                eprintln!("warning: skipping unreadable file '{}'", path);
+                msg::warn(&format!("skipping unreadable file '{}'", path));
                 return Ok(false);
             }
         };

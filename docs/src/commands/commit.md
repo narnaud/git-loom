@@ -5,7 +5,7 @@ Create a commit on a feature branch without leaving the integration branch.
 ## Usage
 
 ```
-git loom commit [-b <branch>] [-m <message>] [files...]
+git loom commit [-b <branch>] [-m <message>] [-p] [files...]
 ```
 
 ### Options
@@ -14,6 +14,7 @@ git loom commit [-b <branch>] [-m <message>] [files...]
 |--------|-------------|
 | `-b, --branch <branch>` | Target feature branch (name or short ID). Prompts if omitted. |
 | `-m, --message <message>` | Commit message. Opens editor if omitted. |
+| `-p, --patch` | Interactively select hunks to stage before committing. |
 
 ### File Arguments
 
@@ -32,6 +33,12 @@ When `zz` appears alongside other file arguments, `zz` wins and stages everythin
 3. **Message resolution** — gets the commit message (flag or editor)
 4. **Commit** — creates the commit
 5. **Relocate** — moves the commit to the target feature branch, updating all branch refs and integration topology automatically
+
+### Patch Mode
+
+With `-p`, an interactive TUI opens before staging, letting you pick individual hunks to include in the commit. Any file arguments narrow the picker to those files; omitting them (or using `zz`) shows all changes.
+
+If specific files are given alongside `-p`, any other staged files are saved aside first so they don't accidentally end up in the commit. They are restored automatically afterward.
 
 ### Loose Commit
 
@@ -90,6 +97,22 @@ git loom commit -b feature-logging -m "add request logging" zz
 ```bash
 git loom commit -m "initial scaffold" zz
 # No -b flag, branch matches remote → creates loose commit directly
+```
+
+### Interactive hunk selection
+
+```bash
+git loom commit -b feature-auth -p -m "fix auth check"
+# Opens hunk picker for all changes
+# Only selected hunks are staged and committed to feature-auth
+```
+
+### Hunk selection for specific files
+
+```bash
+git loom commit -b feature-auth -p ar -m "partial auth fix"
+# Opens hunk picker filtered to src/auth.rs
+# Other staged files are saved aside and restored after the commit
 ```
 
 ## Conflicts

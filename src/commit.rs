@@ -4,8 +4,10 @@ use anyhow::{Context, Result, bail};
 use git2::{Repository, StatusOptions};
 use serde::{Deserialize, Serialize};
 
+use crate::core::graph;
 use crate::core::msg;
 use crate::core::repo::{self, Target};
+use crate::core::staging;
 use crate::core::transaction::{self, LoomState, Rollback};
 use crate::core::weave::{self, RebaseOutcome, Weave};
 use crate::git;
@@ -19,7 +21,13 @@ struct CommitContext {
 ///
 /// Stages files, creates the commit at HEAD, then uses Weave to relocate
 /// it to the target feature branch (creating merge topology if needed).
-pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) -> Result<()> {
+pub fn run(
+    branch: Option<String>,
+    message: Option<String>,
+    patch: bool,
+    files: Vec<String>,
+    theme: &graph::Theme,
+) -> Result<()> {
     let repo = repo::open_repo()?;
     let workdir = repo::require_workdir(&repo, "commit")?.to_path_buf();
     let git_dir = repo.path().to_path_buf();
@@ -33,7 +41,11 @@ pub fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) 
 
     // Step 1: Stage files (saving aside any pre-existing staged files not in
     // the target list so they don't accidentally end up in this commit).
-    let saved_staged = resolve_staging(&repo, &workdir, &files)?;
+    let saved_staged = if patch {
+        resolve_staging_patch(&repo, &workdir, &files, theme)?
+    } else {
+        resolve_staging(&repo, &workdir, &files)?
+    };
 
     // Step 2: Verify index has changes — restore saved staged on failure so
     // pre-existing staged work is not lost.
@@ -171,6 +183,41 @@ fn post_commit(workdir: &Path, branch_name: &str, saved_staged: &str) -> Result<
     ));
 
     Ok(())
+}
+
+/// Resolve staging in patch mode: open the interactive hunk picker.
+///
+/// - If files specified: save and unstage other staged files first (so only
+///   the selected files appear in the picker and don't leak into this commit).
+/// - Opens the hunk picker (filtered to files if provided, or all changes).
+/// - If the user cancels: restores saved staged patch and returns an error.
+/// - Returns the saved staged patch for later restoration after the commit.
+fn resolve_staging_patch(
+    repo: &Repository,
+    workdir: &std::path::Path,
+    files: &[String],
+    theme: &graph::Theme,
+) -> Result<String> {
+    // Save aside other staged files when specific files are targeted.
+    let saved_staged = if !files.is_empty() && !files.iter().any(|f| f == "zz") {
+        let mut resolved_paths = Vec::new();
+        for arg in files {
+            let path = resolve_file_arg(repo, arg)?;
+            resolved_paths.push(path);
+        }
+        let path_refs: Vec<&str> = resolved_paths.iter().map(|s| s.as_str()).collect();
+        save_and_unstage_other_staged(repo, workdir, &path_refs)?
+    } else {
+        String::new()
+    };
+
+    let confirmed = staging::run_hunk_picker(repo, workdir, files, theme)?;
+    if !confirmed {
+        git::restore_staged_patch(workdir, &saved_staged)?;
+        anyhow::bail!("Commit cancelled");
+    }
+
+    Ok(saved_staged)
 }
 
 /// Resolve staging based on file arguments.

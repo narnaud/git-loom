@@ -158,6 +158,9 @@ enum Command {
         /// Commit message (if not provided, opens editor)
         #[arg(short, long)]
         message: Option<String>,
+        /// Interactively select hunks to stage before committing
+        #[arg(short = 'p', long = "patch")]
+        patch: bool,
         /// Files to stage (short IDs, filenames, or 'zz' for all), none for all tracked changes
         files: Vec<String>,
     },
@@ -167,6 +170,9 @@ enum Command {
         /// Create a new branch from the source commit and move it there
         #[arg(short = 'c', long = "create")]
         create: bool,
+        /// Interactively select hunks to stage before folding
+        #[arg(short = 'p', long = "patch")]
+        patch: bool,
         /// Source(s) and target: files, commits, or branches (last arg is the target)
         #[arg(required = true, num_args = 1..)]
         args: Vec<String>,
@@ -415,8 +421,9 @@ fn main() {
         Some(Command::Commit {
             branch,
             message,
+            patch,
             files,
-        }) => commit::run(branch, message, files),
+        }) => commit::run(branch, message, patch, files, &theme),
         Some(Command::Swap { a, b }) => swap::run(a, b),
         Some(Command::Drop { target, yes }) => drop::run(target, yes),
         Some(Command::Absorb { dry_run, files }) => absorb::run(dry_run, files),
@@ -429,7 +436,11 @@ fn main() {
         }) => split::run(target, message, files),
         Some(Command::Push { branch, no_pr }) => push::run(branch, no_pr),
         Some(Command::Update { yes }) => update::run(yes),
-        Some(Command::Fold { create, args }) => fold::run(create, args),
+        Some(Command::Fold {
+            create,
+            patch,
+            args,
+        }) => fold::run(create, patch, args, &theme),
         Some(Command::Trace) => trace::run(),
         Some(Command::Continue) => transaction::continue_run(),
         Some(Command::Abort) => transaction::abort_run(),

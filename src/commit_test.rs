@@ -1,4 +1,10 @@
+use crate::core::graph;
 use crate::core::test_helpers::TestRepo;
+
+/// Wrapper so existing tests don't need to pass patch/theme.
+fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) -> anyhow::Result<()> {
+    super::run(branch, message, false, files, &graph::Theme::dark())
+}
 
 /// Helper: set up a test repo with an empty feature branch at the merge-base.
 ///
@@ -55,7 +61,7 @@ fn commit_stages_specific_file() {
     test_repo.write_file("other.txt", "other");
 
     let result = test_repo.in_dir(|| {
-        super::run(
+        run(
             Some("feature-a".to_string()),
             Some("Add new file".to_string()),
             vec!["new.txt".to_string()],
@@ -76,7 +82,7 @@ fn commit_stages_zz_all_changes() {
     test_repo.write_file("file2.txt", "content2");
 
     let result = test_repo.in_dir(|| {
-        super::run(
+        run(
             Some("feature-a".to_string()),
             Some("Add files".to_string()),
             vec!["zz".to_string()],
@@ -98,7 +104,7 @@ fn commit_uses_already_staged() {
     test_repo.stage_files(&["staged.txt"]);
 
     let result = test_repo.in_dir(|| {
-        super::run(
+        run(
             Some("feature-a".to_string()),
             Some("Use staged".to_string()),
             vec![], // no file args = use index as-is
@@ -116,7 +122,7 @@ fn commit_empty_index_fails() {
 
     // No files staged, no file args
     let result = test_repo.in_dir(|| {
-        super::run(
+        run(
             Some("feature-a".to_string()),
             Some("Message".to_string()),
             vec![],
@@ -146,7 +152,7 @@ fn commit_to_non_woven_branch_fails() {
     test_repo.write_file("file.txt", "content");
 
     let result = test_repo.in_dir(|| {
-        super::run(
+        run(
             Some("not-woven".to_string()),
             Some("Message".to_string()),
             vec!["file.txt".to_string()],
@@ -164,7 +170,7 @@ fn commit_to_new_branch_creates_and_weaves() {
     test_repo.write_file("new.txt", "content");
 
     let result = test_repo.in_dir(|| {
-        super::run(
+        run(
             Some("feature-new".to_string()),
             Some("Add file".to_string()),
             vec!["new.txt".to_string()],
@@ -199,7 +205,7 @@ fn commit_to_empty_branch_creates_merge_topology() {
     test_repo.write_file("new.txt", "content");
 
     let result = test_repo.in_dir(|| {
-        super::run(
+        run(
             Some("feature-a".to_string()),
             Some("New commit".to_string()),
             vec!["new.txt".to_string()],
@@ -260,7 +266,7 @@ fn commit_to_second_empty_branch_creates_parallel_topology() {
     test_repo.write_file("b1.txt", "content");
 
     let result = test_repo.in_dir(|| {
-        super::run(
+        run(
             Some("feature-b".to_string()),
             Some("B1".to_string()),
             vec!["b1.txt".to_string()],
@@ -309,7 +315,7 @@ fn commit_moves_to_correct_branch_in_topology() {
     test_repo.write_file("new.txt", "content");
 
     let result = test_repo.in_dir(|| {
-        super::run(
+        run(
             Some("feature-a".to_string()),
             Some("New on A".to_string()),
             vec!["new.txt".to_string()],
@@ -355,7 +361,7 @@ fn commit_conflict_pauses_operation() {
     test_repo.write_file("feature1", "conflicting content");
 
     let result = test_repo.in_dir(|| {
-        super::run(
+        run(
             Some("new-line".to_string()),
             Some("New line".to_string()),
             vec!["zz".to_string()],
@@ -400,7 +406,7 @@ fn commit_conflict_preserves_existing_empty_branch() {
     test_repo.write_file("shared.txt", "conflicting content");
 
     let result = test_repo.in_dir(|| {
-        super::run(
+        run(
             Some("empty-branch".to_string()),
             Some("Should conflict".to_string()),
             vec!["zz".to_string()],
@@ -437,7 +443,7 @@ fn commit_loose_when_no_branch_and_at_remote() {
     test_repo.write_file("loose.txt", "content");
 
     let result = test_repo.in_dir(|| {
-        super::run(
+        run(
             None, // no -b flag
             Some("Loose commit".to_string()),
             vec!["loose.txt".to_string()],
@@ -466,7 +472,7 @@ fn commit_loose_works_with_existing_local_commits() {
     test_repo.write_file("first.txt", "first");
     test_repo
         .in_dir(|| {
-            super::run(
+            run(
                 None,
                 Some("First loose commit".to_string()),
                 vec!["first.txt".to_string()],
@@ -477,7 +483,7 @@ fn commit_loose_works_with_existing_local_commits() {
     // Now create a second loose commit — should still work
     test_repo.write_file("second.txt", "second");
     let result = test_repo.in_dir(|| {
-        super::run(
+        run(
             None,
             Some("Second loose commit".to_string()),
             vec!["second.txt".to_string()],
@@ -508,7 +514,7 @@ fn commit_with_branch_flag_does_not_create_loose() {
     test_repo.write_file("file.txt", "content");
 
     let result = test_repo.in_dir(|| {
-        super::run(
+        run(
             Some("feature-new".to_string()), // explicit -b flag
             Some("Branch commit".to_string()),
             vec!["file.txt".to_string()],
@@ -537,7 +543,7 @@ fn commit_not_on_integration_branch_fails() {
     test_repo.write_file("new.txt", "content");
 
     let result = test_repo.in_dir(|| {
-        super::run(
+        run(
             Some("feature-a".to_string()),
             Some("Message".to_string()),
             vec!["new.txt".to_string()],
@@ -560,7 +566,7 @@ fn commit_nonexistent_file_fails() {
     let test_repo = setup_with_woven_branch();
 
     let result = test_repo.in_dir(|| {
-        super::run(
+        run(
             Some("feature-a".to_string()),
             Some("Message".to_string()),
             vec!["nonexistent.txt".to_string()],
@@ -633,7 +639,7 @@ fn commit_abort_preserves_working_state() {
     test_repo.write_file("shared.txt", "conflicting-write");
 
     let result = test_repo.in_dir(|| {
-        super::run(
+        run(
             Some("new-line".to_string()),
             Some("New line".to_string()),
             vec!["shared.txt".to_string()],
