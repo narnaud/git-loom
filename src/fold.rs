@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 use crate::commit;
+use crate::core::diff;
 use crate::core::graph;
 use crate::core::msg;
 use crate::core::repo::{self, Target, TargetKind};
@@ -11,6 +12,7 @@ use crate::core::staging;
 use crate::core::transaction::{self, LoomState, Rollback};
 use crate::core::weave::{self, RebaseOutcome, Weave};
 use crate::git;
+use crate::tui::hunk_selector::FileEntry;
 
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "op")]
@@ -215,18 +217,43 @@ fn create_branch_and_move(
     Ok(())
 }
 
-/// Fold interactively-selected hunks into a target commit.
+/// Fold interactively-selected hunks into a target commit, or move/uncommit
+/// hunks from a source commit.
 ///
-/// `args` is `[<target>]` or `[<files...>, <target>]`.
-/// The last argument is the target commit; all others are file filters for the
-/// hunk picker. If no files are given, all working-tree changes are shown.
+/// Forms:
+/// - `fold -p [<files>...] <commit>` — pick working-tree hunks, fold into commit
+/// - `fold -p <commit1> <commit2>` — pick hunks from commit1 to move into commit2
+/// - `fold -p <commit> zz` — pick hunks from commit to uncommit to working tree
 fn run_patch_fold(repo: &Repository, args: &[String], theme: &graph::Theme) -> Result<()> {
     let workdir = repo::require_workdir(repo, "fold")?;
 
-    let (target_arg, file_args) = args.split_last().expect("args is non-empty");
+    let (target_arg, source_args) = args.split_last().expect("args is non-empty");
 
-    // Validate file args: reject commit / branch sources (out of scope for -p).
-    for arg in file_args {
+    // Detect commit-source forms: fold -p <commit> <commit|zz>
+    if source_args.len() == 1 {
+        let source_arg = &source_args[0];
+        if let Ok(Target::Commit(source_hash)) =
+            repo::resolve_arg(repo, source_arg, &[TargetKind::Commit])
+        {
+            if target_arg == "zz" {
+                return run_patch_fold_commit_to_unstaged(repo, workdir, &source_hash, theme);
+            }
+            if let Ok(Target::Commit(target_hash)) =
+                repo::resolve_arg(repo, target_arg, &[TargetKind::Commit])
+            {
+                return run_patch_fold_commit_to_commit(
+                    repo,
+                    workdir,
+                    &source_hash,
+                    &target_hash,
+                    theme,
+                );
+            }
+        }
+    }
+
+    // Working-tree hunk fold: validate sources are files/zz (not commits/branches).
+    for arg in source_args {
         if arg == "zz" {
             continue;
         }
@@ -251,8 +278,8 @@ fn run_patch_fold(repo: &Repository, args: &[String], theme: &graph::Theme) -> R
         _ => unreachable!(),
     };
 
-    // Open the hunk picker (filtered to file_args if provided, else all changes).
-    let confirmed = staging::run_hunk_picker(repo, workdir, file_args, theme)?;
+    // Open the hunk picker (filtered to source_args if provided, else all changes).
+    let confirmed = staging::run_hunk_picker(repo, workdir, source_args, theme)?;
     if !confirmed {
         msg::error("Fold cancelled");
         return Ok(());
@@ -262,6 +289,265 @@ fn run_patch_fold(repo: &Repository, args: &[String], theme: &graph::Theme) -> R
     commit::verify_has_staged_changes(repo)?;
     let staged = repo::get_staged_files(repo)?;
     fold_files_into_commit(repo, &staged, &commit_hash)
+}
+
+/// Build a unified diff patch from the selected text hunks across all files.
+fn build_selected_patch(selections: &[FileEntry]) -> String {
+    let mut patch = String::new();
+    for file in selections {
+        if file.binary {
+            continue;
+        }
+        let selected: Vec<_> = file
+            .hunks
+            .iter()
+            .filter(|h| h.selected)
+            .map(|h| &h.hunk)
+            .collect();
+        if !selected.is_empty() {
+            patch.push_str(&diff::build_hunk_patch(&file.path, &selected));
+        }
+    }
+    patch
+}
+
+/// At a rebase edit pause: reverse-apply patch, stage affected files, amend.
+fn reverse_apply_and_amend(workdir: &Path, selections: &[FileEntry], patch: &str) -> Result<()> {
+    git::apply_patch_reverse(workdir, patch)?;
+    for file in selections {
+        if file.hunks.iter().any(|h| h.selected) {
+            git::stage_path(workdir, &file.path)?;
+        }
+    }
+    git::commit_amend_no_edit(workdir)
+}
+
+/// At a rebase edit pause: apply patch, stage affected files, amend.
+fn apply_and_amend(workdir: &Path, selections: &[FileEntry], patch: &str) -> Result<()> {
+    git::apply_patch(workdir, patch)?;
+    for file in selections {
+        if file.hunks.iter().any(|h| h.selected) {
+            git::stage_path(workdir, &file.path)?;
+        }
+    }
+    git::commit_amend_no_edit(workdir)
+}
+
+/// Pick hunks from `source_hash` to move into `target_hash`.
+///
+/// Selected hunks are removed from source and added to target via a two-phase
+/// edit+continue rebase. Requires source to be newer than target.
+fn run_patch_fold_commit_to_commit(
+    repo: &Repository,
+    workdir: &Path,
+    source_hash: &str,
+    target_hash: &str,
+    theme: &graph::Theme,
+) -> Result<()> {
+    let source_oid = git2::Oid::from_str(source_hash)?;
+    let target_oid = git2::Oid::from_str(target_hash)?;
+
+    if source_oid == target_oid {
+        bail!("Source and target are the same commit");
+    }
+    if !repo.graph_descendant_of(source_oid, target_oid)? {
+        bail!("Source commit must be newer than target commit");
+    }
+
+    let selections = staging::run_commit_hunk_picker(workdir, source_hash, &[], theme)?
+        .ok_or_else(|| anyhow::anyhow!("Cancelled"))?;
+
+    if !selections
+        .iter()
+        .any(|f| f.hunks.iter().any(|h| h.selected))
+    {
+        bail!("No hunks selected");
+    }
+
+    let selected_patch = build_selected_patch(&selections);
+    if selected_patch.is_empty() {
+        bail!("No text hunks selected — binary and deleted files are not supported with -p");
+    }
+
+    let saved_head = repo::head_oid(repo)?.to_string();
+    let saved_refs = repo::snapshot_branch_refs(repo)?;
+
+    // Save and unstage any pre-existing staged changes so they don't accidentally
+    // get included in the amend operations below.
+    let saved_staged = save_and_unstage_all_staged(repo, workdir)?;
+
+    // Phase 1: edit source, remove selected hunks.
+    let mut graph = Weave::from_repo(repo)?;
+    graph.edit_commit(source_oid);
+    let todo = graph.to_todo();
+    git::branch_force_create(workdir, TRACK_BRANCH, target_hash)?;
+
+    if let Err(e) = weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo) {
+        let _ = git::branch_delete(workdir, TRACK_BRANCH);
+        let _ = git::restore_staged_patch(workdir, &saved_staged);
+        return Err(e);
+    }
+
+    if let Err(e) = reverse_apply_and_amend(workdir, &selections, &selected_patch) {
+        let _ = git::rebase_abort(workdir);
+        let _ = git::branch_delete(workdir, TRACK_BRANCH);
+        let _ = git::restore_staged_patch(workdir, &saved_staged);
+        return Err(e);
+    }
+
+    let new_source_hash = git::rev_parse(workdir, "HEAD")?;
+
+    if let Err(e) = git::continue_rebase_or_abort(workdir) {
+        let _ = git::branch_delete(workdir, TRACK_BRANCH);
+        let _ = git::restore_staged_patch(workdir, &saved_staged);
+        return Err(e);
+    }
+
+    // Phase 2: edit target (new OID tracked via TRACK_BRANCH), add selected hunks.
+    let phase2_target_hash = git::rev_parse(workdir, TRACK_BRANCH)?;
+    let _ = git::branch_delete(workdir, TRACK_BRANCH);
+    let phase2_target_oid = git2::Oid::from_str(&phase2_target_hash)?;
+
+    let repo2 = git2::Repository::discover(workdir)?;
+    let mut graph2 = Weave::from_repo(&repo2)?;
+    graph2.edit_commit(phase2_target_oid);
+    let todo2 = graph2.to_todo();
+
+    let rollback = |saved_head: &str, saved_refs: &std::collections::HashMap<String, git2::Oid>| {
+        let _ = git::reset_hard(workdir, saved_head);
+        if let Err(re) = repo::restore_branch_refs(workdir, saved_refs) {
+            msg::warn(&format!("failed to restore branch refs: {re}"));
+        }
+    };
+
+    if let Err(e) = weave::run_rebase_or_abort(workdir, Some(&graph2.base_oid.to_string()), &todo2)
+    {
+        rollback(&saved_head, &saved_refs);
+        let _ = git::restore_staged_patch(workdir, &saved_staged);
+        return Err(e);
+    }
+
+    if let Err(e) = apply_and_amend(workdir, &selections, &selected_patch) {
+        let _ = git::rebase_abort(workdir);
+        rollback(&saved_head, &saved_refs);
+        let _ = git::restore_staged_patch(workdir, &saved_staged);
+        return Err(e);
+    }
+
+    let new_target_hash = git::rev_parse(workdir, "HEAD")?;
+
+    if let Err(e) = git::continue_rebase_or_abort(workdir) {
+        rollback(&saved_head, &saved_refs);
+        let _ = git::restore_staged_patch(workdir, &saved_staged);
+        return Err(e);
+    }
+
+    git::restore_staged_patch(workdir, &saved_staged)?;
+
+    msg::success(&format!(
+        "Moved hunk(s) from `{}` (now `{}`) into `{}` (now `{}`)",
+        git::short_hash(source_hash),
+        git::short_hash(&new_source_hash),
+        git::short_hash(target_hash),
+        git::short_hash(&new_target_hash)
+    ));
+
+    Ok(())
+}
+
+/// Pick hunks from `commit_hash` to uncommit back into the working tree.
+///
+/// Selected hunks are removed from the commit and left unstaged.
+fn run_patch_fold_commit_to_unstaged(
+    repo: &Repository,
+    workdir: &Path,
+    commit_hash: &str,
+    theme: &graph::Theme,
+) -> Result<()> {
+    let selections = staging::run_commit_hunk_picker(workdir, commit_hash, &[], theme)?
+        .ok_or_else(|| anyhow::anyhow!("Cancelled"))?;
+
+    if !selections
+        .iter()
+        .any(|f| f.hunks.iter().any(|h| h.selected))
+    {
+        bail!("No hunks selected");
+    }
+
+    let selected_patch = build_selected_patch(&selections);
+    if selected_patch.is_empty() {
+        bail!("No text hunks selected — binary and deleted files are not supported with -p");
+    }
+
+    let head_oid = repo::head_oid(repo)?;
+    let target_oid = git2::Oid::from_str(commit_hash)?;
+    let is_head = head_oid == target_oid;
+
+    // Save and unstage any pre-existing staged changes so they don't accidentally
+    // get included in the amend operation below.
+    let saved_staged = save_and_unstage_all_staged(repo, workdir)?;
+
+    let new_hash;
+
+    if is_head {
+        let pre_amend_hash = head_oid.to_string();
+        git::apply_patch_reverse(workdir, &selected_patch)?;
+        for file in &selections {
+            if file.hunks.iter().any(|h| h.selected) {
+                git::stage_path(workdir, &file.path)?;
+            }
+        }
+        git::commit_amend_no_edit(workdir)?;
+        new_hash = git::rev_parse(workdir, "HEAD")?;
+        if let Err(e) = git::apply_patch(workdir, &selected_patch) {
+            let _ = git::reset_hard(workdir, &pre_amend_hash);
+            let _ = git::restore_staged_patch(workdir, &saved_staged);
+            return Err(e)
+                .context("Failed to restore hunks to working directory, operation rolled back");
+        }
+    } else {
+        let saved_head = head_oid.to_string();
+        let saved_refs = repo::snapshot_branch_refs(repo)?;
+
+        let mut graph = Weave::from_repo(repo)?;
+        graph.edit_commit(target_oid);
+        let todo = graph.to_todo();
+        if let Err(e) =
+            weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo)
+        {
+            let _ = git::restore_staged_patch(workdir, &saved_staged);
+            return Err(e);
+        }
+
+        if let Err(e) = reverse_apply_and_amend(workdir, &selections, &selected_patch) {
+            let _ = git::rebase_abort(workdir);
+            let _ = git::restore_staged_patch(workdir, &saved_staged);
+            return Err(e);
+        }
+
+        new_hash = git::rev_parse(workdir, "HEAD")?;
+        git::continue_rebase_or_abort(workdir)?;
+
+        if let Err(e) = git::apply_patch(workdir, &selected_patch) {
+            let _ = git::reset_hard(workdir, &saved_head);
+            if let Err(re) = repo::restore_branch_refs(workdir, &saved_refs) {
+                msg::warn(&format!("failed to restore branch refs: {re}"));
+            }
+            let _ = git::restore_staged_patch(workdir, &saved_staged);
+            return Err(e)
+                .context("Failed to apply changes to working directory, operation rolled back");
+        }
+    }
+
+    git::restore_staged_patch(workdir, &saved_staged)?;
+
+    msg::success(&format!(
+        "Uncommitted hunk(s) from `{}` (now `{}`) to working directory",
+        git::short_hash(commit_hash),
+        git::short_hash(&new_hash)
+    ));
+
+    Ok(())
 }
 
 /// Fold currently staged files into a target commit.
@@ -436,6 +722,22 @@ fn classify(sources: &[Target], target: &Target) -> Result<FoldOp> {
             _ => unreachable!(),
         }
     }
+}
+
+/// Save and unstage all currently staged changes, returning a patch to restore them later.
+///
+/// Returns an empty string if nothing is staged. Callers must call
+/// `git::restore_staged_patch` with the returned patch when the operation
+/// completes (or is rolled back), so pre-existing staged work is never lost.
+fn save_and_unstage_all_staged(repo: &Repository, workdir: &Path) -> Result<String> {
+    let staged = repo::get_staged_files(repo)?;
+    if staged.is_empty() {
+        return Ok(String::new());
+    }
+    let refs: Vec<&str> = staged.iter().map(|s| s.as_str()).collect();
+    let patch = git::diff_cached_files(workdir, &refs)?;
+    git::unstage_files(workdir, &refs)?;
+    Ok(patch)
 }
 
 /// Collect all file paths with staged or unstaged changes.

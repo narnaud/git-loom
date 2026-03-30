@@ -7,7 +7,9 @@ Fold source(s) into a target — a polymorphic command that amends files into co
 ```
 git loom fold <target>
 git loom fold <source>... <target>
-git loom fold --patch [<files>...] <target>
+git loom fold -p [<files>...] <target>
+git loom fold -p <commit1> <commit2>
+git loom fold -p <commit> zz
 git loom fold --create <commit> <new-branch>
 ```
 
@@ -17,7 +19,7 @@ When only a target is given, currently staged files are folded into the target c
 
 | Option | Description |
 |--------|-------------|
-| `-p, --patch` | Interactively select hunks to stage, then fold them into the target commit. |
+| `-p, --patch` | Interactively select hunks before folding. Three forms depending on argument types (see below). |
 | `-c, --create` | Create a new branch and move the source commit into it. |
 
 ## Type Dispatch
@@ -77,11 +79,13 @@ If `zz` is mixed with individual file arguments, `zz` takes precedence and all c
 
 ### Interactive hunk selection (`-p`)
 
-With `-p`, an interactive TUI opens letting you pick individual hunks to fold into the target commit. The last argument is always the target commit.
+With `-p`, an interactive TUI opens for hunk-level selection. There are three forms depending on the argument types.
+
+**Form 1 — pick working-tree hunks → fold into commit:**
 
 ```bash
 git loom fold -p ab
-# Opens hunk picker for all working tree changes
+# Opens hunk picker for all working-tree changes
 # Selected hunks are staged and folded into commit ab
 ```
 
@@ -90,8 +94,27 @@ Provide file arguments before the target to narrow the picker:
 ```bash
 git loom fold -p src/auth.rs ab
 # Opens hunk picker filtered to src/auth.rs
-# Selected hunks are folded into commit ab
 ```
+
+**Form 2 — pick hunks from a commit → move into another commit:**
+
+```bash
+git loom fold -p c2 c1
+# Opens commit-diff picker for c2
+# Selected hunks are removed from c2 and added to c1
+```
+
+The source (`c2`) must be newer than the target (`c1`). Binary and deleted files are not supported.
+
+**Form 3 — pick hunks from a commit → uncommit to working tree:**
+
+```bash
+git loom fold -p ab zz
+# Opens commit-diff picker for ab
+# Selected hunks are removed from ab and appear as unstaged modifications
+```
+
+All `-p` forms error with `"No hunks selected"` if nothing is selected.
 
 ### Fixup a commit into another
 
@@ -190,9 +213,9 @@ git add <resolved-files> && git loom continue
 # ✓ Moved `d0` to branch `feature-b` (now `e1f2a3b`)
 ```
 
-The following fold operations **do not** support pause/resume and abort
-immediately on conflict:
+The following fold operations **do not** support pause/resume and abort immediately on conflict:
 
+- All `-p` (patch mode) forms — any conflict causes an automatic abort and restores the original state
 - Uncommit a single file (`CommitFile → zz`)
 - Move a file between commits (`CommitFile → Commit`)
 - Create a new branch and move a commit (`--create`)
