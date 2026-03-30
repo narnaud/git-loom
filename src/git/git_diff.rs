@@ -85,6 +85,59 @@ pub fn diff_cached_file_is_binary(workdir: &Path, path: &str) -> Result<bool> {
     Ok(out.starts_with("-\t"))
 }
 
+/// Check whether a file's changes within a commit are binary.
+///
+/// Uses `git diff --numstat <oid>^..<oid> -- <path>`.
+pub fn diff_commit_file_is_binary(workdir: &Path, oid: &str, path: &str) -> Result<bool> {
+    let out = run_git_stdout(
+        workdir,
+        &[
+            "diff",
+            "--numstat",
+            &format!("{}^..{}", oid, oid),
+            "--",
+            path,
+        ],
+    )?;
+    Ok(out.starts_with("-\t"))
+}
+
+/// List files changed in a commit with their status character (A/M/D/R/etc.).
+///
+/// Wraps `git diff --name-status <oid>^..<oid>`. Returns `(status_char, path)` pairs.
+pub fn diff_commit_name_status(workdir: &Path, oid: &str) -> Result<Vec<(char, String)>> {
+    let out = run_git_stdout(
+        workdir,
+        &["diff", "--name-status", &format!("{}^..{}", oid, oid)],
+    )?;
+    let mut result = Vec::new();
+    for line in out.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let mut fields = line.splitn(2, '\t');
+        let status_field = fields.next().unwrap_or("");
+        let path_field = fields.next().unwrap_or("").trim();
+        if status_field.is_empty() || path_field.is_empty() {
+            continue;
+        }
+        let status = status_field.chars().next().unwrap_or('M');
+        // For rename/copy entries (R/C), git outputs "old-path\tnew-path"; use the destination.
+        let path = if matches!(status, 'R' | 'C') {
+            path_field
+                .split('\t')
+                .next_back()
+                .unwrap_or(path_field)
+                .to_string()
+        } else {
+            path_field.to_string()
+        };
+        result.push((status, path));
+    }
+    Ok(result)
+}
+
 /// Get the full unified diff of all working-tree changes against HEAD.
 ///
 /// Wraps `git diff HEAD`.

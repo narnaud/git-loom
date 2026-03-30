@@ -22,6 +22,8 @@ pub(crate) enum HunkOrigin {
     Staged,
     /// From `git diff` (unstaged working-tree change).
     Unstaged,
+    /// From a commit diff (`git diff <oid>^..<oid>`).
+    Commit,
 }
 
 /// A single hunk with a toggle state and origin.
@@ -339,6 +341,7 @@ impl HunkSelectorApp {
             let origin_label = match entry.origin {
                 HunkOrigin::Staged => " (staged)",
                 HunkOrigin::Unstaged => "",
+                HunkOrigin::Commit => "",
             };
             let header_text = format!(
                 "[{}] Hunk {}/{}{}",

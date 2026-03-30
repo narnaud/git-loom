@@ -146,6 +146,8 @@ pub(crate) fn apply_selections(workdir: &Path, files: &[FileEntry]) -> Result<()
                     }
                 }
                 (HunkOrigin::Unstaged, false) => {}
+                // Commit-origin hunks are read-only here; callers handle them.
+                (HunkOrigin::Commit, _) => {}
             }
         }
 
@@ -339,6 +341,95 @@ fn collect_unstaged_hunks(
         });
     }
     Ok(false)
+}
+
+/// Open the interactive hunk picker for hunks from a specific commit.
+///
+/// Shows the diff of `oid` vs its parent. All hunks start unselected (no-op).
+/// Returns `Some(files)` with the user's selections on confirm, `None` on cancel.
+pub fn run_commit_hunk_picker(
+    workdir: &Path,
+    oid: &str,
+    files: &[String],
+    theme: &graph::Theme,
+) -> Result<Option<Vec<FileEntry>>> {
+    let entries = collect_commit_hunks(workdir, oid, files)?;
+
+    if entries.is_empty() {
+        msg::warn("No changes in commit");
+        return Ok(None);
+    }
+
+    let tui_theme = TuiTheme::from_graph_theme(theme);
+    crate::tui::hunk_selector::run_hunk_selector(entries, tui_theme)
+}
+
+/// Collect file entries from a commit's diff (`git diff <oid>^..<oid>`).
+///
+/// All hunks are created with `HunkOrigin::Commit` and `selected = false`.
+pub(crate) fn collect_commit_hunks(
+    workdir: &Path,
+    oid: &str,
+    files: &[String],
+) -> Result<Vec<FileEntry>> {
+    let changed_files = git::diff_commit_name_status(workdir, oid)?;
+
+    let mut entries = Vec::new();
+
+    for (status, path) in &changed_files {
+        if !files.is_empty() && !files.iter().any(|f| f == path) {
+            continue;
+        }
+
+        let mut hunks = Vec::new();
+        let mut is_binary = false;
+
+        if *status == 'D' {
+            hunks.push(HunkEntry {
+                hunk: diff::DiffHunk {
+                    text: String::from("(file deleted)"),
+                    modified_lines: vec![],
+                },
+                selected: false,
+                origin: HunkOrigin::Commit,
+            });
+        } else if git::diff_commit_file_is_binary(workdir, oid, path)? {
+            hunks.push(HunkEntry {
+                hunk: diff::DiffHunk {
+                    text: String::from("(binary file)"),
+                    modified_lines: vec![],
+                },
+                selected: false,
+                origin: HunkOrigin::Commit,
+            });
+            is_binary = true;
+        } else {
+            let raw_diff = git::diff_commit_file(workdir, oid, path)?;
+            for h in diff::parse_hunks(&raw_diff) {
+                hunks.push(HunkEntry {
+                    hunk: h,
+                    selected: false,
+                    origin: HunkOrigin::Commit,
+                });
+            }
+        }
+
+        if hunks.is_empty() {
+            continue;
+        }
+
+        hunks.sort_by_key(|entry| hunk_sort_key(&entry.hunk));
+
+        entries.push(FileEntry {
+            path: path.clone(),
+            hunks,
+            index_status: *status,
+            worktree_status: ' ',
+            binary: is_binary,
+        });
+    }
+
+    Ok(entries)
 }
 
 fn hunk_sort_key(hunk: &diff::DiffHunk) -> usize {
