@@ -54,13 +54,13 @@ The `specs/` directory contains detailed design documents that describe each fea
 | `specs/004-weave.md` | Weave: structured graph model for topology-aware rebase |
 | `specs/005-branch.md` | Branch creation and weaving into integration branches |
 | `specs/006-commit.md` | Commit to feature branches from the integration branch |
-| `specs/007-fold.md` | Fold: amend files, fixup commits, move commits between branches |
+| `specs/007-fold.md` | Fold: amend files, fixup commits, move commits between branches; hunk-level fold with `-p` |
 | `specs/008-drop.md` | Drop commits or branches from history |
 | `specs/009-init.md` | Initialize a new integration branch tracking a remote |
 | `specs/010-update.md` | Pull-rebase integration branch and update submodules |
 | `specs/011-push.md` | Push a feature branch to remote (plain, GitHub, Gerrit) |
 | `specs/012-absorb.md` | Absorb: auto-distribute changes into originating commits |
-| `specs/013-split.md` | Split a commit into two or more commits |
+| `specs/013-split.md` | Split a commit into two commits by file or by hunk (`-p`) |
 | `specs/014-continue-abort.md` | Continue or abort a paused loom operation |
 | `specs/015-swap.md` | Swap two commits or two branch sections |
 | `specs/016-diff.md` | Diff: short-ID–aware wrapper around git diff |
