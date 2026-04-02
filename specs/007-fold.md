@@ -28,6 +28,9 @@ etc.). `fold` unifies them under one verb: **fold source into target**.
 git-loom fold <target>
 git-loom fold <source>... <target>
 git-loom fold --create <commit> <new-branch>
+git-loom fold -p [<files>...] <commit>
+git-loom fold -p <commit1> <commit2>
+git-loom fold -p <commit> zz
 ```
 
 **Arguments:**
@@ -51,6 +54,9 @@ all preceding arguments are sources.
   exactly one commit source. The branch is created at the upstream merge-base
   and the commit is moved into it — whether the commit was a loose commit on
   the integration line or already on an existing branch.
+- `-p` / `--patch`: Hunk-level fold mode. Opens an interactive hunk picker
+  instead of operating at the file level. Has three forms (see Patch Mode
+  below).
 
 ## Type Dispatch
 
@@ -282,6 +288,100 @@ rebase operation. The source uses the `commit_sid:index` format.
 - Commit topology
 - Other branches not in the ancestry chain
 
+## Patch Mode (`-p`)
+
+The `-p` flag switches fold to hunk-level granularity. There are three forms,
+detected by the argument types:
+
+### Form 1: Pick working-tree hunks → fold into commit
+
+```bash
+git-loom fold -p [<files>...] <commit>
+```
+
+Opens an interactive hunk picker showing the current working-tree diff,
+optionally filtered to the listed files (file paths or `zz` for all). After
+the user selects hunks, the selection is staged and folded into the target
+commit — identical in effect to `fold <staged files> <commit>` but at hunk
+granularity.
+
+**Error if no hunks selected:** `"No hunks selected"`.
+
+**What changes:**
+
+- The target commit absorbs the selected working-tree hunks (new hash).
+- All descendant commits get new hashes (same content and messages).
+
+**What stays the same:**
+
+- Unselected working-tree changes remain unstaged.
+- Other commits' content and messages.
+
+### Form 2: Pick hunks from a commit → move into another commit
+
+```bash
+git-loom fold -p <commit1> <commit2>
+```
+
+Detected when both arguments resolve to commits. Opens the commit-diff hunk
+picker for `<commit1>`. Selected hunks are removed from `<commit1>` and added
+to `<commit2>` in a single two-phase edit-and-continue rebase. `<commit1>`
+must be newer (a descendant of `<commit2>`).
+
+**Constraints:**
+
+- Source and target must be different commits.
+- Source must be newer than target: `"Source commit must be newer than target commit"`.
+- At least one hunk must be selected: `"No hunks selected"`.
+- Binary files and deleted files are not supported: `"No text hunks selected — binary and deleted files are not supported with -p"`.
+
+**What changes:**
+
+- `<commit1>` loses the selected hunks (new hash).
+- `<commit2>` gains the selected hunks (new hash).
+- All commits between/after the affected commits get new hashes.
+
+**What stays the same:**
+
+- Both commits' messages.
+- All other hunks in both commits.
+- Commit topology.
+
+### Form 3: Pick hunks from a commit → uncommit to working tree
+
+```bash
+git-loom fold -p <commit> zz
+```
+
+Detected when the target is `zz`. Opens the commit-diff hunk picker for
+`<commit>`. Selected hunks are removed from the commit and applied to the
+working directory as unstaged modifications. The commit itself remains in
+history, minus the selected hunks.
+
+**Constraints:** same as Form 2 (no binary/deleted files).
+
+**What changes:**
+
+- The commit loses the selected hunks (new hash).
+- The selected hunks appear in the working directory as unstaged modifications.
+- All descendant commits get new hashes (for non-HEAD case).
+
+**What stays the same:**
+
+- The commit's message.
+- All unselected hunks in the commit.
+- Other uncommitted changes in the working directory.
+
+### Patch mode conflict handling
+
+All `-p` forms use **hard-fail** conflict handling: if a conflict occurs during
+the internal rebase, the operation is aborted automatically and the repository
+is returned to its original state. `loom continue` / `loom abort` are not
+supported for `-p` forms.
+
+Pre-existing staged changes are always saved aside and restored regardless of
+outcome.
+
 ## Target Resolution
 
 Arguments are resolved via `resolve_arg()` with `accept = [Commit, CommitFile, File, Unstaged]` — see spec 002 for the resolution algorithm.
@@ -305,6 +405,28 @@ This means arguments can be:
 
 The command distinguishes sources from the target purely by position (last
 argument is target).
+
+## Conflict Recovery
+
+The following non-`-p` operations support resumable conflict handling (`loom
+continue` / `loom abort`):
+
+| Operation | `LoomState.context` |
+|-----------|---------------------|
+| Files into commit | `op: "FilesIntoCommit"` — original commit hash, file count, saved staged patch |
+| Commit into commit (fixup) | `op: "CommitIntoCommit"` — source and target hashes |
+| Commit to branch (move) | `op: "CommitToBranch"` — commit hash, branch name |
+| Commit to unstaged (uncommit) | `op: "CommitToUnstaged"` — commit hash, captured diff |
+
+When `loom continue` is called after conflict resolution, `after_continue`
+reads the saved context, cleans up the tracking branch (`_loom-track`), and
+prints the success message. If the `CommitToUnstaged` diff cannot be
+re-applied (because conflict resolution changed the surrounding context), the
+diff is saved to `.git/loom/unapplied.patch` for manual recovery.
+
+All `-p` (patch mode) operations use **hard-fail**: no `LoomState` is saved and
+`loom continue` / `loom abort` are not available. An auto-abort restores the
+repository on any conflict.
 
 ## Prerequisites
 
@@ -425,6 +547,43 @@ git-loom fold README.md HEAD
 # Amend README.md changes into HEAD
 ```
 
+### Fold selected working-tree hunks into a commit
+
+```bash
+git-loom status
+# │●  ab  72f9d3 Fix login bug
+# Working tree has changes to src/auth.rs
+
+git-loom fold -p ab
+# → hunk picker opens showing all working-tree changes
+# User selects specific hunks → they are staged and folded into ab
+```
+
+### Move selected hunks from one commit to another
+
+```bash
+git-loom status
+# │●  c1  aaa111 Add feature X
+# │●  c2  bbb222 Add feature Y (contains a hunk that belongs in c1)
+
+git-loom fold -p c2 c1
+# → commit-diff picker opens for c2
+# User selects the misplaced hunk → it is removed from c2 and added to c1
+# ✓ Moved hunk(s) from `bbb222` (now `ccc333`) into `aaa111` (now `ddd444`)
+```
+
+### Uncommit selected hunks to working tree
+
+```bash
+git-loom status
+# │●  ab  72f9d3 Refactor auth (too many changes mixed in)
+
+git-loom fold -p ab zz
+# → commit-diff picker opens for ab
+# User selects hunks to extract → they are removed from ab and appear unstaged
+# ✓ Uncommitted hunk(s) from `72f9d3` (now `8a3b2c`) to working directory
+```
+
 ## Design Decisions
 
 ### Single Verb, Multiple Actions
@@ -481,3 +640,21 @@ Users don't need to manually stash before folding.
 When moving a commit to a branch that shares its tip with other co-located
 branches, only the target branch advances to include the moved commit.
 Co-located branches remain unaffected, pointing at their original tip.
+
+### Patch Mode as a Flag, Not Separate Forms
+
+Hunk-level folding is exposed as `-p` on the existing `fold` command rather
+than separate commands (`fold-hunks`, `fold -h`, etc.). The three `-p` dispatch
+forms (working-tree→commit, commit→commit, commit→unstaged) mirror the
+file-level cases and keep the same "fold X into Y" mental model at finer
+granularity. Reusing `fold -p` avoids command proliferation and keeps the
+help text cohesive.
+
+### Two-Phase Rebase for Commit-to-Commit Patch Move
+
+Moving hunks between two non-HEAD commits requires two separate edit-and-continue
+rebases: phase 1 removes the selected hunks from the source commit; phase 2
+adds them to the target commit. A single rebase cannot do both atomically
+because the target commit's new OID is not known until phase 1 completes. The
+`_loom-track` temporary branch is used to carry the target commit's pre-phase-1
+OID through to phase 2.
