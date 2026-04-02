@@ -1,10 +1,11 @@
 use anyhow::{Result, bail};
 use git2::{Oid, Repository};
 
-use crate::core::msg;
 use crate::core::repo::{self, Target, TargetKind};
 use crate::core::weave;
+use crate::core::{diff, graph, msg, staging};
 use crate::git;
+use crate::tui::hunk_selector::FileEntry;
 
 /// Commit with `-m` message or open the editor.
 fn commit_or_editor(workdir: &std::path::Path, message: Option<&str>) -> Result<()> {
@@ -17,14 +18,20 @@ fn commit_or_editor(workdir: &std::path::Path, message: Option<&str>) -> Result<
 /// Split a commit into two sequential commits.
 ///
 /// Dispatches based on the resolved target type:
-/// - Commit → split the commit by selecting files for the first commit
-pub fn run(target: String, message: Option<String>, files: Vec<String>) -> Result<()> {
+/// - Commit → split the commit by selecting files (or hunks with `-p`) for the first commit
+pub fn run(
+    target: String,
+    message: Option<String>,
+    patch: bool,
+    files: Vec<String>,
+    theme: &graph::Theme,
+) -> Result<()> {
     let repo = repo::open_repo()?;
 
     let resolved = repo::resolve_arg(&repo, &target, &[TargetKind::Commit])?;
 
     match resolved {
-        Target::Commit(hash) => split_commit(&repo, &hash, message, files),
+        Target::Commit(hash) => split_commit(&repo, &hash, message, patch, files, theme),
         _ => unreachable!(),
     }
 }
@@ -34,7 +41,9 @@ fn split_commit(
     repo: &Repository,
     commit_hash: &str,
     message: Option<String>,
+    patch: bool,
     files: Vec<String>,
+    theme: &graph::Theme,
 ) -> Result<()> {
     let workdir = repo::require_workdir(repo, "split")?;
     let commit_oid = repo.revparse_single(commit_hash)?.peel_to_commit()?.id();
@@ -44,7 +53,37 @@ fn split_commit(
         bail!("Cannot split a merge commit");
     }
 
-    // Get files changed in the commit
+    let original_msg = commit.message().unwrap_or("").trim().to_string();
+
+    if patch {
+        let oid_str = commit_oid.to_string();
+        let selections = staging::run_commit_hunk_picker(workdir, &oid_str, &files, theme)?
+            .ok_or_else(|| anyhow::anyhow!("Cancelled"))?;
+
+        let has_selected = selections
+            .iter()
+            .any(|f| f.hunks.iter().any(|h| h.selected));
+        let has_unselected = selections
+            .iter()
+            .any(|f| f.hunks.iter().any(|h| !h.selected));
+        if !has_selected {
+            bail!("Must select at least one hunk for the first commit");
+        }
+        if !has_unselected {
+            bail!("Must leave at least one hunk for the second commit");
+        }
+
+        return perform_split_by_hunks(
+            repo,
+            workdir,
+            commit_oid,
+            &selections,
+            message.as_deref(),
+            &original_msg,
+        );
+    }
+
+    // File-based split
     let all_files = repo::commit_file_paths(repo, commit_oid)?;
     if all_files.len() < 2 {
         bail!("Cannot split a commit with only one file");
@@ -60,9 +99,6 @@ fn split_commit(
         files
     };
 
-    let original_msg = commit.message().unwrap_or("").trim().to_string();
-
-    // Compute remaining files
     let remaining: Vec<String> = all_files
         .into_iter()
         .filter(|f| !selected.contains(f))
@@ -89,7 +125,8 @@ pub fn split_commit_with_selection(
     selected: Vec<String>,
     message: String,
 ) -> Result<()> {
-    split_commit(repo, commit_hash, Some(message), selected)
+    let theme = graph::Theme::dark();
+    split_commit(repo, commit_hash, Some(message), false, selected, &theme)
 }
 
 /// Show an interactive file picker for splitting.
@@ -220,6 +257,114 @@ fn perform_non_head_split(
     // Abort automatically on conflict — split does not save LoomState.
     git::continue_rebase_or_abort(workdir)?;
 
+    Ok((hash1, hash2))
+}
+
+/// Perform the hunk-based split operation.
+fn perform_split_by_hunks(
+    repo: &Repository,
+    workdir: &std::path::Path,
+    commit_oid: Oid,
+    selections: &[FileEntry],
+    msg1: Option<&str>,
+    msg2: &str,
+) -> Result<()> {
+    let head_oid = repo::head_oid(repo)?;
+    let is_head = head_oid == commit_oid;
+    let oid_str = commit_oid.to_string();
+    let short_hash = git::short_hash(&oid_str);
+
+    let saved_staged = save_staged(repo, workdir)?;
+
+    let split_result = if is_head {
+        perform_head_split_by_hunks(workdir, selections, msg1, msg2)
+    } else {
+        perform_non_head_split_by_hunks(repo, workdir, commit_oid, selections, msg1, msg2)
+    };
+
+    git::restore_staged_patch(workdir, &saved_staged)?;
+
+    let (new_hash1, new_hash2) = split_result?;
+
+    msg::success(&format!(
+        "Split `{}` into `{}` and `{}`",
+        short_hash,
+        git::short_hash(&new_hash1),
+        git::short_hash(&new_hash2)
+    ));
+    Ok(())
+}
+
+/// HEAD hunk-based split.
+///
+/// ```text
+/// reset_mixed(HEAD~1) → apply selected hunks → commit(msg1) → stage remaining → commit(msg2)
+/// ```
+fn perform_head_split_by_hunks(
+    workdir: &std::path::Path,
+    selections: &[FileEntry],
+    msg1: Option<&str>,
+    msg2: &str,
+) -> Result<(String, String)> {
+    git::reset_mixed(workdir, "HEAD~1")?;
+
+    // Stage selected hunks for the first commit.
+    let mut selected_patch = String::new();
+    for file in selections {
+        let selected: Vec<_> = file
+            .hunks
+            .iter()
+            .filter(|h| h.selected)
+            .map(|h| &h.hunk)
+            .collect();
+        if selected.is_empty() {
+            continue;
+        }
+        if file.binary || file.index_status == 'D' {
+            git::stage_path(workdir, &file.path)?;
+        } else {
+            selected_patch.push_str(&diff::build_hunk_patch(&file.path, &selected));
+        }
+    }
+    if !selected_patch.is_empty() {
+        git::apply_cached_patch(workdir, &selected_patch)?;
+    }
+
+    commit_or_editor(workdir, msg1)?;
+
+    // Stage remaining changes for the second commit.
+    for file in selections {
+        if file.hunks.iter().any(|h| !h.selected) {
+            git::stage_path(workdir, &file.path)?;
+        }
+    }
+    git::commit(workdir, msg2)?;
+
+    let hash2 = git::rev_parse(workdir, "HEAD")?;
+    let hash1 = git::rev_parse(workdir, "HEAD~1")?;
+    Ok((hash1, hash2))
+}
+
+/// Non-HEAD hunk-based split using edit-and-continue rebase.
+fn perform_non_head_split_by_hunks(
+    repo: &Repository,
+    workdir: &std::path::Path,
+    commit_oid: Oid,
+    selections: &[FileEntry],
+    msg1: Option<&str>,
+    msg2: &str,
+) -> Result<(String, String)> {
+    weave::start_edit_rebase(repo, workdir, commit_oid)?;
+
+    let (hash1, hash2) = match perform_head_split_by_hunks(workdir, selections, msg1, msg2) {
+        Ok(hashes) => hashes,
+        Err(e) => {
+            let _ = git::rebase_abort(workdir);
+            return Err(e);
+        }
+    };
+
+    git::continue_rebase_or_abort(workdir)?;
     Ok((hash1, hash2))
 }
 

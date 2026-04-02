@@ -192,6 +192,9 @@ enum Command {
         /// Message for the first commit (prompts if omitted)
         #[arg(short, long)]
         message: Option<String>,
+        /// Interactively pick hunks for the first commit
+        #[arg(short = 'p', long = "patch")]
+        patch: bool,
         /// Files for the first commit (shows interactive picker if omitted)
         files: Vec<String>,
     },
@@ -432,8 +435,9 @@ fn main() {
         Some(Command::Split {
             target,
             message,
+            patch,
             files,
-        }) => split::run(target, message, files),
+        }) => split::run(target, message, patch, files, &theme),
         Some(Command::Push { branch, no_pr }) => push::run(branch, no_pr),
         Some(Command::Update { yes }) => update::run(yes),
         Some(Command::Fold {

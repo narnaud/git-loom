@@ -1,11 +1,11 @@
 # split
 
-Split a commit into two sequential commits by selecting which files go into each.
+Split a commit into two sequential commits by selecting which files (or hunks) go into the first.
 
 ## Usage
 
 ```
-git loom split <target> [-m <message>] [<files>...]
+git loom split [-p] [-m <message>] <target> [<files>...]
 ```
 
 ### Arguments
@@ -13,38 +13,37 @@ git loom split <target> [-m <message>] [<files>...]
 | Argument | Description |
 |----------|-------------|
 | `<target>` | Commit hash, short ID, or `HEAD` |
-| `<files>...` | Files for the first commit. Shows an interactive picker if omitted. |
+| `<files>...` | Files for the first commit. Shows an interactive picker if omitted. Ignored when `-p` is used. |
 
 ### Options
 
 | Option | Description |
 |--------|-------------|
 | `-m, --message <message>` | Message for the first commit. Opens editor if omitted. |
+| `-p, --patch` | Interactively pick individual hunks for the first commit |
 
 ## What It Does
 
-1. **Resolve** — finds the target commit
-2. **File selection** — if `<files>` are given, uses them directly; otherwise shows an interactive multi-select of the files changed in the commit
-3. **First commit** — creates a new commit with the selected files and the provided message (or opens the git editor if `-m` was omitted)
-4. **Second commit** — creates a second commit with the remaining files, reusing the original commit message
+### File-based split (default)
 
-### HEAD vs Non-HEAD
+Shows an interactive multi-select of all files changed in the commit. The files you pick go into the first commit; the rest stay in the second commit, which keeps the original message.
 
-- **HEAD commit**: a simple `reset --mixed` + re-commit sequence (no rebase needed)
-- **Non-HEAD commit**: uses an edit-and-continue rebase to pause at the target, split it, then replay the rest of the history
+You can skip the picker by listing `<files>` on the command line. The commit must touch at least two files.
 
-Both paths are atomic — if anything fails, the operation is aborted and the original state is restored.
+### Hunk-based split (`-p`)
 
-## Constraints
+Opens the hunk picker TUI showing every hunk in the commit. All hunks start **unselected** (no-op). Toggle hunks with `Space`; selected hunks go into the first commit, unselected hunks stay in the second. Works on single-file commits.
 
-- The commit must change **at least two files** (otherwise there is nothing to split)
-- **Merge commits** cannot be split
-- You must assign at least one file to each side (cannot put everything in one commit)
-- Branch and file targets are rejected — only commits are accepted
+### HEAD vs non-HEAD
+
+- **HEAD commit**: `reset --mixed HEAD~1` then re-commit in two steps — no rebase needed.
+- **Non-HEAD commit**: uses an edit-and-continue rebase to pause at the target, split it, then replay descendants.
+
+Both paths preserve any pre-existing staged changes and abort cleanly on error.
 
 ## Examples
 
-### Split HEAD interactively
+### Split HEAD interactively by file
 
 ```bash
 git loom split HEAD
@@ -55,24 +54,22 @@ git loom split HEAD
 # ✓ Split `abc123d` into `def456a` and `789bcd0`
 ```
 
-### Split HEAD non-interactively
+### Split HEAD by file non-interactively
 
 ```bash
 git loom split HEAD -m "refactor: extract auth" src/auth.rs
 # ✓ Split `abc123d` into `def456a` and `789bcd0`
 ```
 
-### Split a commit by short ID with a message
+### Split a commit by short ID using the hunk picker
 
 ```bash
-git loom split ab -m "refactor: extract helpers"
-# ? Select files for the first commit
-# > [x] src/helpers.rs
-#   [ ] src/lib.rs
+git loom split -p ab -m "fix: extract bounds check"
+# (hunk picker TUI opens — toggle hunks for first commit)
 # ✓ Split `ab12345` into `cd67890` and `ef01234`
 ```
 
-### Split a commit non-interactively
+### Split a non-HEAD commit by file
 
 ```bash
 git loom split ab -m "refactor: extract helpers" src/helpers.rs
@@ -82,5 +79,7 @@ git loom split ab -m "refactor: extract helpers" src/helpers.rs
 ## Prerequisites
 
 - Must be in a git repository with a working tree
-- The target commit must have at least two changed files
-- All operations are atomic and automatically preserve uncommitted changes
+- Target must be a commit (not a branch, file, or `zz`)
+- Merge commits cannot be split
+- File-based split requires the commit to touch at least two files
+- Git ≥ 2.38
