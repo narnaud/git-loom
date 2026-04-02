@@ -115,7 +115,9 @@ pub fn run(create: bool, patch: bool, args: Vec<String>, theme: &graph::Theme) -
 
     // Classify and dispatch
     match classify(&resolved_sources, &resolved_target)? {
-        FoldOp::FilesIntoCommit { files, commit } => fold_files_into_commit(&repo, &files, &commit),
+        FoldOp::FilesIntoCommit { files, commit } => {
+            fold_files_into_commit(&repo, &files, &commit, false)
+        }
         FoldOp::CommitIntoCommit { source, target } => {
             fold_commit_into_commit(&repo, &source, &target)
         }
@@ -288,7 +290,7 @@ fn run_patch_fold(repo: &Repository, args: &[String], theme: &graph::Theme) -> R
     // Fold whatever is now staged into the target commit.
     commit::verify_has_staged_changes(repo)?;
     let staged = repo::get_staged_files(repo)?;
-    fold_files_into_commit(repo, &staged, &commit_hash)
+    fold_files_into_commit(repo, &staged, &commit_hash, true)
 }
 
 /// Build a unified diff patch from the selected text hunks across all files.
@@ -564,7 +566,7 @@ fn run_staged(repo: &Repository, target_arg: &str) -> Result<()> {
     commit::verify_has_staged_changes(repo)?;
 
     let staged = repo::get_staged_files(repo)?;
-    fold_files_into_commit(repo, &staged, &commit_hash)
+    fold_files_into_commit(repo, &staged, &commit_hash, true)
 }
 
 /// The classified fold operation.
@@ -755,13 +757,23 @@ fn collect_changed_files(repo: &Repository) -> Result<Vec<String>> {
 }
 
 /// Fold file changes into a commit (Case 1: File(s) + Commit).
-fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str) -> Result<()> {
+///
+/// When `skip_staging` is true the caller has already staged exactly the right
+/// content (e.g. from a hunk picker), so the file-level `git add` is skipped.
+fn fold_files_into_commit(
+    repo: &Repository,
+    files: &[String],
+    commit_hash: &str,
+    skip_staging: bool,
+) -> Result<()> {
     let workdir = repo::require_workdir(repo, "fold")?;
 
     // Validate all files have changes
-    for file in files {
-        if !repo::path_has_changes(repo, file)? {
-            bail!("File '{}' has no changes to fold", file);
+    if !skip_staging {
+        for file in files {
+            if !repo::path_has_changes(repo, file)? {
+                bail!("File '{}' has no changes to fold", file);
+            }
         }
     }
 
@@ -791,9 +803,13 @@ fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str
 
     if is_head {
         // Simple case: stage files and amend HEAD
-        git::stage_files(workdir, &file_refs)?;
+        if !skip_staging {
+            git::stage_files(workdir, &file_refs)?;
+        }
         if let Err(e) = git::commit_amend_no_edit(workdir) {
-            let _ = git::unstage_files(workdir, &file_refs);
+            if !skip_staging {
+                let _ = git::unstage_files(workdir, &file_refs);
+            }
             let _ = git::restore_staged_patch(workdir, &saved_staged);
             return Err(e);
         }
@@ -808,9 +824,13 @@ fn fold_files_into_commit(repo: &Repository, files: &[String], commit_hash: &str
         let subject = target_commit.summary().unwrap_or("fixup");
         let message = format!("fixup! {}", subject);
 
-        git::stage_files(workdir, &file_refs)?;
+        if !skip_staging {
+            git::stage_files(workdir, &file_refs)?;
+        }
         if let Err(e) = git::commit(workdir, &message) {
-            let _ = git::unstage_files(workdir, &file_refs);
+            if !skip_staging {
+                let _ = git::unstage_files(workdir, &file_refs);
+            }
             let _ = git::restore_staged_patch(workdir, &saved_staged);
             return Err(e);
         }

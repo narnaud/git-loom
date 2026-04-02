@@ -19,6 +19,7 @@ fn fold_file_into_head() {
         &test_repo.repo,
         &["file1.txt".to_string()],
         &head_oid.to_string(),
+        false,
     );
 
     assert!(
@@ -50,6 +51,7 @@ fn fold_multiple_files_into_head() {
         &test_repo.repo,
         &["file1.txt".to_string(), "new_file.txt".to_string()],
         &head_oid.to_string(),
+        false,
     );
 
     assert!(result.is_ok(), "fold failed: {:?}", result);
@@ -71,6 +73,7 @@ fn fold_file_into_non_head_commit() {
         &test_repo.repo,
         &["file1.txt".to_string()],
         &c1_oid.to_string(),
+        false,
     );
 
     assert!(
@@ -99,6 +102,7 @@ fn fold_file_no_changes_fails() {
         &test_repo.repo,
         &["file1.txt".to_string()],
         &head_oid.to_string(),
+        false,
     );
 
     assert!(result.is_err());
@@ -119,6 +123,7 @@ fn fold_file_into_non_head_with_other_changes_autostashed() {
         &test_repo.repo,
         &["file1.txt".to_string()],
         &c1_oid.to_string(),
+        false,
     );
 
     assert!(
@@ -159,6 +164,7 @@ fn fold_file_into_woven_branch_commit() {
         &test_repo.repo,
         &["feature1".to_string()],
         &feat1_oid.to_string(),
+        false,
     );
 
     assert!(
@@ -180,6 +186,132 @@ fn fold_file_into_woven_branch_commit() {
         !status_output.contains("UU") && !status_output.contains("AA"),
         "Working tree should have no merge conflicts, but status shows:\n{}",
         status_output
+    );
+}
+
+// ── Case 1b: fold -p (skip_staging=true) — hunk-level precision ─────────
+
+/// Read the content of a file from a specific commit tree.
+fn read_file_from_commit(repo: &git2::Repository, commit_oid: git2::Oid, path: &str) -> String {
+    let commit = repo.find_commit(commit_oid).unwrap();
+    let tree = commit.tree().unwrap();
+    let entry = tree.get_path(std::path::Path::new(path)).unwrap();
+    let blob = repo.find_blob(entry.id()).unwrap();
+    std::str::from_utf8(blob.content()).unwrap().to_string()
+}
+
+/// Regression test: `fold -p <commit>` must fold only staged hunks, not entire files.
+///
+/// Before the fix, `fold_files_into_commit` called `git stage_files` which
+/// re-staged the whole file, overwriting the hunk-level staging set by
+/// `apply_selections`.  With `skip_staging = true` the precise staging must be
+/// preserved.
+#[test]
+fn fold_patch_only_staged_hunk_is_folded_into_head() {
+    let test_repo = TestRepo::new();
+
+    // Initial file with enough gap between sections to produce two hunks.
+    let initial = "line 1\nline 2\nline 3\nline 4\nline 5\n\
+                   line 6\nline 7\nline 8\nline 9\nline 10\n\
+                   line 11\nline 12\nline 13\nline 14\nline 15\n";
+    test_repo.write_file("file.txt", initial);
+    test_repo.stage_files(&["file.txt"]);
+    test_repo.commit_staged("initial");
+
+    // Modify two distant regions — produces two separate hunks.
+    let modified = "line 1\nMODIFIED TOP\nline 3\nline 4\nline 5\n\
+                    line 6\nline 7\nline 8\nline 9\nline 10\n\
+                    line 11\nline 12\nline 13\nMODIFIED BOTTOM\nline 15\n";
+    test_repo.write_file("file.txt", modified);
+
+    // Stage only the first hunk (top change) by applying a patch to the index.
+    let first_hunk_patch = "--- a/file.txt\n+++ b/file.txt\n\
+                             @@ -1,5 +1,5 @@\n line 1\n-line 2\n+MODIFIED TOP\n \
+                             line 3\n line 4\n line 5\n";
+    let workdir = test_repo.workdir();
+    crate::git::apply_cached_patch(workdir.as_path(), first_hunk_patch).unwrap();
+
+    let head_oid = test_repo.head_oid();
+    let staged = crate::core::repo::get_staged_files(&test_repo.repo).unwrap();
+    assert_eq!(staged, vec!["file.txt"]);
+
+    let result =
+        super::fold_files_into_commit(&test_repo.repo, &staged, &head_oid.to_string(), true);
+    assert!(
+        result.is_ok(),
+        "fold_files_into_commit failed: {:?}",
+        result
+    );
+
+    // The committed file must contain only the first hunk — not MODIFIED BOTTOM.
+    let committed = read_file_from_commit(&test_repo.repo, test_repo.head_oid(), "file.txt");
+    assert!(
+        committed.contains("MODIFIED TOP"),
+        "committed content should contain MODIFIED TOP"
+    );
+    assert!(
+        !committed.contains("MODIFIED BOTTOM"),
+        "committed content must NOT contain MODIFIED BOTTOM (whole-file bug)"
+    );
+
+    // The second change must still be in the working tree (not lost).
+    let worktree = test_repo.read_file("file.txt");
+    assert!(
+        worktree.contains("MODIFIED BOTTOM"),
+        "working tree should still have MODIFIED BOTTOM"
+    );
+}
+
+/// Same regression but targeting a non-HEAD commit.
+#[test]
+fn fold_patch_only_staged_hunk_is_folded_into_non_head() {
+    let test_repo = TestRepo::new_with_remote();
+
+    let initial = "line 1\nline 2\nline 3\nline 4\nline 5\n\
+                   line 6\nline 7\nline 8\nline 9\nline 10\n\
+                   line 11\nline 12\nline 13\nline 14\nline 15\n";
+    test_repo.write_file("file.txt", initial);
+    test_repo.stage_files(&["file.txt"]);
+    test_repo.commit_staged("target commit");
+    let target_oid = test_repo.head_oid();
+
+    // Add a second commit on top using CLI helpers to avoid index sync issues.
+    test_repo.write_file("other.txt", "other content");
+    test_repo.stage_files(&["other.txt"]);
+    test_repo.commit_staged("second commit");
+
+    // Modify two distant regions.
+    let modified = "line 1\nMODIFIED TOP\nline 3\nline 4\nline 5\n\
+                    line 6\nline 7\nline 8\nline 9\nline 10\n\
+                    line 11\nline 12\nline 13\nMODIFIED BOTTOM\nline 15\n";
+    test_repo.write_file("file.txt", modified);
+
+    // Stage only the first hunk.
+    let first_hunk_patch = "--- a/file.txt\n+++ b/file.txt\n\
+                             @@ -1,5 +1,5 @@\n line 1\n-line 2\n+MODIFIED TOP\n \
+                             line 3\n line 4\n line 5\n";
+    let workdir = test_repo.workdir();
+    crate::git::apply_cached_patch(workdir.as_path(), first_hunk_patch).unwrap();
+
+    let staged = crate::core::repo::get_staged_files(&test_repo.repo).unwrap();
+    let result =
+        super::fold_files_into_commit(&test_repo.repo, &staged, &target_oid.to_string(), true);
+    assert!(
+        result.is_ok(),
+        "fold_files_into_commit failed: {:?}",
+        result
+    );
+
+    // Find the new OID of the rewritten target commit (it's now 1 step back).
+    let new_target_oid = test_repo.get_oid(1);
+    let committed = read_file_from_commit(&test_repo.repo, new_target_oid, "file.txt");
+    assert!(
+        committed.contains("MODIFIED TOP"),
+        "committed content should contain MODIFIED TOP"
+    );
+    assert!(
+        !committed.contains("MODIFIED BOTTOM"),
+        "committed content must NOT contain MODIFIED BOTTOM (whole-file bug)"
     );
 }
 
@@ -1590,6 +1722,7 @@ fn fold_abort_preserves_working_state() {
         &test_repo.repo,
         &["shared.txt".to_string()],
         &a_oid.to_string(),
+        false,
     );
     assert!(
         result.is_ok(),
