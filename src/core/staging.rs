@@ -432,6 +432,22 @@ pub(crate) fn collect_commit_hunks(
     Ok(entries)
 }
 
+/// Save and unstage all currently staged changes, returning a patch to restore them later.
+///
+/// Returns an empty string if nothing is staged. Callers must call
+/// `git::restore_staged_patch` with the returned patch when the operation
+/// completes (or is rolled back), so pre-existing staged work is never lost.
+pub(crate) fn save_and_unstage_staged(repo: &Repository, workdir: &Path) -> Result<String> {
+    let staged = repo::get_staged_files(repo)?;
+    if staged.is_empty() {
+        return Ok(String::new());
+    }
+    let refs: Vec<&str> = staged.iter().map(|s| s.as_str()).collect();
+    let patch = git::diff_cached_files(workdir, &refs)?;
+    git::unstage_files(workdir, &refs)?;
+    Ok(patch)
+}
+
 fn hunk_sort_key(hunk: &diff::DiffHunk) -> usize {
     let first_line = hunk.text.lines().next().unwrap_or("");
     parse_hunk_start(first_line).unwrap_or(0)
