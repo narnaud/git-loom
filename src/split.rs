@@ -167,7 +167,7 @@ fn perform_split(
     // Save pre-existing staged changes so reset --mixed doesn't discard them.
     // (For non-HEAD splits, the rebase autostash handles this, but saving
     // here is harmless — it will be empty.)
-    let saved_staged = save_staged(repo, workdir)?;
+    let saved_staged = staging::save_and_unstage_staged(repo, workdir)?;
 
     let split_result = if is_head {
         perform_head_split(workdir, selected, remaining, msg1, msg2)
@@ -274,7 +274,7 @@ fn perform_split_by_hunks(
     let oid_str = commit_oid.to_string();
     let short_hash = git::short_hash(&oid_str);
 
-    let saved_staged = save_staged(repo, workdir)?;
+    let saved_staged = staging::save_and_unstage_staged(repo, workdir)?;
 
     let split_result = if is_head {
         perform_head_split_by_hunks(workdir, selections, msg1, msg2)
@@ -366,18 +366,6 @@ fn perform_non_head_split_by_hunks(
 
     git::continue_rebase_or_abort(workdir)?;
     Ok((hash1, hash2))
-}
-
-/// Save all staged changes aside so they can be restored after the split.
-fn save_staged(repo: &Repository, workdir: &std::path::Path) -> Result<String> {
-    let staged = repo::get_staged_files(repo)?;
-    if staged.is_empty() {
-        return Ok(String::new());
-    }
-    let refs: Vec<&str> = staged.iter().map(|s| s.as_str()).collect();
-    let patch = git::diff_cached_files(workdir, &refs)?;
-    git::unstage_files(workdir, &refs)?;
-    Ok(patch)
 }
 
 #[cfg(test)]

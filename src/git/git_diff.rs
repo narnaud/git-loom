@@ -116,22 +116,18 @@ pub fn diff_commit_name_status(workdir: &Path, oid: &str) -> Result<Vec<(char, S
         if line.is_empty() {
             continue;
         }
-        let mut fields = line.splitn(2, '\t');
+        let mut fields = line.splitn(3, '\t');
         let status_field = fields.next().unwrap_or("");
-        let path_field = fields.next().unwrap_or("").trim();
-        if status_field.is_empty() || path_field.is_empty() {
+        let path1 = fields.next().unwrap_or("").trim();
+        let path2 = fields.next().map(str::trim);
+        if status_field.is_empty() || path1.is_empty() {
             continue;
         }
         let status = status_field.chars().next().unwrap_or('M');
         // For rename/copy entries (R/C), git outputs "old-path\tnew-path"; use the destination.
-        let path = if matches!(status, 'R' | 'C') {
-            path_field
-                .split('\t')
-                .next_back()
-                .unwrap_or(path_field)
-                .to_string()
-        } else {
-            path_field.to_string()
+        let path = match (status, path2) {
+            ('R' | 'C', Some(dest)) => dest.to_string(),
+            _ => path1.to_string(),
         };
         result.push((status, path));
     }
