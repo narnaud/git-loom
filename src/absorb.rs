@@ -101,6 +101,11 @@ fn build_plan(
     weave_graph: &Weave,
 ) -> Result<AbsorbPlan> {
     let in_scope: HashMap<Oid, &CommitInfo> = info.commits.iter().map(|c| (c.oid, c)).collect();
+    let commit_to_branch: HashMap<Oid, String> = weave_graph
+        .branch_sections
+        .iter()
+        .flat_map(|s| s.commits.iter().map(move |c| (c.oid, s.label.clone())))
+        .collect();
 
     let mut whole_file_assigned: Vec<(String, Oid)> = Vec::new();
     let mut hunk_assigned: Vec<(String, Oid, Vec<DiffHunk>)> = Vec::new();
@@ -110,7 +115,7 @@ fn build_plan(
     for file in changed_files {
         match analyze_file(repo, workdir, file, &in_scope)? {
             FileAnalysis::Assigned { commit_oid } => {
-                print_assignment(file, commit_oid, &in_scope, weave_graph);
+                print_assignment(file, commit_oid, &in_scope, &commit_to_branch);
                 whole_file_assigned.push((file.clone(), commit_oid));
                 any_assigned = true;
             }
@@ -128,7 +133,7 @@ fn build_plan(
                                 total,
                                 commit_oid,
                                 &in_scope,
-                                weave_graph,
+                                &commit_to_branch,
                             );
                             per_commit.entry(commit_oid).or_default().push(hunk);
                         }
@@ -198,7 +203,6 @@ fn apply_plan(repo: &Repository, workdir: &Path, git_dir: &Path, plan: AbsorbPla
     let saved_head = repo::head_oid(repo)?.to_string();
     let saved_refs = repo::snapshot_branch_refs(repo)?;
 
-    // Group assignments by target commit.
     let mut groups: HashMap<Oid, Vec<String>> = HashMap::new();
     for (file, oid) in &plan.whole_file_assigned {
         groups.entry(*oid).or_default().push(file.clone());
@@ -208,7 +212,7 @@ fn apply_plan(repo: &Repository, workdir: &Path, git_dir: &Path, plan: AbsorbPla
         hunk_groups.entry(oid).or_default().push((path, hunks));
     }
 
-    // Save staged files that are NOT being absorbed so they don't leak into fixup commits.
+    // Keep non-absorbed staged changes from leaking into fixup commits.
     let absorbed_files: HashSet<&str> = groups
         .values()
         .flatten()
@@ -317,19 +321,7 @@ fn create_fixup_commits(
             rollback_pre_rebase(workdir, pre_rebase);
             return Err(e);
         }
-        let subject = repo
-            .find_commit(*target_oid)
-            .ok()
-            .map(|c| repo::commit_subject(&c))
-            .unwrap_or_else(|| target_oid.to_string());
-        let msg = format!("fixup! {}", subject);
-        if let Err(e) = git::commit(workdir, &msg) {
-            rollback_pre_rebase(workdir, pre_rebase);
-            return Err(e);
-        }
-        let fixup_hash = git::rev_parse(workdir, "HEAD")?;
-        let fixup_oid = git2::Oid::from_str(&fixup_hash)?;
-        fixup_pairs.push((fixup_oid, *target_oid));
+        commit_fixup(repo, workdir, target_oid, pre_rebase, &mut fixup_pairs)?;
     }
 
     for (target_oid, file_hunks) in hunk_groups {
@@ -341,22 +333,34 @@ fn create_fixup_commits(
             rollback_pre_rebase(workdir, pre_rebase);
             return Err(e);
         }
-        let subject = repo
-            .find_commit(*target_oid)
-            .ok()
-            .map(|c| repo::commit_subject(&c))
-            .unwrap_or_else(|| target_oid.to_string());
-        let msg = format!("fixup! {}", subject);
-        if let Err(e) = git::commit(workdir, &msg) {
-            rollback_pre_rebase(workdir, pre_rebase);
-            return Err(e);
-        }
-        let fixup_hash = git::rev_parse(workdir, "HEAD")?;
-        let fixup_oid = git2::Oid::from_str(&fixup_hash)?;
-        fixup_pairs.push((fixup_oid, *target_oid));
+        commit_fixup(repo, workdir, target_oid, pre_rebase, &mut fixup_pairs)?;
     }
 
     Ok(fixup_pairs)
+}
+
+/// Commit a fixup for `target_oid` (staging already done by the caller) and record the pair.
+fn commit_fixup(
+    repo: &Repository,
+    workdir: &Path,
+    target_oid: &Oid,
+    pre_rebase: &PreRebaseState<'_>,
+    fixup_pairs: &mut Vec<(Oid, Oid)>,
+) -> Result<()> {
+    let subject = repo
+        .find_commit(*target_oid)
+        .ok()
+        .map(|c| repo::commit_subject(&c))
+        .unwrap_or_else(|| target_oid.to_string());
+    let msg = format!("fixup! {}", subject);
+    if let Err(e) = git::commit(workdir, &msg) {
+        rollback_pre_rebase(workdir, pre_rebase);
+        return Err(e);
+    }
+    let fixup_hash = git::rev_parse(workdir, "HEAD")?;
+    let fixup_oid = git2::Oid::from_str(&fixup_hash)?;
+    fixup_pairs.push((fixup_oid, *target_oid));
+    Ok(())
 }
 
 /// Save diffs for skipped files and restore their working-tree state before the rebase.
@@ -365,11 +369,10 @@ fn save_skipped_patch(workdir: &Path, skipped_files: &[String]) -> Result<Option
         return Ok(None);
     }
     let refs: Vec<&str> = skipped_files.iter().map(|f| f.as_str()).collect();
-    let dirty = git::diff_head_name_only(workdir)?;
-    if dirty.trim().is_empty() {
+    let patch = git::diff_head_files(workdir, &refs)?;
+    if patch.trim().is_empty() {
         return Ok(None);
     }
-    let patch = git::diff_head_files(workdir, &refs)?;
     let _ = git::restore_files_to_head(workdir, &refs);
     Ok(Some(patch))
 }
@@ -439,15 +442,15 @@ fn post_absorb(
 fn commit_label(
     commit_oid: Oid,
     in_scope: &HashMap<Oid, &CommitInfo>,
-    weave_graph: &Weave,
+    commit_to_branch: &HashMap<Oid, String>,
 ) -> String {
-    let oid_str = commit_oid.to_string();
-    let short = git::short_hash(&oid_str);
-    let message = in_scope
+    let info = in_scope.get(&commit_oid);
+    let short = info
+        .map(|c| c.short_id.as_str())
+        .unwrap_or_else(|| "???????");
+    let message = info.map(|c| c.message.as_str()).unwrap_or("");
+    let branch_info = commit_to_branch
         .get(&commit_oid)
-        .map(|c| c.message.as_str())
-        .unwrap_or("");
-    let branch_info = find_branch_for_commit(weave_graph, commit_oid)
         .map(|b| format!(" ({})", b))
         .unwrap_or_default();
     format!("{} \"{}\"{}", short, message, branch_info)
@@ -458,12 +461,12 @@ fn print_assignment(
     file: &str,
     commit_oid: Oid,
     in_scope: &HashMap<Oid, &CommitInfo>,
-    weave_graph: &Weave,
+    commit_to_branch: &HashMap<Oid, String>,
 ) {
     println!(
         "  {} -> {}",
         file,
-        commit_label(commit_oid, in_scope, weave_graph)
+        commit_label(commit_oid, in_scope, commit_to_branch)
     );
 }
 
@@ -474,14 +477,14 @@ fn print_hunk_assignment(
     total: usize,
     commit_oid: Oid,
     in_scope: &HashMap<Oid, &CommitInfo>,
-    weave_graph: &Weave,
+    commit_to_branch: &HashMap<Oid, String>,
 ) {
     println!(
         "  {} [hunk {}/{}] -> {}",
         file,
         hunk_num,
         total,
-        commit_label(commit_oid, in_scope, weave_graph)
+        commit_label(commit_oid, in_scope, commit_to_branch)
     );
 }
 
@@ -651,18 +654,6 @@ fn analyze_hunk(
     }
 
     HunkAnalysis::Assigned { commit_oid }
-}
-
-/// Find the branch name that contains a given commit OID in the Weave graph.
-fn find_branch_for_commit(weave: &Weave, oid: Oid) -> Option<String> {
-    for section in &weave.branch_sections {
-        for commit in &section.commits {
-            if commit.oid == oid {
-                return Some(section.label.clone());
-            }
-        }
-    }
-    None
 }
 
 #[cfg(test)]
