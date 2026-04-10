@@ -599,7 +599,7 @@ fn commit_accepts_staged_rename_only() {
         .unwrap();
 
     // verify_has_staged_changes should accept a rename-only index
-    let result = super::verify_has_staged_changes(&test_repo.repo);
+    let result = crate::core::repo::verify_has_staged_changes(&test_repo.repo);
     assert!(
         result.is_ok(),
         "staged rename should be accepted, got: {:?}",

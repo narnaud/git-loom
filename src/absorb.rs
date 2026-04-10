@@ -508,18 +508,10 @@ fn get_changed_files(
     } else {
         let mut result = Vec::new();
         for arg in user_files {
-            let path = resolve_file_arg(repo, arg)?;
+            let path = repo::resolve_file_arg(repo, arg)?;
             result.push(path);
         }
         Ok(result)
-    }
-}
-
-/// Resolve a user argument to a file path using the centralized resolver.
-fn resolve_file_arg(repo: &Repository, arg: &str) -> Result<String> {
-    match repo::resolve_arg(repo, arg, &[repo::TargetKind::File])? {
-        repo::Target::File(path) => Ok(path),
-        _ => unreachable!(),
     }
 }
 
