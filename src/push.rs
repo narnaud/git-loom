@@ -81,7 +81,6 @@ pub fn run(branch: Option<String>, no_pr: bool) -> Result<()> {
     }
 }
 
-/// Resolve an explicit branch argument to a woven branch name.
 fn resolve_branch(repo: &Repository, info: &repo::RepoInfo, branch_arg: &str) -> Result<String> {
     let name = repo::resolve_arg(repo, branch_arg, &[repo::TargetKind::Branch])?.expect_branch()?;
     if info.branches.iter().any(|b| b.name == name) {
@@ -91,7 +90,6 @@ fn resolve_branch(repo: &Repository, info: &repo::RepoInfo, branch_arg: &str) ->
     }
 }
 
-/// Interactive branch picker: list woven branches.
 fn pick_branch(info: &repo::RepoInfo) -> Result<String> {
     let items: Vec<String> = info.branches.iter().map(|b| b.name.clone()).collect();
     msg::select("Select branch to push", items)
@@ -106,7 +104,6 @@ fn detect_remote_type(
     workdir: &Path,
     upstream_label: &str,
 ) -> Result<RemoteType> {
-    // 1. Check explicit config override
     if let Ok(config_value) = git::run_git_stdout(workdir, &["config", "--get", "loom.remote-type"])
     {
         let value = config_value.trim().to_lowercase();
@@ -127,36 +124,27 @@ fn detect_remote_type(
         ));
     }
 
-    // 2. Check remote URL for github.com
     let remote_name = extract_remote_name(upstream_label);
     if let Ok(remote) = repo.find_remote(&remote_name)
         && let Some(url) = remote.url()
-        && url.contains("github.com")
     {
-        return Ok(RemoteType::GitHub);
-    }
-
-    // 2b. Check remote URL for dev.azure.com
-    if let Ok(remote) = repo.find_remote(&remote_name)
-        && let Some(url) = remote.url()
-        && url.contains("dev.azure.com")
-    {
-        return Ok(RemoteType::AzureDevOps);
-    }
-
-    // 3. Check for Gerrit commit-msg hook
-    // Use repo.commondir() so this works in worktrees (where hooks are shared)
-    {
-        let hook_path = repo.commondir().join("hooks").join("commit-msg");
-        if let Ok(content) = std::fs::read_to_string(&hook_path)
-            && content.to_lowercase().contains("gerrit")
-        {
-            let target_branch = extract_target_branch(upstream_label);
-            return Ok(RemoteType::Gerrit { target_branch });
+        if url.contains("github.com") {
+            return Ok(RemoteType::GitHub);
+        }
+        if url.contains("dev.azure.com") {
+            return Ok(RemoteType::AzureDevOps);
         }
     }
 
-    // 4. Default to plain
+    // Use repo.commondir() so this works in worktrees (where hooks are shared)
+    let hook_path = repo.commondir().join("hooks").join("commit-msg");
+    if let Ok(content) = std::fs::read_to_string(&hook_path)
+        && content.to_lowercase().contains("gerrit")
+    {
+        let target_branch = extract_target_branch(upstream_label);
+        return Ok(RemoteType::Gerrit { target_branch });
+    }
+
     Ok(RemoteType::Plain)
 }
 
@@ -233,7 +221,6 @@ fn resolve_push_remote(
     upstream_label: &str,
     remote_type: &RemoteType,
 ) -> String {
-    // 1. Check explicit config override
     if let Ok(push_remote) = git::run_git_stdout(workdir, &["config", "--get", "loom.push-remote"])
     {
         let remote = push_remote.trim();
@@ -242,7 +229,6 @@ fn resolve_push_remote(
         }
     }
 
-    // 2. GitHub fork workflow: if upstream is "upstream" and origin exists, push to origin
     let remote_name = extract_remote_name(upstream_label);
     if *remote_type == RemoteType::GitHub
         && remote_name == "upstream"
@@ -254,7 +240,6 @@ fn resolve_push_remote(
     }
 }
 
-/// Force-with-lease push a branch to remote.
 fn git_push(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
     git::run_git(
         workdir,
@@ -266,7 +251,9 @@ fn git_push(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
             remote,
             branch,
         ],
-    )
+    )?;
+    msg::success(&format!("Pushed `{}` to `{}`", branch, remote));
+    Ok(())
 }
 
 /// Collect commits for a branch from oldest to newest, skipping merge commits.
@@ -325,7 +312,6 @@ fn pr_title_and_description(
         return Ok((subject.clone(), body.clone()));
     }
 
-    // Multiple commits: ask the user for a title
     let title = msg::input("PR title", |s| {
         if s.is_empty() {
             Err("Title cannot be empty")
@@ -349,11 +335,8 @@ fn pr_title_and_description(
     Ok((title, description))
 }
 
-/// Push using plain git with force-with-lease.
 fn push_plain(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
-    git_push(workdir, remote, branch)?;
-    msg::success(&format!("Pushed `{}` to `{}`", branch, remote));
-    Ok(())
+    git_push(workdir, remote, branch)
 }
 
 /// Push to GitHub: push the branch, then open `gh pr create --web`.
@@ -379,14 +362,12 @@ fn push_github(
     upstream_label: &str,
 ) -> Result<()> {
     git_push(workdir, remote, branch)?;
-    msg::success(&format!("Pushed `{}` to `{}`", branch, remote));
 
     // Skip PR creation when pushing the upstream target branch itself
     if branch == target_branch {
         return Ok(());
     }
 
-    // Check if gh CLI is available
     let start = Instant::now();
     let gh_check = Command::new("gh").arg("--version").output();
     let gh_available = gh_check.as_ref().is_ok_and(|o| o.status.success());
@@ -427,7 +408,6 @@ fn push_github(
         branch.to_string()
     };
 
-    // If a PR already exists, show its URL instead of opening the browser
     if let Some(pr_url) = find_existing_github_pr(workdir, &pr_target_repo, branch) {
         msg::success(&format!("PR updated: {}", pr_url));
         return Ok(());
@@ -554,7 +534,6 @@ fn push_azure(
     base_oid: git2::Oid,
 ) -> Result<()> {
     git_push(workdir, remote, branch)?;
-    msg::success(&format!("Pushed `{}` to `{}`", branch, remote));
 
     let start = Instant::now();
     let az_check = az_command().arg("--version").output();
@@ -702,14 +681,13 @@ fn push_gerrit_no_pr(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
 
     let opt_as_is = format!("Push as `{}` (admin required to delete it later)", branch);
     let opt_wip = format!("Push as `wip/{}` instead", branch);
-    let opt_cancel = "Cancel".to_string();
 
     let choice = msg::select(
         &format!(
             "Branch `{}` is not prefixed with `wip/` — a Gerrit admin will be needed to delete the remote branch later",
             branch
         ),
-        vec![opt_as_is.clone(), opt_wip.clone(), opt_cancel],
+        vec![opt_as_is.clone(), opt_wip.clone(), "Cancel".to_string()],
     )?;
 
     if choice == opt_as_is {
@@ -761,7 +739,6 @@ fn push_gerrit(workdir: &Path, remote: &str, branch: &str, target_branch: &str) 
         bail!("Git {} failed", cmd);
     }
 
-    // Extract Gerrit review URLs from remote output
     let mut message = format!(
         "Pushed `{}` to `{}` (Gerrit: `refs/for/{}`)",
         branch, remote, target_branch
