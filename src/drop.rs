@@ -12,6 +12,13 @@ use crate::core::transaction::{self, LoomState, Rollback};
 use crate::core::weave::{self, RebaseOutcome, Weave};
 use crate::git;
 
+fn confirm_or_bail(skip: bool, prompt: &str) -> Result<()> {
+    if !skip && !msg::confirm(prompt)? {
+        bail!("Cancelled");
+    }
+    Ok(())
+}
+
 #[derive(Serialize, Deserialize)]
 struct DropContext {
     commit_hash: String,
@@ -64,16 +71,12 @@ fn drop_file(repo: &Repository, path: &str, skip_confirm: bool) -> Result<()> {
             !statuses.is_empty()
         };
         if has_tracked {
-            if !skip_confirm && !msg::confirm(&format!("Discard all changes in `{}`?", path))? {
-                bail!("Cancelled");
-            }
+            confirm_or_bail(skip_confirm, &format!("Discard all changes in `{}`?", path))?;
             git::run_git(workdir, &["restore", "--staged", "--worktree", path])?;
             git::run_git(workdir, &["clean", "-fd", "--", path])?;
             msg::success(&format!("Restored `{}`", path));
         } else {
-            if !skip_confirm && !msg::confirm(&format!("Delete `{}`?", path))? {
-                bail!("Cancelled");
-            }
+            confirm_or_bail(skip_confirm, &format!("Delete `{}`?", path))?;
             git::run_git(workdir, &["clean", "-fd", "--", path])?;
             msg::success(&format!("Deleted `{}`", path));
         }
@@ -86,24 +89,18 @@ fn drop_file(repo: &Repository, path: &str, skip_confirm: bool) -> Result<()> {
 
     if status.is_wt_new() {
         // Untracked file — delete it
-        if !skip_confirm && !msg::confirm(&format!("Delete `{}`?", path))? {
-            bail!("Cancelled");
-        }
+        confirm_or_bail(skip_confirm, &format!("Delete `{}`?", path))?;
         std::fs::remove_file(workdir.join(path))
             .with_context(|| format!("Failed to delete '{}'", path))?;
         msg::success(&format!("Deleted `{}`", path));
     } else if status.is_index_new() {
         // Staged new file — remove from index and disk
-        if !skip_confirm && !msg::confirm(&format!("Delete `{}`?", path))? {
-            bail!("Cancelled");
-        }
+        confirm_or_bail(skip_confirm, &format!("Delete `{}`?", path))?;
         git::run_git(workdir, &["rm", "--force", path])?;
         msg::success(&format!("Deleted `{}`", path));
     } else {
         // Tracked file with modifications — restore it
-        if !skip_confirm && !msg::confirm(&format!("Discard changes to `{}`?", path))? {
-            bail!("Cancelled");
-        }
+        confirm_or_bail(skip_confirm, &format!("Discard changes to `{}`?", path))?;
         git::run_git(workdir, &["restore", "--staged", "--worktree", path])?;
         msg::success(&format!("Restored `{}`", path));
     }
@@ -123,9 +120,7 @@ fn drop_all(repo: &Repository, skip_confirm: bool) -> Result<()> {
         bail!("No local changes to discard");
     }
 
-    if !skip_confirm && !msg::confirm("Discard all local changes?")? {
-        bail!("Cancelled");
-    }
+    confirm_or_bail(skip_confirm, "Discard all local changes?")?;
 
     git::run_git(workdir, &["restore", "--staged", "--worktree", "."])?;
     git::run_git(workdir, &["clean", "-fd"])?;
@@ -165,22 +160,16 @@ fn drop_commit(repo: &Repository, commit_hash: &str, skip_confirm: bool) -> Resu
         }
     }
 
-    // Confirm with the user
     let short_hash = git::short_hash(commit_hash);
-    let summary = repo
-        .find_commit(commit_oid)?
-        .summary()
-        .unwrap_or("")
-        .to_string();
-    if !skip_confirm && !msg::confirm(&format!("Drop commit `{}` {}?", short_hash, summary))? {
-        bail!("Cancelled");
-    }
+    let summary = repo::commit_subject(&repo.find_commit(commit_oid)?);
+    confirm_or_bail(
+        skip_confirm,
+        &format!("Drop commit `{}` {}?", short_hash, summary),
+    )?;
 
-    // Build weave and drop the commit
     let mut graph = Weave::from_repo_with_info(repo, &info)?;
     graph.drop_commit(commit_oid);
 
-    // Save LoomState before the rebase so we can resume on conflict.
     let ctx = DropContext {
         commit_hash: commit_hash.to_string(),
     };
@@ -249,9 +238,10 @@ fn drop_branch_with_info(
 
     // Check if branch is at the merge-base with no owned commits
     if branch_info.tip_oid == merge_base_oid {
-        if !skip_confirm && !msg::confirm(&format!("Drop empty branch `{}`?", branch_name))? {
-            bail!("Cancelled");
-        }
+        confirm_or_bail(
+            skip_confirm,
+            &format!("Drop empty branch `{}`?", branch_name),
+        )?;
         git::branch_delete(workdir, branch_name)?;
         msg::success(&format!("Dropped branch `{}`", branch_name));
         return Ok(());
@@ -266,19 +256,15 @@ fn drop_branch_with_info(
         branch_name,
     )?;
     let commit_count = owned.len();
-    if !skip_confirm {
-        let prompt = if commit_count == 1 {
-            format!("Drop branch `{}` and its 1 commit?", branch_name)
-        } else {
-            format!(
-                "Drop branch `{}` and its {} commits?",
-                branch_name, commit_count
-            )
-        };
-        if !msg::confirm(&prompt)? {
-            bail!("Cancelled");
-        }
-    }
+    let prompt = if commit_count == 1 {
+        format!("Drop branch `{}` and its 1 commit?", branch_name)
+    } else {
+        format!(
+            "Drop branch `{}` and its {} commits?",
+            branch_name, commit_count
+        )
+    };
+    confirm_or_bail(skip_confirm, &prompt)?;
 
     // Check if another branch shares the same tip (co-located branches)
     let colocated_branch = info
@@ -290,7 +276,6 @@ fn drop_branch_with_info(
     let is_woven = branch_info.tip_oid != head_oid
         && !is_on_first_parent_line(repo, head_oid, merge_base_oid, branch_info.tip_oid)?;
 
-    // Build weave and apply the appropriate mutation
     let mut graph = Weave::from_repo_with_info(repo, info)?;
 
     if is_woven {
