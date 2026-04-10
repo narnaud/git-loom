@@ -3,7 +3,6 @@ use git2::{Repository, StatusOptions};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use crate::commit;
 use crate::core::diff;
 use crate::core::graph;
 use crate::core::msg;
@@ -289,7 +288,7 @@ fn run_patch_fold(repo: &Repository, args: &[String], theme: &graph::Theme) -> R
     }
 
     // Fold whatever is now staged into the target commit.
-    commit::verify_has_staged_changes(repo)?;
+    repo::verify_has_staged_changes(repo)?;
     let staged = repo::get_staged_files(repo)?;
     fold_files_into_commit(repo, &staged, &commit_hash, true)
 }
@@ -574,7 +573,7 @@ fn run_staged(repo: &Repository, target_arg: &str) -> Result<()> {
         _ => unreachable!(),
     };
 
-    commit::verify_has_staged_changes(repo)?;
+    repo::verify_has_staged_changes(repo)?;
 
     let staged = repo::get_staged_files(repo)?;
     fold_files_into_commit(repo, &staged, &commit_hash, true)

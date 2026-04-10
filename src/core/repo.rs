@@ -622,6 +622,22 @@ pub fn get_staged_files(repo: &Repository) -> Result<Vec<String>> {
     Ok(paths)
 }
 
+/// Resolve a user argument to a file path.
+pub fn resolve_file_arg(repo: &Repository, arg: &str) -> Result<String> {
+    match resolve_arg(repo, arg, &[TargetKind::File])? {
+        Target::File(path) => Ok(path),
+        _ => unreachable!(),
+    }
+}
+
+/// Check that the index has at least one staged change; bail if not.
+pub fn verify_has_staged_changes(repo: &Repository) -> Result<()> {
+    if get_staged_files(repo)?.is_empty() {
+        anyhow::bail!("Nothing to commit");
+    }
+    Ok(())
+}
+
 /// Count the number of commits reachable from `from` but not from `hide`.
 fn count_commits(repo: &Repository, from: git2::Oid, hide: git2::Oid) -> Result<usize> {
     if from == hide {

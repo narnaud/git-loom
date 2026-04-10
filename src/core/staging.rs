@@ -448,6 +448,29 @@ pub(crate) fn save_and_unstage_staged(repo: &Repository, workdir: &Path) -> Resu
     Ok(patch)
 }
 
+/// Save the staged diff for files that are staged but NOT in `target_files`,
+/// then unstage them so they don't leak into the upcoming commit.
+///
+/// Returns the patch as a string (may be empty if nothing to save).
+pub(crate) fn save_and_unstage_other_staged(
+    repo: &Repository,
+    workdir: &Path,
+    target_files: &[&str],
+) -> Result<String> {
+    let staged = repo::get_staged_files(repo)?;
+    let other: Vec<&str> = staged
+        .iter()
+        .filter(|f| !target_files.contains(&f.as_str()))
+        .map(|s| s.as_str())
+        .collect();
+    if other.is_empty() {
+        return Ok(String::new());
+    }
+    let patch = git::diff_cached_files(workdir, &other)?;
+    git::unstage_files(workdir, &other)?;
+    Ok(patch)
+}
+
 fn hunk_sort_key(hunk: &diff::DiffHunk) -> usize {
     let first_line = hunk.text.lines().next().unwrap_or("");
     parse_hunk_start(first_line).unwrap_or(0)

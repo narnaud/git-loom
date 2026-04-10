@@ -1,12 +1,12 @@
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use git2::{Repository, StatusOptions};
+use git2::Repository;
 use serde::{Deserialize, Serialize};
 
 use crate::core::graph;
 use crate::core::msg;
-use crate::core::repo::{self, Target};
+use crate::core::repo;
 use crate::core::staging;
 use crate::core::transaction::{self, LoomState, Rollback};
 use crate::core::weave::{self, RebaseOutcome, Weave};
@@ -39,20 +39,27 @@ pub fn run(
          Use `git commit` directly on feature branches",
     )?;
 
-    // Step 1: Stage files (saving aside any pre-existing staged files not in
-    // the target list so they don't accidentally end up in this commit).
+    // Stage files, saving aside any pre-existing staged files not in the
+    // target list so they don't accidentally end up in this commit.
     let saved_staged = if patch {
         resolve_staging_patch(&repo, &workdir, &files, theme)?
     } else {
         resolve_staging(&repo, &workdir, &files)?
     };
 
-    // Step 2: Verify index has changes — restore saved staged on failure so
-    // pre-existing staged work is not lost.
-    if let Err(e) = verify_has_staged_changes(&repo) {
+    // Verify index has changes — restore saved staged on failure so pre-existing staged work is not lost.
+    if let Err(e) = repo::verify_has_staged_changes(&repo) {
         git::restore_staged_patch(&workdir, &saved_staged)?;
         return Err(e);
     }
+
+    let do_commit = || {
+        if let Some(msg) = &message {
+            git::commit(&workdir, msg)
+        } else {
+            git::commit_with_editor(&workdir)
+        }
+    };
 
     // Loose commit: when no -b flag and local branch name matches the
     // upstream's local counterpart (e.g. "main" tracking "origin/main"),
@@ -60,11 +67,7 @@ pub fn run(
     // branch. This works regardless of whether local commits or woven
     // branches already exist.
     if branch.is_none() && info.branch_name == repo::upstream_local_branch(&info.upstream.label) {
-        let result = if let Some(msg) = &message {
-            git::commit(&workdir, msg)
-        } else {
-            git::commit_with_editor(&workdir)
-        };
+        let result = do_commit();
         git::restore_staged_patch(&workdir, &saved_staged)?;
         result?;
         let new_head = repo::head_oid(&repo)?;
@@ -75,38 +78,24 @@ pub fn run(
         return Ok(());
     }
 
-    // Step 3: Save HEAD for rollback
     let saved_head = repo::head_oid(&repo)?.to_string();
 
-    // Step 4: Resolve branch target (may create a new branch at merge-base)
-    // Snapshot existing branch names so we can detect newly-created branches.
-    // Only delete newly-created branches on rollback (not pre-existing empty ones).
-    let branches_before: Vec<String> = repo
-        .branches(Some(git2::BranchType::Local))?
-        .filter_map(|b| b.ok())
-        .filter_map(|(b, _)| b.name().ok().flatten().map(String::from))
-        .collect();
-    let branch_name = resolve_branch_target(&repo, &info, &workdir, branch.as_deref())?;
-    let branch_is_new = !branches_before.contains(&branch_name);
+    // Resolve branch target (may create a new branch at merge-base).
+    // Returns whether the branch was newly created — only newly-created
+    // branches are deleted on rollback (not pre-existing empty ones).
+    let (branch_name, branch_is_new) =
+        resolve_branch_target(&repo, &info, &workdir, branch.as_deref())?;
 
-    // Check if the branch is at the merge-base (no commits of its own).
-    // Empty branches need to have a branch section and merge entry created
-    // in the Weave before moving the commit there.
+    // Empty branches (pointing at merge-base) need a branch section and
+    // merge entry created in the Weave before moving the commit there.
     let branch_is_empty =
         is_branch_at_merge_base(&repo, &branch_name, info.upstream.merge_base_oid)?;
 
-    // Step 5: Create commit at HEAD
-    let commit_result = if let Some(msg) = &message {
-        git::commit(&workdir, msg)
-    } else {
-        git::commit_with_editor(&workdir)
-    };
-    if let Err(e) = commit_result {
+    if let Err(e) = do_commit() {
         git::restore_staged_patch(&workdir, &saved_staged)?;
         return Err(e);
     }
 
-    // Step 6: Move commit to branch via Weave
     let head_oid = repo::head_oid(&repo)?;
 
     let mut graph = Weave::from_repo_with_info(&repo, &info)?;
@@ -200,13 +189,9 @@ fn resolve_staging_patch(
 ) -> Result<String> {
     // Save aside other staged files when specific files are targeted.
     let saved_staged = if !files.is_empty() && !files.iter().any(|f| f == "zz") {
-        let mut resolved_paths = Vec::new();
-        for arg in files {
-            let path = resolve_file_arg(repo, arg)?;
-            resolved_paths.push(path);
-        }
+        let resolved_paths = resolve_file_args(repo, files)?;
         let path_refs: Vec<&str> = resolved_paths.iter().map(|s| s.as_str()).collect();
-        save_and_unstage_other_staged(repo, workdir, &path_refs)?
+        staging::save_and_unstage_other_staged(repo, workdir, &path_refs)?
     } else {
         String::new()
     };
@@ -241,85 +226,31 @@ fn resolve_staging(
         return Ok(String::new());
     }
 
-    let mut resolved_paths = Vec::new();
-    for arg in files {
-        let path = resolve_file_arg(repo, arg)?;
-        resolved_paths.push(path);
-    }
-
+    let resolved_paths = resolve_file_args(repo, files)?;
     let path_refs: Vec<&str> = resolved_paths.iter().map(|s| s.as_str()).collect();
-
-    // Save and unstage any pre-existing staged files not in our target list.
-    let saved_staged = save_and_unstage_other_staged(repo, workdir, &path_refs)?;
-
+    let saved_staged = staging::save_and_unstage_other_staged(repo, workdir, &path_refs)?;
     git::stage_files(workdir, &path_refs)?;
-
     Ok(saved_staged)
 }
 
-/// Save the staged diff for files that are staged but NOT in `target_files`,
-/// then unstage them so they don't leak into the upcoming commit.
-///
-/// Returns the patch as a string (may be empty if nothing to save).
-fn save_and_unstage_other_staged(
-    repo: &Repository,
-    workdir: &std::path::Path,
-    target_files: &[&str],
-) -> Result<String> {
-    let staged = repo::get_staged_files(repo)?;
-    let other: Vec<&str> = staged
+/// Resolve a slice of user file arguments to repo-relative paths.
+fn resolve_file_args(repo: &Repository, files: &[String]) -> Result<Vec<String>> {
+    files
         .iter()
-        .filter(|f| !target_files.contains(&f.as_str()))
-        .map(|s| s.as_str())
-        .collect();
-
-    if other.is_empty() {
-        return Ok(String::new());
-    }
-
-    let patch = git::diff_cached_files(workdir, &other)?;
-    git::unstage_files(workdir, &other)?;
-    Ok(patch)
-}
-
-/// Resolve a file argument using the centralized resolver.
-fn resolve_file_arg(repo: &Repository, arg: &str) -> Result<String> {
-    match repo::resolve_arg(repo, arg, &[repo::TargetKind::File])? {
-        Target::File(path) => Ok(path),
-        _ => unreachable!(),
-    }
-}
-
-/// Verify that the index has staged changes.
-pub fn verify_has_staged_changes(repo: &Repository) -> Result<()> {
-    let mut opts = StatusOptions::new();
-    opts.include_untracked(false);
-
-    let statuses = repo.statuses(Some(&mut opts))?;
-
-    let has_staged = statuses.iter().any(|entry| {
-        let status = entry.status();
-        status.is_index_new()
-            || status.is_index_modified()
-            || status.is_index_deleted()
-            || status.is_index_renamed()
-            || status.is_index_typechange()
-    });
-
-    if !has_staged {
-        bail!("Nothing to commit");
-    }
-
-    Ok(())
+        .map(|arg| repo::resolve_file_arg(repo, arg))
+        .collect()
 }
 
 /// Resolve the target branch: explicit name/shortID, or interactive picker.
+///
+/// Returns `(branch_name, is_new)` — `is_new` is true when the branch was
+/// created by this call (only newly-created branches are deleted on rollback).
 fn resolve_branch_target(
     repo: &Repository,
     info: &repo::RepoInfo,
     workdir: &std::path::Path,
     branch: Option<&str>,
-) -> Result<String> {
+) -> Result<(String, bool)> {
     match branch {
         Some(b) => resolve_explicit_branch(repo, info, workdir, b),
         None => pick_branch(repo, info, workdir),
@@ -336,12 +267,12 @@ fn resolve_explicit_branch(
     info: &repo::RepoInfo,
     workdir: &std::path::Path,
     branch: &str,
-) -> Result<String> {
+) -> Result<(String, bool)> {
     match repo::resolve_arg(repo, branch, &[repo::TargetKind::Branch]) {
         Ok(target) => {
             let name = target.expect_branch()?;
             if info.branches.iter().any(|b| b.name == name) {
-                Ok(name)
+                Ok((name, false))
             } else {
                 bail!("Branch '{}' is not woven into the integration branch", name)
             }
@@ -362,7 +293,7 @@ fn resolve_explicit_branch(
             }
 
             create_branch_at_merge_base(workdir, &name, info.upstream.merge_base_oid)?;
-            Ok(name)
+            Ok((name, true))
         }
     }
 }
@@ -372,7 +303,7 @@ fn pick_branch(
     repo: &Repository,
     info: &repo::RepoInfo,
     workdir: &std::path::Path,
-) -> Result<String> {
+) -> Result<(String, bool)> {
     let branch_names: Vec<String> = info.branches.iter().map(|b| b.name.clone()).collect();
 
     let not_empty = |s: &str| {
@@ -396,9 +327,10 @@ fn pick_branch(
         git::branch_validate_name(&name)?;
         repo::ensure_branch_not_exists(repo, &name)?;
         create_branch_at_merge_base(workdir, &name, info.upstream.merge_base_oid)?;
+        return Ok((name, true));
     }
 
-    Ok(name)
+    Ok((name, false))
 }
 
 /// Check if a branch points to the merge-base commit (i.e., has no commits of its own).
