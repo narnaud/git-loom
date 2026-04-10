@@ -7,6 +7,8 @@ use crate::core::{diff, graph, msg, staging};
 use crate::git;
 use crate::tui::hunk_selector::FileEntry;
 
+const COMMAND: &str = "split";
+
 /// Commit with `-m` message or open the editor.
 fn commit_or_editor(workdir: &std::path::Path, message: Option<&str>) -> Result<()> {
     match message {
@@ -45,9 +47,9 @@ fn split_commit(
     files: Vec<String>,
     theme: &graph::Theme,
 ) -> Result<()> {
-    let workdir = repo::require_workdir(repo, "split")?;
-    let commit_oid = repo.revparse_single(commit_hash)?.peel_to_commit()?.id();
-    let commit = repo.find_commit(commit_oid)?;
+    let workdir = repo::require_workdir(repo, COMMAND)?;
+    let commit = repo.revparse_single(commit_hash)?.peel_to_commit()?;
+    let commit_oid = commit.id();
 
     if commit.parent_count() > 1 {
         bail!("Cannot split a merge commit");
@@ -83,7 +85,6 @@ fn split_commit(
         );
     }
 
-    // File-based split
     let all_files = repo::commit_file_paths(repo, commit_oid)?;
     if all_files.len() < 2 {
         bail!("Cannot split a commit with only one file");
@@ -149,7 +150,60 @@ fn pick_files(files: &[String]) -> Result<Vec<String>> {
     Ok(selected)
 }
 
-/// Perform the actual split operation.
+/// Shared split dispatcher: save staged, run split logic, restore staged, print success.
+///
+/// `do_split` receives `is_head: bool` and returns `(hash1, hash2)`.
+fn run_split(
+    repo: &Repository,
+    workdir: &std::path::Path,
+    commit_oid: Oid,
+    do_split: impl FnOnce(bool) -> Result<(String, String)>,
+) -> Result<()> {
+    let is_head = repo::head_oid(repo)? == commit_oid;
+    let oid_str = commit_oid.to_string();
+    let short_hash = git::short_hash(&oid_str);
+    // Save pre-existing staged changes so reset --mixed doesn't discard them.
+    // (For non-HEAD splits, the rebase autostash handles this, but saving
+    // here is harmless — it will be empty.)
+    let saved_staged = staging::save_and_unstage_staged(repo, workdir)?;
+    let split_result = do_split(is_head);
+    // Restore pre-existing staged changes regardless of outcome.
+    git::restore_staged_patch(workdir, &saved_staged)?;
+    let (h1, h2) = split_result?;
+    msg::success(&format!(
+        "Split `{}` into `{}` and `{}`",
+        short_hash,
+        git::short_hash(&h1),
+        git::short_hash(&h2)
+    ));
+    Ok(())
+}
+
+/// Wrap a head-split closure in an edit-and-continue rebase for non-HEAD commits.
+///
+/// Aborts the rebase automatically on error — split does not save LoomState.
+fn perform_non_head_with(
+    repo: &Repository,
+    workdir: &std::path::Path,
+    commit_oid: Oid,
+    do_head_split: impl FnOnce() -> Result<(String, String)>,
+) -> Result<(String, String)> {
+    weave::start_edit_rebase(repo, workdir, commit_oid)?;
+    let result = match do_head_split() {
+        Ok(hashes) => hashes,
+        Err(e) => {
+            let _ = git::rebase_abort(workdir);
+            return Err(e);
+        }
+    };
+    // Continue the rebase — later commits are replayed on top of the split
+    // commits, so hash1 and hash2 remain valid (they are ancestors).
+    // Abort automatically on conflict — split does not save LoomState.
+    git::continue_rebase_or_abort(workdir)?;
+    Ok(result)
+}
+
+/// Perform the file-based split operation.
 fn perform_split(
     repo: &Repository,
     workdir: &std::path::Path,
@@ -159,34 +213,15 @@ fn perform_split(
     msg1: Option<&str>,
     msg2: &str,
 ) -> Result<()> {
-    let head_oid = repo::head_oid(repo)?;
-    let is_head = head_oid == commit_oid;
-    let oid_str = commit_oid.to_string();
-    let short_hash = git::short_hash(&oid_str);
-
-    // Save pre-existing staged changes so reset --mixed doesn't discard them.
-    // (For non-HEAD splits, the rebase autostash handles this, but saving
-    // here is harmless — it will be empty.)
-    let saved_staged = staging::save_and_unstage_staged(repo, workdir)?;
-
-    let split_result = if is_head {
-        perform_head_split(workdir, selected, remaining, msg1, msg2)
-    } else {
-        perform_non_head_split(repo, workdir, commit_oid, selected, remaining, msg1, msg2)
-    };
-
-    // Restore pre-existing staged changes regardless of outcome.
-    git::restore_staged_patch(workdir, &saved_staged)?;
-
-    let (new_hash1, new_hash2) = split_result?;
-
-    msg::success(&format!(
-        "Split `{}` into `{}` and `{}`",
-        short_hash,
-        git::short_hash(&new_hash1),
-        git::short_hash(&new_hash2)
-    ));
-    Ok(())
+    run_split(repo, workdir, commit_oid, |is_head| {
+        if is_head {
+            perform_head_split(workdir, selected, remaining, msg1, msg2)
+        } else {
+            perform_non_head_with(repo, workdir, commit_oid, || {
+                perform_head_split(workdir, selected, remaining, msg1, msg2)
+            })
+        }
+    })
 }
 
 /// Split HEAD commit (no rebase needed).
@@ -213,49 +248,8 @@ fn perform_head_split(
     git::stage_files(workdir, &remaining_refs)?;
     git::commit(workdir, msg2)?;
 
-    // HEAD is the second commit, HEAD~1 is the first
     let hash2 = git::rev_parse(workdir, "HEAD")?;
     let hash1 = git::rev_parse(workdir, "HEAD~1")?;
-
-    Ok((hash1, hash2))
-}
-
-/// Split a non-HEAD commit using edit-and-continue rebase.
-///
-/// ```text
-/// Weave::from_repo → edit_commit(oid) → run_rebase (pauses)
-/// → reset_mixed(HEAD~1) → stage selected → commit(msg1)
-/// → stage remaining → commit(msg2)
-/// → continue_rebase
-/// ```
-///
-/// Returns `(hash1, hash2)` — the two new commit hashes.
-fn perform_non_head_split(
-    repo: &Repository,
-    workdir: &std::path::Path,
-    commit_oid: Oid,
-    selected: &[String],
-    remaining: &[String],
-    msg1: Option<&str>,
-    msg2: &str,
-) -> Result<(String, String)> {
-    // Start edit rebase
-    weave::start_edit_rebase(repo, workdir, commit_oid)?;
-
-    // Now paused at the target commit — split it (same as HEAD split since
-    // the rebase has made the target commit HEAD).
-    let (hash1, hash2) = match perform_head_split(workdir, selected, remaining, msg1, msg2) {
-        Ok(hashes) => hashes,
-        Err(e) => {
-            let _ = git::rebase_abort(workdir);
-            return Err(e);
-        }
-    };
-
-    // Continue the rebase — later commits are replayed on top of the split
-    // commits, so hash1 and hash2 remain valid (they are ancestors).
-    // Abort automatically on conflict — split does not save LoomState.
-    git::continue_rebase_or_abort(workdir)?;
 
     Ok((hash1, hash2))
 }
@@ -269,30 +263,15 @@ fn perform_split_by_hunks(
     msg1: Option<&str>,
     msg2: &str,
 ) -> Result<()> {
-    let head_oid = repo::head_oid(repo)?;
-    let is_head = head_oid == commit_oid;
-    let oid_str = commit_oid.to_string();
-    let short_hash = git::short_hash(&oid_str);
-
-    let saved_staged = staging::save_and_unstage_staged(repo, workdir)?;
-
-    let split_result = if is_head {
-        perform_head_split_by_hunks(workdir, selections, msg1, msg2)
-    } else {
-        perform_non_head_split_by_hunks(repo, workdir, commit_oid, selections, msg1, msg2)
-    };
-
-    git::restore_staged_patch(workdir, &saved_staged)?;
-
-    let (new_hash1, new_hash2) = split_result?;
-
-    msg::success(&format!(
-        "Split `{}` into `{}` and `{}`",
-        short_hash,
-        git::short_hash(&new_hash1),
-        git::short_hash(&new_hash2)
-    ));
-    Ok(())
+    run_split(repo, workdir, commit_oid, |is_head| {
+        if is_head {
+            perform_head_split_by_hunks(workdir, selections, msg1, msg2)
+        } else {
+            perform_non_head_with(repo, workdir, commit_oid, || {
+                perform_head_split_by_hunks(workdir, selections, msg1, msg2)
+            })
+        }
+    })
 }
 
 /// HEAD hunk-based split.
@@ -308,7 +287,6 @@ fn perform_head_split_by_hunks(
 ) -> Result<(String, String)> {
     git::reset_mixed(workdir, "HEAD~1")?;
 
-    // Stage selected hunks for the first commit.
     let mut selected_patch = String::new();
     for file in selections {
         let selected: Vec<_> = file
@@ -332,7 +310,6 @@ fn perform_head_split_by_hunks(
 
     commit_or_editor(workdir, msg1)?;
 
-    // Stage remaining changes for the second commit.
     for file in selections {
         if file.hunks.iter().any(|h| !h.selected) {
             git::stage_path(workdir, &file.path)?;
@@ -342,29 +319,6 @@ fn perform_head_split_by_hunks(
 
     let hash2 = git::rev_parse(workdir, "HEAD")?;
     let hash1 = git::rev_parse(workdir, "HEAD~1")?;
-    Ok((hash1, hash2))
-}
-
-/// Non-HEAD hunk-based split using edit-and-continue rebase.
-fn perform_non_head_split_by_hunks(
-    repo: &Repository,
-    workdir: &std::path::Path,
-    commit_oid: Oid,
-    selections: &[FileEntry],
-    msg1: Option<&str>,
-    msg2: &str,
-) -> Result<(String, String)> {
-    weave::start_edit_rebase(repo, workdir, commit_oid)?;
-
-    let (hash1, hash2) = match perform_head_split_by_hunks(workdir, selections, msg1, msg2) {
-        Ok(hashes) => hashes,
-        Err(e) => {
-            let _ = git::rebase_abort(workdir);
-            return Err(e);
-        }
-    };
-
-    git::continue_rebase_or_abort(workdir)?;
     Ok((hash1, hash2))
 }
 
