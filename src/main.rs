@@ -457,10 +457,7 @@ fn main() {
     trace::finalize();
 
     if let Err(e) = result {
-        msg::error(&format!(
-            "{}\nRun `loom trace` to see the full command log.",
-            e
-        ));
+        msg::error(&e.to_string());
         std::process::exit(1);
     }
 }
