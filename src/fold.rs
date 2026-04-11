@@ -273,23 +273,22 @@ fn run_patch_fold(repo: &Repository, args: &[String], theme: &graph::Theme) -> R
         }
     }
 
-    // Resolve target commit.
     let resolved = repo::resolve_arg(repo, target_arg, &[TargetKind::Commit])?;
     let commit_hash = match resolved {
         Target::Commit(hash) => hash,
         _ => unreachable!(),
     };
 
-    // Open the hunk picker (filtered to source_args if provided, else all changes).
     let confirmed = staging::run_hunk_picker(repo, workdir, source_args, theme)?;
     if !confirmed {
         msg::error("Fold cancelled");
         return Ok(());
     }
 
-    // Fold whatever is now staged into the target commit.
-    repo::verify_has_staged_changes(repo)?;
     let staged = repo::get_staged_files(repo)?;
+    if staged.is_empty() {
+        bail!("Nothing to commit");
+    }
     fold_files_into_commit(repo, &staged, &commit_hash, true)
 }
 
@@ -420,7 +419,7 @@ fn run_patch_fold_commit_to_commit(
     let phase2_target_oid = git2::Oid::from_str(&phase2_target_hash)?;
 
     // Re-open repo after phase 1 rebase (OIDs changed)
-    let repo2 = Repository::discover(workdir)?;
+    let repo2 = Repository::open(workdir)?;
     let mut graph2 = Weave::from_repo(&repo2)?;
     graph2.edit_commit(phase2_target_oid);
     let todo2 = graph2.to_todo();
@@ -573,9 +572,10 @@ fn run_staged(repo: &Repository, target_arg: &str) -> Result<()> {
         _ => unreachable!(),
     };
 
-    repo::verify_has_staged_changes(repo)?;
-
     let staged = repo::get_staged_files(repo)?;
+    if staged.is_empty() {
+        bail!("Nothing to commit");
+    }
     fold_files_into_commit(repo, &staged, &commit_hash, true)
 }
 
@@ -761,7 +761,6 @@ fn fold_files_into_commit(
 ) -> Result<()> {
     let workdir = repo::require_workdir(repo, COMMAND)?;
 
-    // Validate all files have changes
     if !skip_staging {
         for file in files {
             if !repo::path_has_changes(repo, file)? {
@@ -778,19 +777,7 @@ fn fold_files_into_commit(
 
     // Save and unstage any pre-existing staged files not in our target list,
     // so they don't accidentally end up in this commit/amend.
-    let staged = repo::get_staged_files(repo)?;
-    let other_staged: Vec<&str> = staged
-        .iter()
-        .filter(|f| !file_refs.contains(&f.as_str()))
-        .map(|s| s.as_str())
-        .collect();
-    let saved_staged = if other_staged.is_empty() {
-        String::new()
-    } else {
-        let patch = git::diff_cached_files(workdir, &other_staged)?;
-        git::unstage_files(workdir, &other_staged)?;
-        patch
-    };
+    let saved_staged = staging::save_and_unstage_other_staged(repo, workdir, &file_refs)?;
 
     let new_hash;
 
@@ -831,7 +818,7 @@ fn fold_files_into_commit(
         let fixup_oid = git2::Oid::from_str(&fixup_hash)?;
 
         // Re-open repo after creating the fixup commit (OIDs changed)
-        let repo2 = Repository::discover(workdir)?;
+        let repo2 = Repository::open(workdir)?;
         let mut graph = Weave::from_repo(&repo2)?;
         graph.fixup_commit(fixup_oid, target_oid)?;
 
@@ -841,7 +828,6 @@ fn fold_files_into_commit(
         git::branch_force_create(workdir, TRACK_BRANCH, commit_hash)?;
         graph.track_commit(target_oid, TRACK_BRANCH);
 
-        // Save LoomState before the rebase.
         let git_dir = repo.path().to_path_buf();
         let fold_ctx = serde_json::to_value(FoldVariant::FilesIntoCommit {
             original_commit_hash: commit_hash.to_string(),
@@ -908,7 +894,6 @@ fn fold_commit_into_commit(repo: &Repository, source_hash: &str, target_hash: &s
     git::branch_force_create(workdir, TRACK_BRANCH, target_hash)?;
     graph.track_commit(target_oid, TRACK_BRANCH);
 
-    // Save LoomState before the rebase.
     let git_dir = repo.path().to_path_buf();
     let fold_ctx = serde_json::to_value(FoldVariant::CommitIntoCommit {
         source_hash: source_hash.to_string(),
@@ -1198,7 +1183,7 @@ fn fold_commit_file_to_commit(
         let phase2_target_oid = git2::Oid::from_str(&phase2_target_hash)?;
 
         // Re-open repo after phase 1 rebase (OIDs changed)
-        let repo2 = Repository::discover(workdir)?;
+        let repo2 = Repository::open(workdir)?;
         let mut graph2 = Weave::from_repo(&repo2)?;
         graph2.edit_commit(phase2_target_oid);
 
@@ -1303,7 +1288,6 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
         let mut graph = Weave::from_repo(repo)?;
         graph.drop_commit(target_oid);
 
-        // Save LoomState before the rebase.
         let git_dir = repo.path().to_path_buf();
         let fold_ctx = serde_json::to_value(FoldVariant::CommitToUnstaged {
             commit_hash: commit_hash.to_string(),
