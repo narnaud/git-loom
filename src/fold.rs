@@ -281,8 +281,7 @@ fn run_patch_fold(repo: &Repository, args: &[String], theme: &graph::Theme) -> R
 
     let confirmed = staging::run_hunk_picker(repo, workdir, source_args, theme)?;
     if !confirmed {
-        msg::error("Fold cancelled");
-        return Ok(());
+        bail!("Cancelled");
     }
 
     let staged = repo::get_staged_files(repo)?;

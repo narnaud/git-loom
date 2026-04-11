@@ -711,7 +711,7 @@ fn push_gerrit_no_pr(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
         ));
         Ok(())
     } else {
-        bail!("Push cancelled")
+        bail!("Cancelled")
     }
 }
 
@@ -736,7 +736,7 @@ fn push_gerrit(workdir: &Path, remote: &str, branch: &str, target_branch: &str) 
     loom_trace::log_command("git", &cmd, duration_ms, output.status.success(), &stderr);
 
     if !output.status.success() {
-        bail!("Git {} failed", cmd);
+        bail!("git push failed");
     }
 
     let mut message = format!(

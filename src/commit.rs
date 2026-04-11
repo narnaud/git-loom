@@ -199,7 +199,7 @@ fn resolve_staging_patch(
     let confirmed = staging::run_hunk_picker(repo, workdir, files, theme)?;
     if !confirmed {
         git::restore_staged_patch(workdir, &saved_staged)?;
-        anyhow::bail!("Commit cancelled");
+        anyhow::bail!("Cancelled");
     }
 
     Ok(saved_staged)

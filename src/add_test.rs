@@ -180,7 +180,13 @@ fn add_patch_flag_placeholder() {
 
     let result = test_repo.in_dir(|| super::run(vec![], true, &theme));
 
-    assert!(result.is_ok(), "add -p should not crash: {:?}", result);
+    // In a headless environment the picker auto-cancels, so we expect either
+    // Ok(()) or the "Cancelled" error — not a panic or unexpected error.
+    match &result {
+        Ok(()) => {}
+        Err(e) if e.to_string() == "Cancelled" => {}
+        Err(e) => panic!("add -p should not crash: {e:?}"),
+    }
 }
 
 /// Untracked files in subdirectories should appear in collect_file_entries.

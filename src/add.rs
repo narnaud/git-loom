@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 
 use crate::core::repo::{self, Target, TargetKind};
 use crate::core::staging;
@@ -45,7 +45,7 @@ fn run_patch(files: Vec<String>, theme: &graph::Theme) -> Result<()> {
 
     let confirmed = staging::run_hunk_picker(&repo, &workdir, &files, theme)?;
     if !confirmed {
-        msg::error("Operation was canceled by the user");
+        bail!("Cancelled");
     }
     Ok(())
 }
