@@ -55,7 +55,7 @@ fn run_git_captured(workdir: &Path, args: &[&str]) -> Result<std::process::Outpu
     loom_trace::log_command("git", &cmd, duration_ms, output.status.success(), &stderr);
 
     if !output.status.success() {
-        bail!("Git {} failed", cmd);
+        bail!("git {} failed", args[0]);
     }
 
     Ok(output)
@@ -127,7 +127,7 @@ pub fn run_git_interactive(workdir: &Path, args: &[&str]) -> Result<()> {
     loom_trace::log_command("git", &cmd, duration_ms, status.success(), "");
 
     if !status.success() {
-        bail!("Git {} failed", cmd);
+        bail!("git {} failed", args[0]);
     }
 
     Ok(())

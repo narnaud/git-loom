@@ -64,8 +64,7 @@ fn apply_patch_with_flags(workdir: &Path, patch: &str, flags: &[&str]) -> Result
     );
 
     if !output.status.success() {
-        let flag = args[1..].join(" ");
-        bail!("Git apply {} failed", flag);
+        bail!("git apply failed");
     }
 
     Ok(())
