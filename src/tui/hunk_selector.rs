@@ -1,8 +1,11 @@
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
+    MouseButton, MouseEventKind,
+};
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Position, Rect},
     style::Modifier,
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
@@ -124,6 +127,9 @@ struct HunkSelectorApp {
     should_quit: bool,
     confirmed: bool,
     scroll_offset: u16,
+    /// Cached layout rects for mouse hit-testing (updated each render).
+    left_pane_area: Rect,
+    right_pane_area: Rect,
 }
 
 // ---------------------------------------------------------------------------
@@ -190,6 +196,8 @@ impl HunkSelectorApp {
             should_quit: false,
             confirmed: false,
             scroll_offset: 0,
+            left_pane_area: Rect::default(),
+            right_pane_area: Rect::default(),
         }
     }
 
@@ -219,6 +227,8 @@ impl HunkSelectorApp {
             .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
             .split(outer[0]);
 
+        self.left_pane_area = panes[0];
+        self.right_pane_area = panes[1];
         self.render_file_list(frame, panes[0]);
         self.render_diff_view(frame, panes[1]);
         self.render_status_bar(frame, outer[1]);
@@ -427,6 +437,85 @@ impl HunkSelectorApp {
         }
     }
 
+    fn handle_mouse(&mut self, kind: MouseEventKind, col: u16, row: u16) {
+        let pos = Position { x: col, y: row };
+
+        if self.left_pane_area.contains(pos) {
+            match kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    // Inner area: subtract 1-row border top.
+                    let inner_top = self.left_pane_area.y + 1;
+                    if row < inner_top {
+                        return;
+                    }
+                    let clicked = (row - inner_top) as usize;
+                    if clicked < self.display_rows.len() {
+                        self.cursor_pos = clicked;
+                        self.hunk_index = 0;
+                        self.scroll_offset = 0;
+                        self.active_pane = Pane::Left;
+                    }
+                }
+                MouseEventKind::ScrollUp => {
+                    if self.cursor_pos > 0 {
+                        self.cursor_pos -= 1;
+                        self.hunk_index = 0;
+                        self.scroll_offset = 0;
+                    }
+                }
+                MouseEventKind::ScrollDown => {
+                    if self.cursor_pos + 1 < self.display_rows.len() {
+                        self.cursor_pos += 1;
+                        self.hunk_index = 0;
+                        self.scroll_offset = 0;
+                    }
+                }
+                _ => {}
+            }
+        } else if self.right_pane_area.contains(pos) {
+            match kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    self.active_pane = Pane::Right;
+                    let file_idx = match self.current_file_index() {
+                        Some(i) => i,
+                        None => return,
+                    };
+                    // Inner area: subtract 1-row border top, then account for scroll.
+                    let inner_top = self.right_pane_area.y + 1;
+                    if row < inner_top {
+                        return;
+                    }
+                    let clicked_line = (row - inner_top) as u16 + self.scroll_offset;
+                    // Walk hunks to find which one was clicked.
+                    let file = &self.files[file_idx];
+                    let total = file.hunks.len();
+                    let mut line: u16 = 0;
+                    for (i, entry) in file.hunks.iter().enumerate() {
+                        let hunk_lines = 1 + entry.hunk.text.lines().count() as u16;
+                        let separator = if i + 1 < total { 1 } else { 0 };
+                        if clicked_line < line + hunk_lines {
+                            // Clicked inside this hunk — toggle if on header row.
+                            self.hunk_index = i;
+                            if clicked_line == line {
+                                let h = &mut self.files[file_idx].hunks[i];
+                                h.selected = !h.selected;
+                            }
+                            return;
+                        }
+                        line += hunk_lines + separator;
+                    }
+                }
+                MouseEventKind::ScrollUp => {
+                    self.scroll_offset = self.scroll_offset.saturating_sub(3);
+                }
+                MouseEventKind::ScrollDown => {
+                    self.scroll_offset += 3;
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn navigate_up(&mut self) {
         if self.display_rows.is_empty() {
             return;
@@ -585,11 +674,13 @@ pub fn run_hunk_selector(files: Vec<FileEntry>, theme: TuiTheme) -> Result<Optio
     }
 
     let mut terminal = ratatui::init();
+    crossterm::execute!(std::io::stdout(), EnableMouseCapture)?;
 
     // Panic-safe cleanup: install a hook that restores the terminal before the
     // default handler fires.
     let prev_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        let _ = crossterm::execute!(std::io::stdout(), DisableMouseCapture);
         ratatui::restore();
         prev_hook(info);
     }));
@@ -597,6 +688,7 @@ pub fn run_hunk_selector(files: Vec<FileEntry>, theme: TuiTheme) -> Result<Optio
     let result = run_event_loop(&mut terminal, files, theme);
 
     // Restore terminal state on normal exit.
+    crossterm::execute!(std::io::stdout(), DisableMouseCapture)?;
     ratatui::restore();
 
     // Remove our custom panic hook — back to default.
@@ -615,12 +707,18 @@ fn run_event_loop(
     loop {
         terminal.draw(|frame| app.render(frame))?;
 
-        if let Event::Key(key) = event::read()? {
-            // On Windows, crossterm fires both Press and Release. Only handle Press.
-            if key.kind != KeyEventKind::Press {
-                continue;
+        match event::read()? {
+            Event::Key(key) => {
+                // On Windows, crossterm fires both Press and Release. Only handle Press.
+                if key.kind != KeyEventKind::Press {
+                    continue;
+                }
+                app.handle_key(key.code, key.modifiers);
             }
-            app.handle_key(key.code, key.modifiers);
+            Event::Mouse(mouse) => {
+                app.handle_mouse(mouse.kind, mouse.column, mouse.row);
+            }
+            _ => {}
         }
 
         if app.should_quit {
