@@ -5,10 +5,13 @@ use crossterm::event::{
 };
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Position, Rect},
+    layout::{Constraint, Direction, Layout, Margin, Position, Rect},
     style::Modifier,
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{
+        Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
+        ScrollbarState, Wrap,
+    },
 };
 
 use crate::core::diff::DiffHunk;
@@ -302,9 +305,39 @@ impl HunkSelectorApp {
         let mut state = ListState::default();
         state.select(Some(self.cursor_pos));
         frame.render_stateful_widget(list, area, &mut state);
+
+        // Scrollbar — only when the list overflows the visible inner height.
+        let inner = area.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+        let inner_height = inner.height as usize;
+        let total = self.display_rows.len();
+        if total > inner_height {
+            // Ratatui maps thumb to bottom when position = content_length - 1.
+            // Setting content_length = max_pos + 1 makes the max scroll position
+            // land at content_length - 1, and gives thumb_size = track * inner_height
+            // / total_rows (the correct visible fraction).
+            let max_pos = total - inner_height;
+            let mut sb_state = ScrollbarState::new(max_pos + 1)
+                .position(self.cursor_pos.min(max_pos))
+                .viewport_content_length(inner_height);
+            let sb_area = area.inner(Margin {
+                horizontal: 0,
+                vertical: 1,
+            });
+            frame.render_stateful_widget(
+                Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                    .begin_symbol(None)
+                    .end_symbol(None)
+                    .track_symbol(None),
+                sb_area,
+                &mut sb_state,
+            );
+        }
     }
 
-    fn render_diff_view(&self, frame: &mut Frame, area: Rect) {
+    fn render_diff_view(&mut self, frame: &mut Frame, area: Rect) {
         let border_style = if self.active_pane == Pane::Right {
             self.theme.border_active
         } else {
@@ -389,12 +422,64 @@ impl HunkSelectorApp {
             }
         }
 
+        // Two empty lines at the bottom for breathing room.
+        lines.push(Line::from(""));
+        lines.push(Line::from(""));
+
+        let inner = area.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+        let inner_width = inner.width as usize;
+        let inner_height = inner.height as usize;
+
+        // With wrapping enabled, each logical line may span multiple rendered rows.
+        // Compute total rendered rows so the scrollbar reflects actual content height.
+        let total_rows: usize = lines
+            .iter()
+            .map(|line| {
+                let width: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
+                if inner_width == 0 || width == 0 {
+                    1
+                } else {
+                    width.div_ceil(inner_width)
+                }
+            })
+            .sum();
+
+        // Clamp scroll so the last line of content is always at the bottom.
+        let max_scroll = total_rows.saturating_sub(inner_height) as u16;
+        self.scroll_offset = self.scroll_offset.min(max_scroll);
+
         let paragraph = Paragraph::new(lines)
             .block(block)
             .wrap(Wrap { trim: false })
             .scroll((self.scroll_offset, 0));
 
         frame.render_widget(paragraph, area);
+
+        if total_rows > inner_height {
+            // Ratatui maps thumb to bottom when position = content_length - 1.
+            // Setting content_length = max_scroll + 1 makes scroll_offset = max_scroll
+            // land at content_length - 1, and gives thumb_size = track * inner_height
+            // / total_rows (the correct visible fraction).
+            let max_scroll_usize = total_rows - inner_height;
+            let mut sb_state = ScrollbarState::new(max_scroll_usize + 1)
+                .position(self.scroll_offset as usize)
+                .viewport_content_length(inner_height);
+            let sb_area = area.inner(Margin {
+                horizontal: 0,
+                vertical: 1,
+            });
+            frame.render_stateful_widget(
+                Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                    .begin_symbol(None)
+                    .end_symbol(None)
+                    .track_symbol(None),
+                sb_area,
+                &mut sb_state,
+            );
+        }
     }
 
     fn render_status_bar(&self, frame: &mut Frame, area: Rect) {
@@ -485,7 +570,7 @@ impl HunkSelectorApp {
                     if row < inner_top {
                         return;
                     }
-                    let clicked_line = (row - inner_top) as u16 + self.scroll_offset;
+                    let clicked_line = row - inner_top + self.scroll_offset;
                     // Walk hunks to find which one was clicked.
                     let file = &self.files[file_idx];
                     let total = file.hunks.len();
