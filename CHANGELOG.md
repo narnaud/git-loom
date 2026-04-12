@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.18.0](https://github.com/narnaud/git-loom/compare/v0.17.0...v0.18.0) (2026-04-12)
+
+
+### Features ✨
+
+* add commit-based hunk picker for split/fold -p workflows ([bf2f061](https://github.com/narnaud/git-loom/commit/bf2f061e40ad44513b59e9170f7f8fd26216745c))
+* add mouse support to hunk selector TUI ([aabb358](https://github.com/narnaud/git-loom/commit/aabb3584d467611f570e976743cb8a157a1edb17))
+* add scrollbar to file list and diff pane in hunk selector ([500c094](https://github.com/narnaud/git-loom/commit/500c0945c5e61de192551b03056b45dca10196ac))
+* implement fold -p &lt;c1&gt; &lt;c2&gt; and fold -p &lt;c&gt; zz ([3bc9286](https://github.com/narnaud/git-loom/commit/3bc9286b33cea80a7919fe9a9ac89c0d7e76f046))
+* implement split -p for hunk-level commit splitting ([eb0e0c3](https://github.com/narnaud/git-loom/commit/eb0e0c34c52df3f3d41c3f71aa6823cfaee69bc2))
+
+
+### Bug Fixes 🐞
+
+* fold -p &lt;commit&gt; was folding whole file instead of selected hunks ([fa557e5](https://github.com/narnaud/git-loom/commit/fa557e5ceaf2633fa600b072355e9253f1ef48de))
+* remove trace hint in error ([29106ad](https://github.com/narnaud/git-loom/commit/29106ad6c355723f27a0aa76dead6dc100207588))
+
+
+### Documentation
+
+* add hunk selection guide and update add command docs ([d364255](https://github.com/narnaud/git-loom/commit/d3642552ecd06ebc4b11148ec174c88acc746d5d))
+* update fold and split specs to document hunk-level -p mode ([81b2473](https://github.com/narnaud/git-loom/commit/81b24737c91dfb91c20a2abda69bf4b07a7274f6))
+
+
+### Changes
+
+* simplify absorb.rs ([ae49eae](https://github.com/narnaud/git-loom/commit/ae49eae751e35a524f1c69498307028fb9b44171))
+* simplify commit.rs, consolidate shared helpers ([e984957](https://github.com/narnaud/git-loom/commit/e98495778796d3ecf1cd2006d835945983779fdf))
+* simplify drop.rs, use confirm_or_bail helper and commit_subject ([bbd67c4](https://github.com/narnaud/git-loom/commit/bbd67c40398c5875fec720f2b819bc0dc0911342))
+* simplify fold/split/staging code ([db70a1d](https://github.com/narnaud/git-loom/commit/db70a1d422d2c6b1e591aea5c72c669a01621171))
+* simplify push.rs, merge find_remote calls, consolidate push message ([adac68a](https://github.com/narnaud/git-loom/commit/adac68aa7eb950eae7885fa6e0779b2cb76c3190))
+* simplify split.rs ([26870f7](https://github.com/narnaud/git-loom/commit/26870f7bd08bcf46d87ac289ca9a883910a111eb))
+* small cleanup on fold ([da21973](https://github.com/narnaud/git-loom/commit/da219738b3a12df736b2c07285430a38f8c91404))
+
+
+### Other
+
+* add consistency in the cancellation and error messages ([c055984](https://github.com/narnaud/git-loom/commit/c055984514a0b2862fb08b36c7b93063ce6325dd))
+
 ## [0.17.0](https://github.com/narnaud/git-loom/compare/v0.16.1...v0.17.0) (2026-03-29)
 
 
