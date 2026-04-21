@@ -541,19 +541,15 @@ impl HunkSelectorApp {
                         self.active_pane = Pane::Left;
                     }
                 }
-                MouseEventKind::ScrollUp => {
-                    if self.cursor_pos > 0 {
-                        self.cursor_pos -= 1;
-                        self.hunk_index = 0;
-                        self.scroll_offset = 0;
-                    }
+                MouseEventKind::ScrollUp if self.cursor_pos > 0 => {
+                    self.cursor_pos -= 1;
+                    self.hunk_index = 0;
+                    self.scroll_offset = 0;
                 }
-                MouseEventKind::ScrollDown => {
-                    if self.cursor_pos + 1 < self.display_rows.len() {
-                        self.cursor_pos += 1;
-                        self.hunk_index = 0;
-                        self.scroll_offset = 0;
-                    }
+                MouseEventKind::ScrollDown if self.cursor_pos + 1 < self.display_rows.len() => {
+                    self.cursor_pos += 1;
+                    self.hunk_index = 0;
+                    self.scroll_offset = 0;
                 }
                 _ => {}
             }
