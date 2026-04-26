@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.18.1](https://github.com/narnaud/git-loom/compare/v0.18.0...v0.18.1) (2026-04-26)
+
+
+### Bug Fixes 🐞
+
+* fix clippy warnings ([bfb02f7](https://github.com/narnaud/git-loom/commit/bfb02f7359caf85ee147db95a7c5489e5264b27e))
+
+
+### Other
+
+* **deps:** bump actions/upload-pages-artifact from 4 to 5 ([d23c35f](https://github.com/narnaud/git-loom/commit/d23c35f3b519d88207ad4431c46ae5d0fe2012db))
+* **deps:** bump clap from 4.6.0 to 4.6.1 ([02fc950](https://github.com/narnaud/git-loom/commit/02fc950c2864f00537b5d0673230dabd626998d4))
+* **deps:** bump googleapis/release-please-action from 4 to 5 ([6adf5d4](https://github.com/narnaud/git-loom/commit/6adf5d450721016ca8e9f9af34aa4fd40dbf7010))
+* **deps:** bump softprops/action-gh-release from 2 to 3 ([5dfe9ea](https://github.com/narnaud/git-loom/commit/5dfe9eaf01e7b613ccd9ae5088875bc5838c1b58))
+
 ## [0.18.0](https://github.com/narnaud/git-loom/compare/v0.17.0...v0.18.0) (2026-04-12)
 
 
