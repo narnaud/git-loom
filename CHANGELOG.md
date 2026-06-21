@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.19.0](https://github.com/narnaud/git-loom/compare/v0.18.0...v0.19.0) (2026-06-21)
+
+
+### Features ✨
+
+* **diff:** add --staged and --all flags to match git diff ([67097fb](https://github.com/narnaud/git-loom/commit/67097fba60b7567c2e75ed768907c67ef91a16fd))
+
+
+### Bug Fixes 🐞
+
+* fix clippy warnings ([bfb02f7](https://github.com/narnaud/git-loom/commit/bfb02f7359caf85ee147db95a7c5489e5264b27e))
+
+
+### Other
+
+* **deps:** bump actions/upload-pages-artifact from 4 to 5 ([d23c35f](https://github.com/narnaud/git-loom/commit/d23c35f3b519d88207ad4431c46ae5d0fe2012db))
+* **deps:** bump chrono from 0.4.44 to 0.4.45 ([49aad54](https://github.com/narnaud/git-loom/commit/49aad54a702e90991f0f45375e8249496329d6d2))
+* **deps:** bump clap from 4.6.0 to 4.6.1 ([02fc950](https://github.com/narnaud/git-loom/commit/02fc950c2864f00537b5d0673230dabd626998d4))
+* **deps:** bump googleapis/release-please-action from 4 to 5 ([6adf5d4](https://github.com/narnaud/git-loom/commit/6adf5d450721016ca8e9f9af34aa4fd40dbf7010))
+* **deps:** bump ratatui from 0.30.0 to 0.30.1 ([be4f4e9](https://github.com/narnaud/git-loom/commit/be4f4e93cdbb9ef7a43b2c03126f4a64d930016b))
+* **deps:** bump serde_json from 1.0.149 to 1.0.150 ([de53f89](https://github.com/narnaud/git-loom/commit/de53f89956917d1d16d08a52cf2bbdd3cc0f2ed1))
+* **deps:** bump softprops/action-gh-release from 2 to 3 ([5dfe9ea](https://github.com/narnaud/git-loom/commit/5dfe9eaf01e7b613ccd9ae5088875bc5838c1b58))
+
 ## [0.18.0](https://github.com/narnaud/git-loom/compare/v0.17.0...v0.18.0) (2026-04-12)
 
 
