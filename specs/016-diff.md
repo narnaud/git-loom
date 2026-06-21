@@ -31,7 +31,7 @@ other loom command.
 ## CLI
 
 ```bash
-git-loom diff [args...]
+git-loom diff [args...] [--staged] [--all]
 ```
 
 **Alias:** `di`
@@ -46,12 +46,26 @@ git-loom diff [args...]
 
   Tokens can be mixed freely (e.g. a commit and a file in the same invocation).
 
+**Options:**
+
+- `--staged` (alias `--cached`): Show staged changes (index vs `HEAD`) instead
+  of unstaged changes.
+- `-a`, `--all`: Show all changes, staged and unstaged combined (working tree
+  vs `HEAD`).
+
+`--staged` and `--all` are mutually exclusive. With neither flag, the command
+shows unstaged changes only, exactly like `git diff`.
+
 ## What Happens
 
 ### When No Arguments Are Given
 
 `git diff` is invoked with no additional arguments, showing the diff between
 the working tree and the index (unstaged changes), exactly as `git diff` does.
+
+With `--staged`, `git diff --staged` is invoked instead, showing staged
+changes (index vs `HEAD`). With `--all`, `git diff HEAD` is invoked, showing
+both staged and unstaged changes in one view.
 
 **What changes:** nothing — this is a read-only inspection command.
 
@@ -70,9 +84,11 @@ given commit and the working tree, including both staged and unstaged changes.
 ### When a File Is Given
 
 The token is resolved to a repository-relative file path (via short ID lookup
-or direct path lookup) and passed to `git diff HEAD -- <path>`. This shows all
-changes to that file since `HEAD`, meaning both staged and unstaged changes are
-included in a single view.
+or direct path lookup) and passed to `git diff -- <path>`, showing unstaged
+changes to that file. The `--staged` and `--all` flags apply the same way as
+with no arguments: `--staged` shows staged changes
+(`git diff --staged -- <path>`) and `--all` shows both
+(`git diff HEAD -- <path>`).
 
 **What changes:** nothing.
 
@@ -138,6 +154,20 @@ git-loom diff
 # Equivalent to: git diff
 ```
 
+### Show staged changes
+
+```
+git-loom diff --staged
+# Equivalent to: git diff --staged
+```
+
+### Show all changes (staged and unstaged)
+
+```
+git-loom diff --all
+# Equivalent to: git diff HEAD
+```
+
 ### Diff a single commit by short ID
 
 ```
@@ -155,7 +185,7 @@ git-loom status
 # M  ma  src/auth/login.rs
 
 git-loom diff ma
-# Shows all changes to src/auth/login.rs since HEAD (staged + unstaged)
+# Shows unstaged changes to src/auth/login.rs
 ```
 
 ### Diff a commit range using short IDs
@@ -202,14 +232,13 @@ intentional: ranges frequently mix short IDs with standard git refs like
 forms. If a token is genuinely invalid, git will report the error with its
 usual diagnostic.
 
-### File diffs always compared against HEAD
+### File diffs compared against the index, HEAD, or working tree
 
-When a file is specified without an explicit commit, the diff is run as
-`git diff HEAD -- <path>`. This shows the total change to the file since the
-last commit, combining staged and unstaged changes into one view. This matches
-the most common intent ("what have I changed in this file?") and avoids
-confusion between `git diff` (unstaged only) and `git diff --cached` (staged
-only).
+When a file is specified without an explicit commit, the comparison base
+follows the same rule as the no-argument case: unstaged changes by default,
+staged changes with `--staged`, and all changes (`git diff HEAD -- <path>`)
+with `--all`. This keeps file diffs consistent with whole-tree diffs and lets
+the user choose precisely which changes to inspect.
 
 ### File before commit in resolution priority
 

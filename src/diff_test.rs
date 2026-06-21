@@ -11,8 +11,28 @@ fn diff_no_args() {
     let test_repo = TestRepo::new();
     test_repo.commit("Initial commit", "file.txt");
 
-    let result = test_repo.in_dir(|| super::run(vec![]));
+    let result = test_repo.in_dir(|| super::run(vec![], false, false));
     assert!(result.is_ok(), "diff with no args should succeed");
+}
+
+#[test]
+fn diff_staged() {
+    no_pager();
+    let test_repo = TestRepo::new();
+    test_repo.commit("Initial commit", "file.txt");
+
+    let result = test_repo.in_dir(|| super::run(vec![], true, false));
+    assert!(result.is_ok(), "diff --staged should succeed");
+}
+
+#[test]
+fn diff_all() {
+    no_pager();
+    let test_repo = TestRepo::new();
+    test_repo.commit("Initial commit", "file.txt");
+
+    let result = test_repo.in_dir(|| super::run(vec![], false, true));
+    assert!(result.is_ok(), "diff --all should succeed");
 }
 
 #[test]
@@ -21,7 +41,7 @@ fn diff_commit_by_hash() {
     let test_repo = TestRepo::new();
     let oid = test_repo.commit("Test commit", "file.txt");
 
-    let result = test_repo.in_dir(|| super::run(vec![oid.to_string()]));
+    let result = test_repo.in_dir(|| super::run(vec![oid.to_string()], false, false));
     assert!(result.is_ok(), "diff with commit hash should succeed");
 }
 
@@ -33,7 +53,7 @@ fn diff_commit_range() {
     let oid2 = test_repo.commit("Second commit", "file2.txt");
 
     let range = format!("{}..{}", oid1, oid2);
-    let result = test_repo.in_dir(|| super::run(vec![range]));
+    let result = test_repo.in_dir(|| super::run(vec![range], false, false));
     assert!(result.is_ok(), "diff with commit range should succeed");
 }
 
@@ -41,6 +61,6 @@ fn diff_commit_range() {
 fn diff_invalid_target_fails() {
     let test_repo = TestRepo::new();
 
-    let result = test_repo.in_dir(|| super::run(vec!["nonexistent_xyz".to_string()]));
+    let result = test_repo.in_dir(|| super::run(vec!["nonexistent_xyz".to_string()], false, false));
     assert!(result.is_err(), "diff with invalid target should fail");
 }
