@@ -4,15 +4,19 @@ use crate::core::repo::{self, Target, TargetKind};
 use crate::git;
 
 /// Show a diff using short IDs (like `git diff`).
-pub fn run(args: Vec<String>) -> Result<()> {
+///
+/// By default shows unstaged changes (working tree vs index), like `git diff`.
+/// `--staged` shows staged changes (index vs HEAD); `--all` shows everything
+/// (working tree vs HEAD).
+pub fn run(args: Vec<String>, staged: bool, all: bool) -> Result<()> {
     let repo = repo::open_repo()?;
     let workdir = repo::require_workdir(&repo, "diff")?;
 
-    if args.is_empty() {
-        return git::run_git_interactive(workdir, &["diff"]);
+    let mut git_args: Vec<String> = vec!["diff".to_string()];
+    if staged {
+        git_args.push("--staged".to_string());
     }
 
-    let mut git_args: Vec<String> = vec!["diff".to_string()];
     let mut file_paths: Vec<String> = Vec::new();
     let mut has_commits = false;
 
@@ -37,11 +41,13 @@ pub fn run(args: Vec<String>) -> Result<()> {
         }
     }
 
-    // File diffs are always shown against HEAD so staged changes are included.
+    // With `--all` and no explicit commit, diff the working tree against HEAD so
+    // both staged and unstaged changes are shown in a single view.
+    if all && !has_commits {
+        git_args.push("HEAD".to_string());
+    }
+
     if !file_paths.is_empty() {
-        if !has_commits {
-            git_args.push("HEAD".to_string());
-        }
         git_args.push("--".to_string());
         git_args.extend(file_paths);
     }

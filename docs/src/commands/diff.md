@@ -5,7 +5,7 @@ Show a diff using short IDs, like `git diff`.
 ## Usage
 
 ```
-git loom diff [args...]
+git loom diff [args...] [--staged] [--all]
 ```
 
 Alias: `di`
@@ -18,11 +18,20 @@ Each argument is a file, commit, or commit range. Arguments can be mixed freely 
 |----------|-------------|
 | `[args...]` | Files (short ID or path), commits (short ID, hash), or ranges (`left..right`) |
 
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--staged` (alias `--cached`) | Show staged changes (index vs `HEAD`) |
+| `-a`, `--all` | Show all changes, staged and unstaged combined (working tree vs `HEAD`) |
+
+`--staged` and `--all` are mutually exclusive. With neither flag, only unstaged changes are shown, exactly like `git diff`.
+
 ## What It Does
 
 ### When No Arguments Are Given
 
-Shows unstaged changes in the working tree — identical to `git diff` with no arguments.
+Shows unstaged changes in the working tree — identical to `git diff` with no arguments. Use `--staged` to show staged changes instead, or `--all` to show both.
 
 ### When a Commit Is Given
 
@@ -30,7 +39,7 @@ Resolves the token to a full hash and passes it to `git diff`, showing the diff 
 
 ### When a File Is Given
 
-Resolves the token to a file path and runs `git diff HEAD -- <path>`, showing all changes to that file since `HEAD` (staged and unstaged combined).
+Resolves the token to a file path and runs `git diff -- <path>`, showing unstaged changes to that file. With `--staged` the staged changes are shown (`git diff --staged -- <path>`); with `--all` both are shown (`git diff HEAD -- <path>`).
 
 ### When a Commit Range Is Given
 
@@ -64,6 +73,20 @@ git loom diff
 # Equivalent to: git diff
 ```
 
+### Show staged changes
+
+```bash
+git loom diff --staged
+# Equivalent to: git diff --staged
+```
+
+### Show all changes, staged and unstaged
+
+```bash
+git loom diff --all
+# Equivalent to: git diff HEAD
+```
+
 ### Diff a commit by short ID
 
 ```bash
@@ -75,7 +98,7 @@ git loom diff ab
 
 ```bash
 git loom diff ma
-# Shows all changes to the file with short ID "ma" since HEAD
+# Shows unstaged changes to the file with short ID "ma"
 ```
 
 ### Diff a commit range

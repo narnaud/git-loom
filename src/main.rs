@@ -260,6 +260,12 @@ enum Command {
     Diff {
         /// Files, commits, or commit ranges (short IDs supported, e.g. `ma`, `d0`, `d0..3a`)
         args: Vec<String>,
+        /// Show staged changes (index vs HEAD)
+        #[arg(long = "staged", visible_alias = "cached", conflicts_with = "all")]
+        staged: bool,
+        /// Show all changes, both staged and unstaged (working tree vs HEAD)
+        #[arg(short = 'a', long = "all")]
+        all: bool,
     },
     /// Show the latest command trace
     Trace,
@@ -431,7 +437,7 @@ fn main() {
         Some(Command::Drop { target, yes }) => drop::run(target, yes),
         Some(Command::Absorb { dry_run, files }) => absorb::run(dry_run, files),
         Some(Command::Show { target }) => show::run(target),
-        Some(Command::Diff { args }) => diff::run(args),
+        Some(Command::Diff { args, staged, all }) => diff::run(args, staged, all),
         Some(Command::Split {
             target,
             message,
