@@ -134,28 +134,36 @@ pub fn run(create: bool, patch: bool, args: Vec<String>, theme: &graph::Theme) -
     }
 }
 
-/// Create a new branch and move the source commit into it.
+/// Create a new branch and move the source commit(s) into it.
 ///
-/// `args` must be exactly `[<commit>, <new-branch-name>]`.
-/// The branch is created at the merge-base, then the commit is moved to it
-/// using the same Weave machinery as the normal commit-to-branch fold.
+/// `args` must be `[<commit>..., <new-branch-name>]` — one or more commits
+/// followed by the new branch name. The branch is created at the merge-base,
+/// then the commits are moved to it using the same Weave machinery as the
+/// normal commit-to-branch fold.
 fn run_create(repo: &Repository, args: &[String]) -> Result<()> {
-    if args.len() != 2 {
+    if args.len() < 2 {
         bail!(
-            "fold --create requires exactly one commit and one new branch name\n\
-             Usage: loom fold -c <commit> <new-branch>"
+            "fold --create requires at least one commit and one new branch name\n\
+             Usage: loom fold -c <commit>... <new-branch>"
         );
     }
 
-    let (source_arg, branch_name) = (&args[0], &args[1]);
+    let (source_args, branch_name) = args.split_at(args.len() - 1);
+    let branch_name = &branch_name[0];
     let workdir = repo::require_workdir(repo, COMMAND)?;
 
-    // Resolve source — must be a commit
-    let source = repo::resolve_arg(repo, source_arg, &[TargetKind::Commit])?;
-    let commit_hash = match source {
-        Target::Commit(hash) => hash,
-        _ => unreachable!(),
-    };
+    // Resolve sources — all must be commits
+    let mut commit_hashes = Vec::new();
+    for source_arg in source_args {
+        let source = repo::resolve_arg(repo, source_arg, &[TargetKind::Commit])?;
+        match source {
+            Target::Commit(hash) => commit_hashes.push(hash),
+            _ => unreachable!(),
+        }
+    }
+
+    // Order oldest-first so the commits land on the branch in history order.
+    let commit_hashes = sort_commits_oldest_first(repo, commit_hashes)?;
 
     git::branch_validate_name(branch_name)?;
 
@@ -165,14 +173,18 @@ fn run_create(repo: &Repository, args: &[String]) -> Result<()> {
         .is_ok();
     if branch_exists {
         msg::warn(&format!(
-            "Branch `{}` already exists — moving commit to it",
+            "Branch `{}` already exists — moving commit(s) to it",
             branch_name
         ));
-        return fold_commit_to_branch(repo, &commit_hash, branch_name);
+        // A single commit keeps the resumable commit-to-branch path.
+        if commit_hashes.len() == 1 {
+            return fold_commit_to_branch(repo, &commit_hashes[0], branch_name);
+        }
+        return move_commits_and_report(workdir, repo, &commit_hashes, branch_name, None);
     }
 
     // Create the branch at the merge-base so it has no commits of its own yet;
-    // move_commit_to_branch will add a section for it in the Weave graph.
+    // move_commits_to_branch will add a section for it in the Weave graph.
     let info = repo::gather_repo_info(repo, false, 1).ok();
     let base_hash = match &info {
         Some(info) => info.upstream.merge_base_oid.to_string(),
@@ -182,39 +194,95 @@ fn run_create(repo: &Repository, args: &[String]) -> Result<()> {
         ),
     };
 
-    create_branch_and_move(workdir, repo, &commit_hash, branch_name, &base_hash)
+    move_commits_and_report(workdir, repo, &commit_hashes, branch_name, Some(&base_hash))
 }
 
-/// Create a branch at `base_hash`, then move `commit_hash` to it.
-fn create_branch_and_move(
+/// Sort commit hashes oldest-first (ancestors before descendants), removing
+/// duplicates. Unrelated commits are ordered by committer time.
+fn sort_commits_oldest_first(repo: &Repository, hashes: Vec<String>) -> Result<Vec<String>> {
+    let mut oids: Vec<git2::Oid> = Vec::new();
+    for h in &hashes {
+        let oid = git2::Oid::from_str(h)?;
+        if !oids.contains(&oid) {
+            oids.push(oid);
+        }
+    }
+
+    oids.sort_by(|a, b| {
+        if a == b {
+            return std::cmp::Ordering::Equal;
+        }
+        if repo.graph_descendant_of(*a, *b).unwrap_or(false) {
+            std::cmp::Ordering::Greater // a is newer → later
+        } else if repo.graph_descendant_of(*b, *a).unwrap_or(false) {
+            std::cmp::Ordering::Less // a is older → earlier
+        } else {
+            // Unrelated commits: fall back to committer time.
+            let ta = repo
+                .find_commit(*a)
+                .map(|c| c.time().seconds())
+                .unwrap_or(0);
+            let tb = repo
+                .find_commit(*b)
+                .map(|c| c.time().seconds())
+                .unwrap_or(0);
+            ta.cmp(&tb)
+        }
+    });
+
+    Ok(oids.iter().map(|o| o.to_string()).collect())
+}
+
+/// Move `commit_hashes` to `branch_name` and report the result.
+///
+/// When `base_hash` is `Some`, the branch is created at that base first (and
+/// deleted again on failure). On conflict the rebase is aborted — this path is
+/// not resumable.
+fn move_commits_and_report(
     workdir: &Path,
     repo: &Repository,
-    commit_hash: &str,
+    commit_hashes: &[String],
     branch_name: &str,
-    base_hash: &str,
+    base_hash: Option<&str>,
 ) -> Result<()> {
-    git::branch_create(workdir, branch_name, base_hash)?;
+    let created = base_hash.is_some();
+    if let Some(base) = base_hash {
+        git::branch_create(workdir, branch_name, base)?;
+    }
 
-    match move_commit_to_branch(repo, commit_hash, branch_name) {
+    match move_commits_to_branch(repo, commit_hashes, branch_name) {
         Ok(RebaseOutcome::Completed) => {}
         Ok(RebaseOutcome::Conflicted) => {
             let _ = git::rebase_abort(workdir);
-            let _ = git::branch_delete(workdir, branch_name);
+            if created {
+                let _ = git::branch_delete(workdir, branch_name);
+            }
             bail!("Rebase failed with conflicts — aborted");
         }
         Err(e) => {
-            let _ = git::branch_delete(workdir, branch_name);
+            if created {
+                let _ = git::branch_delete(workdir, branch_name);
+            }
             return Err(e);
         }
     }
 
     let new_hash = git::rev_parse(workdir, branch_name)?;
-    msg::success(&format!(
-        "Created branch `{}` and moved `{}` to it (now `{}`)",
-        branch_name,
-        git::short_hash(commit_hash),
-        git::short_hash(&new_hash)
-    ));
+    if created {
+        msg::success(&format!(
+            "Created branch `{}` and moved {} commit(s) to it (now `{}`)",
+            branch_name,
+            commit_hashes.len(),
+            git::short_hash(&new_hash)
+        ));
+    } else {
+        msg::success(&format!(
+            "Moved {} commit(s) to branch `{}` (now `{}`)",
+            commit_hashes.len(),
+            branch_name,
+            git::short_hash(&new_hash)
+        ));
+    }
 
     Ok(())
 }
@@ -973,9 +1041,24 @@ pub fn move_commit_to_branch(
     commit_hash: &str,
     branch_name: &str,
 ) -> Result<RebaseOutcome> {
-    let workdir = repo::require_workdir(repo, COMMAND)?;
+    move_commits_to_branch(
+        repo,
+        std::slice::from_ref(&commit_hash.to_string()),
+        branch_name,
+    )
+}
 
-    let commit_oid = git2::Oid::from_str(commit_hash)?;
+/// Move one or more commits to the tip of a branch using Weave.
+///
+/// Commits are appended in the order given, so callers that care about the
+/// resulting history order should pass them oldest-first. Returns
+/// `RebaseOutcome` — callers build and save their own `LoomState`.
+pub fn move_commits_to_branch(
+    repo: &Repository,
+    commit_hashes: &[String],
+    branch_name: &str,
+) -> Result<RebaseOutcome> {
+    let workdir = repo::require_workdir(repo, COMMAND)?;
 
     let mut graph = Weave::from_repo(repo)?;
 
@@ -1016,7 +1099,10 @@ pub fn move_commit_to_branch(
         graph.add_merge(branch_name.to_string(), None, None);
     }
 
-    graph.move_commit(commit_oid, branch_name)?;
+    for commit_hash in commit_hashes {
+        let commit_oid = git2::Oid::from_str(commit_hash)?;
+        graph.move_commit(commit_oid, branch_name)?;
+    }
 
     let todo = graph.to_todo();
     weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)

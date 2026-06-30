@@ -167,7 +167,7 @@ enum Command {
     /// Fold source(s) into a target (amend files, fixup commits, move commits, move files between commits)
     #[command(visible_aliases = ["amend", "am", "fixup", "mv", "rub"])]
     Fold {
-        /// Create a new branch from the source commit and move it there
+        /// Create a new branch from the source commit(s) and move them there
         #[arg(short = 'c', long = "create")]
         create: bool,
         /// Interactively select hunks to stage before folding
