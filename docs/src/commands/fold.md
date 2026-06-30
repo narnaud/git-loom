@@ -10,7 +10,7 @@ git loom fold <source>... <target>
 git loom fold -p [<files>...] <target>
 git loom fold -p <commit1> <commit2>
 git loom fold -p <commit> zz
-git loom fold --create <commit> <new-branch>
+git loom fold --create <commit>... <new-branch>
 ```
 
 When only a target is given, currently staged files are folded into the target commit. When two or more arguments are provided, the last argument is the target and all preceding arguments are sources.
@@ -20,7 +20,7 @@ When only a target is given, currently staged files are folded into the target c
 | Option | Description |
 |--------|-------------|
 | `-p, --patch` | Interactively select hunks before folding. Three forms depending on argument types (see below). |
-| `-c, --create` | Create a new branch and move the source commit into it. |
+| `-c, --create` | Create a new branch and move the source commit(s) into it. |
 
 ## Type Dispatch
 
@@ -145,7 +145,14 @@ git loom fold -c d0 new-feature
 # Creates new-feature and moves commit d0 into it
 ```
 
-If the branch already exists, a warning is printed and the commit is moved there anyway — same as a normal `fold <commit> <branch>`.
+You can list several commits to move them all into the new branch. They are ordered oldest-first so the new branch preserves their history order.
+
+```bash
+git loom fold -c d0 d1 d2 new-feature
+# Creates new-feature and moves d0, d1, d2 into it
+```
+
+If the branch already exists, a warning is printed and the commit(s) are moved there anyway — same as a normal `fold <commit> <branch>`.
 
 ```bash
 git loom fold -c d0 existing-branch

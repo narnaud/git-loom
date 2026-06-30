@@ -1562,6 +1562,44 @@ fn fold_create_moves_commit_on_branch_to_new_branch() {
 }
 
 #[test]
+fn fold_create_moves_multiple_commits_to_new_branch() {
+    // Move two loose integration commits into a brand new branch.
+    //
+    // Before:
+    //   ●  L2  ← move both to new-branch
+    //   ●  L1  ←
+    //   ╯
+    let test_repo = TestRepo::new_with_remote();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    let l1_oid = test_repo.commit("L1", "l1.txt");
+    let l2_oid = test_repo.commit("L2", "l2.txt");
+
+    // Pass them newest-first to verify they are reordered oldest-first.
+    let result = super::run_create(
+        &test_repo.repo,
+        &[
+            l2_oid.to_string(),
+            l1_oid.to_string(),
+            "new-branch".to_string(),
+        ],
+    );
+    assert!(result.is_ok(), "fold --create failed: {:?}", result);
+
+    // new-branch should contain L1 then L2 (oldest-first), with L2 at the tip.
+    let tip = test_repo.get_branch_target("new-branch");
+    let tip_commit = test_repo.find_commit(tip);
+    assert_eq!(tip_commit.summary().unwrap(), "L2", "L2 should be at tip");
+    let parent = tip_commit.parent(0).unwrap();
+    assert_eq!(parent.summary().unwrap(), "L1", "L1 should be below L2");
+    assert_eq!(
+        parent.parent(0).unwrap().id(),
+        base_oid,
+        "L1 should sit on the merge-base"
+    );
+}
+
+#[test]
 fn fold_create_warns_and_moves_to_existing_branch() {
     // When --create is used but the branch already exists, warn and move the commit.
     // Uses a non-woven feature-a at base and a loose commit on integration.
