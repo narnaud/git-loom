@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.19.1](https://github.com/narnaud/git-loom/compare/v0.19.0...v0.19.1) (2026-07-02)
+
+
+### Other
+
+* **deps:** bump actions/checkout from 6 to 7 ([5a4a5c1](https://github.com/narnaud/git-loom/commit/5a4a5c1458d89ee090c9f5b6240fca2851c776ca))
+* **deps:** bump anyhow from 1.0.102 to 1.0.103 ([0d38c73](https://github.com/narnaud/git-loom/commit/0d38c73952d89932a5b129669adfaa53b5885e94))
+* **deps:** bump ratatui from 0.30.1 to 0.30.2 ([e7472c1](https://github.com/narnaud/git-loom/commit/e7472c19684370cf0293adc4d5b8ec1236a6292e))
+
 ## [0.19.0](https://github.com/narnaud/git-loom/compare/v0.18.0...v0.19.0) (2026-06-21)
 
 
