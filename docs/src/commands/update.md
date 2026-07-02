@@ -16,6 +16,12 @@ git loom update [-y]
 |--------|-------------|
 | `-y, --yes` | Skip confirmation prompt when removing branches with a gone upstream |
 
+### Configuration
+
+| Config | Description |
+|--------|-------------|
+| `loom.pruneGoneBranches` | When `true`, always remove branches with a gone upstream without prompting (same as `--yes`). Set with `git config loom.pruneGoneBranches true`. |
+
 ## What It Does
 
 ### Fetch
@@ -100,6 +106,8 @@ git loom update -y
 # ✓ Removed branch `old-feature`
 # ✓ Removed branch `closed-pr`
 ```
+
+The same behavior can be made permanent with `git config loom.pruneGoneBranches true`.
 
 ### Gone branch with unmerged commits
 

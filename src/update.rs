@@ -198,6 +198,7 @@ fn post_update(workdir: &Path, repo: &git2::Repository, ctx: &UpdateContext) -> 
         }
         msg::warn(&warn_msg);
         let confirmed = ctx.skip_confirm
+            || repo::prune_gone_branches(repo)
             || msg::confirm(if gone.len() == 1 {
                 "Remove it?"
             } else {

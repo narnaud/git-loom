@@ -39,6 +39,11 @@ git-loom update [--yes]
 
 - `--yes` / `-y`: Skip the confirmation prompt when removing branches with gone upstreams.
 
+**Configuration:**
+
+- `loom.pruneGoneBranches` (boolean): When `true`, gone-upstream branches are
+  removed without prompting, as if `--yes` had been passed. Defaults to `false`.
+
 ## What Happens
 
 ### Normal Update
@@ -61,7 +66,8 @@ git-loom update [--yes]
    initialized and updated recursively.
 6. **Gone upstream cleanup**: Any local branches whose configured upstream
    tracking branch no longer exists (pruned in step 2) are listed and the user
-   is prompted once to remove them. Use `--yes` to skip the prompt. Each branch
+   is prompted once to remove them. Use `--yes`, or set
+   `loom.pruneGoneBranches` to `true` in git config, to skip the prompt. Each branch
    that is successfully deleted prints a success message. If a branch cannot be
    deleted because it contains unmerged local commits, a warning is printed
    instead: `"Skipped branch '<name>' — it has unmerged local commits. Use 'git branch -D <name>' to force-delete."` — the remaining branches are still
