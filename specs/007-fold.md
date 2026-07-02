@@ -27,7 +27,7 @@ etc.). `fold` unifies them under one verb: **fold source into target**.
 ```bash
 git-loom fold <target>
 git-loom fold <source>... <target>
-git-loom fold --create <commit> <new-branch>
+git-loom fold --create <commit>... <new-branch>
 git-loom fold -p [<files>...] <commit>
 git-loom fold -p <commit1> <commit2>
 git-loom fold -p <commit> zz
@@ -49,11 +49,14 @@ all preceding arguments are sources.
 
 **Flags:**
 
-- `--create` / `-c`: Create a new branch from the source commit and move it
-  there. The target must be a branch name that does not yet exist. Requires
-  exactly one commit source. The branch is created at the upstream merge-base
-  and the commit is moved into it — whether the commit was a loose commit on
-  the integration line or already on an existing branch.
+- `--create` / `-c`: Create a new branch from the source commit(s) and move
+  them there. The target must be a branch name that does not yet exist.
+  Accepts one or more commit sources. The branch is created at the upstream
+  merge-base and the commits are moved into it — whether they were loose
+  commits on the integration line or already on an existing branch. Multiple
+  commits are ordered oldest-first so the new branch preserves their history
+  order. If the named branch already exists, the commits are moved onto it
+  with a warning.
 - `-p` / `--patch`: Hunk-level fold mode. Opens an interactive hunk picker
   instead of operating at the file level. Has three forms (see Patch Mode
   below).
@@ -73,7 +76,7 @@ combination:
 | Commit | Unstaged (`zz`) | Uncommit: remove commit, put changes in working directory | No |
 | CommitFile | Unstaged (`zz`) | Uncommit file: remove one file from a commit to working directory | No |
 | CommitFile | Commit | Move file: move one file's changes from one commit to another | No |
-| Commit | New branch (`-c`) | Create: make a new branch and move the commit into it | No |
+| Commit | New branch (`-c`) | Create: make a new branch and move the commit(s) into it | Yes |
 
 CommitFile sources use the `commit_sid:index` format shown by `git loom status -f`
 (e.g. `fa:0` for the first file in commit `fa`).
