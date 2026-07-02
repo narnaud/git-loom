@@ -206,8 +206,18 @@ fn post_update(workdir: &Path, repo: &git2::Repository, ctx: &UpdateContext) -> 
             })?;
         if confirmed {
             for name in &gone {
+                // Capture the tip before deletion so users can revive the branch.
+                let short_id = repo
+                    .revparse_single(name)
+                    .ok()
+                    .map(|obj| git::short_hash(&obj.id().to_string()).to_string());
                 match git::branch_delete(workdir, name) {
-                    Ok(()) => msg::success(&format!("Removed branch `{}`", name)),
+                    Ok(()) => match &short_id {
+                        Some(id) => {
+                            msg::success(&format!("Removed branch `{}` (was {})", name, id))
+                        }
+                        None => msg::success(&format!("Removed branch `{}`", name)),
+                    },
                     Err(_) => {
                         msg::warn(&format!(
                             "Skipped branch `{}` — it has unmerged local commits.\n\
