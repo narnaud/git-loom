@@ -241,6 +241,58 @@ fn update_preserves_merge_topology() {
 }
 
 #[test]
+fn update_removes_gone_upstream_branches_via_config() {
+    let test_repo = TestRepo::new_with_remote();
+    let remote_path = test_repo.remote_path().unwrap();
+
+    // Enable auto-removal via git config instead of the --yes flag
+    test_repo
+        .repo
+        .config()
+        .unwrap()
+        .set_bool("loom.pruneGoneBranches", true)
+        .unwrap();
+
+    // Create feature-x on the remote and fetch it so origin/feature-x exists locally
+    {
+        let remote_repo = Repository::open_bare(&remote_path).unwrap();
+        let remote_head = remote_repo
+            .find_branch("main", BranchType::Local)
+            .unwrap()
+            .get()
+            .target()
+            .unwrap();
+        let commit = remote_repo.find_commit(remote_head).unwrap();
+        remote_repo.branch("feature-x", &commit, false).unwrap();
+    }
+    test_repo
+        .repo
+        .find_remote("origin")
+        .unwrap()
+        .fetch(&["feature-x"], None, None)
+        .unwrap();
+    test_repo.create_branch_tracking("feature-x", "origin/feature-x");
+
+    // Delete feature-x from the remote (simulates upstream deletion)
+    {
+        let remote_repo = Repository::open_bare(&remote_path).unwrap();
+        let mut branch = remote_repo
+            .find_branch("feature-x", BranchType::Local)
+            .unwrap();
+        branch.delete().unwrap();
+    }
+
+    // Run update WITHOUT --yes; the config setting should skip the prompt
+    let result = test_repo.in_dir(|| super::run(false));
+    assert!(result.is_ok(), "update failed: {:?}", result.err());
+
+    assert!(
+        !test_repo.branch_exists("feature-x"),
+        "feature-x should be removed after update (loom.pruneGoneBranches = true)"
+    );
+}
+
+#[test]
 fn update_removes_branches_with_gone_upstream() {
     let test_repo = TestRepo::new_with_remote();
     let remote_path = test_repo.remote_path().unwrap();

@@ -120,6 +120,16 @@ pub fn hide_branch_pattern(repo: &Repository) -> Option<String> {
         .ok()
 }
 
+/// Read git config `loom.pruneGoneBranches`. When `true`, `loom update`
+/// removes local branches whose upstream was pruned without prompting.
+/// Returns `false` if the key is unset or not a boolean.
+pub fn prune_gone_branches(repo: &Repository) -> bool {
+    repo.config()
+        .ok()
+        .and_then(|config| config.get_bool("loom.pruneGoneBranches").ok())
+        .unwrap_or(false)
+}
+
 /// Extract the local branch name from a remote tracking ref.
 ///
 /// e.g. `"origin/main"` → `"main"`, `"origin/feat/foo"` → `"feat/foo"`.
