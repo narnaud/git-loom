@@ -252,8 +252,8 @@ enum Command {
     /// Show the diff and metadata for a commit (like `git show`)
     #[command(visible_alias = "sh")]
     Show {
-        /// Commit hash, branch name, or short ID
-        target: String,
+        /// Commit hash, branch name, or short ID (defaults to the last commit on the current branch)
+        target: Option<String>,
     },
     /// Show a diff using short IDs (like `git diff`)
     #[command(visible_alias = "di")]
