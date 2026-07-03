@@ -475,33 +475,82 @@ fn find_existing_github_pr(workdir: &Path, gh_repo: &str, head_arg: &str) -> Opt
     prs.get(0)?.get("url")?.as_str().map(str::to_string)
 }
 
-/// Extract the Azure DevOps organization URL from a remote URL.
+/// Azure DevOps coordinates parsed from a git remote URL.
+struct AzureRemote {
+    /// Organization URL, e.g. `https://dev.azure.com/<org>`.
+    org_url: String,
+    /// Team project name, when it can be read from the URL.
+    project: Option<String>,
+    /// Repository name, when it can be read from the URL.
+    repository: Option<String>,
+}
+
+/// Extract the Azure DevOps organization URL and project from a remote URL.
 ///
 /// Supports:
-/// - HTTPS:  `https://dev.azure.com/<org>/...`       → `https://dev.azure.com/<org>`
-/// - SSH:    `git@ssh.dev.azure.com:v3/<org>/...`    → `https://dev.azure.com/<org>`
-/// - Legacy: `https://<org>.visualstudio.com/...`    → `https://<org>.visualstudio.com`
+/// - HTTPS:  `https://dev.azure.com/<org>/<project>/...`    → org + project
+/// - SSH:    `git@ssh.dev.azure.com:v3/<org>/<project>/...` → org + project
+/// - Legacy: `https://<org>.visualstudio.com/...`           → org only
+///
+/// The project matters because `az repos pr create` only auto-detects it from
+/// the git remote for the HTTPS form; with an SSH remote it must be passed
+/// explicitly via `--project`.
 ///
 /// Returns `None` if the URL is unrecognised.
-fn extract_azure_org_url(repo: &Repository, remote: &str) -> Option<String> {
+fn extract_azure_remote(repo: &Repository, remote: &str) -> Option<AzureRemote> {
     let remote = repo.find_remote(remote).ok()?;
     let url = remote.url()?;
 
+    let opt = |s: &str| (!s.is_empty()).then(|| s.to_string());
+
+    // Repository is the segment after `_git` (HTTPS form), or the last segment
+    // when there is no `_git` marker (SSH form: `<org>/<project>/<repo>`).
+    let repository = |parts: &[&str]| {
+        parts
+            .iter()
+            .position(|p| *p == "_git")
+            .and_then(|i| parts.get(i + 1))
+            .or_else(|| parts.get(2))
+            .and_then(|r| opt(r.trim_end_matches(".git")))
+    };
+
+    let split_org_project = |rest: &str| {
+        let parts: Vec<&str> = rest.split('/').collect();
+        let org = opt(parts.first()?)?;
+        let project = parts.get(1).and_then(|p| opt(p));
+        Some((org, project, repository(&parts)))
+    };
+
     if let Some(rest) = url.strip_prefix("https://dev.azure.com/") {
-        let org = rest.split('/').next()?;
-        return Some(format!("https://dev.azure.com/{}", org));
+        let (org, project, repository) = split_org_project(rest)?;
+        return Some(AzureRemote {
+            org_url: format!("https://dev.azure.com/{}", org),
+            project,
+            repository,
+        });
     }
 
     if let Some(rest) = url.strip_prefix("git@ssh.dev.azure.com:v3/") {
-        let org = rest.split('/').next()?;
-        return Some(format!("https://dev.azure.com/{}", org));
+        let (org, project, repository) = split_org_project(rest)?;
+        return Some(AzureRemote {
+            org_url: format!("https://dev.azure.com/{}", org),
+            project,
+            repository,
+        });
     }
 
     if let Some(rest) = url.strip_prefix("https://")
-        && let Some(host) = rest.split('/').next()
+        && let Some((host, path)) = rest.split_once('/')
         && host.ends_with(".visualstudio.com")
     {
-        return Some(format!("https://{}", host));
+        // Legacy collection URLs are ambiguous about the project segment, so
+        // leave it to az auto-detection rather than guessing.
+        let parts: Vec<&str> = path.split('/').collect();
+        return Some(AzureRemote {
+            org_url: format!("https://{}", host),
+            project: None,
+            repository: repository(&parts),
+        });
     }
 
     None
@@ -552,10 +601,13 @@ fn push_azure(
     // Extract the org URL so we can pass --org explicitly rather than relying
     // on --detect, which produces a misleading "need to login" error when it
     // fails to infer the organisation from the remote URL.
-    let org_url = extract_azure_org_url(repo, remote);
+    let azure = extract_azure_remote(repo, remote);
+    let org_url = azure.as_ref().map(|a| a.org_url.as_str());
+    let project = azure.as_ref().and_then(|a| a.project.as_deref());
+    let repository = azure.as_ref().and_then(|a| a.repository.as_deref());
 
     // If a PR already exists, show its URL instead of opening the browser
-    if let Some(pr_url) = find_existing_azure_pr(workdir, branch, org_url.as_deref()) {
+    if let Some(pr_url) = find_existing_azure_pr(workdir, branch, org_url, project, repository) {
         msg::success(&format!("PR updated: {}", pr_url));
         return Ok(());
     }
@@ -587,11 +639,23 @@ fn push_azure(
         &title,
     ];
 
-    if let Some(ref org) = org_url {
+    if let Some(org) = org_url {
         args.push("--org");
         args.push(org);
     } else {
         args.push("--detect");
+    }
+
+    // With an explicit --org, az no longer auto-detects the project or the
+    // repository, so pass whatever we could read from the remote URL.
+    if let Some(project) = project {
+        args.push("--project");
+        args.push(project);
+    }
+
+    if let Some(repository) = repository {
+        args.push("--repository");
+        args.push(repository);
     }
 
     if !description.is_empty() {
@@ -621,7 +685,13 @@ fn push_azure(
 /// Check if an Azure DevOps PR already exists for the given source branch.
 ///
 /// Returns the PR web URL if found, or `None` if no PR exists or the check fails.
-fn find_existing_azure_pr(workdir: &Path, branch: &str, org_url: Option<&str>) -> Option<String> {
+fn find_existing_azure_pr(
+    workdir: &Path,
+    branch: &str,
+    org_url: Option<&str>,
+    project: Option<&str>,
+    repository: Option<&str>,
+) -> Option<String> {
     let mut cmd = az_command();
     cmd.current_dir(workdir);
     cmd.args([
@@ -637,6 +707,14 @@ fn find_existing_azure_pr(workdir: &Path, branch: &str, org_url: Option<&str>) -
         cmd.args(["--org", org]);
     } else {
         cmd.arg("--detect");
+    }
+    // With an explicit --org, az no longer auto-detects the project or the
+    // repository, so pass whatever we could read from the remote URL.
+    if let Some(project) = project {
+        cmd.args(["--project", project]);
+    }
+    if let Some(repository) = repository {
+        cmd.args(["--repository", repository]);
     }
     let output = cmd.output().ok()?;
 

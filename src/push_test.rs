@@ -375,3 +375,60 @@ fn extract_gh_repo_nonexistent_remote() {
     let result = super::extract_gh_repo(&test_repo.repo, "nonexistent");
     assert_eq!(result, None);
 }
+
+// ── extract_azure_remote tests ────────────────────────────────────────────
+
+#[test]
+fn extract_azure_remote_https() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo
+        .repo
+        .remote_set_url(
+            "origin",
+            "https://dev.azure.com/myorg/myproject/_git/myrepo",
+        )
+        .unwrap();
+    let azure = super::extract_azure_remote(&test_repo.repo, "origin").unwrap();
+    assert_eq!(azure.org_url, "https://dev.azure.com/myorg");
+    assert_eq!(azure.project.as_deref(), Some("myproject"));
+    assert_eq!(azure.repository.as_deref(), Some("myrepo"));
+}
+
+#[test]
+fn extract_azure_remote_ssh() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo
+        .repo
+        .remote_set_url("origin", "git@ssh.dev.azure.com:v3/myorg/myproject/myrepo")
+        .unwrap();
+    let azure = super::extract_azure_remote(&test_repo.repo, "origin").unwrap();
+    assert_eq!(azure.org_url, "https://dev.azure.com/myorg");
+    assert_eq!(azure.project.as_deref(), Some("myproject"));
+    assert_eq!(azure.repository.as_deref(), Some("myrepo"));
+}
+
+#[test]
+fn extract_azure_remote_visualstudio_has_no_project() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo
+        .repo
+        .remote_set_url(
+            "origin",
+            "https://myorg.visualstudio.com/myproject/_git/myrepo",
+        )
+        .unwrap();
+    let azure = super::extract_azure_remote(&test_repo.repo, "origin").unwrap();
+    assert_eq!(azure.org_url, "https://myorg.visualstudio.com");
+    assert_eq!(azure.project, None);
+    assert_eq!(azure.repository.as_deref(), Some("myrepo"));
+}
+
+#[test]
+fn extract_azure_remote_unrecognized() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo
+        .repo
+        .remote_set_url("origin", "git@github.com:owner/repo.git")
+        .unwrap();
+    assert!(super::extract_azure_remote(&test_repo.repo, "origin").is_none());
+}
