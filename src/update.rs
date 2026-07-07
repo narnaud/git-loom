@@ -48,15 +48,26 @@ pub fn run(skip_confirm: bool) -> Result<()> {
         .context("Upstream branch name is not valid UTF-8")?
         .to_string();
 
-    // Fetch with tags, force-update, and prune deleted remote branches
+    // Fetch with tags, force-update, and prune deleted remote branches.
+    // The spinner reassures the user that work is happening (fetches can be slow);
+    // afterwards we print git's own summary so they can tell whether anything was
+    // actually pulled (e.g. `a309e49..7b3c4c1 main -> origin/main`). `--no-progress`
+    // drops the transfer noise (`remote: ...`, `Receiving objects`) so the captured
+    // output is just the clean ref-update summary.
     let spinner = msg::spinner();
     spinner.start("Fetching latest changes...");
 
-    let result = git::run_git(&workdir, &["fetch", "--tags", "--force", "--prune"]);
+    let result = git::run_git_combined(
+        &workdir,
+        &["fetch", "--no-progress", "--tags", "--force", "--prune"],
+    );
 
     match result {
-        Ok(()) => {
+        Ok(summary) => {
             spinner.stop("Fetched latest changes");
+            if !summary.is_empty() {
+                println!("{}", summary);
+            }
         }
         Err(e) => {
             spinner.error("Fetch failed");

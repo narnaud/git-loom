@@ -76,6 +76,17 @@ pub fn run_git_stdout(workdir: &Path, args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+/// Run a git command and return its combined stdout+stderr, trimmed.
+/// Useful for commands (like `fetch`) that print their summary to stderr, so a
+/// caller can show git's output after a spinner instead of streaming it live.
+/// On failure, returns an error with the command name; stderr is still traced.
+pub fn run_git_combined(workdir: &Path, args: &[&str]) -> Result<String> {
+    let output = run_git_captured(workdir, args)?;
+    let mut combined = String::from_utf8_lossy(&output.stdout).into_owned();
+    combined.push_str(&String::from_utf8_lossy(&output.stderr));
+    Ok(combined.trim().to_string())
+}
+
 /// Check that the installed Git version meets the minimum requirement.
 /// Returns an error with an actionable message if the version is too old.
 pub fn check_git_version() -> Result<()> {
