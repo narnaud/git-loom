@@ -72,7 +72,7 @@ fn failed_command_includes_stderr() {
 }
 
 #[test]
-fn successful_command_excludes_stderr_section() {
+fn successful_command_without_stderr_has_no_section() {
     let (_dir, git_dir) = setup_git_dir();
 
     super::init(&git_dir, "git loom commit");
@@ -82,6 +82,28 @@ fn successful_command_excludes_stderr_section() {
     let content = fs::read_to_string(&path).unwrap();
     assert!(!content.contains("FAILED"));
     assert!(!content.contains("[stderr]"));
+}
+
+#[test]
+fn successful_command_includes_stderr() {
+    // Servers print MR/review links to stderr on a successful push, so the
+    // trace must keep stderr even when the command succeeds.
+    let (_dir, git_dir) = setup_git_dir();
+
+    super::init(&git_dir, "git loom push feature-a");
+    super::log_command(
+        "git",
+        "push -u origin feature-a",
+        1200,
+        true,
+        "remote: To create a merge request, visit:\nremote:   https://gitlab.com/g/p/-/merge_requests/new",
+    );
+    let path = super::finalize().unwrap();
+
+    let content = fs::read_to_string(&path).unwrap();
+    assert!(!content.contains("FAILED"));
+    assert!(content.contains("[stderr]"));
+    assert!(content.contains("merge_requests/new"));
 }
 
 #[test]

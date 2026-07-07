@@ -241,7 +241,7 @@ fn format_log_suffix(logger: &LoomLogger) -> String {
                 out.push('\n');
             }
         }
-        if !entry.success && !entry.stderr.is_empty() {
+        if !entry.stderr.is_empty() {
             out.push_str("    [stderr]\n");
             for line in entry.stderr.lines() {
                 out.push_str(line);
@@ -284,8 +284,8 @@ fn format_log(logger: &LoomLogger) -> String {
             }
         }
 
-        // Stderr on failure
-        if !entry.success && !entry.stderr.is_empty() {
+        // Stderr (on success too — servers print MR/review links there)
+        if !entry.stderr.is_empty() {
             out.push_str("    [stderr]\n");
             for line in entry.stderr.lines() {
                 out.push_str(line);
