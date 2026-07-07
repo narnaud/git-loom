@@ -45,11 +45,17 @@ git-loom push [branch] [--no-pr]
 
 Detection priority (first match wins):
 
-1. **Explicit config**: `git config loom.remote-type` — values: `github`, `azure`, `gerrit`
+1. **Explicit config**: `git config loom.remote-type` — values: `github`, `gitlab`, `azure`, `gerrit`
 2. **URL heuristics**: Remote URL contains `github.com` → GitHub
-3. **URL heuristics**: Remote URL contains `dev.azure.com` → Azure DevOps
-4. **Hook inspection**: `.git/hooks/commit-msg` contains "gerrit" (case-insensitive) → Gerrit
-5. **Fallback**: Plain
+3. **URL heuristics**: Remote URL contains `gitlab` → GitLab
+4. **URL heuristics**: Remote URL contains `dev.azure.com` → Azure DevOps
+5. **Hook inspection**: `.git/hooks/commit-msg` contains "gerrit" (case-insensitive) → Gerrit
+6. **Fallback**: Plain
+
+Self-hosted GitLab instances whose hostname does not contain `gitlab` (e.g.
+`invent.kde.org`) are not auto-detected — set `git config loom.remote-type
+gitlab` for those. Even without detection, a plain push still surfaces the MR
+link the server prints (see [Plain](#plain-default)).
 
 ## Push Remote Selection
 
@@ -72,6 +78,11 @@ git push --force-with-lease --force-if-includes -u <remote> <branch>
 Uses `--force-with-lease` because woven branches are frequently rebased and
 need force pushing. `--force-if-includes` adds an extra safety check that the
 local ref includes the remote ref.
+
+After pushing, any `remote:` lines containing an `http(s)` URL are surfaced as
+indented continuation lines below the success message. This shows the MR/PR
+creation link that servers like GitLab print on push, even when the remote type
+was not detected as GitLab.
 
 ### GitHub
 
@@ -101,6 +112,24 @@ repo.
 **Upstream branch skip:** If the branch being pushed is the upstream target
 branch itself (e.g. pushing `main` when tracking `origin/main`), PR creation
 is skipped and the push falls back to the plain force-with-lease strategy.
+
+### GitLab
+
+```bash
+git push --force-with-lease --force-if-includes \
+    -o merge_request.create -o merge_request.target=<target> -u <remote> <branch>
+# Pushed 'feature-a' to origin
+#   https://gitlab.com/group/repo/-/merge_requests/42
+```
+
+Uses GitLab [push options](https://docs.gitlab.com/ee/user/project/push_options.html)
+so the server creates a merge request (or points to the existing one) as part of
+the push. The MR URL GitLab prints in the push output is surfaced below the
+success message, reusing the same `remote:` URL extraction as the plain and
+Gerrit strategies. No extra CLI tool is required.
+
+If the branch being pushed is the upstream target branch itself, the MR push
+options are skipped and it falls back to a plain push.
 
 ### Azure DevOps
 

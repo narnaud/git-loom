@@ -16,6 +16,7 @@ use crate::trace as loom_trace;
 enum RemoteType {
     Plain,
     GitHub,
+    GitLab,
     AzureDevOps,
     Gerrit { target_branch: String },
 }
@@ -67,6 +68,7 @@ pub fn run(branch: Option<String>, no_pr: bool) -> Result<()> {
             base_oid,
             &info.upstream.label,
         ),
+        RemoteType::GitLab => push_gitlab(&workdir, &remote_name, &branch_name, &target_branch),
         RemoteType::AzureDevOps => push_azure(
             &repo,
             &workdir,
@@ -110,6 +112,9 @@ fn detect_remote_type(
         if value == "github" {
             return Ok(RemoteType::GitHub);
         }
+        if value == "gitlab" {
+            return Ok(RemoteType::GitLab);
+        }
         if value == "azure" {
             return Ok(RemoteType::AzureDevOps);
         }
@@ -119,7 +124,7 @@ fn detect_remote_type(
         }
         msg::warn(&format!(
             "Unknown loom.remote-type '{}' — falling back to auto-detection.\n\
-             Valid values: github, azure, gerrit",
+             Valid values: github, gitlab, azure, gerrit",
             config_value.trim()
         ));
     }
@@ -130,6 +135,9 @@ fn detect_remote_type(
     {
         if url.contains("github.com") {
             return Ok(RemoteType::GitHub);
+        }
+        if url.contains("gitlab") {
+            return Ok(RemoteType::GitLab);
         }
         if url.contains("dev.azure.com") {
             return Ok(RemoteType::AzureDevOps);
@@ -240,8 +248,63 @@ fn resolve_push_remote(
     }
 }
 
+/// Run a `git push …`, trace-log it, bail on failure, and return its stderr.
+///
+/// stderr carries the server's `remote:` messages — GitLab MR links, Gerrit
+/// review URLs, GitHub "create a pull request" hints — so callers surface them
+/// to the user via [`append_remote_urls`].
+fn run_push_capture(workdir: &Path, args: &[&str]) -> Result<String> {
+    let start = Instant::now();
+    let output = Command::new("git")
+        .current_dir(workdir)
+        .args(args)
+        .output()?;
+
+    let duration_ms = start.elapsed().as_millis();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    loom_trace::log_command(
+        "git",
+        &args.join(" "),
+        duration_ms,
+        output.status.success(),
+        &stderr,
+    );
+
+    if !output.status.success() {
+        bail!("git push failed");
+    }
+
+    Ok(stderr)
+}
+
+/// Append `remote:` URLs found in git push stderr to `message`.
+///
+/// Servers print MR/review links as `remote:   https://…` lines. Each such URL
+/// is added as an indented continuation line. A trailing `[tag]` (Gerrit) is
+/// wrapped in backticks.
+fn append_remote_urls(message: &mut String, stderr: &str) {
+    for line in stderr.lines() {
+        if let Some(rest) = line.strip_prefix("remote:") {
+            let trimmed = rest.trim();
+            if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+                message.push('\n');
+                if trimmed.ends_with(']') {
+                    if let Some(pos) = trimmed.rfind('[') {
+                        let (before, tag) = trimmed.split_at(pos);
+                        message.push_str(&format!("{}`{}`", before, tag));
+                    } else {
+                        message.push_str(trimmed);
+                    }
+                } else {
+                    message.push_str(trimmed);
+                }
+            }
+        }
+    }
+}
+
 fn git_push(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
-    git::run_git(
+    let stderr = run_push_capture(
         workdir,
         &[
             "push",
@@ -252,7 +315,9 @@ fn git_push(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
             branch,
         ],
     )?;
-    msg::success(&format!("Pushed `{}` to `{}`", branch, remote));
+    let mut message = format!("Pushed `{}` to `{}`", branch, remote);
+    append_remote_urls(&mut message, &stderr);
+    msg::success(&message);
     Ok(())
 }
 
@@ -473,6 +538,39 @@ fn find_existing_github_pr(workdir: &Path, gh_repo: &str, head_arg: &str) -> Opt
 
     let prs: serde_json::Value = serde_json::from_str(trimmed).ok()?;
     prs.get(0)?.get("url")?.as_str().map(str::to_string)
+}
+
+/// Push to GitLab: push the branch with `merge_request.create` push options so
+/// GitLab creates (or points to) a merge request, then surface the MR URL it
+/// prints in the push output.
+///
+/// If the branch being pushed is the upstream target branch itself, skip the
+/// MR push options and fall back to a plain push.
+fn push_gitlab(workdir: &Path, remote: &str, branch: &str, target_branch: &str) -> Result<()> {
+    if branch == target_branch {
+        return git_push(workdir, remote, branch);
+    }
+
+    let target_opt = format!("merge_request.target={}", target_branch);
+    let stderr = run_push_capture(
+        workdir,
+        &[
+            "push",
+            "--force-with-lease",
+            "--force-if-includes",
+            "-o",
+            "merge_request.create",
+            "-o",
+            &target_opt,
+            "-u",
+            remote,
+            branch,
+        ],
+    )?;
+    let mut message = format!("Pushed `{}` to `{}`", branch, remote);
+    append_remote_urls(&mut message, &stderr);
+    msg::success(&message);
+    Ok(())
 }
 
 /// Azure DevOps coordinates parsed from a git remote URL.
@@ -801,44 +899,13 @@ fn push_gerrit(workdir: &Path, remote: &str, branch: &str, target_branch: &str) 
     let refspec = format!("{}:refs/for/{}", branch, target_branch);
     let topic_opt = format!("topic={}", branch);
 
-    let args = ["push", "-o", &topic_opt, remote, &refspec];
-    let start = Instant::now();
-    let output = Command::new("git")
-        .current_dir(workdir)
-        .args(args)
-        .output()?;
-
-    let duration_ms = start.elapsed().as_millis();
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let cmd = args.join(" ");
-    loom_trace::log_command("git", &cmd, duration_ms, output.status.success(), &stderr);
-
-    if !output.status.success() {
-        bail!("git push failed");
-    }
+    let stderr = run_push_capture(workdir, &["push", "-o", &topic_opt, remote, &refspec])?;
 
     let mut message = format!(
         "Pushed `{}` to `{}` (Gerrit: `refs/for/{}`)",
         branch, remote, target_branch
     );
-    for line in stderr.lines() {
-        if let Some(rest) = line.strip_prefix("remote:") {
-            let trimmed = rest.trim();
-            if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
-                message.push('\n');
-                if trimmed.ends_with(']') {
-                    if let Some(pos) = trimmed.rfind('[') {
-                        let (before, tag) = trimmed.split_at(pos);
-                        message.push_str(&format!("{}`{}`", before, tag));
-                    } else {
-                        message.push_str(trimmed);
-                    }
-                } else {
-                    message.push_str(trimmed);
-                }
-            }
-        }
-    }
+    append_remote_urls(&mut message, &stderr);
     msg::success(&message);
 
     Ok(())
