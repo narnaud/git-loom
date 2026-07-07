@@ -24,11 +24,14 @@ git loom push [branch] [--no-pr]
 
 Detection priority (first match wins):
 
-1. **Explicit config** — `git config loom.remote-type` set to `github`, `azure`, or `gerrit`
+1. **Explicit config** — `git config loom.remote-type` set to `github`, `gitlab`, `azure`, or `gerrit`
 2. **URL heuristics** — remote URL contains `github.com` → GitHub
-3. **URL heuristics** — remote URL contains `dev.azure.com` → Azure DevOps
-4. **Hook inspection** — `.git/hooks/commit-msg` contains "gerrit" → Gerrit
-5. **Fallback** — Plain Git
+3. **URL heuristics** — remote URL contains `gitlab` → GitLab
+4. **URL heuristics** — remote URL contains `dev.azure.com` → Azure DevOps
+5. **Hook inspection** — `.git/hooks/commit-msg` contains "gerrit" → Gerrit
+6. **Fallback** — Plain Git
+
+Self-hosted GitLab whose hostname does not contain `gitlab` (e.g. `invent.kde.org`) is not auto-detected — set `git config loom.remote-type gitlab`. Even without detection, a plain push still surfaces the MR link the server prints.
 
 ## Push Remote Selection
 
@@ -54,6 +57,8 @@ git push --force-with-lease --force-if-includes -u <remote> <branch>
 
 Uses `--force-with-lease` because woven branches are frequently rebased. `--force-if-includes` adds extra safety.
 
+Any `remote:` lines containing an `http(s)` URL are shown below the success message, so the MR/PR creation link that servers like GitLab print on push is visible even when the remote type was not detected.
+
 ### GitHub
 
 Pushes the branch with `--force-with-lease`, then checks whether a PR already exists for the branch:
@@ -66,6 +71,15 @@ If `gh` is not installed, the push succeeds with a message suggesting to install
 In a **fork workflow** (tracking `upstream/main`), pushes go to `origin` (your fork) and the PR targets the upstream repository automatically.
 
 If the branch being pushed is the upstream target branch itself, PR creation is skipped.
+
+### GitLab
+
+```bash
+git push --force-with-lease --force-if-includes \
+    -o merge_request.create -o merge_request.target=<target> -u <remote> <branch>
+```
+
+Uses GitLab [push options](https://docs.gitlab.com/ee/user/project/push_options.html) so the server creates a merge request (or points to the existing one) during the push. The MR URL GitLab prints is shown below the success message. No extra CLI tool is required. If the branch being pushed is the upstream target branch itself, the MR push options are skipped.
 
 ### Azure DevOps
 
@@ -100,6 +114,7 @@ Use `--no-pr` when you want to push a branch to the remote without triggering PR
 |-------------|-------------------|
 | Plain | Same as normal (force-with-lease push) |
 | GitHub | Skips `gh pr create` |
+| GitLab | Plain push without `merge_request.create` push options |
 | Azure DevOps | Skips `az repos pr create` |
 | Gerrit | Plain push to branch ref instead of `refs/for/` (see below) |
 

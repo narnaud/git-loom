@@ -302,6 +302,70 @@ fn detect_remote_type_gerrit_in_worktree() {
 }
 
 #[test]
+fn detect_remote_type_gitlab_by_config() {
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    test_repo.commit("C1", "c1.txt");
+
+    test_repo.set_config("loom.remote-type", "gitlab");
+
+    let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), super::RemoteType::GitLab);
+}
+
+#[test]
+fn detect_remote_type_gitlab_by_url() {
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    test_repo.commit("C1", "c1.txt");
+
+    test_repo
+        .repo
+        .remote_set_url("origin", "git@gitlab.com:group/repo.git")
+        .unwrap();
+
+    let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), super::RemoteType::GitLab);
+}
+
+// ── append_remote_urls tests ─────────────────────────────────────────────
+
+#[test]
+fn append_remote_urls_extracts_gitlab_mr_link() {
+    let stderr = "remote: \n\
+                  remote: To create a merge request for feature-a, visit:\n\
+                  remote:   https://gitlab.com/group/repo/-/merge_requests/new?x=1\n\
+                  remote: \n";
+    let mut message = String::from("Pushed");
+    super::append_remote_urls(&mut message, stderr);
+    assert_eq!(
+        message,
+        "Pushed\nhttps://gitlab.com/group/repo/-/merge_requests/new?x=1"
+    );
+}
+
+#[test]
+fn append_remote_urls_wraps_gerrit_tag() {
+    let stderr = "remote:   https://gerrit.example.com/c/proj/+/123 [NEW]\n";
+    let mut message = String::from("Pushed");
+    super::append_remote_urls(&mut message, stderr);
+    assert_eq!(
+        message,
+        "Pushed\nhttps://gerrit.example.com/c/proj/+/123 `[NEW]`"
+    );
+}
+
+#[test]
+fn append_remote_urls_ignores_non_url_lines() {
+    let stderr = "remote: Counting objects: 5, done.\nSwitched to branch\n";
+    let mut message = String::from("Pushed");
+    super::append_remote_urls(&mut message, stderr);
+    assert_eq!(message, "Pushed");
+}
+
+#[test]
 fn detect_remote_type_azure_by_url() {
     let test_repo = TestRepo::new_with_remote();
     let workdir = test_repo.workdir();
