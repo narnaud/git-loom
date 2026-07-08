@@ -126,6 +126,47 @@ fn multiple_hidden_branches() {
     assert!(info.commits.is_empty());
 }
 
+// ── top_commit tests ────────────────────────────────────────────────────────
+
+#[test]
+fn top_commit_returns_tip_loose_commit() {
+    let test_repo = TestRepo::new_with_remote();
+
+    test_repo.commit_empty("C1");
+    test_repo.commit_empty("C2");
+    let c2 = test_repo.head_oid();
+
+    let top = super::top_commit(&test_repo.repo).unwrap();
+    assert_eq!(top, Some(c2));
+}
+
+#[test]
+fn top_commit_skips_merge_of_hidden_branch() {
+    // Reproduces the bug: HEAD is a merge of a hidden `local-` branch. The top
+    // of status is the integration commit below the merge, not the merge itself.
+    let test_repo = TestRepo::new_with_remote();
+
+    test_repo.commit_empty("Base");
+    let base = test_repo.head_oid();
+
+    // A local-only branch that diverges from the base with its own commit.
+    test_repo.create_branch_at_commit("local-only", base);
+    test_repo.switch_branch("local-only");
+    test_repo.commit_empty("L1");
+
+    // Meanwhile the integration line advances with a real commit.
+    test_repo.switch_branch("integration");
+    test_repo.commit_empty("C1");
+    let c1 = test_repo.head_oid();
+
+    // Merge local-only back into integration, leaving a merge commit at the tip.
+    test_repo.merge_no_ff("local-only");
+    assert!(test_repo.head_commit().parent_count() > 1, "tip is a merge");
+
+    let top = super::top_commit(&test_repo.repo).unwrap();
+    assert_eq!(top, Some(c1), "should skip the merge and pick C1");
+}
+
 // ── resolve_commit_filter tests ─────────────────────────────────────────────
 
 #[test]
