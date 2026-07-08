@@ -47,6 +47,21 @@ pub fn run(
     Ok(())
 }
 
+/// OID of the commit shown at the top of `loom status`: the tip of the
+/// integration line, skipping merge commits and hidden branches. Returns None
+/// when the integration branch has no commits of its own above the merge-base.
+pub fn top_commit(repo: &git2::Repository) -> Result<Option<git2::Oid>> {
+    let mut info = repo::gather_repo_info(repo, false, 0)?;
+
+    let pattern =
+        repo::hide_branch_pattern(repo).unwrap_or_else(|| repo::DEFAULT_HIDE_PATTERN.to_string());
+    if !pattern.is_empty() {
+        hide_branches(&mut info, &pattern);
+    }
+
+    Ok(graph::top_loose_commit(&info))
+}
+
 /// Resolve a list of user-supplied IDs to a set of commit OIDs whose files
 /// should be shown. Supports git hashes and loom commit short IDs.
 /// Unknown IDs are silently skipped.
