@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.20.0](https://github.com/narnaud/git-loom/compare/v0.19.0...v0.20.0) (2026-07-14)
+
+
+### Features ✨
+
+* **fold:** support multiple commits with --create ([f6a636a](https://github.com/narnaud/git-loom/commit/f6a636a8995fd4e9705467cff19bebb381fed96b))
+* **pull:** show whether anything was pulled ([1bc9ed1](https://github.com/narnaud/git-loom/commit/1bc9ed1b9c0fef98dcb8e725360081002a1ae856))
+* **push:** support GitLab and surface server MR/PR links ([38acd1e](https://github.com/narnaud/git-loom/commit/38acd1e90c8ca0dd4d1080915a38f38013b7ab49))
+* **show:** default to HEAD when no target given ([291d857](https://github.com/narnaud/git-loom/commit/291d85735eef4c91acdebb5cacdec37182329e9d))
+* **update:** add loom.pruneGoneBranches config to auto-remove gone-upstream branches ([acde3ee](https://github.com/narnaud/git-loom/commit/acde3ee7f243b0935996a670216876661ea95226))
+* **update:** show tip sha when pruning gone-upstream branches ([2f2754b](https://github.com/narnaud/git-loom/commit/2f2754b868cb1478f5cf2f244c42445223eaaba2))
+
+
+### Bug Fixes 🐞
+
+* **azure:** pass --project and --repository so PR creation works with SSH remotes ([3d9981e](https://github.com/narnaud/git-loom/commit/3d9981e38054c04264a3bafc7d5cc7e144864293))
+* **show:** default to the top-of-status commit, not raw HEAD ([8a23334](https://github.com/narnaud/git-loom/commit/8a23334d27e7587716b8ae383e3e72327c7764ca))
+* **trace:** keep stderr for successful commands ([4fff836](https://github.com/narnaud/git-loom/commit/4fff83636f41d64f7dd63752b4b5978607aa6fc3))
+
+
+### Other
+
+* **deps:** bump actions/checkout from 6 to 7 ([5a4a5c1](https://github.com/narnaud/git-loom/commit/5a4a5c1458d89ee090c9f5b6240fca2851c776ca))
+* **deps:** bump anyhow from 1.0.102 to 1.0.103 ([0d38c73](https://github.com/narnaud/git-loom/commit/0d38c73952d89932a5b129669adfaa53b5885e94))
+* **deps:** bump ratatui from 0.30.1 to 0.30.2 ([e7472c1](https://github.com/narnaud/git-loom/commit/e7472c19684370cf0293adc4d5b8ec1236a6292e))
+
 ## [0.19.0](https://github.com/narnaud/git-loom/compare/v0.18.0...v0.19.0) (2026-06-21)
 
 
