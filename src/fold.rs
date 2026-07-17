@@ -165,7 +165,7 @@ fn run_create(repo: &Repository, args: &[String]) -> Result<()> {
     // Order oldest-first so the commits land on the branch in history order.
     let commit_hashes = sort_commits_oldest_first(repo, commit_hashes)?;
 
-    git::branch_validate_name(branch_name)?;
+    git::branch_validate_name(workdir, branch_name)?;
 
     // If the branch already exists, warn and fall through to a normal move.
     let branch_exists = repo

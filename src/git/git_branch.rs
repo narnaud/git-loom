@@ -6,8 +6,12 @@ use anyhow::{Context, Result, bail};
 use super::run_git;
 
 /// Validate a branch name using `git check-ref-format`.
-pub fn branch_validate_name(name: &str) -> Result<()> {
+///
+/// Runs in `workdir` so it does not depend on the process-global cwd (which
+/// git reads even for `--branch`; a deleted cwd makes it fail).
+pub fn branch_validate_name(workdir: &Path, name: &str) -> Result<()> {
     let output = Command::new("git")
+        .current_dir(workdir)
         .args(["check-ref-format", "--branch", name])
         .output()
         .context("Failed to run git check-ref-format")?;

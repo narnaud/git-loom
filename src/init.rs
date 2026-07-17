@@ -20,7 +20,7 @@ pub fn run(name: Option<String>) -> Result<()> {
         bail!("Branch name cannot be empty");
     }
 
-    git::branch_validate_name(&name)?;
+    git::branch_validate_name(workdir, &name)?;
 
     repo::ensure_branch_not_exists(&repo, &name)?;
 

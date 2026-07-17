@@ -38,7 +38,8 @@ pub fn run(target: String, message: Option<String>) -> Result<()> {
             if new_name == name {
                 return Ok(());
             }
-            git::branch_validate_name(&new_name)?;
+            let workdir = repo::require_workdir(&repo, "reword")?;
+            git::branch_validate_name(workdir, &new_name)?;
             reword_branch(&repo, &name, &new_name)
         }
         _ => unreachable!(),
