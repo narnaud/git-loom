@@ -120,3 +120,7 @@ pub fn continue_rebase_or_abort(workdir: &Path) -> Result<()> {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "git_rebase_test.rs"]
+mod tests;
