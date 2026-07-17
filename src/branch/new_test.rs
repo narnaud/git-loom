@@ -41,13 +41,15 @@ fn branch_ownership_splits_commits() {
 
 #[test]
 fn branch_invalid_name_fails() {
-    let result = crate::git::branch_validate_name("my..branch");
+    let workdir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+
+    let result = crate::git::branch_validate_name(workdir, "my..branch");
     assert!(result.is_err(), "double dots should be invalid");
 
-    let result = crate::git::branch_validate_name("has space");
+    let result = crate::git::branch_validate_name(workdir, "has space");
     assert!(result.is_err(), "spaces should be invalid");
 
-    let result = crate::git::branch_validate_name("valid-name");
+    let result = crate::git::branch_validate_name(workdir, "valid-name");
     assert!(result.is_ok(), "valid name should pass");
 }
 

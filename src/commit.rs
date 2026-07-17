@@ -283,7 +283,7 @@ fn resolve_explicit_branch(
             if name.is_empty() {
                 bail!("Branch name cannot be empty");
             }
-            git::branch_validate_name(&name)?;
+            git::branch_validate_name(workdir, &name)?;
 
             if repo.find_branch(&name, git2::BranchType::Local).is_ok() {
                 bail!(
@@ -324,7 +324,7 @@ fn pick_branch(
 
     // If user typed a name that isn't an existing woven branch, create it
     if !branch_names.contains(&name) {
-        git::branch_validate_name(&name)?;
+        git::branch_validate_name(workdir, &name)?;
         repo::ensure_branch_not_exists(repo, &name)?;
         create_branch_at_merge_base(workdir, &name, info.upstream.merge_base_oid)?;
         return Ok((name, true));
