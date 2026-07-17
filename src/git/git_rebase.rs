@@ -19,12 +19,28 @@ pub enum RebaseOutcome {
 /// initial rebase in `weave::run_rebase`).
 pub fn continue_rebase(workdir: &Path) -> Result<RebaseOutcome> {
     use std::process::Command;
-    let status = Command::new("git")
+    use std::time::Instant;
+
+    use crate::trace as loom_trace;
+
+    let start = Instant::now();
+    let output = Command::new("git")
         .current_dir(workdir)
         .args(["rebase", "--continue"])
         .env("GIT_EDITOR", "true")
-        .status()?;
-    if status.success() {
+        .output()?;
+
+    let duration_ms = start.elapsed().as_millis();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    loom_trace::log_command(
+        "git",
+        "rebase --continue",
+        duration_ms,
+        output.status.success(),
+        &stderr,
+    );
+
+    if output.status.success() {
         Ok(RebaseOutcome::Completed)
     } else {
         Ok(RebaseOutcome::Conflicted)
@@ -104,3 +120,7 @@ pub fn continue_rebase_or_abort(workdir: &Path) -> Result<()> {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "git_rebase_test.rs"]
+mod tests;
