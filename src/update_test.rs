@@ -345,6 +345,50 @@ fn update_removes_branches_with_gone_upstream() {
 }
 
 #[test]
+fn update_prunes_the_push_remote_in_a_fork_workflow() {
+    let test_repo = TestRepo::new_with_remote();
+    let remote_path = test_repo.remote_path().unwrap();
+
+    // Add a fork as a second remote and make `loom push` target it
+    let fork_path = remote_path.parent().unwrap().join("fork.git");
+    Repository::init_bare(&fork_path).unwrap();
+    test_repo
+        .repo
+        .remote("personal", fork_path.to_str().unwrap())
+        .unwrap();
+    test_repo.set_config("loom.push-remote", "personal");
+
+    // Push feature-x to the fork, so it tracks personal/feature-x
+    test_repo.create_branch("feature-x");
+    let workdir = test_repo.workdir();
+    crate::git::run_git(&workdir, &["push", "-u", "personal", "feature-x"]).unwrap();
+
+    // Delete feature-x from the fork (simulates GitHub deleting a merged PR branch)
+    {
+        let fork_repo = Repository::open_bare(&fork_path).unwrap();
+        let mut branch = fork_repo
+            .find_branch("feature-x", BranchType::Local)
+            .unwrap();
+        branch.delete().unwrap();
+    }
+
+    let result = test_repo.in_dir(|| super::run(true));
+    assert!(result.is_ok(), "update failed: {:?}", result.err());
+
+    assert!(
+        test_repo
+            .repo
+            .find_reference("refs/remotes/personal/feature-x")
+            .is_err(),
+        "the stale tracking ref on the push remote should be pruned"
+    );
+    assert!(
+        !test_repo.branch_exists("feature-x"),
+        "feature-x should be removed after update (deleted on the push remote)"
+    );
+}
+
+#[test]
 fn update_keeps_branches_without_tracking_config() {
     let test_repo = TestRepo::new_with_remote();
 
