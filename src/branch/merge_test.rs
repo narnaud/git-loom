@@ -40,6 +40,38 @@ fn merge_weaves_existing_branch() {
     );
 }
 
+/// A local branch whose name contains '/' must be merged as-is, not mistaken
+/// for a remote branch and stripped down to a duplicate ref.
+#[test]
+fn merge_local_branch_with_slash_keeps_full_name() {
+    let test_repo = TestRepo::new_with_remote();
+
+    test_repo.commit("B1", "b1.txt");
+
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+    test_repo.create_branch_at("wip/dfaure/feature-a", &base_oid.to_string());
+
+    test_repo.switch_branch("wip/dfaure/feature-a");
+    test_repo.commit("A1", "a1.txt");
+    test_repo.switch_branch("integration");
+
+    test_repo
+        .in_dir(|| super::merge::run(Some("wip/dfaure/feature-a".to_string()), false))
+        .unwrap();
+
+    let info = repo::gather_repo_info(&test_repo.repo, false, 1).unwrap();
+    let branch_names: Vec<&str> = info.branches.iter().map(|b| b.name.as_str()).collect();
+    assert!(
+        branch_names.contains(&"wip/dfaure/feature-a"),
+        "the branch passed in must be the one woven, got: {:?}",
+        branch_names
+    );
+    assert!(
+        !test_repo.branch_exists("dfaure/feature-a"),
+        "no duplicate ref with the first path component stripped may be created"
+    );
+}
+
 /// Merging an already-woven branch should error.
 #[test]
 fn merge_already_woven_errors() {
