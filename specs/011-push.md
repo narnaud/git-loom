@@ -13,7 +13,7 @@ varies significantly depending on the hosting platform:
 
 - **Plain Git** needs `--force-with-lease` because the branch is rebased
 - **GitHub** benefits from opening a pull request after pushing
-- **Gerrit** requires a special `refs/for/` refspec and topic option
+- **Gerrit** requires a special `refs/for/` refspec
 
 `git loom push` unifies these under one command with automatic remote detection.
 
@@ -154,11 +154,11 @@ is not installed, prints a helpful message with a link to install it.
 ### Gerrit
 
 ```bash
-git push -o topic=<branch> <remote> <branch>:refs/for/<target>
+git push <remote> <branch>:refs/for/<target>
 ```
 
-Uses the Gerrit `refs/for/` refspec to create or update a change. Sets the
-topic to the branch name for grouping related changes.
+Uses the Gerrit `refs/for/` refspec to create or update a change. No topic is
+set — Gerrit keeps whatever topic the change already has.
 
 After pushing, stderr from the git push command is captured and scanned for
 review URLs. Lines starting with `remote:` that contain `http://` or `https://`

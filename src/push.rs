@@ -905,15 +905,14 @@ fn push_gerrit_no_pr(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
     }
 }
 
-/// Push to Gerrit with topic and refs/for/ refspec.
+/// Push to Gerrit with the refs/for/ refspec.
 ///
 /// Captures stderr from the push command and extracts Gerrit review URLs
 /// (lines starting with `remote:` that contain `http://` or `https://`).
 fn push_gerrit(workdir: &Path, remote: &str, branch: &str, target_branch: &str) -> Result<()> {
     let refspec = format!("{}:refs/for/{}", branch, target_branch);
-    let topic_opt = format!("topic={}", branch);
 
-    let stderr = run_push_capture(workdir, &["push", "-o", &topic_opt, remote, &refspec])?;
+    let stderr = run_push_capture(workdir, &["push", remote, &refspec])?;
 
     let mut message = format!(
         "Pushed `{}` to `{}` (Gerrit: `refs/for/{}`)",

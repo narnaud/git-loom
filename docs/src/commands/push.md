@@ -93,10 +93,10 @@ Pushes the branch with `--force-with-lease`, then checks whether a PR already ex
 ### Gerrit
 
 ```bash
-git push -o topic=<branch> <remote> <branch>:refs/for/<target>
+git push <remote> <branch>:refs/for/<target>
 ```
 
-Uses the `refs/for/` refspec and sets the topic to the branch name. After pushing, any review URLs returned by Gerrit are extracted from the remote output and displayed below the success message.
+Uses the `refs/for/` refspec. No topic is set. After pushing, any review URLs returned by Gerrit are extracted from the remote output and displayed below the success message.
 
 ## PR Title and Description
 
