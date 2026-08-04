@@ -382,6 +382,55 @@ fn resolve_arg_file_cwd_relative() {
 }
 
 #[test]
+fn resolve_arg_file_absolute_path() {
+    let test_repo = TestRepo::new_with_remote();
+    let sub_dir = test_repo.workdir().join("sub");
+    std::fs::create_dir_all(&sub_dir).unwrap();
+    let abs = sub_dir.join("deep.txt");
+    std::fs::write(&abs, "content").unwrap();
+    let arg = abs.to_string_lossy().into_owned();
+    test_repo.in_dir(|| {
+        let result = repo::resolve_arg(&test_repo.repo, &arg, &[TargetKind::File]).unwrap();
+        assert_eq!(result, Target::File("sub/deep.txt".to_string()));
+    });
+}
+
+#[test]
+fn resolve_arg_file_absolute_path_from_subdir() {
+    let test_repo = TestRepo::new_with_remote();
+    let sub_dir = test_repo.workdir().join("sub");
+    std::fs::create_dir_all(&sub_dir).unwrap();
+    test_repo.write_file("top.txt", "content");
+    let arg = test_repo
+        .workdir()
+        .join("top.txt")
+        .to_string_lossy()
+        .into_owned();
+    // CWD is a subdir, so the prefix must not be prepended to an absolute path.
+    test_repo.in_dir_path(&sub_dir, || {
+        let result = repo::resolve_arg(&test_repo.repo, &arg, &[TargetKind::File]).unwrap();
+        assert_eq!(result, Target::File("top.txt".to_string()));
+    });
+}
+
+#[test]
+fn resolve_arg_file_absolute_outside_repo_errors() {
+    let test_repo = TestRepo::new_with_remote();
+    let outside = tempfile::tempdir().unwrap();
+    let abs = outside.path().join("stranger.txt");
+    std::fs::write(&abs, "content").unwrap();
+    let arg = abs.to_string_lossy().into_owned();
+    test_repo.in_dir(|| {
+        let result = repo::resolve_arg(&test_repo.repo, &arg, &[TargetKind::File]);
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("outside repository"),
+            "error should say the path is outside the repo: {msg}"
+        );
+    });
+}
+
+#[test]
 fn resolve_arg_file_not_found_errors() {
     let test_repo = TestRepo::new_with_remote();
     test_repo.in_dir(|| {

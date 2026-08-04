@@ -57,6 +57,12 @@ fn split_commit(
 
     let original_msg = commit.message().unwrap_or("").trim().to_string();
 
+    // The commit's file list is repo-relative, so the given paths must be too.
+    let files: Vec<String> = files
+        .iter()
+        .map(|f| repo::to_repo_path(repo, f))
+        .collect::<Result<_>>()?;
+
     if patch {
         let oid_str = commit_oid.to_string();
         let selections = staging::run_commit_hunk_picker(workdir, &oid_str, &files, theme)?

@@ -39,6 +39,41 @@ fn split_head_commit() {
     );
 }
 
+#[test]
+fn split_head_commit_with_absolute_path() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("Add files", "file1.txt");
+
+    let target_oid = test_repo.commit_multi(
+        &[("file_a.txt", "content a"), ("file_b.txt", "content b")],
+        "Two files commit",
+    );
+
+    let abs = test_repo
+        .workdir()
+        .join("file_a.txt")
+        .to_string_lossy()
+        .into_owned();
+
+    let result = test_repo.in_dir(|| {
+        super::split_commit_with_selection(
+            &test_repo.repo,
+            &target_oid.to_string(),
+            vec![abs.clone()],
+            "First part".to_string(),
+        )
+    });
+
+    assert!(
+        result.is_ok(),
+        "split with absolute path failed: {result:?}"
+    );
+    assert_eq!(
+        test_repo.commit_file_paths(test_repo.get_oid(1)),
+        vec!["file_a.txt"]
+    );
+}
+
 // ── Non-HEAD split tests ──────────────────────────────────────────────
 
 #[test]
