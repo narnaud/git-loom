@@ -28,16 +28,16 @@ pub fn run(branch: Option<String>, all: bool) -> Result<()> {
         None => pick_branch(&repo, &info, all)?,
     };
 
-    // If this is a remote branch (contains '/'), create a local tracking branch
-    let local_name = if branch_name.contains('/') {
+    // Remote branches need a local tracking branch before they can be merged.
+    let local_name = if repo.find_branch(&branch_name, BranchType::Local).is_ok() {
+        branch_name.clone()
+    } else {
         let local = repo::upstream_local_branch(&branch_name);
         git::branch_create(workdir, &local, &branch_name)?;
         // Set up tracking
         let mut local_branch = repo.find_branch(&local, BranchType::Local)?;
         local_branch.set_upstream(Some(&branch_name))?;
         local
-    } else {
-        branch_name.clone()
     };
 
     // Merge the branch into integration (--no-ff) so it appears in the topology
