@@ -28,6 +28,8 @@ git loom update [-y]
 
 Runs `git fetch --tags --force --prune` against the tracked remote. Force-updates moved tags and prunes deleted remote branches from local tracking refs.
 
+In a fork workflow, where `loom push` sends feature branches to another remote (see [push](push.md)), that remote is fetched too with `git fetch --prune <remote>` — otherwise its tracking refs go stale and branches deleted on the fork are never seen as gone. Tags are only fetched from the tracked remote. If the fork is unreachable, loom warns and continues with the update.
+
 ### Upstream Commit Filtering
 
 Before rebasing, loom scans every feature-branch commit against the new upstream and drops any that are already present. Two strategies are applied:

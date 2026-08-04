@@ -248,6 +248,20 @@ fn resolve_push_remote(
     }
 }
 
+/// The remote `loom push` sends feature branches to, when it differs from the
+/// remote the integration branch tracks — i.e. a fork workflow.
+///
+/// Returns `None` for the common single-remote setup, where both are the same.
+pub(crate) fn fork_push_remote(
+    repo: &Repository,
+    workdir: &Path,
+    upstream_label: &str,
+) -> Option<String> {
+    let remote_type = detect_remote_type(repo, workdir, upstream_label).ok()?;
+    let push_remote = resolve_push_remote(repo, workdir, upstream_label, &remote_type);
+    (push_remote != extract_remote_name(upstream_label)).then_some(push_remote)
+}
+
 /// Run a `git push …`, trace-log it, bail on failure, and return its stderr.
 ///
 /// stderr carries the server's `remote:` messages — GitLab MR links, Gerrit

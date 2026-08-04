@@ -75,6 +75,8 @@ pub fn run(skip_confirm: bool) -> Result<()> {
         }
     }
 
+    fetch_push_remote(&repo, &workdir, &upstream_name);
+
     // Save rollback state before the rebase
     let ctx = UpdateContext {
         branch_name: branch_name.clone(),
@@ -144,6 +146,41 @@ pub fn run(skip_confirm: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Fetch and prune the push remote when it differs from the integration
+/// branch's remote.
+///
+/// In a fork workflow feature branches live on the push remote, which the
+/// fetch above never touches — its remote-tracking refs would stay stale
+/// forever and branches deleted on the fork would never show up as gone.
+///
+/// Only branches are pruned here: tags come from the integration remote,
+/// whose tags are the authoritative ones.
+fn fetch_push_remote(repo: &git2::Repository, workdir: &Path, upstream_name: &str) {
+    let Some(remote) = crate::push::fork_push_remote(repo, workdir, upstream_name) else {
+        return;
+    };
+
+    let spinner = msg::spinner();
+    spinner.start(&format!("Fetching `{}`...", remote));
+
+    match git::run_git_combined(workdir, &["fetch", "--no-progress", "--prune", &remote]) {
+        Ok(summary) => {
+            spinner.stop(&format!("Fetched `{}`", remote));
+            if !summary.is_empty() {
+                println!("{}", summary);
+            }
+        }
+        // An unreachable fork must not stop the update: the integration branch
+        // can still be rebased onto its own upstream.
+        Err(_) => {
+            spinner.error(&format!(
+                "Could not fetch `{}` — branches deleted there are not detected",
+                remote
+            ));
+        }
+    }
 }
 
 /// Resume an `update` operation after a conflict has been resolved.

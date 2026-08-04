@@ -15,7 +15,8 @@ After initializing an integration branch with `git loom init`, the upstream
 remote will continue to receive new commits. The update command brings those
 changes into the local integration branch in a single step:
 
-- **Fetch** all upstream changes, including tags, and prune deleted remote branches
+- **Fetch** all upstream changes, including tags, and prune deleted remote
+  branches — on the push remote too, when it differs (fork workflow)
 - **Rebase** local commits onto the updated upstream, keeping feature branches
   on the correct side of the topology
 - **Filter** commits already merged or cherry-picked upstream, preventing
@@ -52,8 +53,10 @@ git-loom update [--yes]
 
 1. **Validation**: HEAD must be on a branch (not detached), the branch must have
    an upstream tracking ref, and the repository must have a working tree.
-2. **Fetch**: All upstream changes are fetched, including tags. Moved tags
-   are force-updated. Deleted remote branches are pruned locally.
+2. **Fetch**: All upstream changes are fetched from the remote the integration
+   branch tracks, including tags. Moved tags are force-updated. Deleted remote
+   branches are pruned locally. When the push remote differs from that remote
+   (fork workflow), it is fetched and pruned as well — branches only, no tags.
 3. **Upstream commit filtering**: Before rebasing, any feature-branch commits
    already present in the new upstream are removed from the rebase todo. This
    uses two detection strategies (see "Upstream Commit Filtering" below).
@@ -306,6 +309,25 @@ The fetch step synchronizes all upstream state, not just branch commits:
   state clean
 
 This provides a complete sync rather than a minimal one.
+
+### Fetching the Push Remote
+
+In a fork workflow the feature branches live on the push remote (`loom.push-remote`,
+or the GitHub `upstream`/`origin` convention — see Spec 011), not on the remote
+the integration branch tracks. That remote is the one whose deletions matter for
+gone-upstream detection, so `update` fetches it too, with `--prune`, using the
+same resolution as `loom push`. Without it the fork's remote-tracking refs stay
+stale forever and no branch is ever reported as gone.
+
+Only the remotes loom itself uses are fetched — not `--all`, which would also hit
+read-only remotes added for cherry-picking. Single-remote setups resolve to the
+same remote and pay nothing.
+
+Tags are not fetched from the push remote: the integration remote's tags are the
+authoritative ones, and force-updating from a fork could move them backwards.
+
+A failure to fetch the push remote is a warning, not an error: the integration
+branch can still be rebased onto its own upstream.
 
 ### Automatic Working Tree Preservation
 
