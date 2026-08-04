@@ -229,12 +229,17 @@ fn reject_merge_commit(repo: &Repository, oid: git2::Oid) -> Result<()> {
     Ok(())
 }
 
-/// Try to resolve `arg` as a file path (CWD-relative → repo-relative).
+/// Try to resolve `arg` as a file path (absolute or CWD-relative → repo-relative).
 fn try_resolve_file(repo: &Repository, arg: &str) -> Result<Option<Target>> {
-    let repo_path = cwd_to_repo_path(repo, arg).unwrap_or_else(|_| arg.to_string());
     let workdir = match repo.workdir() {
         Some(w) => w,
         None => return Ok(None),
+    };
+    let repo_path = if Path::new(arg).is_absolute() {
+        // Like git, an absolute path outside the repo is an error, not a miss.
+        abs_to_repo_path(workdir, arg)?
+    } else {
+        cwd_to_repo_path(repo, arg).unwrap_or_else(|_| arg.to_string())
     };
     let full_path = workdir.join(&repo_path);
     if full_path.exists() {
@@ -343,6 +348,42 @@ fn try_resolve_shortid(
         }
     }
     Ok(None)
+}
+
+/// Convert a user-supplied path — absolute or CWD-relative — to a repo-relative
+/// path, the way git accepts either form.
+pub fn to_repo_path(repo: &Repository, arg: &str) -> Result<String> {
+    if Path::new(arg).is_absolute() {
+        let workdir = repo
+            .workdir()
+            .context("Repository has no working directory")?;
+        abs_to_repo_path(workdir, arg)
+    } else {
+        cwd_to_repo_path(repo, arg)
+    }
+}
+
+/// Convert an absolute path to a repo-relative path.
+///
+/// Errors when the path lies outside the repository, like git does.
+fn abs_to_repo_path(workdir: &Path, arg: &str) -> Result<String> {
+    // Canonicalize both sides so symlinked repo paths still match.  It fails on
+    // paths that no longer exist (deleted files), so fall back to the path itself.
+    let workdir_canonical =
+        std::fs::canonicalize(workdir).unwrap_or_else(|_| workdir.to_path_buf());
+    let path = Path::new(arg);
+    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+
+    let rel = canonical
+        .strip_prefix(&workdir_canonical)
+        .map_err(|_| anyhow::anyhow!("'{}' is outside repository", arg))?;
+    let s = rel
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join("/");
+    // The repo root itself means "everything"; "." is git's spelling for that.
+    Ok(if s.is_empty() { ".".to_string() } else { s })
 }
 
 /// Convert a CWD-relative path to a repo-relative path.

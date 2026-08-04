@@ -271,10 +271,12 @@ All commands resolve user-provided arguments through `git::resolve_arg(repo, arg
 The `accept` parameter is a `&[TargetKind]` slice specifying which kinds of targets the
 command accepts and in what priority order. Resolution strategies are only attempted for
 the listed kinds. Merge commits are automatically rejected when resolving `Commit` targets.
-CWD-relative path conversion is handled internally for `File` targets.
+Path conversion to repo-relative form is handled internally for `File` targets.
 
 Available `TargetKind` values:
-- `File` — a working-tree file path (CWD-relative → repo-relative conversion applied)
+- `File` — a working-tree file path, either CWD-relative or absolute (converted
+  to repo-relative). An absolute path outside the repository is an error:
+  `'<path>' is outside repository`.
 - `Branch` — a local branch name
 - `Commit` — a non-merge commit (hash, `HEAD`, etc.; branch names are excluded)
 - `CommitFile` — a commit-file reference (e.g. `02:0`)
