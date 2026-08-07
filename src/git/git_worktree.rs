@@ -8,8 +8,8 @@
 //!
 //! This module restores the invariant: before a rebase, branches about to be
 //! rewritten are mapped to worktrees. A branch checked out in a dirty external
-//! worktree refuses the whole operation up front; clean worktrees are synced
-//! (`reset --hard`) to the new tip once the rebase completes. Because a rebase
+//! worktree refuses the whole operation up front; clean worktrees are
+//! fast-forwarded to the new tip once the rebase completes. Because a rebase
 //! can pause (conflict or `edit`), the planned syncs are saved to
 //! `<git_dir>/loom/worktree-sync.json` and applied when the rebase machinery
 //! finishes — a sync only fires if the branch ref actually moved away from the
@@ -58,8 +58,6 @@ fn parse_worktree_list(porcelain: &str) -> Vec<WorktreeCheckout> {
             {
                 result.push(WorktreeCheckout { path: p, branch: b });
             }
-            path = None;
-            branch = None;
             skip = false;
         } else if let Some(p) = line.strip_prefix("worktree ") {
             path = Some(PathBuf::from(p));
@@ -76,7 +74,7 @@ fn parse_worktree_list(porcelain: &str) -> Vec<WorktreeCheckout> {
 ///
 /// Dirty means: staged or modified tracked files, unmerged entries, or an
 /// operation in progress (rebase/merge/cherry-pick/revert). Untracked files
-/// alone are clean — `reset --hard` leaves them untouched.
+/// alone are clean — the sync refuses to overwrite them instead.
 pub fn worktree_is_dirty(worktree: &Path) -> Result<bool> {
     let status = super::run_git_stdout(worktree, &["status", "--porcelain"])?;
     if status.lines().any(|line| !line.starts_with("??")) {
@@ -117,6 +115,11 @@ pub fn plan_worktree_syncs(workdir: &Path, branches: &[String]) -> Result<Vec<Pe
     let mut dirty = Vec::new();
     for checkout in worktree_checkouts(workdir)? {
         if !branches.contains(&checkout.branch) {
+            continue;
+        }
+        // A locked worktree whose directory is gone is not marked prunable;
+        // treat it like a prunable one (not checked out).
+        if !checkout.path.exists() {
             continue;
         }
         let canonical = checkout
@@ -161,8 +164,17 @@ pub fn plan_worktree_syncs(workdir: &Path, branches: &[String]) -> Result<Vec<Pe
 }
 
 /// Save the sync plan so it survives a paused rebase (conflict or `edit`).
+///
+/// An empty plan removes any stale file left by an interrupted earlier
+/// operation, so the file always reflects the current one.
 pub fn save_worktree_syncs(workdir: &Path, syncs: &[PendingSync]) -> Result<()> {
     let path = sync_file_path(workdir)?;
+    if syncs.is_empty() {
+        if path.exists() {
+            std::fs::remove_file(&path)?;
+        }
+        return Ok(());
+    }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).with_context(|| {
             format!(
@@ -187,7 +199,7 @@ pub fn finish_worktree_syncs(workdir: &Path) {
     let Ok(git_dir) = absolute_git_dir(workdir) else {
         return;
     };
-    let file = git_dir.join("loom").join("worktree-sync.json");
+    let file = sync_file_in(&git_dir);
     if !file.exists() || super::rebase_is_in_progress(&git_dir) {
         return;
     }
@@ -210,7 +222,7 @@ pub fn finish_worktree_syncs(workdir: &Path) {
     apply_worktree_syncs(workdir, &syncs);
 }
 
-/// Hard-reset each worktree to its branch's new tip.
+/// Fast-forward each worktree to its branch's new tip.
 fn apply_worktree_syncs(workdir: &Path, syncs: &[PendingSync]) {
     for sync in syncs {
         let Ok(new_tip) = super::rev_parse(workdir, &format!("refs/heads/{}", sync.branch)) else {
@@ -223,24 +235,32 @@ fn apply_worktree_syncs(workdir: &Path, syncs: &[PendingSync]) {
         if !worktree_matches_commit(&sync.path, &sync.old_tip) {
             msg::warn(&format!(
                 "Worktree `{}` was modified while branch `{}` was being rewritten — not synced\n\
-                 Its checkout still matches the old tip {}; reconcile it manually before committing there",
+                 Its index and files are still based on the old tip {} plus your changes, \
+                 while HEAD now points at the rewritten branch; reconcile manually before committing there",
                 sync.path.display(),
                 sync.branch,
                 super::short_hash(&sync.old_tip),
             ));
             continue;
         }
-        match super::reset_hard(&sync.path, &new_tip) {
+        // Fast-forward the checkout old→new. Unlike `reset --hard`, this
+        // refuses — touching nothing — if an untracked file would be
+        // overwritten by a file the rewritten branch newly tracks.
+        match super::run_git(
+            &sync.path,
+            &["read-tree", "-m", "-u", &sync.old_tip, &new_tip],
+        ) {
             Ok(()) => msg::success(&format!(
                 "Synced worktree `{}` to rewritten branch `{}`",
                 sync.path.display(),
                 sync.branch
             )),
-            Err(e) => msg::warn(&format!(
-                "Could not sync worktree `{}` to rewritten branch `{}`: {}",
+            Err(_) => msg::warn(&format!(
+                "Worktree `{}` was not synced to rewritten branch `{}` — untracked files there would be overwritten\n\
+                 Move them away, then run `git -C {} reset --hard`",
                 sync.path.display(),
                 sync.branch,
-                e
+                sync.path.display()
             )),
         }
     }
@@ -254,9 +274,11 @@ fn worktree_matches_commit(worktree: &Path, commit: &str) -> bool {
 }
 
 fn sync_file_path(workdir: &Path) -> Result<PathBuf> {
-    Ok(absolute_git_dir(workdir)?
-        .join("loom")
-        .join("worktree-sync.json"))
+    Ok(sync_file_in(&absolute_git_dir(workdir)?))
+}
+
+fn sync_file_in(git_dir: &Path) -> PathBuf {
+    git_dir.join("loom").join("worktree-sync.json")
 }
 
 /// Resolve the git dir, avoiding a process spawn in the common layout.

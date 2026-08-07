@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use super::{WorktreeCheckout, parse_worktree_list};
+use super::{PendingSync, WorktreeCheckout, parse_worktree_list};
 use crate::core::test_helpers::TestRepo;
 use crate::core::weave;
 use crate::core::weave::Weave;
@@ -145,6 +145,77 @@ fn untracked_file_does_not_block_and_survives_sync() {
         std::fs::read_to_string(wt.join("notes.txt")).unwrap(),
         "scratch"
     );
+}
+
+#[test]
+fn untracked_collision_blocks_sync_but_preserves_file() {
+    let (t, wt, newbase) = setup_worktree_repo("u1.txt");
+    let old_feature = t.get_branch_target("feature");
+    // The rewritten feature will newly track u1.txt (from newbase); an
+    // untracked u1.txt in the worktree must never be overwritten by the sync.
+    std::fs::write(wt.join("u1.txt"), "draft").unwrap();
+
+    let outcome = weave_rebase(&t, &newbase).unwrap();
+    assert!(matches!(outcome, RebaseOutcome::Completed));
+
+    // The branch was rewritten, but the sync refused and the draft survives.
+    assert_ne!(t.get_branch_target("feature"), old_feature);
+    assert_eq!(std::fs::read_to_string(wt.join("u1.txt")).unwrap(), "draft");
+    assert!(
+        !wt_status(&wt).trim().is_empty(),
+        "worktree stays desynced when the sync is refused"
+    );
+    assert!(!pending_sync_file(&t).exists());
+}
+
+#[test]
+fn edit_pause_saves_plan_and_syncs_on_continue() {
+    let (t, wt, newbase) = setup_worktree_repo("u1.txt");
+    let old_feature = t.get_branch_target("feature");
+
+    // An `edit` at the feature tip: git rebase exits successfully but stays
+    // in progress, so the sync must wait for the continue.
+    let mut graph = Weave::from_repo(&t.repo).unwrap();
+    graph.edit_commit(old_feature);
+    let todo = graph.to_todo();
+    let outcome = weave::run_rebase(&t.workdir(), Some(&newbase), &todo).unwrap();
+    assert!(matches!(outcome, RebaseOutcome::Completed));
+    assert!(git::rebase_is_in_progress(t.repo.path()));
+    assert!(
+        pending_sync_file(&t).exists(),
+        "sync plan should survive the edit pause"
+    );
+
+    let outcome = git::continue_rebase(&t.workdir()).unwrap();
+    assert!(matches!(outcome, RebaseOutcome::Completed));
+
+    let new_feature = t.get_branch_target("feature");
+    assert_ne!(new_feature, old_feature);
+    assert_eq!(
+        git::rev_parse(&wt, "HEAD").unwrap(),
+        new_feature.to_string()
+    );
+    assert!(wt_status(&wt).trim().is_empty());
+    assert!(!pending_sync_file(&t).exists());
+}
+
+#[test]
+fn finish_skips_deleted_branch_and_removes_file() {
+    let t = TestRepo::new_with_remote();
+    let workdir = t.workdir();
+    git::save_worktree_syncs(
+        &workdir,
+        &[PendingSync {
+            branch: "nonexistent".to_string(),
+            path: workdir.clone(),
+            old_tip: t.head_oid().to_string(),
+        }],
+    )
+    .unwrap();
+    assert!(pending_sync_file(&t).exists());
+
+    git::finish_worktree_syncs(&workdir);
+    assert!(!pending_sync_file(&t).exists());
 }
 
 #[test]

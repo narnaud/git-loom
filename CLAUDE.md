@@ -94,7 +94,7 @@ git-loom must never discard user data — staged changes, working tree changes, 
 2. Register the command name in `transaction::dispatch_after_continue`
 3. There is no `dispatch_after_abort` — abort is handled automatically by `Rollback::apply_abort()`
 
-**Worktree ref safety** (`git/git_worktree.rs`): the explicit `update-ref` todo lines bypass git's check against moving a branch checked out in another worktree. `weave::run_rebase` therefore refuses up front if such a worktree has local changes, and hard-resets clean ones to the rewritten tip once the rebase completes. The sync plan survives a paused rebase in `<git_dir>/loom/worktree-sync.json`, applied by `finish_worktree_syncs` (idempotent, called from every completion/abort path); a sync only fires if the branch actually moved and the worktree still matches the recorded old tip, so user changes made mid-pause are never discarded.
+**Worktree ref safety** (`git/git_worktree.rs`, spec 004): the explicit `update-ref` todo lines bypass git's check against moving a branch checked out in another worktree. `weave::run_rebase` therefore refuses up front if such a worktree has local changes, and fast-forwards clean ones to the rewritten tip once the rebase completes (`read-tree -m -u`, which refuses to overwrite untracked files). The sync plan survives a paused rebase in `<git_dir>/loom/worktree-sync.json`, applied by `finish_worktree_syncs` (idempotent, called from every completion/abort path); a sync only fires if the branch actually moved and the worktree still matches the recorded old tip, so user changes made mid-pause are never discarded.
 
 ## Error Reporting Convention
 

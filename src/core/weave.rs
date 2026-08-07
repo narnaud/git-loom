@@ -1178,9 +1178,7 @@ pub fn run_rebase(
     // clean ones are synced to the rewritten tips once the rebase completes.
     let worktree_syncs =
         git::plan_worktree_syncs(workdir, &todo_update_ref_branches(todo_content))?;
-    if !worktree_syncs.is_empty() {
-        git::save_worktree_syncs(workdir, &worktree_syncs)?;
-    }
+    git::save_worktree_syncs(workdir, &worktree_syncs)?;
 
     let self_exe = git::loom_exe_path()?;
 

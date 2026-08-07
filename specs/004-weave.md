@@ -155,6 +155,35 @@ Key behaviors:
   commands (e.g., `reword`, `split`, excluded `fold` paths) abort explicitly
   and leave the repository in its original state
 
+## Worktree Ref Safety
+
+The `update-ref` directives bypass git's porcelain check against moving a
+branch that is checked out in another worktree, which would desync that
+worktree: its index and files stay at the old tip, so `git status` there
+shows the old→new delta as phantom staged changes. Before executing the
+todo, every branch named in an `update-ref` directive is mapped to worktrees
+(`git worktree list --porcelain`):
+
+- Checked out in the worktree the rebase runs in: no special handling — the
+  rebase moves ref, index, and files together.
+- Checked out in another worktree that has local changes (staged or modified
+  tracked files, unmerged entries, or an operation in progress): the whole
+  operation is refused before anything is rewritten, naming the branch and
+  worktree path. Untracked files alone do not count as local changes.
+- Checked out in another clean worktree: after the rebase completes, the
+  worktree is fast-forwarded to the rewritten tip (`read-tree -m -u`), which
+  refuses — with a warning — rather than overwrite an untracked file that the
+  rewritten branch newly tracks.
+- Detached-HEAD worktrees, and worktrees whose directory is gone, are
+  unaffected.
+
+Because the rebase can pause (conflict or `edit`), the planned syncs are
+saved to `.git/loom/worktree-sync.json` and applied when the rebase machinery
+finishes, from any completion or abort path. A sync only fires if the branch
+actually moved away from the recorded old tip and the worktree still matches
+that tip, so applying after an abort is a no-op, and a worktree modified
+during the pause is left alone (with a warning) instead of being reset.
+
 ## Integration with Commands
 
 | Command | Mutations used |
