@@ -183,6 +183,10 @@ pub fn continue_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
     // else: no rebase or merge is in progress — the user already ran
     // `git rebase --continue` manually, so move straight to dispatch.
 
+    // No-op unless the user completed the rebase manually — the loom-driven
+    // paths sync worktrees inside `continue_rebase` already.
+    git::finish_worktree_syncs(workdir);
+
     dispatch_after_continue(workdir, &state)?;
     delete(git_dir)?;
     Ok(())
@@ -204,6 +208,11 @@ pub fn abort_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
     } else if git::merge_is_in_progress(git_dir) {
         let _ = git::merge_abort(workdir);
     }
+
+    // Settle any worktree sync plan left by the interrupted rebase: a no-op
+    // cleanup if refs were restored, a real sync if the user completed the
+    // rebase manually before aborting.
+    git::finish_worktree_syncs(workdir);
 
     state.rollback.apply_abort(workdir)?;
     delete(git_dir)?;

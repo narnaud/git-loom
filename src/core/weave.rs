@@ -1173,6 +1173,15 @@ pub fn run_rebase(
 
     use crate::trace as loom_trace;
 
+    // The `update-ref` lines in the todo bypass git's check against moving a
+    // branch checked out in another worktree. Refuse dirty worktrees up front;
+    // clean ones are synced to the rewritten tips once the rebase completes.
+    let worktree_syncs =
+        git::plan_worktree_syncs(workdir, &todo_update_ref_branches(todo_content))?;
+    if !worktree_syncs.is_empty() {
+        git::save_worktree_syncs(workdir, &worktree_syncs)?;
+    }
+
     let self_exe = git::loom_exe_path()?;
 
     // Write todo content to a temp file
@@ -1265,6 +1274,8 @@ pub fn run_rebase(
                 return Ok(RebaseOutcome::Conflicted);
             }
         }
+        // The rebase never started — no refs moved, drop the sync plan.
+        git::finish_worktree_syncs(workdir);
         let stderr_msg = String::from_utf8_lossy(&output.stderr);
         anyhow::bail!("git rebase failed: {}", stderr_msg.trim());
     }
@@ -1272,7 +1283,22 @@ pub fn run_rebase(
     // Clean up the temp file
     let _ = temp_path.close();
 
+    // Sync worktrees now unless the rebase paused at an `edit` command
+    // (then the refs move when the rebase is continued to completion).
+    git::finish_worktree_syncs(workdir);
+
     Ok(RebaseOutcome::Completed)
+}
+
+/// Branch names from `update-ref refs/heads/<name>` lines in a todo.
+///
+/// These are exactly the refs the rebase will rewrite (besides HEAD's branch,
+/// which moves together with the current worktree).
+fn todo_update_ref_branches(todo: &str) -> Vec<String> {
+    todo.lines()
+        .filter_map(|line| line.trim().strip_prefix("update-ref refs/heads/"))
+        .map(str::to_string)
+        .collect()
 }
 
 /// Returns OIDs in `base..HEAD` that have cherry-pick equivalents in `upstream`.

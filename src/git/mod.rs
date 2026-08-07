@@ -4,6 +4,7 @@ pub mod git_commit;
 pub mod git_diff;
 pub mod git_merge;
 pub mod git_rebase;
+pub mod git_worktree;
 
 pub use git_apply::{
     apply_cached_patch, apply_cached_patch_reverse, apply_patch, apply_patch_reverse,
@@ -29,6 +30,7 @@ pub use git_rebase::{
     RebaseOutcome, continue_rebase, continue_rebase_or_abort, rebase, rebase_abort,
     rebase_is_in_progress,
 };
+pub use git_worktree::{finish_worktree_syncs, plan_worktree_syncs, save_worktree_syncs};
 
 use std::path::Path;
 use std::process::Command;
