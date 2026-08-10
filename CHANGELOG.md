@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.20.0](https://github.com/narnaud/git-loom/compare/v0.19.0...v0.20.0) (2026-08-10)
+
+
+### Features ✨
+
+* **fold:** support multiple commits with --create ([f6a636a](https://github.com/narnaud/git-loom/commit/f6a636a8995fd4e9705467cff19bebb381fed96b))
+* **paths:** accept absolute file paths like git ([4eeb8be](https://github.com/narnaud/git-loom/commit/4eeb8be764e996cc4b478cd1ba367d94a10a8b16))
+* **pull:** show whether anything was pulled ([1bc9ed1](https://github.com/narnaud/git-loom/commit/1bc9ed1b9c0fef98dcb8e725360081002a1ae856))
+* **push:** support GitLab and surface server MR/PR links ([38acd1e](https://github.com/narnaud/git-loom/commit/38acd1e90c8ca0dd4d1080915a38f38013b7ab49))
+* **show:** default to HEAD when no target given ([291d857](https://github.com/narnaud/git-loom/commit/291d85735eef4c91acdebb5cacdec37182329e9d))
+* **update:** add loom.pruneGoneBranches config to auto-remove gone-upstream branches ([acde3ee](https://github.com/narnaud/git-loom/commit/acde3ee7f243b0935996a670216876661ea95226))
+* **update:** show tip sha when pruning gone-upstream branches ([2f2754b](https://github.com/narnaud/git-loom/commit/2f2754b868cb1478f5cf2f244c42445223eaaba2))
+
+
+### Bug Fixes 🐞
+
+* **azure:** pass --project and --repository so PR creation works with SSH remotes ([3d9981e](https://github.com/narnaud/git-loom/commit/3d9981e38054c04264a3bafc7d5cc7e144864293))
+* **branch:** merge local branches whose name contains a slash ([b094bd4](https://github.com/narnaud/git-loom/commit/b094bd455fcddfda300eab3031702161fb80993e))
+* **branch:** run check-ref-format in a workdir to fix flaky validation ([9a04c31](https://github.com/narnaud/git-loom/commit/9a04c31f6c0b2b14efba97c27ebfa59c743a37ec))
+* **fold:** capture git rebase --continue output instead of leaking it ([fd815f2](https://github.com/narnaud/git-loom/commit/fd815f24cd00eadab141c41d72e1e67e26a68007)), closes [#159](https://github.com/narnaud/git-loom/issues/159)
+* **push:** don't set a Gerrit topic from the local branch name ([990460c](https://github.com/narnaud/git-loom/commit/990460c84540b0bd4e2a909c57e2b7bb80b04e13)), closes [#178](https://github.com/narnaud/git-loom/issues/178)
+* **show:** default to the top-of-status commit, not raw HEAD ([8a23334](https://github.com/narnaud/git-loom/commit/8a23334d27e7587716b8ae383e3e72327c7764ca))
+* **trace:** keep stderr for successful commands ([4fff836](https://github.com/narnaud/git-loom/commit/4fff83636f41d64f7dd63752b4b5978607aa6fc3))
+* **update:** fetch the push remote too, so gone branches are detected ([de502fb](https://github.com/narnaud/git-loom/commit/de502fb6f6d8ab6247243b47f4b7041dec007cde))
+
+
+### Tests
+
+* **fold:** assert continue_rebase records output to trace ([c7ab007](https://github.com/narnaud/git-loom/commit/c7ab007daf41559cad7355cd66edf8fd5b02d200))
+
+
+### Other
+
+* **deps:** bump actions/checkout from 6 to 7 ([5a4a5c1](https://github.com/narnaud/git-loom/commit/5a4a5c1458d89ee090c9f5b6240fca2851c776ca))
+* **deps:** bump actions/setup-python from 6 to 7 ([f8259e4](https://github.com/narnaud/git-loom/commit/f8259e49334398240e9103a6bd05116381839012))
+* **deps:** bump anyhow from 1.0.102 to 1.0.103 ([0d38c73](https://github.com/narnaud/git-loom/commit/0d38c73952d89932a5b129669adfaa53b5885e94))
+* **deps:** bump anyhow from 1.0.103 to 1.0.104 ([0aa2e74](https://github.com/narnaud/git-loom/commit/0aa2e74fea7d74ba6e05fb04a68f9d1d8bfdb99c))
+* **deps:** bump clap from 4.6.1 to 4.6.4 ([fab1937](https://github.com/narnaud/git-loom/commit/fab1937b1e8b912fd6bfc907d326b5999514024f))
+* **deps:** bump clap from 4.6.4 to 4.6.5 ([e3186f1](https://github.com/narnaud/git-loom/commit/e3186f1a8671257a99f28954ec1ffce6e1d48a90))
+* **deps:** bump ratatui from 0.30.1 to 0.30.2 ([e7472c1](https://github.com/narnaud/git-loom/commit/e7472c19684370cf0293adc4d5b8ec1236a6292e))
+* **deps:** bump serde from 1.0.228 to 1.0.229 ([2589767](https://github.com/narnaud/git-loom/commit/25897675892144c61209c966068f5595cadf9dff))
+* **deps:** bump serde_json from 1.0.150 to 1.0.151 ([9401da2](https://github.com/narnaud/git-loom/commit/9401da291ab57729ec2a5de2ef1755a12b984074))
+
 ## [0.19.0](https://github.com/narnaud/git-loom/compare/v0.18.0...v0.19.0) (2026-06-21)
 
 
