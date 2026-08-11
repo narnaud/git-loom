@@ -212,7 +212,7 @@ fn drop_commit_from_branch_section() {
         }],
     };
 
-    graph.drop_commit(oid(OID_A1));
+    assert!(graph.drop_commit(oid(OID_A1)));
 
     assert_eq!(graph.branch_sections.len(), 1);
     assert_eq!(graph.branch_sections[0].commits.len(), 1);
@@ -239,7 +239,7 @@ fn drop_last_commit_removes_section_and_merge() {
         ],
     };
 
-    graph.drop_commit(oid(OID_A1));
+    assert!(graph.drop_commit(oid(OID_A1)));
 
     assert!(graph.branch_sections.is_empty());
     assert_eq!(graph.integration_line.len(), 1); // Only "Int" pick remains
@@ -257,8 +257,31 @@ fn drop_commit_from_integration_line() {
         ],
     };
 
-    graph.drop_commit(oid(OID_C1));
+    assert!(graph.drop_commit(oid(OID_C1)));
 
+    assert_eq!(graph.integration_line.len(), 1);
+}
+
+#[test]
+fn drop_unknown_commit_or_branch_returns_false() {
+    let mut graph = Weave {
+        base_oid: oid(BASE),
+
+        branch_sections: vec![BranchSection {
+            reset_target: "onto".to_string(),
+            commits: vec![make_commit(OID_A1, "A1")],
+            label: "feature-a".to_string(),
+            branch_names: vec!["feature-a".to_string()],
+        }],
+        integration_line: vec![IntegrationEntry::Pick(make_commit(OID_C1, "C1"))],
+    };
+
+    assert!(!graph.drop_commit(oid("dead")));
+    assert!(!graph.drop_branch("no-such-branch"));
+    assert!(!graph.reassign_branch("no-such-branch", "feature-a"));
+
+    // Graph is unchanged
+    assert_eq!(graph.branch_sections.len(), 1);
     assert_eq!(graph.integration_line.len(), 1);
 }
 
@@ -293,7 +316,7 @@ fn drop_branch_removes_section_and_merge() {
         ],
     };
 
-    graph.drop_branch("feature-a");
+    assert!(graph.drop_branch("feature-a"));
 
     assert_eq!(graph.branch_sections.len(), 1);
     assert_eq!(graph.branch_sections[0].label, "feature-b");
@@ -585,7 +608,7 @@ fn reassign_branch_renames_section() {
         }],
     };
 
-    graph.reassign_branch("feature-a", "feature-b");
+    assert!(graph.reassign_branch("feature-a", "feature-b"));
 
     assert_eq!(graph.branch_sections[0].label, "feature-b");
     assert!(
@@ -774,7 +797,7 @@ fn drop_commit_transfers_update_refs_to_adjacent() {
         }],
     };
 
-    graph.drop_commit(oid("222"));
+    assert!(graph.drop_commit(oid("222")));
 
     // update_refs should transfer to adjacent commit (C1, preceding)
     assert_eq!(graph.branch_sections[0].commits.len(), 2);
@@ -805,7 +828,7 @@ fn drop_commit_transfers_update_refs_to_next_when_first() {
         }],
     };
 
-    graph.drop_commit(oid("111"));
+    assert!(graph.drop_commit(oid("111")));
 
     assert_eq!(graph.branch_sections[0].commits.len(), 1);
     assert!(
@@ -828,7 +851,7 @@ fn drop_commit_on_integration_line_transfers_update_refs() {
         ],
     };
 
-    graph.drop_commit(oid("222"));
+    assert!(graph.drop_commit(oid("222")));
 
     // Should transfer to an adjacent Pick on the integration line
     let picks: Vec<&CommitEntry> = graph
@@ -873,7 +896,7 @@ fn drop_branch_preserves_colocated_update_refs_at_boundary() {
         }],
     };
 
-    graph.drop_branch("feat3");
+    assert!(graph.drop_branch("feat3"));
 
     // feat1 should be the new section label (first ref found)
     assert_eq!(graph.branch_sections[0].label, "feat1");

@@ -41,7 +41,12 @@ pub fn run(branch: Option<String>) -> Result<()> {
 
     // Build weave and remove the branch section
     let mut graph = Weave::from_repo_with_info(&repo, &info)?;
-    graph.drop_branch(&branch_name);
+    if !graph.drop_branch(&branch_name) {
+        bail!(
+            "Cannot unmerge: branch '{}' not found in weave graph",
+            branch_name
+        );
+    }
 
     let todo = graph.to_todo();
     weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo)?;

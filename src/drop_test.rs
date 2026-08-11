@@ -105,6 +105,43 @@ fn drop_one_of_two_commits_preserves_branch() {
     );
 }
 
+#[test]
+fn drop_stale_sha_fails_without_touching_history() {
+    let test_repo = TestRepo::new_with_remote();
+    let b_oid = test_repo.commit("B", "b.txt");
+    let stale_oid = test_repo.commit("C", "c.txt");
+
+    // Rewrite history: C's object stays alive in the reflog but is no longer
+    // in the upstream..HEAD range
+    test_repo.reset_hard(b_oid);
+    let new_tip = test_repo.commit("C2", "c2.txt");
+
+    let result = super::drop_commit(&test_repo.repo, &stale_oid.to_string(), true);
+    let err = result.expect_err("dropping a stale SHA must fail");
+    assert!(
+        err.to_string().contains("not in the local commits"),
+        "unexpected error: {}",
+        err
+    );
+    assert_eq!(test_repo.head_oid(), new_tip, "history must be unchanged");
+}
+
+#[test]
+fn drop_upstream_commit_fails_without_touching_history() {
+    let test_repo = TestRepo::new_with_remote();
+    let local_oid = test_repo.commit("Local", "local.txt");
+    let upstream_oid = test_repo.find_remote_branch_target("origin/main");
+
+    let result = super::drop_commit(&test_repo.repo, &upstream_oid.to_string(), true);
+    let err = result.expect_err("dropping an upstream commit must fail");
+    assert!(
+        err.to_string().contains("already in the upstream"),
+        "unexpected error: {}",
+        err
+    );
+    assert_eq!(test_repo.head_oid(), local_oid, "history must be unchanged");
+}
+
 // ── Drop branch tests ───────────────────────────────────────────────────
 
 #[test]
