@@ -1371,7 +1371,13 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
         let saved_refs = repo::snapshot_branch_refs(repo)?;
 
         let mut graph = Weave::from_repo(repo)?;
-        graph.drop_commit(target_oid);
+        if !graph.drop_commit(target_oid) {
+            bail!(
+                "Commit `{}` is not in the local commits (upstream..HEAD)\n\
+                 If history was rewritten, the SHA may be stale — run `loom` to see the current commits",
+                git::short_hash(commit_hash)
+            );
+        }
 
         let git_dir = repo.path().to_path_buf();
         let fold_ctx = serde_json::to_value(FoldVariant::CommitToUnstaged {

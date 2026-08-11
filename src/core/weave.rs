@@ -324,7 +324,8 @@ impl Weave {
         }
 
         for oid in to_drop {
-            self.drop_commit(oid);
+            // Always found: the oids come from the sections themselves
+            let _ = self.drop_commit(oid);
         }
         Ok(())
     }
@@ -333,7 +334,10 @@ impl Weave {
     ///
     /// If the commit is in a branch section and is the last commit, the section
     /// and its merge entry are also removed.
-    pub fn drop_commit(&mut self, oid: Oid) {
+    ///
+    /// Returns false if the commit is not in the graph.
+    #[must_use]
+    pub fn drop_commit(&mut self, oid: Oid) -> bool {
         // Check branch sections first
         for i in 0..self.branch_sections.len() {
             if let Some(pos) = self.branch_sections[i]
@@ -359,16 +363,19 @@ impl Weave {
                         |e| !matches!(e, IntegrationEntry::Merge { label: l, .. } if *l == label),
                     );
                 }
-                return;
+                return true;
             }
         }
 
         // Check integration line
-        if let Some(pos) = self
+        let Some(pos) = self
             .integration_line
             .iter()
             .position(|e| matches!(e, IntegrationEntry::Pick(c) if c.oid == oid))
-            && let IntegrationEntry::Pick(removed) = self.integration_line.remove(pos)
+        else {
+            return false;
+        };
+        if let IntegrationEntry::Pick(removed) = self.integration_line.remove(pos)
             && !removed.update_refs.is_empty()
         {
             // Find the nearest adjacent Pick to transfer refs to
@@ -381,15 +388,19 @@ impl Weave {
                 c.update_refs.extend(removed.update_refs);
             }
         }
+        true
     }
 
     /// Remove an entire branch section and its merge entry.
-    pub fn drop_branch(&mut self, branch_name: &str) {
+    ///
+    /// Returns false if no section matches the branch name.
+    #[must_use]
+    pub fn drop_branch(&mut self, branch_name: &str) -> bool {
         // Find the section that has this branch name
         let Some(idx) = self.branch_sections.iter().position(|s| {
             s.branch_names.contains(&branch_name.to_string()) || s.label == branch_name
         }) else {
-            return;
+            return false;
         };
 
         let old_label = self.branch_sections[idx].label.clone();
@@ -440,6 +451,7 @@ impl Weave {
                 |e| !matches!(e, IntegrationEntry::Merge { label: l, .. } if *l == old_label),
             );
         }
+        true
     }
 
     /// Move a commit to the tip of a branch section.
@@ -682,42 +694,48 @@ impl Weave {
     ///
     /// Renames the section's label and merge line, removes the dropped branch
     /// from branch_names, ensures the keep branch is present.
-    pub fn reassign_branch(&mut self, drop_branch: &str, keep_branch: &str) {
-        if let Some(section) = self
+    ///
+    /// Returns false if no section matches the dropped branch name.
+    #[must_use]
+    pub fn reassign_branch(&mut self, drop_branch: &str, keep_branch: &str) -> bool {
+        let Some(section) = self
             .branch_sections
             .iter_mut()
             .find(|s| s.label == drop_branch || s.branch_names.contains(&drop_branch.to_string()))
-        {
-            let old_label = section.label.clone();
+        else {
+            return false;
+        };
 
-            // If the section was labeled with the drop branch, rename the label
-            if section.label == drop_branch {
-                section.label = keep_branch.to_string();
-            }
+        let old_label = section.label.clone();
 
-            // Remove the drop branch from branch_names
-            section.branch_names.retain(|n| n != drop_branch);
+        // If the section was labeled with the drop branch, rename the label
+        if section.label == drop_branch {
+            section.label = keep_branch.to_string();
+        }
 
-            // Ensure the keep branch is in branch_names
-            if !section.branch_names.contains(&keep_branch.to_string()) {
-                section.branch_names.push(keep_branch.to_string());
-            }
+        // Remove the drop branch from branch_names
+        section.branch_names.retain(|n| n != drop_branch);
 
-            // Update the merge entry label and clear original_oid so the
-            // rebase generates a fresh merge message with the new branch name.
-            let new_label = section.label.clone();
-            for entry in &mut self.integration_line {
-                if let IntegrationEntry::Merge {
-                    label,
-                    original_oid,
-                } = entry
-                    && *label == old_label
-                {
-                    *label = new_label.clone();
-                    *original_oid = None;
-                }
+        // Ensure the keep branch is in branch_names
+        if !section.branch_names.contains(&keep_branch.to_string()) {
+            section.branch_names.push(keep_branch.to_string());
+        }
+
+        // Update the merge entry label and clear original_oid so the
+        // rebase generates a fresh merge message with the new branch name.
+        let new_label = section.label.clone();
+        for entry in &mut self.integration_line {
+            if let IntegrationEntry::Merge {
+                label,
+                original_oid,
+            } = entry
+                && *label == old_label
+            {
+                *label = new_label.clone();
+                *original_oid = None;
             }
         }
+        true
     }
 
     /// Swap two commits within the same sequence.

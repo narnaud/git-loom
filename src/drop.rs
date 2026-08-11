@@ -140,6 +140,32 @@ fn drop_commit(repo: &Repository, commit_hash: &str, skip_confirm: bool) -> Resu
     let commit_oid = git2::Oid::from_str(commit_hash)?;
     let info = repo::gather_repo_info(repo, false, 1)?;
 
+    // Refuse commits outside the local range (upstream..HEAD). Stale SHAs from
+    // before a rewrite still resolve via the reflog, and upstream commits
+    // resolve too — dropping those must fail, not pretend to succeed.
+    if !info.commits.iter().any(|c| c.oid == commit_oid) {
+        let short_hash = git::short_hash(commit_hash);
+        let upstream = &info.upstream.label;
+        let in_upstream = repo
+            .merge_base(info.upstream.merge_base_oid, commit_oid)
+            .is_ok_and(|base| base == commit_oid);
+        if in_upstream {
+            bail!(
+                "Commit `{}` is already in the upstream ({})\n\
+                 loom only manages the local commits ({}..HEAD)",
+                short_hash,
+                upstream,
+                upstream
+            );
+        }
+        bail!(
+            "Commit `{}` is not in the local commits ({}..HEAD)\n\
+             If history was rewritten, the SHA may be stale — run `loom` to see the current commits",
+            short_hash,
+            upstream
+        );
+    }
+
     // Check if this commit is the only commit on a branch.
     // If so, delegate to drop_branch for clean section removal.
     let merge_base_oid = info.upstream.merge_base_oid;
@@ -168,7 +194,12 @@ fn drop_commit(repo: &Repository, commit_hash: &str, skip_confirm: bool) -> Resu
     )?;
 
     let mut graph = Weave::from_repo_with_info(repo, &info)?;
-    graph.drop_commit(commit_oid);
+    if !graph.drop_commit(commit_oid) {
+        bail!(
+            "Cannot drop commit: {} not found in weave graph",
+            short_hash
+        );
+    }
 
     let ctx = DropContext {
         commit_hash: commit_hash.to_string(),
@@ -279,10 +310,16 @@ fn drop_branch_with_info(
     let mut graph = Weave::from_repo_with_info(repo, info)?;
 
     if is_woven {
-        if let Some(keep) = colocated_branch {
-            graph.reassign_branch(branch_name, &keep.name);
+        let removed = if let Some(keep) = colocated_branch {
+            graph.reassign_branch(branch_name, &keep.name)
         } else {
-            graph.drop_branch(branch_name);
+            graph.drop_branch(branch_name)
+        };
+        if !removed {
+            bail!(
+                "Cannot drop branch: '{}' not found in weave graph",
+                branch_name
+            );
         }
     } else if owned.is_empty() {
         // Co-located non-woven: no commits to drop, just delete the ref
@@ -292,7 +329,12 @@ fn drop_branch_with_info(
     } else {
         // Non-woven branch: drop each uniquely owned commit individually
         for oid in &owned {
-            graph.drop_commit(*oid);
+            if !graph.drop_commit(*oid) {
+                bail!(
+                    "Cannot drop branch: commit {} not found in weave graph",
+                    oid
+                );
+            }
         }
     }
 
