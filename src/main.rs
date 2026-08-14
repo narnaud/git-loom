@@ -56,10 +56,10 @@ const GROUPED_COMMANDS: &str = "\
   \x1b[32madd\x1b[0m               Stage files using short IDs or paths [\x1b[32m-p\x1b[0m for interactive hunks]
 
 \x1b[1;33mCommits:\x1b[0m
-  \x1b[32mcommit\x1b[0m, \x1b[32mci\x1b[0m        Create a commit on a feature branch
-  \x1b[32mfold\x1b[0m              Amend, fixup, or move commits [\x1b[32mamend\x1b[0m, \x1b[32mam\x1b[0m, \x1b[32mfixup\x1b[0m, \x1b[32mmv\x1b[0m, \x1b[32mrub\x1b[0m]
+  \x1b[32mcommit\x1b[0m, \x1b[32mci\x1b[0m        Create a commit on a feature branch [\x1b[32m-p\x1b[0m for interactive hunks]
+  \x1b[32mfold\x1b[0m              Amend, fixup, or move commits [\x1b[32m-p\x1b[0m for interactive hunks] [\x1b[32mamend\x1b[0m, \x1b[32mam\x1b[0m, \x1b[32mfixup\x1b[0m, \x1b[32mmv\x1b[0m, \x1b[32mrub\x1b[0m]
   \x1b[32mabsorb\x1b[0m            Auto-distribute changes into originating commits
-  \x1b[32msplit\x1b[0m             Split a commit into two
+  \x1b[32msplit\x1b[0m             Split a commit into two [\x1b[32m-p\x1b[0m for interactive hunks]
   \x1b[32mswap\x1b[0m              Swap two commits
   \x1b[32mreword\x1b[0m, \x1b[32mrw\x1b[0m        Reword a commit message or rename a branch
   \x1b[32mdrop\x1b[0m, \x1b[32mrm\x1b[0m          Drop a change, commit, or branch
