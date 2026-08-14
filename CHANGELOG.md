@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.20.1](https://github.com/narnaud/git-loom/compare/v0.20.0...v0.20.1) (2026-08-14)
+
+
+### Bug Fixes 🐞
+
+* **drop:** fail loudly for commits outside upstream..HEAD ([71991af](https://github.com/narnaud/git-loom/commit/71991af72b5048953717c0bb83424670c418ae88))
+
+
+### Documentation
+
+* Add `-p` for commit, fold and split in the help ([7288a63](https://github.com/narnaud/git-loom/commit/7288a6355ec3ee0fa5ad1224aeecaec550920f4b))
+
+
+### Other
+
+* **deps:** bump clap from 4.6.5 to 4.6.6 ([af7cb76](https://github.com/narnaud/git-loom/commit/af7cb76ce3cb0620e6a6aab26a6e50a910939fc5))
+
 ## [0.20.0](https://github.com/narnaud/git-loom/compare/v0.19.0...v0.20.0) (2026-08-10)
 
 
