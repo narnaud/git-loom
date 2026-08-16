@@ -3,6 +3,7 @@ use std::path::Path;
 use anyhow::{Result, bail};
 
 /// Outcome of a rebase operation.
+#[derive(Debug)]
 pub enum RebaseOutcome {
     Completed,
     Conflicted,
@@ -41,6 +42,9 @@ pub fn continue_rebase(workdir: &Path) -> Result<RebaseOutcome> {
     );
 
     if output.status.success() {
+        // If this completed the rebase (rather than pausing at another step),
+        // sync worktrees whose checked-out branch was rewritten.
+        super::git_worktree::finish_worktree_syncs(workdir);
         Ok(RebaseOutcome::Completed)
     } else {
         Ok(RebaseOutcome::Conflicted)
@@ -96,7 +100,10 @@ pub fn rebase_onto(workdir: &Path, newbase: &str, upstream: &str) -> Result<()> 
 
 /// Abort an in-progress rebase.
 pub fn rebase_abort(workdir: &Path) -> Result<()> {
-    super::run_git(workdir, &["rebase", "--abort"])
+    super::run_git(workdir, &["rebase", "--abort"])?;
+    // The abort restored all branch refs, so this only removes the sync plan.
+    super::git_worktree::finish_worktree_syncs(workdir);
+    Ok(())
 }
 
 /// Check whether a rebase is currently in progress in the repository.
