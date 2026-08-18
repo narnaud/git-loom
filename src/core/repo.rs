@@ -291,8 +291,18 @@ fn try_resolve_shortid(
     arg: &str,
     accept: &[TargetKind],
 ) -> Result<Option<Target>> {
-    let needs_files = arg.contains(':');
-    let info = gather_repo_info(repo, needs_files, 1)?;
+    let needs_commit_files = arg.contains(':');
+    // File short IDs are the only ones that need the working tree scanned;
+    // branch and commit IDs are allocated before files, so leaving them out
+    // does not shift any ID. Context commits get no short IDs at all.
+    let info = gather(
+        repo,
+        GatherOpts {
+            commit_files: needs_commit_files,
+            context: 0,
+            working_changes: accept.contains(&TargetKind::File),
+        },
+    )?;
     let entities = info.collect_entities();
     let allocator = crate::core::shortid::IdAllocator::new(entities);
 
@@ -476,7 +486,8 @@ pub struct RepoInfo {
     /// Local branches whose tip is in the commit range (excluding the
     /// current integration branch).
     pub branches: Vec<BranchInfo>,
-    /// Staged and unstaged working tree changes.
+    /// Staged and unstaged working tree changes. Empty when gathered via
+    /// [`gather_commit_graph`].
     pub working_changes: Vec<FileChange>,
     /// Context commits before the base (for history context display).
     pub context_commits: Vec<ContextCommit>,
@@ -557,11 +568,60 @@ pub struct FileChange {
     pub worktree: char,
 }
 
+/// Whether the repo has an integration context: HEAD on a branch that has an
+/// upstream. Commands that fall back to plain-git behavior outside such a
+/// context check this first, so they can propagate every other failure from
+/// [`gather_repo_info`] instead of swallowing it.
+pub fn has_integration_context(repo: &Repository) -> bool {
+    let Ok(head) = repo.head() else {
+        return false;
+    };
+    if !head.is_branch() {
+        return false;
+    }
+    let Some(name) = head.shorthand() else {
+        return false;
+    };
+    repo.find_branch(name, BranchType::Local)
+        .and_then(|b| b.upstream())
+        .is_ok()
+}
+
+/// What [`gather`] collects on top of the commit graph. Everything off by
+/// default: each extra costs a walk or a full working tree scan.
+#[derive(Default, Clone, Copy)]
+struct GatherOpts {
+    /// List the files each commit touches.
+    commit_files: bool,
+    /// How many context commits to walk below the merge-base.
+    context: usize,
+    /// Scan the working tree for staged and unstaged changes.
+    working_changes: bool,
+}
+
 /// Collect all data needed for the status display: walk commits from HEAD to the
 /// upstream tracking branch, detect feature branches, and gather working tree status.
 ///
 /// When `show_files` is true, each commit will include the list of files it touches.
 pub fn gather_repo_info(repo: &Repository, show_files: bool, context: usize) -> Result<RepoInfo> {
+    gather(
+        repo,
+        GatherOpts {
+            commit_files: show_files,
+            context,
+            working_changes: true,
+        },
+    )
+}
+
+/// Like [`gather_repo_info`], but skips the working tree scan — `working_changes`
+/// comes back empty. For commands that only need the commit graph and would
+/// otherwise pay for a full `git status` on every invocation.
+pub fn gather_commit_graph(repo: &Repository) -> Result<RepoInfo> {
+    gather(repo, GatherOpts::default())
+}
+
+fn gather(repo: &Repository, opts: GatherOpts) -> Result<RepoInfo> {
     let head = repo.head()?;
 
     if !head.is_branch() {
@@ -596,7 +656,7 @@ pub fn gather_repo_info(repo: &Repository, show_files: bool, context: usize) -> 
 
     let merge_base_oid = repo.merge_base(head_oid, upstream_oid)?;
 
-    let commits = walk_commits(repo, head_oid, merge_base_oid, show_files)?;
+    let commits = walk_commits(repo, head_oid, merge_base_oid, opts.commit_files)?;
     let commit_set: std::collections::HashSet<git2::Oid> = commits.iter().map(|c| c.oid).collect();
     let branches = find_branches_in_range(
         repo,
@@ -605,7 +665,11 @@ pub fn gather_repo_info(repo: &Repository, show_files: bool, context: usize) -> 
         &branch_name,
         &upstream_name,
     )?;
-    let working_changes = get_working_changes(repo)?;
+    let working_changes = if opts.working_changes {
+        get_working_changes(repo)?
+    } else {
+        vec![]
+    };
 
     // Count how many commits upstream is ahead of the merge-base
     let commits_ahead = count_commits(repo, upstream_oid, merge_base_oid)?;
@@ -622,7 +686,7 @@ pub fn gather_repo_info(repo: &Repository, show_files: bool, context: usize) -> 
     let base_time = base_commit.time();
     let base_date = format_epoch(base_time.seconds());
 
-    let context_commits = walk_context_commits(repo, merge_base_oid, context)?;
+    let context_commits = walk_context_commits(repo, merge_base_oid, opts.context)?;
 
     Ok(RepoInfo {
         branch_name,

@@ -156,6 +156,15 @@ fn display_path(repo_path: &str, cwd_prefix: &str) -> String {
 
 // ── Section building ────────────────────────────────────────────────────
 
+/// The name commit assignment uses for the branch(es) at `tip`: the first one
+/// listed, which matters only when several branch names are co-located there.
+fn canonical_branch_name(info: &RepoInfo, tip: git2::Oid) -> &str {
+    info.branches
+        .iter()
+        .find(|b| b.tip_oid == tip)
+        .map_or("", |b| b.name.as_str())
+}
+
 /// Assign each in-range commit to the feature branch that owns it by walking
 /// parent links from every branch tip. Commits absent from the returned map
 /// are "loose": they sit on the integration line and belong to no feature
@@ -163,16 +172,6 @@ fn display_path(repo_path: &str, cwd_prefix: &str) -> String {
 fn assign_commits_to_branches(info: &RepoInfo) -> HashMap<git2::Oid, String> {
     // Build a set of branch tip OIDs for quick lookup.
     let branch_tip_set: HashSet<git2::Oid> = info.branches.iter().map(|b| b.tip_oid).collect();
-
-    // Group branches by tip OID to handle co-located branches (multiple
-    // branch names pointing to the same commit).
-    let mut tip_to_names: HashMap<git2::Oid, Vec<String>> = HashMap::new();
-    for b in &info.branches {
-        tip_to_names
-            .entry(b.tip_oid)
-            .or_default()
-            .push(b.name.clone());
-    }
 
     // Build a parent lookup from the commit list so we can walk ancestry chains.
     let parent_map: HashMap<git2::Oid, Option<git2::Oid>> =
@@ -189,7 +188,7 @@ fn assign_commits_to_branches(info: &RepoInfo) -> HashMap<git2::Oid, String> {
         if !seen_tips.insert(b.tip_oid) {
             continue; // Already processed commits for this tip
         }
-        let canonical_name = tip_to_names[&b.tip_oid][0].clone();
+        let canonical_name = canonical_branch_name(info, b.tip_oid).to_string();
         let mut current = Some(b.tip_oid);
         let mut is_tip = true;
         while let Some(oid) = current {
@@ -209,16 +208,37 @@ fn assign_commits_to_branches(info: &RepoInfo) -> HashMap<git2::Oid, String> {
     commit_to_branch
 }
 
-/// OID of the commit shown at the top of the status graph: the first loose
-/// commit (on the integration line, belonging to no feature branch) in
-/// topological order. Returns None when every in-range commit belongs to a
-/// feature branch, or there are no commits.
-pub fn top_loose_commit(info: &RepoInfo) -> Option<git2::Oid> {
+/// OIDs of the commits shown on the integration line: those belonging to no
+/// feature branch, in topological order (newest first).
+pub fn loose_commits(info: &RepoInfo) -> Vec<git2::Oid> {
     let commit_to_branch = assign_commits_to_branches(info);
     info.commits
         .iter()
-        .find(|c| !commit_to_branch.contains_key(&c.oid))
+        .filter(|c| !commit_to_branch.contains_key(&c.oid))
         .map(|c| c.oid)
+        .collect()
+}
+
+/// OIDs of the commits the status graph attributes to `branch`, in topological
+/// order (newest first). Empty when `branch` is not a feature branch in the
+/// graph, or owns no commits of its own.
+pub fn commits_in_branch(info: &RepoInfo, branch: &str) -> Vec<git2::Oid> {
+    let Some(tip) = info
+        .branches
+        .iter()
+        .find(|b| b.name == branch)
+        .map(|b| b.tip_oid)
+    else {
+        return Vec::new();
+    };
+    let owner = canonical_branch_name(info, tip);
+
+    let commit_to_branch = assign_commits_to_branches(info);
+    info.commits
+        .iter()
+        .filter(|c| commit_to_branch.get(&c.oid).is_some_and(|n| n == owner))
+        .map(|c| c.oid)
+        .collect()
 }
 
 /// Group commits into sections: working changes, feature branches, loose
