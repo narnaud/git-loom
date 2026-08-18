@@ -23,11 +23,7 @@ pub fn run(
     let ids = shortid::IdAllocator::new(info.collect_entities());
 
     if !show_all {
-        let pattern = repo::hide_branch_pattern(&repo)
-            .unwrap_or_else(|| repo::DEFAULT_HIDE_PATTERN.to_string());
-        if !pattern.is_empty() {
-            hide_branches(&mut info, &pattern);
-        }
+        apply_hidden_branches(&repo, &mut info);
     }
 
     // When specific commits are requested, clear files from non-matching commits.
@@ -47,19 +43,31 @@ pub fn run(
     Ok(())
 }
 
-/// OID of the commit shown at the top of `loom status`: the tip of the
-/// integration line, skipping merge commits and hidden branches. Returns None
-/// when the integration branch has no commits of its own above the merge-base.
-pub fn top_commit(repo: &git2::Repository) -> Result<Option<git2::Oid>> {
-    let mut info = repo::gather_repo_info(repo, false, 0)?;
-
+/// Drop the branches hidden by the `loom.hideBranchPattern` prefix from `info`,
+/// as `loom status` does: both the branches and the commits they own are
+/// removed, so neither shows up anywhere in the graph.
+pub fn apply_hidden_branches(repo: &git2::Repository, info: &mut repo::RepoInfo) {
     let pattern =
         repo::hide_branch_pattern(repo).unwrap_or_else(|| repo::DEFAULT_HIDE_PATTERN.to_string());
     if !pattern.is_empty() {
-        hide_branches(&mut info, &pattern);
+        hide_branches(info, &pattern);
     }
+}
 
-    Ok(graph::top_loose_commit(&info))
+/// OIDs of the commits on the integration line of `loom status`, newest first:
+/// those belonging to no feature branch, skipping merge commits and hidden
+/// branches.
+pub fn loose_commits(repo: &git2::Repository) -> Result<Vec<git2::Oid>> {
+    let mut info = repo::gather_commit_graph(repo)?;
+    apply_hidden_branches(repo, &mut info);
+    Ok(graph::loose_commits(&info))
+}
+
+/// OID of the commit shown at the top of `loom status`: the tip of the
+/// integration line. Returns None when the integration branch has no commits
+/// of its own above the merge-base.
+pub fn top_commit(repo: &git2::Repository) -> Result<Option<git2::Oid>> {
+    Ok(loose_commits(repo)?.first().copied())
 }
 
 /// Resolve a list of user-supplied IDs to a set of commit OIDs whose files
