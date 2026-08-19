@@ -22,18 +22,14 @@ mod update;
 
 use crate::core::{graph, msg, repo, transaction};
 
+use std::ffi::OsString;
 use std::io::IsTerminal;
+use std::sync::OnceLock;
 
 use anyhow::Context;
 use clap::builder::styling::{AnsiColor, Styles};
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use colored::control;
-
-const STYLES: Styles = Styles::styled()
-    .header(AnsiColor::Yellow.on_default().bold())
-    .usage(AnsiColor::Yellow.on_default().bold())
-    .literal(AnsiColor::Green.on_default())
-    .placeholder(AnsiColor::Blue.on_default());
 
 #[derive(ValueEnum, Clone, Copy)]
 enum ThemeArg {
@@ -45,48 +41,86 @@ enum ThemeArg {
     Light,
 }
 
-// Grouped command help — ANSI codes match STYLES (yellow bold = headers, green = literals)
+/// Terminal background the colors are tuned for.
+#[derive(Clone, Copy, PartialEq)]
+enum ThemeMode {
+    Dark,
+    Light,
+}
+
+// Help templates. `{h}`, `{l}` and `{p}` are the header, literal and
+// placeholder styles and `{r}` resets; `apply_styles` substitutes them so the
+// help output follows the terminal background and `--no-color`.
+const ABOUT: &str = "\
+{p}Weave your branches together{r}
+Checkout the full docs here: https://narnaud.github.io/git-loom/";
+
+const HELP_TEMPLATE: &str =
+    "{about-with-newline}\n{usage-heading} {usage}{after-help}\n\n{h}Options:{r}\n{options}\n";
+
+// Grouped command help, replacing clap's flat command list.
 const GROUPED_COMMANDS: &str = "\
-\x1b[1;33mWorkflow:\x1b[0m
-  \x1b[32minit\x1b[0m              Initialize a new integration branch
-  \x1b[32mupdate\x1b[0m, \x1b[32mup\x1b[0m        Pull-rebase and update submodules
-  \x1b[32mpush\x1b[0m, \x1b[32mpr\x1b[0m          Push a branch to remote
+{h}Workflow:{r}
+  {l}init{r}              Initialize a new integration branch
+  {l}update{r}, {l}up{r}        Pull-rebase and update submodules
+  {l}push{r}, {l}pr{r}          Push a branch to remote
 
-\x1b[1;33mStaging:\x1b[0m
-  \x1b[32madd\x1b[0m               Stage files using short IDs or paths [\x1b[32m-p\x1b[0m for interactive hunks]
+{h}Staging:{r}
+  {l}add{r}               Stage files using short IDs or paths [{l}-p{r} for interactive hunks]
 
-\x1b[1;33mCommits:\x1b[0m
-  \x1b[32mcommit\x1b[0m, \x1b[32mci\x1b[0m        Create a commit on a feature branch [\x1b[32m-p\x1b[0m for interactive hunks]
-  \x1b[32mfold\x1b[0m              Amend, fixup, or move commits [\x1b[32m-p\x1b[0m for interactive hunks] [\x1b[32mamend\x1b[0m, \x1b[32mam\x1b[0m, \x1b[32mfixup\x1b[0m, \x1b[32mmv\x1b[0m, \x1b[32mrub\x1b[0m]
-  \x1b[32mabsorb\x1b[0m            Auto-distribute changes into originating commits
-  \x1b[32msplit\x1b[0m             Split a commit into two [\x1b[32m-p\x1b[0m for interactive hunks]
-  \x1b[32mswap\x1b[0m              Swap two commits
-  \x1b[32mreword\x1b[0m, \x1b[32mrw\x1b[0m        Reword a commit message or rename a branch
-  \x1b[32mdrop\x1b[0m, \x1b[32mrm\x1b[0m          Drop a change, commit, or branch
+{h}Commits:{r}
+  {l}commit{r}, {l}ci{r}        Create a commit on a feature branch [{l}-p{r} for interactive hunks]
+  {l}fold{r}              Amend, fixup, or move commits [{l}-p{r} for interactive hunks] [{l}amend{r}, {l}am{r}, {l}fixup{r}, {l}mv{r}, {l}rub{r}]
+  {l}absorb{r}            Auto-distribute changes into originating commits
+  {l}split{r}             Split a commit into two [{l}-p{r} for interactive hunks]
+  {l}swap{r}              Swap two commits
+  {l}reword{r}, {l}rw{r}        Reword a commit message or rename a branch
+  {l}drop{r}, {l}rm{r}          Drop a change, commit, or branch
 
-\x1b[1;33mBranches:\x1b[0m
-  \x1b[32mbranch\x1b[0m, \x1b[32mbr\x1b[0m        Manage feature branches (create, merge, unmerge)
-  \x1b[32mswitch\x1b[0m, \x1b[32msw\x1b[0m        Switch to any branch for testing (without weaving)
+{h}Branches:{r}
+  {l}branch{r}, {l}br{r}        Manage feature branches (create, merge, unmerge)
+  {l}switch{r}, {l}sw{r}        Switch to any branch for testing (without weaving)
 
-\x1b[1;33mInspection:\x1b[0m
-  \x1b[32mstatus\x1b[0m            Show the branch-aware status (\x1b[34mdefault\x1b[0m command)
-  \x1b[32mshow\x1b[0m, \x1b[32msh\x1b[0m          Show commit details (like git show)
-  \x1b[32mdiff\x1b[0m, \x1b[32mdi\x1b[0m          Show a diff using short IDs (like git diff)
-  \x1b[32mtrace\x1b[0m             Show the latest command trace
+{h}Inspection:{r}
+  {l}status{r}            Show the branch-aware status ({p}default{r} command)
+  {l}show{r}, {l}sh{r}          Show commit details (like git show)
+  {l}diff{r}, {l}di{r}          Show a diff using short IDs (like git diff)
+  {l}trace{r}             Show the latest command trace
 
-\x1b[1;33mRecovery:\x1b[0m
-  \x1b[32mcontinue\x1b[0m, \x1b[32mc\x1b[0m       Resume a paused operation after resolving conflicts
-  \x1b[32mabort\x1b[0m, \x1b[32ma\x1b[0m          Cancel a paused operation and restore original state";
+{h}Recovery:{r}
+  {l}continue{r}, {l}c{r}       Resume a paused operation after resolving conflicts
+  {l}abort{r}, {l}a{r}          Cancel a paused operation and restore original state";
+
+/// Style palette for the help output. Yellow is unreadable on a light
+/// background, so headers move to blue and placeholders to magenta there.
+/// Returns a plain palette (no escapes at all) when colors are disabled.
+fn help_styles(mode: ThemeMode, color: bool) -> Styles {
+    if !color {
+        return Styles::plain();
+    }
+    let (header, literal, placeholder) = match mode {
+        ThemeMode::Dark => (AnsiColor::Yellow, AnsiColor::Green, AnsiColor::Blue),
+        ThemeMode::Light => (AnsiColor::Blue, AnsiColor::Green, AnsiColor::Magenta),
+    };
+    Styles::styled()
+        .header(header.on_default().bold())
+        .usage(header.on_default().bold())
+        .literal(literal.on_default())
+        .placeholder(placeholder.on_default())
+}
+
+/// Substitute the style markers of a help template.
+fn apply_styles(template: &str, styles: &Styles) -> String {
+    let header = styles.get_header();
+    template
+        .replace("{h}", &header.to_string())
+        .replace("{l}", &styles.get_literal().to_string())
+        .replace("{p}", &styles.get_placeholder().to_string())
+        .replace("{r}", &format!("{header:#}"))
+}
 
 #[derive(Parser)]
-#[command(
-    name = "git-loom",
-    about = "\x1b[34mWeave your branches together\x1b[0m\nCheckout the full docs here: https://narnaud.github.io/git-loom/",
-    styles = STYLES,
-    version,
-    after_help = GROUPED_COMMANDS,
-    help_template = "{about-with-newline}\n{usage-heading} {usage}{after-help}\n\n\x1b[1;33mOptions:\x1b[0m\n{options}\n",
-)]
+#[command(name = "git-loom", version)]
 struct Cli {
     /// Disable colored output
     #[arg(long)]
@@ -340,13 +374,9 @@ struct BranchNewArgs {
 }
 
 fn main() {
-    let cli = Cli::parse();
+    let cli = parse_cli(&std::env::args_os().collect::<Vec<_>>());
 
-    if cli.no_color
-        || std::env::var_os("NO_COLOR").is_some()
-        || std::env::var_os("TERM").is_some_and(|v| v == "dumb")
-        || !std::io::stdout().is_terminal()
-    {
+    if !colors_enabled(cli.no_color) {
         control::set_override(false);
     }
 
@@ -408,7 +438,7 @@ fn main() {
         }
     }
 
-    let theme = resolve_theme(cli.theme);
+    let theme = graph_theme(resolve_theme_mode(cli.theme));
 
     let result = match cli.command {
         None => status::run(cli.files, cli.context, cli.all, theme),
@@ -468,20 +498,81 @@ fn main() {
     }
 }
 
-fn resolve_theme(arg: ThemeArg) -> graph::Theme {
-    match arg {
-        ThemeArg::Dark => graph::Theme::dark(),
-        ThemeArg::Light => graph::Theme::light(),
-        ThemeArg::Auto => {
-            if !std::io::stdout().is_terminal() {
-                return graph::Theme::dark();
-            }
-            use terminal_colorsaurus::{QueryOptions, ThemeMode, theme_mode};
-            match theme_mode(QueryOptions::default()) {
-                Ok(ThemeMode::Light) => graph::Theme::light(),
-                _ => graph::Theme::dark(),
-            }
+/// Build the CLI and parse `args`. The help text is generated here rather than
+/// in the derive attributes because clap renders it while parsing, before
+/// `main` gets a chance to look at `--no-color` or the terminal background.
+fn parse_cli(args: &[OsString]) -> Cli {
+    let color = colors_enabled(args.iter().any(|arg| arg == "--no-color"));
+    let styles = help_styles(resolve_theme_mode(early_theme(args)), color);
+    let mut command = Cli::command()
+        .styles(styles.clone())
+        .about(apply_styles(ABOUT, &styles))
+        .after_help(apply_styles(GROUPED_COMMANDS, &styles))
+        .help_template(apply_styles(HELP_TEMPLATE, &styles));
+    if !color {
+        command = command.color(clap::ColorChoice::Never);
+    }
+    let matches = command.get_matches_from(args);
+    match Cli::from_arg_matches(&matches) {
+        Ok(cli) => cli,
+        Err(err) => err.exit(),
+    }
+}
+
+/// Whether colored output should be emitted at all.
+fn colors_enabled(no_color: bool) -> bool {
+    !no_color
+        && std::env::var_os("NO_COLOR").is_none()
+        && !std::env::var_os("TERM").is_some_and(|v| v == "dumb")
+        && std::io::stdout().is_terminal()
+}
+
+/// Read `--theme` from the raw args, for the same reason as `parse_cli`.
+/// Unknown values fall back to `Auto`; clap reports them during the real parse.
+fn early_theme(args: &[OsString]) -> ThemeArg {
+    let mut rest = args.iter().skip(1).filter_map(|arg| arg.to_str());
+    while let Some(arg) = rest.next() {
+        let value = match arg.strip_prefix("--theme") {
+            Some("") => rest.next(),
+            Some(tail) => tail.strip_prefix("="),
+            None => continue,
+        };
+        if let Some(value) = value
+            && let Ok(theme) = ThemeArg::from_str(value, true)
+        {
+            return theme;
         }
+    }
+    ThemeArg::Auto
+}
+
+fn resolve_theme_mode(arg: ThemeArg) -> ThemeMode {
+    match arg {
+        ThemeArg::Dark => ThemeMode::Dark,
+        ThemeArg::Light => ThemeMode::Light,
+        ThemeArg::Auto => detect_theme_mode(),
+    }
+}
+
+/// Query the terminal for its background color, at most once per run.
+fn detect_theme_mode() -> ThemeMode {
+    static DETECTED: OnceLock<ThemeMode> = OnceLock::new();
+    *DETECTED.get_or_init(|| {
+        if !std::io::stdout().is_terminal() {
+            return ThemeMode::Dark;
+        }
+        use terminal_colorsaurus::{QueryOptions, ThemeMode as Detected, theme_mode};
+        match theme_mode(QueryOptions::default()) {
+            Ok(Detected::Light) => ThemeMode::Light,
+            _ => ThemeMode::Dark,
+        }
+    })
+}
+
+fn graph_theme(mode: ThemeMode) -> graph::Theme {
+    match mode {
+        ThemeMode::Dark => graph::Theme::dark(),
+        ThemeMode::Light => graph::Theme::light(),
     }
 }
 
@@ -498,3 +589,7 @@ fn handle_write_todo(source: &str, todo_file: &str) -> anyhow::Result<()> {
         .with_context(|| format!("Failed to write todo file '{}'", todo_file))?;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "main_test.rs"]
+mod tests;
