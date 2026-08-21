@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.21.0](https://github.com/narnaud/git-loom/compare/v0.20.1...v0.21.0) (2026-08-21)
+
+
+### Features ✨
+
+* **show:** show all the commits a branch owns, not just its tip ([5abefd6](https://github.com/narnaud/git-loom/commit/5abefd6fb615cd4bce422cdbc5cb7ab6e194a76c))
+
+
+### Bug Fixes 🐞
+
+* **help:** make the grouped help respect --no-color and light terminals ([bc4b8a8](https://github.com/narnaud/git-loom/commit/bc4b8a869b478b7653b58578e82b5e505ba4aec3))
+
 ## [0.20.1](https://github.com/narnaud/git-loom/compare/v0.20.0...v0.20.1) (2026-08-14)
 
 
