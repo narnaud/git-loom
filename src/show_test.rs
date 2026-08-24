@@ -45,7 +45,7 @@ fn show_commit_by_hash() {
     let test_repo = TestRepo::new();
     let oid = test_repo.commit("Test commit", "file.txt");
 
-    let result = test_repo.in_dir(|| super::run(Some(oid.to_string())));
+    let result = test_repo.in_dir(|| super::run(vec![oid.to_string()]));
     assert!(
         result.is_ok(),
         "show should succeed for a valid commit hash"
@@ -58,7 +58,7 @@ fn show_no_target_uses_head() {
     let test_repo = TestRepo::new();
     test_repo.commit("On main", "file.txt");
 
-    let result = test_repo.in_dir(|| super::run(None));
+    let result = test_repo.in_dir(|| super::run(vec![]));
     assert!(
         result.is_ok(),
         "show with no target should show the last commit"
@@ -74,7 +74,7 @@ fn show_branch_succeeds() {
     let head = test_repo.repo.head().unwrap();
     let branch_name = head.shorthand().unwrap().to_string();
 
-    let result = test_repo.in_dir(|| super::run(Some(branch_name.clone())));
+    let result = test_repo.in_dir(|| super::run(vec![branch_name.clone()]));
     assert!(result.is_ok(), "show should succeed for a branch name");
 }
 
@@ -82,7 +82,7 @@ fn show_branch_succeeds() {
 fn show_invalid_target_fails() {
     let test_repo = TestRepo::new();
 
-    let result = test_repo.in_dir(|| super::run(Some("nonexistent_target_xyz".to_string())));
+    let result = test_repo.in_dir(|| super::run(vec!["nonexistent_target_xyz".to_string()]));
     assert!(result.is_err(), "show should fail for invalid target");
 }
 
@@ -277,5 +277,73 @@ fn branch_revs_handles_co_located_branches() {
         revs(&test_repo, "alias"),
         expected,
         "both names at the same tip own the same commits"
+    );
+}
+
+#[test]
+fn show_forwards_unknown_option_before_the_target() {
+    no_pager();
+    let test_repo = TestRepo::new();
+    let oid = test_repo.commit("Test commit", "file.txt");
+
+    let result = test_repo.in_dir(|| super::run(vec!["--stat".to_string(), oid.to_string()]));
+    assert!(result.is_ok(), "show should forward --stat to git show");
+}
+
+#[test]
+fn show_forwards_unknown_option_after_the_target() {
+    no_pager();
+    let test_repo = TestRepo::new();
+    let oid = test_repo.commit("Test commit", "file.txt");
+
+    let result = test_repo.in_dir(|| super::run(vec![oid.to_string(), "--stat".to_string()]));
+    assert!(
+        result.is_ok(),
+        "option position should not matter for passthrough"
+    );
+}
+
+#[test]
+fn show_forwards_a_pathspec_after_the_separator() {
+    no_pager();
+    let test_repo = TestRepo::new();
+    let oid = test_repo.commit("Test commit", "file.txt");
+
+    let result = test_repo.in_dir(|| {
+        super::run(vec![
+            oid.to_string(),
+            "--".to_string(),
+            "file.txt".to_string(),
+        ])
+    });
+    assert!(result.is_ok(), "show should forward the pathspec to git");
+}
+
+#[test]
+fn show_rejects_a_second_target() {
+    let test_repo = TestRepo::new();
+    let oid = test_repo.commit("Test commit", "file.txt");
+
+    // What a detached option value looks like: `loom show -U 5`.
+    let result =
+        test_repo.in_dir(|| super::run(vec!["-U".to_string(), "5".to_string(), oid.to_string()]));
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("single target"), "unexpected error: {err}");
+    assert!(
+        err.contains("-U5"),
+        "error should hint the attached form: {err}"
+    );
+}
+
+#[test]
+fn show_unknown_option_reaches_git() {
+    no_pager();
+    let test_repo = TestRepo::new();
+    test_repo.commit("Test commit", "file.txt");
+
+    let result = test_repo.in_dir(|| super::run(vec!["--definitely-not-a-git-option".to_string()]));
+    assert!(
+        result.is_err(),
+        "git should reject an option loom passed through"
     );
 }

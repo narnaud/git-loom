@@ -5,7 +5,7 @@ Show a diff using short IDs, like `git diff`.
 ## Usage
 
 ```
-git loom diff [args...] [--staged] [--all]
+git loom diff [args...] [--staged] [--all] [git-options...] [-- <pathspec>...]
 ```
 
 Alias: `di`
@@ -26,6 +26,21 @@ Each argument is a file, commit, or commit range. Arguments can be mixed freely 
 | `-a`, `--all` | Show all changes, staged and unstaged combined (working tree vs `HEAD`) |
 
 `--staged` and `--all` are mutually exclusive. With neither flag, only unstaged changes are shown, exactly like `git diff`.
+
+### Git Options
+
+Any option loom doesn't define is passed straight to `git diff`:
+
+```bash
+git loom diff --stat
+git loom diff -w ma
+git loom diff --name-only ab..d0
+git loom diff ma --stat        # options may follow the arguments too
+```
+
+Loom claims only `--staged`/`--cached`, `-a`/`--all` and `-h`/`--help`, so `git diff -a` (`--text`) must be written `--text`.
+
+Options that take a value must be attached — `-U5` or `--unified=5`, not `-U 5` — because loom has no list of git's value-taking options and would read the `5` as a target. Everything after a `--` separator is a pathspec and is forwarded verbatim.
 
 ## What It Does
 

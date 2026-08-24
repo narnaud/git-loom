@@ -64,3 +64,52 @@ fn diff_invalid_target_fails() {
     let result = test_repo.in_dir(|| super::run(vec!["nonexistent_xyz".to_string()], false, false));
     assert!(result.is_err(), "diff with invalid target should fail");
 }
+
+#[test]
+fn diff_forwards_unknown_option() {
+    no_pager();
+    let test_repo = TestRepo::new();
+    test_repo.commit("Initial commit", "file.txt");
+
+    let result = test_repo.in_dir(|| super::run(vec!["-w".to_string()], false, false));
+    assert!(result.is_ok(), "diff should forward -w to git diff");
+}
+
+#[test]
+fn diff_recaptures_staged_after_a_positional() {
+    no_pager();
+    let test_repo = TestRepo::new();
+    let oid = test_repo.commit("Test commit", "file.txt");
+
+    // clap hands `--staged` over inside `args` once a positional was seen.
+    let result = test_repo
+        .in_dir(|| super::run(vec![oid.to_string(), "--staged".to_string()], false, false));
+    assert!(
+        result.is_ok(),
+        "a late --staged should still be loom's flag"
+    );
+}
+
+#[test]
+fn diff_rejects_staged_with_all_when_recaptured() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("Initial commit", "file.txt");
+
+    let result = test_repo.in_dir(|| super::run(vec!["--staged".to_string()], false, true));
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("mutually exclusive"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn diff_forwards_a_pathspec_after_the_separator() {
+    no_pager();
+    let test_repo = TestRepo::new();
+    test_repo.commit("Initial commit", "file.txt");
+
+    let result = test_repo
+        .in_dir(|| super::run(vec!["--".to_string(), "file.txt".to_string()], false, false));
+    assert!(result.is_ok(), "diff should forward the pathspec to git");
+}
