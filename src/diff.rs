@@ -1,14 +1,30 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 
+use crate::core::cli_args;
 use crate::core::repo::{self, Target, TargetKind};
 use crate::git;
+
+/// The flags `diff` owns; everything else hyphenated goes to `git diff`.
+const LOOM_FLAGS: &[&str] = &["--staged", "--cached", "-a", "--all"];
 
 /// Show a diff using short IDs (like `git diff`).
 ///
 /// By default shows unstaged changes (working tree vs index), like `git diff`.
 /// `--staged` shows staged changes (index vs HEAD); `--all` shows everything
-/// (working tree vs HEAD).
+/// (working tree vs HEAD). Options loom doesn't define are forwarded to
+/// `git diff` unchanged.
 pub fn run(args: Vec<String>, staged: bool, all: bool) -> Result<()> {
+    let split = cli_args::split(&args, LOOM_FLAGS);
+
+    // clap only sees loom's own flags when they precede the first positional;
+    // after that they land in `args`, so re-apply whatever `split` recaptured.
+    let is_flag = |names: [&str; 2]| split.loom_flags.iter().any(|f| names.contains(&f.as_str()));
+    let staged = staged || is_flag(["--staged", "--cached"]);
+    let all = all || is_flag(["-a", "--all"]);
+    if staged && all {
+        bail!("--staged and --all are mutually exclusive");
+    }
+
     let repo = repo::open_repo()?;
     let workdir = repo::require_workdir(&repo, "diff")?;
 
@@ -16,11 +32,12 @@ pub fn run(args: Vec<String>, staged: bool, all: bool) -> Result<()> {
     if staged {
         git_args.push("--staged".to_string());
     }
+    git_args.extend(split.options);
 
-    let mut file_paths: Vec<String> = Vec::new();
+    let mut file_paths: Vec<String> = split.pathspec;
     let mut has_commits = false;
 
-    for arg in &args {
+    for arg in &split.targets {
         if let Some((left, right)) = arg.split_once("..") {
             // Commit range: resolve each side leniently (short IDs or raw refs like HEAD)
             let resolved_left = resolve_ref_leniently(&repo, left);

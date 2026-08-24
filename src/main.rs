@@ -286,13 +286,17 @@ enum Command {
     /// Show the diff and metadata for a commit (like `git show`)
     #[command(visible_alias = "sh")]
     Show {
-        /// Commit hash, branch name, or short ID (defaults to the last commit on the current branch)
-        target: Option<String>,
+        /// Commit hash, branch name, or short ID (defaults to the last commit on the current
+        /// branch). Options loom doesn't know are passed to `git show`
+        #[arg(num_args = 0.., allow_hyphen_values = true)]
+        args: Vec<String>,
     },
     /// Show a diff using short IDs (like `git diff`)
     #[command(visible_alias = "di")]
     Diff {
-        /// Files, commits, or commit ranges (short IDs supported, e.g. `ma`, `d0`, `d0..3a`)
+        /// Files, commits, or commit ranges (short IDs supported, e.g. `ma`, `d0`, `d0..3a`).
+        /// Options loom doesn't know are passed to `git diff`
+        #[arg(num_args = 0.., allow_hyphen_values = true)]
         args: Vec<String>,
         /// Show staged changes (index vs HEAD)
         #[arg(long = "staged", visible_alias = "cached", conflicts_with = "all")]
@@ -466,7 +470,7 @@ fn main() {
         Some(Command::Swap { a, b }) => swap::run(a, b),
         Some(Command::Drop { target, yes }) => drop::run(target, yes),
         Some(Command::Absorb { dry_run, files }) => absorb::run(dry_run, files),
-        Some(Command::Show { target }) => show::run(target),
+        Some(Command::Show { args }) => show::run(args),
         Some(Command::Diff { args, staged, all }) => diff::run(args, staged, all),
         Some(Command::Split {
             target,

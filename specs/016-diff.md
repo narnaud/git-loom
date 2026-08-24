@@ -31,7 +31,7 @@ other loom command.
 ## CLI
 
 ```bash
-git-loom diff [args...] [--staged] [--all]
+git-loom diff [args...] [--staged] [--all] [git-options...] [-- <pathspec>...]
 ```
 
 **Alias:** `di`
@@ -55,6 +55,17 @@ git-loom diff [args...] [--staged] [--all]
 
 `--staged` and `--all` are mutually exclusive. With neither flag, the command
 shows unstaged changes only, exactly like `git diff`.
+
+Any other option is forwarded to `git diff` untouched, so `--stat`, `-w`,
+`--name-only`, `--color-words`, `-U5` and the rest of the `git diff` surface all
+work. The flags above, plus `-h`/`--help`, are the only ones loom claims;
+`git diff -a` (`--text`) must therefore be written `--text`.
+
+Options may appear before or after the positional arguments. Options that take a
+value must use the attached (`-U5`) or `=` (`--unified=5`) form — loom keeps no
+table of git options, so a detached `-U 5` is read as a target.
+
+Everything after a `--` separator is a pathspec and is forwarded verbatim.
 
 ## What Happens
 
@@ -108,6 +119,16 @@ git-loom diff HEAD~3..HEAD   # last three commits
 git-loom diff main..HEAD     # divergence from main
 git-loom diff ab..3c         # short IDs on both sides
 ```
+
+**What changes:** nothing.
+
+**What stays the same:** everything.
+
+### When an Unknown Option Is Given
+
+The token is forwarded to `git diff` in the order it was given, before any
+revision and before the `--` separator. Loom does not validate it: an option git
+does not accept produces git's own diagnostic.
 
 **What changes:** nothing.
 
@@ -207,6 +228,15 @@ git-loom diff main..HEAD
 # Both work without short ID lookup
 ```
 
+### Pass options through to git diff
+
+```
+git-loom diff --stat
+git-loom diff -w ma
+git-loom diff --name-only ab..d0
+git-loom diff ma --stat        # options may follow the arguments too
+```
+
 ### Limit diff to a specific file at a specific commit
 
 ```
@@ -222,6 +252,23 @@ The command forwards its resolved arguments to `git diff` and lets git do the
 rendering. This preserves all user configuration: pager settings, color
 themes, diff drivers (e.g. for binary files), and external diff tools. Loom
 does not reimplement diff output.
+
+### Unknown options belong to git
+
+Loom defines only the options it needs (`--staged`, `--all`) and forwards every
+other option to `git diff`. Maintaining a mirror of git's option surface would
+guarantee drift; delegating means the command inherits new git options for free
+and reports errors in git's own words. The cost is that `-a` is loom's `--all`
+rather than git's `--text`, which is the documented trade-off for keeping the
+short flag consistent with the rest of loom.
+
+### Attached option values only
+
+A value-taking option must be written `-U5` or `--unified=5`. Supporting the
+detached `-U 5` form would require loom to know which git options consume the
+next token — a list that must be kept in sync with git forever. Instead the
+stray value is resolved like any other token and, failing that, reported with a
+hint about the attached form.
 
 ### Lenient range endpoint resolution
 

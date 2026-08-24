@@ -150,6 +150,54 @@ assert_contains "$out_sid" "Equiv show commit" "show_equiv_sid_msg"
 assert_contains "$out_sid" "equiv-show.txt"    "show_equiv_sid_file"
 
 # ══════════════════════════════════════════════════════════════════════════════
+# GIT OPTION PASSTHROUGH
+# ══════════════════════════════════════════════════════════════════════════════
+
+describe "unknown option before the target is passed to git show"
+setup_repo_with_remote
+commit_file "Stat before commit" "stat-before.txt"
+hash="$(head_hash)"
+out=$(gl show --stat "$hash")
+assert_exit_ok $? "show_stat_before_ok"
+assert_contains     "$out" "1 file changed" "show_stat_before_diffstat"
+assert_not_contains "$out" "diff --git"     "show_stat_before_no_patch"
+
+describe "unknown option after the target is passed to git show"
+setup_repo_with_remote
+commit_file "Stat after commit" "stat-after.txt"
+hash="$(head_hash)"
+out=$(gl show "$hash" --stat)
+assert_exit_ok $? "show_stat_after_ok"
+assert_contains     "$out" "1 file changed" "show_stat_after_diffstat"
+assert_not_contains "$out" "diff --git"     "show_stat_after_no_patch"
+
+describe "a pathspec after -- is passed to git show"
+setup_repo_with_remote
+commit_file "Pathspec keep" "keep.txt"
+echo "other" > "$WORK/other.txt"
+git -C "$WORK" add other.txt
+git -C "$WORK" commit -q --amend --no-edit
+hash="$(head_hash)"
+out=$(gl show "$hash" -- keep.txt)
+assert_exit_ok $? "show_pathspec_ok"
+assert_contains     "$out" "keep.txt"  "show_pathspec_kept"
+assert_not_contains "$out" "b/other.txt" "show_pathspec_filtered"
+
+describe "a detached option value is rejected with a hint"
+setup_repo_with_remote
+commit_file "Detached value commit" "detached.txt"
+hash="$(head_hash)"
+gl_capture show -U 5 "$hash"
+assert_exit_fail "$CODE" "show_detached_value_fails"
+assert_contains "$OUT" "single target" "show_detached_value_msg"
+
+describe "an option git rejects surfaces git's own error"
+setup_repo_with_remote
+commit_file "Bogus option commit" "bogus.txt"
+gl_capture show --definitely-not-a-git-option
+assert_exit_fail "$CODE" "show_bogus_option_fails"
+
+# ══════════════════════════════════════════════════════════════════════════════
 # ALIAS
 # ══════════════════════════════════════════════════════════════════════════════
 
