@@ -30,7 +30,7 @@ Creating a commit on a feature branch within an integration workflow has frictio
 ## CLI
 
 ```bash
-git-loom commit [-b <branch>] [-m <message>] [files...]
+git-loom commit [-b <branch>] [-m <message>] [-p] [files...]
 ```
 
 **Arguments:**
@@ -38,6 +38,8 @@ git-loom commit [-b <branch>] [-m <message>] [files...]
 - `-b, --branch <branch>`: Target feature branch (name or short ID). Optional;
   prompts interactively if omitted.
 - `-m, --message <message>`: Commit message. Optional; opens editor if omitted.
+- `-p, --patch`: Interactively select hunks to stage before committing (see
+  spec 007 for the hunk picker).
 - `[files...]`: Files to stage before committing. Accepts short IDs, filenames,
   or the reserved token `zz`.
 

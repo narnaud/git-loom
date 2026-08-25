@@ -8,6 +8,8 @@ Create a commit on a feature branch without leaving the integration branch.
 git loom commit [-b <branch>] [-m <message>] [-p] [files...]
 ```
 
+Alias: `ci`
+
 ### Options
 
 | Option | Description |
