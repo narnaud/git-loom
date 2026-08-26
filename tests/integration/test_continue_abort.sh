@@ -32,6 +32,8 @@ echo '{"command":"update","rollback":{"saved_head":"","saved_refs":{},"delete_br
 gl_capture update
 assert_exit_fail "$CODE" "blocked_while_paused"
 assert_contains "$OUT" "loom continue" "blocked_while_paused_hint"
+# No rebase is in progress here: the hint must say so, not claim conflicts.
+assert_contains "$OUT" "no rebase is in progress" "blocked_while_stale_hint"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Helper: produce a conflict scenario
@@ -77,6 +79,11 @@ gl_capture update
 assert_state_file "state_file_exists_after_conflict"
 assert_contains "$OUT" "loom continue" "update_conflict_continue_hint"
 assert_contains "$OUT" "loom abort"    "update_conflict_abort_hint"
+
+# A blocked command during a real pause reports the conflict, not a stale state
+gl_capture status
+assert_exit_fail "$CODE" "blocked_during_conflict"
+assert_contains "$OUT" "paused due to conflicts" "blocked_during_conflict_hint"
 
 # Resolve the conflict and stage it
 echo "resolved content" > "$WORK/conflict.txt"

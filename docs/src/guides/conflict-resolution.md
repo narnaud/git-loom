@@ -116,20 +116,36 @@ $ git add src/models.rs && git loom continue
 ✓ Updated branch `integration` with `origin/main` (abc1234 Latest commit)
 ```
 
-## If You Accidentally Run `git rebase --continue`
+## If You Finished the Rebase Yourself
 
-That's fine. Loom detects that the rebase is no longer active and skips
-straight to the post-rebase work when you run `loom continue`.
+That's fine. If you resolved the conflicts with raw git commands and ran
+`git rebase --continue` to the end, loom notices the rebase is no longer
+active and skips straight to the post-rebase work when you run
+`loom continue`: worktree syncs, submodule updates, branch cleanup, and
+finally removing the state file.
+
+The blocked-command error tells you which case you are in:
+
+```
+✗ A `loom update` is paused, but no rebase is in progress.
+  › If you finished it yourself, run `loom continue` to wrap up and clear the state.
+  › Run `loom abort` to discard it instead.
+```
 
 ## If the State File is Stale
 
 If loom blocks you with a "paused operation" error but you know no operation
-is actually in progress (e.g., after a crash or force-reset), delete the state
-file to reset:
+is actually in progress (e.g., after a crash or force-reset), run
+`loom continue` to finish up, or `loom abort` to discard the operation.
+
+As a last resort you can delete the state file by hand:
 
 ```bash
 rm .git/loom/state.json
 ```
+
+In a linked worktree it lives under that worktree's git directory instead:
+`.git/worktrees/<name>/loom/state.json`.
 
 > [!WARNING]
 > Only do this if you are certain no loom operation is paused. If a rebase is

@@ -99,3 +99,17 @@ fn cli_help_renders() {
     assert!(help.contains("Options:"));
     assert!(!help.contains('\u{1b}'));
 }
+
+#[test]
+fn paused_message_points_at_continue_and_abort() {
+    let paused = paused_state_message("update", true);
+    assert!(paused.contains("paused due to conflicts"), "{paused}");
+    assert!(paused.contains("loom continue"), "{paused}");
+    assert!(paused.contains("loom abort"), "{paused}");
+
+    let finished = paused_state_message("update", false);
+    assert!(finished.contains("no rebase is in progress"), "{finished}");
+    assert!(finished.contains("loom continue"), "{finished}");
+    assert!(finished.contains("loom abort"), "{finished}");
+    assert_ne!(paused, finished);
+}
