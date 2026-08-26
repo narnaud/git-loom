@@ -377,6 +377,26 @@ struct BranchNewArgs {
     target: Option<String>,
 }
 
+/// Message shown when a command is blocked by a paused loom operation.
+///
+/// `interrupted` tells whether git still has a rebase or merge going: if not,
+/// the user likely finished it by hand, and `loom continue` only has the
+/// post-rebase bookkeeping left to do.
+fn paused_state_message(command: &str, interrupted: bool) -> String {
+    if interrupted {
+        format!(
+            "A `loom {command}` is paused due to conflicts.\n\
+             Resolve them, then run `loom continue` to resume, or `loom abort` to cancel."
+        )
+    } else {
+        format!(
+            "A `loom {command}` is paused, but no rebase is in progress.\n\
+             If you finished it yourself, run `loom continue` to wrap up and clear the state.\n\
+             Run `loom abort` to discard it instead."
+        )
+    }
+}
+
 fn main() {
     let cli = parse_cli(&std::env::args_os().collect::<Vec<_>>());
 
@@ -432,12 +452,9 @@ fn main() {
     if !is_exempt && let Ok(repo) = repo::open_repo() {
         let git_dir = repo.path().to_path_buf();
         if let Ok(Some(state)) = transaction::load(&git_dir) {
-            msg::error(&format!(
-                "A `loom {}` is paused due to conflicts.\n\
-                 Run `loom continue` to resume or `loom abort` to cancel.\n\
-                 If no loom operation is in progress, delete `.git/loom/state.json` to reset.",
-                state.command
-            ));
+            let interrupted =
+                git::rebase_is_in_progress(&git_dir) || git::merge_is_in_progress(&git_dir);
+            msg::error(&paused_state_message(&state.command, interrupted));
             std::process::exit(1);
         }
     }

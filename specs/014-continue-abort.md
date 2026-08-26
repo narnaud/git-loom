@@ -117,11 +117,21 @@ or `loom abort`.
 - `Completions` — does not interact with the repo
 - `InternalWriteTodo` — runs as a git subprocess during rebase
 
-Error message format:
+Error message format, when git still has a rebase or merge in progress:
 
 ```
-A loom <command> operation is paused due to a conflict.
-Resolve the conflict and run `loom continue`, or run `loom abort` to cancel.
+A `loom <command>` is paused due to conflicts.
+Resolve them, then run `loom continue` to resume, or `loom abort` to cancel.
+```
+
+When no rebase or merge is in progress, the user most likely finished it with
+raw git commands, so the message points at the bookkeeping `loom continue` has
+left to do:
+
+```
+A `loom <command>` is paused, but no rebase is in progress.
+If you finished it yourself, run `loom continue` to wrap up and clear the state.
+Run `loom abort` to discard it instead.
 ```
 
 ## `loom continue`
