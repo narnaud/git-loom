@@ -43,7 +43,10 @@ pub fn run(branch: Option<String>, no_pr: bool) -> Result<()> {
         None => pick_branch(&info)?,
     };
 
-    let remote_type = detect_remote_type(&repo, &workdir, &info.upstream.label)?;
+    let mut remote_type = detect_remote_type(&repo, &workdir, &info.upstream.label)?;
+    if remote_type == RemoteType::Plain && looks_like_gerrit(&repo, &info.upstream.label) {
+        remote_type = confirm_gerrit(&workdir, &info.upstream.label)?;
+    }
     let remote_name = resolve_push_remote(&repo, &workdir, &info.upstream.label, &remote_type);
 
     let target_branch = extract_target_branch(&info.upstream.label);
@@ -122,9 +125,12 @@ fn detect_remote_type(
             let target_branch = extract_target_branch(upstream_label);
             return Ok(RemoteType::Gerrit { target_branch });
         }
+        if value == "plain" {
+            return Ok(RemoteType::Plain);
+        }
         msg::warn(&format!(
             "Unknown loom.remote-type '{}' — falling back to auto-detection.\n\
-             Valid values: github, gitlab, azure, gerrit",
+             Valid values: github, gitlab, azure, gerrit, plain",
             config_value.trim()
         ));
     }
@@ -154,6 +160,60 @@ fn detect_remote_type(
     }
 
     Ok(RemoteType::Plain)
+}
+
+/// Heuristics that suggest — but don't prove — a Gerrit remote: the remote URL
+/// uses Gerrit's standard SSH port (29418), or a recent commit carries a
+/// `Change-Id:` trailer added by Gerrit's commit-msg hook.
+///
+/// These are only hints (the hook string check in [`detect_remote_type`] can
+/// miss, e.g. when pre-commit manages the commit-msg hook), so callers should
+/// confirm with the user before treating the remote as Gerrit.
+fn looks_like_gerrit(repo: &Repository, upstream_label: &str) -> bool {
+    let remote_name = extract_remote_name(upstream_label);
+    if let Ok(remote) = repo.find_remote(&remote_name)
+        && let Some(url) = remote.url()
+        && url.contains(":29418/")
+    {
+        return true;
+    }
+    recent_commits_have_change_id(repo)
+}
+
+/// Whether any of the last 20 commits reachable from HEAD carries a
+/// `Change-Id:` trailer.
+fn recent_commits_have_change_id(repo: &Repository) -> bool {
+    let Ok(mut revwalk) = repo.revwalk() else {
+        return false;
+    };
+    if revwalk.push_head().is_err() {
+        return false;
+    }
+    revwalk.take(20).flatten().any(|oid| {
+        repo.find_commit(oid)
+            .ok()
+            .and_then(|c| c.message().map(|m| m.contains("\nChange-Id: I")))
+            .unwrap_or(false)
+    })
+}
+
+/// Ask the user to confirm a suspected Gerrit remote and persist the answer.
+///
+/// The answer is saved as `loom.remote-type` (`gerrit` or `plain`) in the repo
+/// config so the question is asked at most once per repository.
+fn confirm_gerrit(workdir: &Path, upstream_label: &str) -> Result<RemoteType> {
+    let is_gerrit = msg::confirm(
+        "This remote looks like Gerrit (SSH port 29418 or Change-Id trailers). Is it a Gerrit remote?",
+    )?;
+    let value = if is_gerrit { "gerrit" } else { "plain" };
+    git::run_git(workdir, &["config", "loom.remote-type", value])?;
+    if is_gerrit {
+        Ok(RemoteType::Gerrit {
+            target_branch: extract_target_branch(upstream_label),
+        })
+    } else {
+        Ok(RemoteType::Plain)
+    }
 }
 
 /// Extract the remote name from an upstream label like "origin/main" → "origin".

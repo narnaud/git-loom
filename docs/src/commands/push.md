@@ -24,12 +24,13 @@ git loom push [branch] [--no-pr]
 
 Detection priority (first match wins):
 
-1. **Explicit config** — `git config loom.remote-type` set to `github`, `gitlab`, `azure`, or `gerrit`
+1. **Explicit config** — `git config loom.remote-type` set to `github`, `gitlab`, `azure`, `gerrit`, or `plain`
 2. **URL heuristics** — remote URL contains `github.com` → GitHub
 3. **URL heuristics** — remote URL contains `gitlab` → GitLab
 4. **URL heuristics** — remote URL contains `dev.azure.com` → Azure DevOps
 5. **Hook inspection** — `.git/hooks/commit-msg` contains "gerrit" → Gerrit
-6. **Fallback** — Plain Git
+6. **Gerrit confirmation** — if nothing matched but the remote URL uses Gerrit's standard SSH port (`:29418/`) or recent commits carry a `Change-Id:` trailer, you are asked to confirm; the answer is saved as `loom.remote-type` (`gerrit` or `plain`) so you are only asked once
+7. **Fallback** — Plain Git
 
 Self-hosted GitLab whose hostname does not contain `gitlab` (e.g. `invent.kde.org`) is not auto-detected — set `git config loom.remote-type gitlab`. Even without detection, a plain push still surfaces the MR link the server prints.
 
