@@ -45,17 +45,29 @@ git-loom push [branch] [--no-pr]
 
 Detection priority (first match wins):
 
-1. **Explicit config**: `git config loom.remote-type` — values: `github`, `gitlab`, `azure`, `gerrit`
+1. **Explicit config**: `git config loom.remote-type` — values: `github`, `gitlab`, `azure`, `gerrit`, `plain`
 2. **URL heuristics**: Remote URL contains `github.com` → GitHub
 3. **URL heuristics**: Remote URL contains `gitlab` → GitLab
 4. **URL heuristics**: Remote URL contains `dev.azure.com` → Azure DevOps
 5. **Hook inspection**: `.git/hooks/commit-msg` contains "gerrit" (case-insensitive) → Gerrit
-6. **Fallback**: Plain
+6. **Gerrit confirmation**: if nothing matched but the remote *looks* like
+   Gerrit — the remote URL uses Gerrit's standard SSH port (`:29418/`), or one
+   of the last 20 commits reachable from HEAD carries a `Change-Id:` trailer —
+   the user is asked to confirm. The answer is saved as
+   `git config loom.remote-type` (`gerrit` or `plain`) so the question is asked
+   at most once per repository. This catches Gerrit repos where the hook check
+   fails, e.g. when [pre-commit](https://pre-commit.com) manages the commit-msg
+   hook and the generated wrapper never mentions "gerrit".
+7. **Fallback**: Plain
 
 Self-hosted GitLab instances whose hostname does not contain `gitlab` (e.g.
 `invent.kde.org`) are not auto-detected — set `git config loom.remote-type
 gitlab` for those. Even without detection, a plain push still surfaces the MR
 link the server prints (see [Plain](#plain-default)).
+
+The Gerrit confirmation prompt only runs in `git loom push` itself. The
+detection helper is also used non-interactively (e.g. by `git loom update` to
+resolve the fork push remote), where it silently falls back to Plain.
 
 ## Push Remote Selection
 

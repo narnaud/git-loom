@@ -113,6 +113,58 @@ fn detect_remote_type_gerrit_by_hook() {
     );
 }
 
+#[test]
+fn detect_remote_type_plain_by_config() {
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    test_repo.commit("C1", "c1.txt");
+
+    // A saved "plain" answer (from the Gerrit confirmation prompt) must be
+    // honored without warning about an unknown value
+    test_repo.set_config("loom.remote-type", "plain");
+
+    let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), super::RemoteType::Plain);
+}
+
+// ── looks_like_gerrit tests ──────────────────────────────────────────────
+
+#[test]
+fn looks_like_gerrit_by_ssh_port() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("C1", "c1.txt");
+
+    test_repo
+        .repo
+        .remote_set_url(
+            "origin",
+            "ssh://nicolas@review.example.com:29418/kdab/Project",
+        )
+        .unwrap();
+
+    assert!(super::looks_like_gerrit(&test_repo.repo, "origin/main"));
+}
+
+#[test]
+fn looks_like_gerrit_by_change_id_trailer() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit(
+        "C1\n\nChange-Id: I61096b677887afc82613103d8467808b77ecbd50",
+        "c1.txt",
+    );
+
+    assert!(super::looks_like_gerrit(&test_repo.repo, "origin/main"));
+}
+
+#[test]
+fn looks_like_gerrit_negative_without_hints() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("C1", "c1.txt");
+
+    assert!(!super::looks_like_gerrit(&test_repo.repo, "origin/main"));
+}
+
 // ── resolve_push_remote tests ────────────────────────────────────────────
 
 #[test]
