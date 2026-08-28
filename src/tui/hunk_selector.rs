@@ -1,21 +1,20 @@
+use std::borrow::Cow;
+
 use anyhow::Result;
-use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
-    MouseButton, MouseEventKind,
-};
+use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEventKind};
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Margin, Position, Rect},
-    style::Modifier,
+    layout::{Position, Rect},
     text::{Line, Span},
-    widgets::{
-        Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
-        ScrollbarState, Wrap,
-    },
+    widgets::{ListItem, Paragraph},
 };
 
 use crate::core::diff::DiffHunk;
+use crate::tui::shell::{KeyResult, PaneId, Shell, ShellApp, ShellConfig};
 use crate::tui::theme::TuiTheme;
+use crate::tui::widgets::common::pane_block;
+use crate::tui::widgets::hunk_view::{HunkEvent, HunkView};
+use crate::tui::widgets::list_pane::ListPane;
 
 // ---------------------------------------------------------------------------
 // Data model
@@ -103,11 +102,10 @@ impl FileEntry {
     }
 }
 
-/// Which pane is focused.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Pane {
-    Left,
-    Right,
+/// Why the selector exited.
+pub(crate) enum Verdict {
+    Confirm,
+    Cancel,
 }
 
 /// An entry in the display list for the file tree.
@@ -119,20 +117,16 @@ enum DisplayRow {
     File(usize),
 }
 
-/// All state for the interactive hunk selector.
-struct HunkSelectorApp {
+/// All state for the interactive hunk selector. `pub(crate)` so a host TUI
+/// can embed it as a [`ShellApp`] later.
+pub(crate) struct HunkSelectorApp {
     files: Vec<FileEntry>,
     display_rows: Vec<DisplayRow>,
-    cursor_pos: usize,
-    hunk_index: usize,
-    active_pane: Pane,
+    /// File-list cursor and view state.
+    list: ListPane,
+    /// Hunk cursor and diff-pane scroll state.
+    hunks: HunkView,
     theme: TuiTheme,
-    should_quit: bool,
-    confirmed: bool,
-    scroll_offset: u16,
-    /// Cached layout rects for mouse hit-testing (updated each render).
-    left_pane_area: Rect,
-    right_pane_area: Rect,
 }
 
 // ---------------------------------------------------------------------------
@@ -187,27 +181,21 @@ fn build_display_rows(files: &[FileEntry]) -> Vec<DisplayRow> {
 // ---------------------------------------------------------------------------
 
 impl HunkSelectorApp {
-    fn new(files: Vec<FileEntry>, theme: TuiTheme) -> Self {
+    pub(crate) fn new(files: Vec<FileEntry>, theme: TuiTheme) -> Self {
         let display_rows = build_display_rows(&files);
         Self {
             files,
             display_rows,
-            cursor_pos: 0,
-            hunk_index: 0,
-            active_pane: Pane::Left,
+            list: ListPane::new(0),
+            hunks: HunkView::new(),
             theme,
-            should_quit: false,
-            confirmed: false,
-            scroll_offset: 0,
-            left_pane_area: Rect::default(),
-            right_pane_area: Rect::default(),
         }
     }
 
     /// Return the file index if the cursor is on a file row, or `None` on a
     /// directory header.
     fn current_file_index(&self) -> Option<usize> {
-        match self.display_rows.get(self.cursor_pos) {
+        match self.display_rows.get(self.list.cursor()) {
             Some(DisplayRow::File(i)) => Some(*i),
             _ => None,
         }
@@ -215,29 +203,7 @@ impl HunkSelectorApp {
 
     // -- rendering ----------------------------------------------------------
 
-    fn render(&mut self, frame: &mut Frame) {
-        let area = frame.area();
-
-        // Reserve one row for the status bar.
-        let outer = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1), Constraint::Length(1)])
-            .split(area);
-
-        // Two panes: ~30% file list, ~70% diff view.
-        let panes = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
-            .split(outer[0]);
-
-        self.left_pane_area = panes[0];
-        self.right_pane_area = panes[1];
-        self.render_file_list(frame, panes[0]);
-        self.render_diff_view(frame, panes[1]);
-        self.render_status_bar(frame, outer[1]);
-    }
-
-    fn render_file_list(&mut self, frame: &mut Frame, area: Rect) {
+    fn render_file_list(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
         let items: Vec<ListItem> = self
             .display_rows
             .iter()
@@ -286,68 +252,13 @@ impl HunkSelectorApp {
             })
             .collect();
 
-        let border_style = if self.active_pane == Pane::Left {
-            self.theme.border_active
-        } else {
-            self.theme.border
-        };
-
-        let block = Block::default()
-            .title(" Files ")
-            .borders(Borders::ALL)
-            .border_style(border_style);
-
-        let list = List::new(items)
-            .block(block)
-            .highlight_style(self.theme.file_selected)
-            .highlight_symbol("> ");
-
-        let mut state = ListState::default();
-        state.select(Some(self.cursor_pos));
-        frame.render_stateful_widget(list, area, &mut state);
-
-        // Scrollbar — only when the list overflows the visible inner height.
-        let inner = area.inner(Margin {
-            horizontal: 1,
-            vertical: 1,
-        });
-        let inner_height = inner.height as usize;
-        let total = self.display_rows.len();
-        if total > inner_height {
-            // Ratatui maps thumb to bottom when position = content_length - 1.
-            // Setting content_length = max_pos + 1 makes the max scroll position
-            // land at content_length - 1, and gives thumb_size = track * inner_height
-            // / total_rows (the correct visible fraction).
-            let max_pos = total - inner_height;
-            let mut sb_state = ScrollbarState::new(max_pos + 1)
-                .position(self.cursor_pos.min(max_pos))
-                .viewport_content_length(inner_height);
-            let sb_area = area.inner(Margin {
-                horizontal: 0,
-                vertical: 1,
-            });
-            frame.render_stateful_widget(
-                Scrollbar::new(ScrollbarOrientation::VerticalRight)
-                    .begin_symbol(None)
-                    .end_symbol(None)
-                    .track_symbol(None),
-                sb_area,
-                &mut sb_state,
-            );
-        }
+        let block = pane_block(" Files ", &self.theme, focused);
+        self.list
+            .render(frame, area, items, block, self.theme.file_selected);
     }
 
-    fn render_diff_view(&mut self, frame: &mut Frame, area: Rect) {
-        let border_style = if self.active_pane == Pane::Right {
-            self.theme.border_active
-        } else {
-            self.theme.border
-        };
-
-        let block = Block::default()
-            .title(" Diff ")
-            .borders(Borders::ALL)
-            .border_style(border_style);
+    fn render_diff_view(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
+        let block = pane_block(" Diff ", &self.theme, focused);
 
         if self.files.is_empty() {
             let empty = Paragraph::new("No files").block(block);
@@ -360,7 +271,7 @@ impl HunkSelectorApp {
             Some(i) => i,
             None => {
                 if let Some(DisplayRow::Directory { dir_start, dir_end }) =
-                    self.display_rows.get(self.cursor_pos)
+                    self.display_rows.get(self.list.cursor())
                 {
                     let count = dir_end - dir_start + 1;
                     let dir = directory_of(&self.files[*dir_start].path);
@@ -376,297 +287,75 @@ impl HunkSelectorApp {
         };
 
         let file = &self.files[file_idx];
-        let total_hunks = file.hunks.len();
-        let mut lines: Vec<Line> = Vec::new();
+        let lines = self.hunks.build_lines(file, &self.theme, focused);
+        self.hunks.render(frame, area, lines, block);
+    }
 
-        for (i, entry) in file.hunks.iter().enumerate() {
-            let marker = if entry.selected { "\u{2713}" } else { " " };
-            let origin_label = match entry.origin {
-                HunkOrigin::Staged => " (staged)",
-                HunkOrigin::Unstaged => "",
-                HunkOrigin::Commit => "",
-            };
-            let header_text = format!(
-                "[{}] Hunk {}/{}{}",
-                marker,
-                i + 1,
-                total_hunks,
-                origin_label
-            );
+    // -- navigation -----------------------------------------------------------
 
-            // Highlight the focused hunk header when right pane is active.
-            let header_style = if self.active_pane == Pane::Right && i == self.hunk_index {
-                self.theme.hunk_header.add_modifier(Modifier::REVERSED)
-            } else {
-                self.theme.hunk_header
-            };
-            lines.push(Line::from(Span::styled(header_text, header_style)));
-
-            // Render each line of the hunk text with syntax coloring.
-            for raw_line in entry.hunk.text.lines() {
-                let style = if raw_line.starts_with('+') {
-                    self.theme.added
-                } else if raw_line.starts_with('-') {
-                    self.theme.removed
-                } else if raw_line.starts_with("@@") {
-                    self.theme.hunk_header
-                } else {
-                    self.theme.context
-                };
-                lines.push(Line::from(Span::styled(raw_line.to_string(), style)));
-            }
-
-            // Blank separator between hunks.
-            if i + 1 < total_hunks {
-                lines.push(Line::from(""));
-            }
-        }
-
-        // Two empty lines at the bottom for breathing room.
-        lines.push(Line::from(""));
-        lines.push(Line::from(""));
-
-        let inner = area.inner(Margin {
-            horizontal: 1,
-            vertical: 1,
-        });
-        let inner_width = inner.width as usize;
-        let inner_height = inner.height as usize;
-
-        // With wrapping enabled, each logical line may span multiple rendered rows.
-        // Compute total rendered rows so the scrollbar reflects actual content height.
-        let total_rows: usize = lines
-            .iter()
-            .map(|line| {
-                let width: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
-                if inner_width == 0 || width == 0 {
-                    1
-                } else {
-                    width.div_ceil(inner_width)
-                }
-            })
-            .sum();
-
-        // Clamp scroll so the last line of content is always at the bottom.
-        let max_scroll = total_rows.saturating_sub(inner_height) as u16;
-        self.scroll_offset = self.scroll_offset.min(max_scroll);
-
-        let paragraph = Paragraph::new(lines)
-            .block(block)
-            .wrap(Wrap { trim: false })
-            .scroll((self.scroll_offset, 0));
-
-        frame.render_widget(paragraph, area);
-
-        if total_rows > inner_height {
-            // Ratatui maps thumb to bottom when position = content_length - 1.
-            // Setting content_length = max_scroll + 1 makes scroll_offset = max_scroll
-            // land at content_length - 1, and gives thumb_size = track * inner_height
-            // / total_rows (the correct visible fraction).
-            let max_scroll_usize = total_rows - inner_height;
-            let mut sb_state = ScrollbarState::new(max_scroll_usize + 1)
-                .position(self.scroll_offset as usize)
-                .viewport_content_length(inner_height);
-            let sb_area = area.inner(Margin {
-                horizontal: 0,
-                vertical: 1,
-            });
-            frame.render_stateful_widget(
-                Scrollbar::new(ScrollbarOrientation::VerticalRight)
-                    .begin_symbol(None)
-                    .end_symbol(None)
-                    .track_symbol(None),
-                sb_area,
-                &mut sb_state,
-            );
+    /// Move the file-list cursor; the hunk cursor follows to the new file.
+    fn move_file_cursor(&mut self, dir: isize) {
+        if self
+            .list
+            .move_cursor(dir, self.display_rows.len(), |_| true)
+        {
+            self.hunks.reset();
         }
     }
 
-    fn render_status_bar(&self, frame: &mut Frame, area: Rect) {
-        let text = " Navigate: \u{2191}/\u{2193} or j/k | Switch Pane: tab | Toggle: space | Confirm: c or Enter | Quit: q or Esc";
-        let bar = Paragraph::new(text).style(self.theme.status_bar);
-        frame.render_widget(bar, area);
-    }
-
-    // -- keyboard handling --------------------------------------------------
-
-    fn handle_key(&mut self, code: KeyCode, modifiers: KeyModifiers) {
-        match code {
-            KeyCode::Char('q') | KeyCode::Esc => {
-                self.should_quit = true;
-                self.confirmed = false;
-            }
-            KeyCode::Char('c') if !modifiers.contains(KeyModifiers::CONTROL) => {
-                self.should_quit = true;
-                self.confirmed = true;
-            }
-            KeyCode::Enter => {
-                self.should_quit = true;
-                self.confirmed = true;
-            }
-            KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
-                // Ctrl-C: quit without staging.
-                self.should_quit = true;
-                self.confirmed = false;
-            }
-            KeyCode::Tab | KeyCode::BackTab => {
-                self.active_pane = match self.active_pane {
-                    Pane::Left => Pane::Right,
-                    Pane::Right => Pane::Left,
-                };
-            }
-            KeyCode::Up | KeyCode::Char('k') => self.navigate_up(),
-            KeyCode::Down | KeyCode::Char('j') => self.navigate_down(),
-            KeyCode::Char(' ') => self.toggle(),
-            _ => {}
-        }
-    }
-
-    fn handle_mouse(&mut self, kind: MouseEventKind, col: u16, row: u16) {
-        let pos = Position { x: col, y: row };
-
-        if self.left_pane_area.contains(pos) {
-            match kind {
-                MouseEventKind::Down(MouseButton::Left) => {
-                    // Inner area: subtract 1-row border top.
-                    let inner_top = self.left_pane_area.y + 1;
-                    if row < inner_top {
-                        return;
-                    }
-                    let clicked = (row - inner_top) as usize;
-                    if clicked < self.display_rows.len() {
-                        self.cursor_pos = clicked;
-                        self.hunk_index = 0;
-                        self.scroll_offset = 0;
-                        self.active_pane = Pane::Left;
-                    }
-                }
-                MouseEventKind::ScrollUp if self.cursor_pos > 0 => {
-                    self.cursor_pos -= 1;
-                    self.hunk_index = 0;
-                    self.scroll_offset = 0;
-                }
-                MouseEventKind::ScrollDown if self.cursor_pos + 1 < self.display_rows.len() => {
-                    self.cursor_pos += 1;
-                    self.hunk_index = 0;
-                    self.scroll_offset = 0;
-                }
-                _ => {}
-            }
-        } else if self.right_pane_area.contains(pos) {
-            match kind {
-                MouseEventKind::Down(MouseButton::Left) => {
-                    self.active_pane = Pane::Right;
-                    let file_idx = match self.current_file_index() {
-                        Some(i) => i,
-                        None => return,
-                    };
-                    // Inner area: subtract 1-row border top, then account for scroll.
-                    let inner_top = self.right_pane_area.y + 1;
-                    if row < inner_top {
-                        return;
-                    }
-                    let clicked_line = row - inner_top + self.scroll_offset;
-                    // Walk hunks to find which one was clicked.
-                    let file = &self.files[file_idx];
-                    let total = file.hunks.len();
-                    let mut line: u16 = 0;
-                    for (i, entry) in file.hunks.iter().enumerate() {
-                        let hunk_lines = 1 + entry.hunk.text.lines().count() as u16;
-                        let separator = if i + 1 < total { 1 } else { 0 };
-                        if clicked_line < line + hunk_lines {
-                            // Clicked inside this hunk — toggle if on header row.
-                            self.hunk_index = i;
-                            if clicked_line == line {
-                                let h = &mut self.files[file_idx].hunks[i];
-                                h.selected = !h.selected;
-                            }
-                            return;
-                        }
-                        line += hunk_lines + separator;
-                    }
-                }
-                MouseEventKind::ScrollUp => {
-                    self.scroll_offset = self.scroll_offset.saturating_sub(3);
-                }
-                MouseEventKind::ScrollDown => {
-                    self.scroll_offset += 3;
-                }
-                _ => {}
-            }
-        }
-    }
-
-    fn navigate_up(&mut self) {
+    fn navigate_up(&mut self, pane: PaneId) {
         if self.display_rows.is_empty() {
             return;
         }
-        match self.active_pane {
-            Pane::Left => {
-                if self.cursor_pos > 0 {
-                    self.cursor_pos -= 1;
-                    self.hunk_index = 0;
-                    self.scroll_offset = 0;
-                }
-            }
-            Pane::Right => {
-                if self.current_file_index().is_some() && self.hunk_index > 0 {
-                    self.hunk_index -= 1;
-                    self.adjust_scroll_to_hunk();
-                } else if self.current_file_index().is_some() && self.hunk_index == 0 {
+        match pane {
+            PaneId::Left => self.move_file_cursor(-1),
+            PaneId::Right => {
+                let Some(file_idx) = self.current_file_index() else {
+                    return;
+                };
+                if let HunkEvent::WrapToPrevFile = self.hunks.move_up(&self.files[file_idx].hunks) {
                     // Move to the last hunk of the previous file.
                     if let Some(prev) = self.prev_file_row() {
-                        self.cursor_pos = prev;
+                        self.list.set_cursor(prev);
                         let file_idx = match self.display_rows[prev] {
                             DisplayRow::File(i) => i,
                             _ => unreachable!(),
                         };
-                        let count = self.files[file_idx].hunks.len();
-                        self.hunk_index = count.saturating_sub(1);
-                        self.adjust_scroll_to_hunk();
+                        self.hunks.focus_last(&self.files[file_idx].hunks);
                     }
                 }
             }
         }
     }
 
-    fn navigate_down(&mut self) {
+    fn navigate_down(&mut self, pane: PaneId) {
         if self.display_rows.is_empty() {
             return;
         }
-        match self.active_pane {
-            Pane::Left => {
-                if self.cursor_pos + 1 < self.display_rows.len() {
-                    self.cursor_pos += 1;
-                    self.hunk_index = 0;
-                    self.scroll_offset = 0;
-                }
-            }
-            Pane::Right => {
-                if let Some(file_idx) = self.current_file_index() {
-                    let hunk_count = self.files[file_idx].hunks.len();
-                    if self.hunk_index + 1 < hunk_count {
-                        self.hunk_index += 1;
-                        self.adjust_scroll_to_hunk();
-                    } else {
-                        // Move to the first hunk of the next file.
-                        if let Some(next) = self.next_file_row() {
-                            self.cursor_pos = next;
-                            self.hunk_index = 0;
-                            self.scroll_offset = 0;
-                        }
+        match pane {
+            PaneId::Left => self.move_file_cursor(1),
+            PaneId::Right => {
+                let Some(file_idx) = self.current_file_index() else {
+                    return;
+                };
+                if let HunkEvent::WrapToNextFile = self.hunks.move_down(&self.files[file_idx].hunks)
+                {
+                    // Move to the first hunk of the next file.
+                    if let Some(next) = self.next_file_row() {
+                        self.list.set_cursor(next);
+                        self.hunks.reset();
                     }
                 }
             }
         }
     }
 
-    fn toggle(&mut self) {
+    fn toggle(&mut self, pane: PaneId) {
         if self.display_rows.is_empty() {
             return;
         }
-        match self.active_pane {
-            Pane::Left => match self.display_rows[self.cursor_pos] {
+        match pane {
+            PaneId::Left => match self.display_rows[self.list.cursor()] {
                 DisplayRow::Directory { dir_start, dir_end } => {
                     // Toggle all hunks in all files under this directory.
                     let any_selected = (dir_start..=dir_end)
@@ -687,19 +376,17 @@ impl HunkSelectorApp {
                     }
                 }
             },
-            Pane::Right => {
-                if let Some(file_idx) = self.current_file_index()
-                    && let Some(h) = self.files[file_idx].hunks.get_mut(self.hunk_index)
-                {
-                    h.selected = !h.selected;
+            PaneId::Right => {
+                if let Some(file_idx) = self.current_file_index() {
+                    self.hunks.toggle_focused(&mut self.files[file_idx].hunks);
                 }
             }
         }
     }
 
-    /// Find the previous File row before `cursor_pos`, skipping directory headers.
+    /// Find the previous File row before the cursor, skipping directory headers.
     fn prev_file_row(&self) -> Option<usize> {
-        let mut pos = self.cursor_pos;
+        let mut pos = self.list.cursor();
         while pos > 0 {
             pos -= 1;
             if matches!(self.display_rows[pos], DisplayRow::File(_)) {
@@ -709,9 +396,9 @@ impl HunkSelectorApp {
         None
     }
 
-    /// Find the next File row after `cursor_pos`, skipping directory headers.
+    /// Find the next File row after the cursor, skipping directory headers.
     fn next_file_row(&self) -> Option<usize> {
-        let mut pos = self.cursor_pos;
+        let mut pos = self.list.cursor();
         while pos + 1 < self.display_rows.len() {
             pos += 1;
             if matches!(self.display_rows[pos], DisplayRow::File(_)) {
@@ -720,24 +407,107 @@ impl HunkSelectorApp {
         }
         None
     }
+}
 
-    /// Rough scroll adjustment: each hunk header + its lines contribute to the
-    /// total row count. We estimate line offsets to keep the focused hunk visible.
-    fn adjust_scroll_to_hunk(&mut self) {
-        let file_idx = match self.current_file_index() {
-            Some(i) => i,
-            None => return,
-        };
-        let file = &self.files[file_idx];
-        let mut row: u16 = 0;
-        for (i, entry) in file.hunks.iter().enumerate() {
-            if i == self.hunk_index {
-                break;
+// ---------------------------------------------------------------------------
+// Shell integration
+// ---------------------------------------------------------------------------
+
+impl ShellApp for HunkSelectorApp {
+    type Exit = Verdict;
+
+    fn config(&self) -> ShellConfig {
+        // Two panes: ~30% file list, ~70% diff view.
+        ShellConfig { split: (30, 70) }
+    }
+
+    fn theme(&self) -> &TuiTheme {
+        &self.theme
+    }
+
+    fn quit_exit(&mut self) -> Verdict {
+        Verdict::Cancel
+    }
+
+    fn handle_key(
+        &mut self,
+        focused: PaneId,
+        code: KeyCode,
+        _modifiers: KeyModifiers,
+    ) -> KeyResult<Verdict> {
+        match code {
+            KeyCode::Esc => KeyResult::Exit(Verdict::Cancel),
+            // Ctrl-C never reaches here — the shell intercepts it first.
+            KeyCode::Char('c') | KeyCode::Enter => KeyResult::Exit(Verdict::Confirm),
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.navigate_up(focused);
+                KeyResult::Handled
             }
-            // 1 for the header line, plus content lines, plus 1 separator.
-            row += 1 + entry.hunk.text.lines().count() as u16 + 1;
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.navigate_down(focused);
+                KeyResult::Handled
+            }
+            KeyCode::Char(' ') => {
+                self.toggle(focused);
+                KeyResult::Handled
+            }
+            _ => KeyResult::Handled,
         }
-        self.scroll_offset = row;
+    }
+
+    fn handle_mouse(&mut self, pane: PaneId, kind: MouseEventKind, pos: Position, area: Rect) {
+        match pane {
+            PaneId::Left => match kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    let Some(clicked) = self.list.hit_test(area, pos.y) else {
+                        return;
+                    };
+                    if clicked < self.display_rows.len() {
+                        self.list.set_cursor(clicked);
+                        self.hunks.reset();
+                    }
+                }
+                MouseEventKind::ScrollUp => self.move_file_cursor(-1),
+                MouseEventKind::ScrollDown => self.move_file_cursor(1),
+                _ => {}
+            },
+            PaneId::Right => match kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    let Some(file_idx) = self.current_file_index() else {
+                        return;
+                    };
+                    // Inner area: subtract 1-row border top, then account for scroll.
+                    let inner_top = area.y + 1;
+                    let inner_height = area.height.saturating_sub(2);
+                    if pos.y < inner_top || pos.y >= inner_top + inner_height {
+                        return;
+                    }
+                    let clicked_line = (pos.y - inner_top) as usize + self.hunks.scroll() as usize;
+                    self.hunks
+                        .click(&mut self.files[file_idx].hunks, clicked_line);
+                }
+                MouseEventKind::ScrollUp => self.hunks.scroll_by(-3),
+                MouseEventKind::ScrollDown => self.hunks.scroll_by(3),
+                _ => {}
+            },
+        }
+    }
+
+    fn render_pane(&mut self, frame: &mut Frame, pane: PaneId, area: Rect, focused: bool) {
+        match pane {
+            PaneId::Left => self.render_file_list(frame, area, focused),
+            PaneId::Right => self.render_diff_view(frame, area, focused),
+        }
+    }
+
+    fn status_hints(&self, _focused: PaneId) -> Vec<Cow<'static, str>> {
+        vec![
+            "Navigate: \u{2191}/\u{2193}".into(),
+            "Switch Pane: tab".into(),
+            "Toggle: space".into(),
+            "Confirm: c or Enter".into(),
+            "Quit: q or Esc".into(),
+        ]
     }
 }
 
@@ -762,629 +532,39 @@ pub fn run_hunk_selector(files: Vec<FileEntry>, theme: TuiTheme) -> Result<Optio
         return Ok(None);
     }
 
-    let mut terminal = ratatui::init();
-    crossterm::execute!(std::io::stdout(), EnableMouseCapture)?;
-
-    // Panic-safe cleanup: install a hook that restores the terminal before the
-    // default handler fires.
-    let prev_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        let _ = crossterm::execute!(std::io::stdout(), DisableMouseCapture);
-        ratatui::restore();
-        prev_hook(info);
-    }));
-
-    let result = run_event_loop(&mut terminal, files, theme);
-
-    // Restore terminal state on normal exit.
-    crossterm::execute!(std::io::stdout(), DisableMouseCapture)?;
-    ratatui::restore();
-
-    // Remove our custom panic hook — back to default.
-    let _ = std::panic::take_hook();
-
-    result
+    let (app, verdict) = Shell::new(HunkSelectorApp::new(files, theme)).run()?;
+    Ok(match verdict {
+        Verdict::Confirm => Some(app.files),
+        Verdict::Cancel => None,
+    })
 }
 
-fn run_event_loop(
-    terminal: &mut ratatui::DefaultTerminal,
-    files: Vec<FileEntry>,
-    theme: TuiTheme,
-) -> Result<Option<Vec<FileEntry>>> {
-    let mut app = HunkSelectorApp::new(files, theme);
-
-    loop {
-        terminal.draw(|frame| app.render(frame))?;
-
-        match event::read()? {
-            Event::Key(key) => {
-                // On Windows, crossterm fires both Press and Release. Only handle Press.
-                if key.kind != KeyEventKind::Press {
-                    continue;
-                }
-                app.handle_key(key.code, key.modifiers);
-            }
-            Event::Mouse(mouse) => {
-                app.handle_mouse(mouse.kind, mouse.column, mouse.row);
-            }
-            _ => {}
-        }
-
-        if app.should_quit {
-            return if app.confirmed {
-                Ok(Some(app.files))
-            } else {
-                Ok(None)
-            };
-        }
-    }
-}
-
+/// Fixtures shared with the shell tests.
 #[cfg(test)]
-mod tests {
+pub(crate) mod test_support {
     use super::*;
-    use crate::core::diff::DiffHunk;
     use crate::core::graph::Theme;
-    use crate::tui::theme::TuiTheme;
 
-    fn make_hunk(text: &str) -> DiffHunk {
-        DiffHunk {
-            text: text.to_string(),
-            modified_lines: vec![],
-        }
-    }
-
-    fn make_theme() -> TuiTheme {
-        TuiTheme::from_graph_theme(&Theme::dark())
-    }
-
-    /// Root-level files (no directory grouping) — keeps existing tests simple.
-    fn make_files() -> Vec<FileEntry> {
-        vec![
-            FileEntry {
-                path: "main.rs".to_string(),
-                hunks: vec![
-                    HunkEntry {
-                        hunk: make_hunk("@@ -1,3 +1,4 @@\n context\n-old\n+new\n"),
-                        selected: true,
-                        origin: HunkOrigin::Staged,
-                    },
-                    HunkEntry {
-                        hunk: make_hunk("@@ -10,2 +11,3 @@\n context\n+added\n"),
-                        selected: false,
-                        origin: HunkOrigin::Unstaged,
-                    },
-                ],
-                index_status: 'M',
-                worktree_status: 'M',
-                binary: false,
-            },
-            FileEntry {
-                path: "lib.rs".to_string(),
-                hunks: vec![HunkEntry {
-                    hunk: make_hunk("@@ -5,2 +5,2 @@\n-old line\n+new line\n"),
-                    selected: false,
-                    origin: HunkOrigin::Unstaged,
-                }],
-                index_status: ' ',
-                worktree_status: 'M',
-                binary: false,
-            },
-        ]
-    }
-
-    /// Files in a subdirectory — for tree-specific tests.
-    fn make_files_in_dir() -> Vec<FileEntry> {
-        vec![
-            FileEntry {
-                path: "src/main.rs".to_string(),
-                hunks: vec![HunkEntry {
-                    hunk: make_hunk("@@ -1,1 +1,1 @@\n-a\n+b\n"),
-                    selected: true,
-                    origin: HunkOrigin::Staged,
-                }],
-                index_status: 'M',
-                worktree_status: ' ',
-                binary: false,
-            },
-            FileEntry {
-                path: "src/lib.rs".to_string(),
-                hunks: vec![HunkEntry {
-                    hunk: make_hunk("@@ -1,1 +1,1 @@\n-x\n+y\n"),
-                    selected: false,
-                    origin: HunkOrigin::Unstaged,
-                }],
-                index_status: ' ',
-                worktree_status: 'M',
-                binary: false,
-            },
-        ]
-    }
-
-    /// Mix of root-level files and files in directories.
-    fn make_files_mixed() -> Vec<FileEntry> {
-        vec![
-            FileEntry {
-                path: "README.md".to_string(),
-                hunks: vec![HunkEntry {
-                    hunk: make_hunk("@@ -1,1 +1,1 @@\n-a\n+b\n"),
-                    selected: false,
-                    origin: HunkOrigin::Unstaged,
-                }],
-                index_status: ' ',
-                worktree_status: 'M',
-                binary: false,
-            },
-            FileEntry {
-                path: "src/main.rs".to_string(),
-                hunks: vec![HunkEntry {
-                    hunk: make_hunk("@@ -1,1 +1,1 @@\n-a\n+b\n"),
-                    selected: true,
-                    origin: HunkOrigin::Staged,
-                }],
-                index_status: 'M',
-                worktree_status: ' ',
-                binary: false,
-            },
-            FileEntry {
-                path: "src/lib.rs".to_string(),
-                hunks: vec![HunkEntry {
-                    hunk: make_hunk("@@ -1,1 +1,1 @@\n-x\n+y\n"),
-                    selected: false,
-                    origin: HunkOrigin::Unstaged,
-                }],
-                index_status: ' ',
-                worktree_status: 'M',
-                binary: false,
-            },
-        ]
-    }
-
-    #[test]
-    fn new_initializes_correctly() {
-        let files = make_files();
-        let app = HunkSelectorApp::new(files, make_theme());
-        assert_eq!(app.cursor_pos, 0);
-        assert_eq!(app.hunk_index, 0);
-        assert_eq!(app.active_pane, Pane::Left);
-        assert!(!app.should_quit);
-        assert!(!app.confirmed);
-        assert_eq!(app.scroll_offset, 0);
-    }
-
-    #[test]
-    fn navigate_files_in_left_pane() {
-        let mut app = HunkSelectorApp::new(make_files(), make_theme());
-        assert_eq!(app.cursor_pos, 0);
-
-        app.navigate_down();
-        assert_eq!(app.cursor_pos, 1);
-
-        // Can't go past the last file.
-        app.navigate_down();
-        assert_eq!(app.cursor_pos, 1);
-
-        app.navigate_up();
-        assert_eq!(app.cursor_pos, 0);
-
-        // Can't go before 0.
-        app.navigate_up();
-        assert_eq!(app.cursor_pos, 0);
-    }
-
-    #[test]
-    fn navigate_hunks_in_right_pane() {
-        let mut app = HunkSelectorApp::new(make_files(), make_theme());
-        app.active_pane = Pane::Right;
-
-        // File 0 has 2 hunks.
-        assert_eq!(app.cursor_pos, 0);
-        assert_eq!(app.hunk_index, 0);
-        app.navigate_down();
-        assert_eq!(app.hunk_index, 1);
-
-        // Past last hunk → move to next file, first hunk.
-        app.navigate_down();
-        assert_eq!(app.cursor_pos, 1);
-        assert_eq!(app.hunk_index, 0);
-
-        // File 1 has 1 hunk — can't go further.
-        app.navigate_down();
-        assert_eq!(app.cursor_pos, 1);
-        assert_eq!(app.hunk_index, 0);
-
-        // Up from first hunk of file 1 → last hunk of file 0.
-        app.navigate_up();
-        assert_eq!(app.cursor_pos, 0);
-        assert_eq!(app.hunk_index, 1);
-
-        app.navigate_up();
-        assert_eq!(app.hunk_index, 0);
-
-        // Can't go before first hunk of first file.
-        app.navigate_up();
-        assert_eq!(app.cursor_pos, 0);
-        assert_eq!(app.hunk_index, 0);
-    }
-
-    #[test]
-    fn navigate_hunks_cross_file_with_dir_headers() {
-        let mut app = HunkSelectorApp::new(make_files_in_dir(), make_theme());
-        app.active_pane = Pane::Right;
-        // display_rows: [Dir(0..1), File(0), File(1)]
-        // Start on dir header — right pane nav is no-op.
-        assert_eq!(app.cursor_pos, 0);
-        assert!(app.current_file_index().is_none());
-
-        // Move cursor to file 0 first.
-        app.active_pane = Pane::Left;
-        app.navigate_down();
-        assert_eq!(app.cursor_pos, 1);
-        app.active_pane = Pane::Right;
-
-        // File 0 has 1 hunk. Down → should skip dir headers and land on file 1.
-        app.navigate_down();
-        assert_eq!(app.cursor_pos, 2);
-        assert_eq!(app.current_file_index(), Some(1));
-        assert_eq!(app.hunk_index, 0);
-
-        // Up from file 1 → back to file 0's last hunk.
-        app.navigate_up();
-        assert_eq!(app.cursor_pos, 1);
-        assert_eq!(app.current_file_index(), Some(0));
-        assert_eq!(app.hunk_index, 0); // file 0 has only 1 hunk
-    }
-
-    #[test]
-    fn toggle_hunk_in_right_pane() {
-        let mut app = HunkSelectorApp::new(make_files(), make_theme());
-        app.active_pane = Pane::Right;
-
-        assert!(app.files[0].hunks[0].selected);
-        app.toggle();
-        assert!(!app.files[0].hunks[0].selected);
-        app.toggle();
-        assert!(app.files[0].hunks[0].selected);
-    }
-
-    #[test]
-    fn toggle_file_in_left_pane() {
-        let mut app = HunkSelectorApp::new(make_files(), make_theme());
-        // First file: one staged (selected), one unstaged (not selected) → any_selected=true
-        assert!(app.files[0].hunks[0].selected);
-        assert!(!app.files[0].hunks[1].selected);
-
-        app.toggle(); // Left pane: deselect all (since any are selected).
-        assert!(app.files[0].hunks.iter().all(|h| !h.selected));
-
-        app.toggle(); // Now none selected → select all.
-        assert!(app.files[0].hunks.iter().all(|h| h.selected));
-    }
-
-    #[test]
-    fn quit_sets_flags() {
-        let mut app = HunkSelectorApp::new(make_files(), make_theme());
-        app.handle_key(KeyCode::Char('q'), KeyModifiers::NONE);
-        assert!(app.should_quit);
-        assert!(!app.confirmed);
-    }
-
-    #[test]
-    fn confirm_sets_flags() {
-        let mut app = HunkSelectorApp::new(make_files(), make_theme());
-        app.handle_key(KeyCode::Char('c'), KeyModifiers::NONE);
-        assert!(app.should_quit);
-        assert!(app.confirmed);
-    }
-
-    #[test]
-    fn enter_confirms() {
-        let mut app = HunkSelectorApp::new(make_files(), make_theme());
-        app.handle_key(KeyCode::Enter, KeyModifiers::NONE);
-        assert!(app.should_quit);
-        assert!(app.confirmed);
-    }
-
-    #[test]
-    fn tab_switches_pane() {
-        let mut app = HunkSelectorApp::new(make_files(), make_theme());
-        assert_eq!(app.active_pane, Pane::Left);
-        app.handle_key(KeyCode::Tab, KeyModifiers::NONE);
-        assert_eq!(app.active_pane, Pane::Right);
-        app.handle_key(KeyCode::Tab, KeyModifiers::NONE);
-        assert_eq!(app.active_pane, Pane::Left);
-    }
-
-    #[test]
-    fn switching_file_resets_hunk_and_scroll() {
-        let mut app = HunkSelectorApp::new(make_files(), make_theme());
-        app.active_pane = Pane::Right;
-        app.navigate_down(); // Move to hunk 1
-        assert_eq!(app.hunk_index, 1);
-        assert!(app.scroll_offset > 0);
-
-        // Switch back to left pane and navigate to next file.
-        app.active_pane = Pane::Left;
-        app.navigate_down();
-        assert_eq!(app.cursor_pos, 1);
-        assert_eq!(app.hunk_index, 0);
-        assert_eq!(app.scroll_offset, 0);
-    }
-
-    #[test]
-    fn empty_files_returns_none() {
-        let result = run_hunk_selector(vec![], make_theme()).unwrap();
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn ctrl_c_quits() {
-        let mut app = HunkSelectorApp::new(make_files(), make_theme());
-        app.handle_key(KeyCode::Char('c'), KeyModifiers::CONTROL);
-        assert!(app.should_quit);
-        assert!(!app.confirmed);
-    }
-
-    #[test]
-    fn esc_quits() {
-        let mut app = HunkSelectorApp::new(make_files(), make_theme());
-        app.handle_key(KeyCode::Esc, KeyModifiers::NONE);
-        assert!(app.should_quit);
-        assert!(!app.confirmed);
-    }
-
-    #[test]
-    fn hunk_origin_preserved_through_toggle() {
-        let mut app = HunkSelectorApp::new(make_files(), make_theme());
-        app.active_pane = Pane::Right;
-
-        // First hunk is Staged
-        assert_eq!(app.files[0].hunks[0].origin, HunkOrigin::Staged);
-        app.toggle();
-        // Origin unchanged after toggle
-        assert_eq!(app.files[0].hunks[0].origin, HunkOrigin::Staged);
-        assert!(!app.files[0].hunks[0].selected);
-    }
-
-    // -- effective_status tests -----------------------------------------------
-
-    #[test]
-    fn effective_status_staged_only_deselect_some() {
-        // M  → deselect one of two staged hunks → MM
-        let file = FileEntry {
-            path: "f.rs".into(),
-            hunks: vec![
-                HunkEntry {
-                    hunk: make_hunk("@@ -1,1 +1,1 @@\n-a\n+b\n"),
-                    selected: true,
-                    origin: HunkOrigin::Staged,
-                },
-                HunkEntry {
-                    hunk: make_hunk("@@ -10,1 +10,1 @@\n-c\n+d\n"),
-                    selected: false, // deselected
-                    origin: HunkOrigin::Staged,
-                },
-            ],
-            index_status: 'M',
-            worktree_status: ' ',
-            binary: false,
-        };
-        assert_eq!(file.effective_status(), ('M', 'M'));
-    }
-
-    #[test]
-    fn effective_status_staged_only_deselect_all() {
-        // M  → deselect all → _M
-        let file = FileEntry {
-            path: "f.rs".into(),
+    /// A selector over one single-hunk file, for render-level tests.
+    pub(crate) fn sample_app() -> HunkSelectorApp {
+        let files = vec![FileEntry {
+            path: "main.rs".to_string(),
             hunks: vec![HunkEntry {
-                hunk: make_hunk("@@ -1,1 +1,1 @@\n-a\n+b\n"),
+                hunk: DiffHunk {
+                    text: "@@ -1,1 +1,1 @@\n-a\n+b\n".to_string(),
+                    modified_lines: vec![],
+                },
                 selected: false,
-                origin: HunkOrigin::Staged,
-            }],
-            index_status: 'M',
-            worktree_status: ' ',
-            binary: false,
-        };
-        assert_eq!(file.effective_status(), (' ', 'M'));
-    }
-
-    #[test]
-    fn effective_status_unstaged_only_select_all() {
-        // _M → select all → M_
-        let file = FileEntry {
-            path: "f.rs".into(),
-            hunks: vec![HunkEntry {
-                hunk: make_hunk("@@ -1,1 +1,1 @@\n-a\n+b\n"),
-                selected: true,
                 origin: HunkOrigin::Unstaged,
             }],
             index_status: ' ',
             worktree_status: 'M',
             binary: false,
-        };
-        assert_eq!(file.effective_status(), ('M', ' '));
-    }
-
-    #[test]
-    fn effective_status_untracked_select() {
-        // ?? → select → A_
-        let file = FileEntry {
-            path: "new.rs".into(),
-            hunks: vec![HunkEntry {
-                hunk: make_hunk("@@ -0,0 +1,1 @@\n+new\n"),
-                selected: true,
-                origin: HunkOrigin::Unstaged,
-            }],
-            index_status: '?',
-            worktree_status: '?',
-            binary: false,
-        };
-        assert_eq!(file.effective_status(), ('A', ' '));
-    }
-
-    #[test]
-    fn effective_status_untracked_no_select() {
-        // ?? stays ??
-        let file = FileEntry {
-            path: "new.rs".into(),
-            hunks: vec![HunkEntry {
-                hunk: make_hunk("@@ -0,0 +1,1 @@\n+new\n"),
-                selected: false,
-                origin: HunkOrigin::Unstaged,
-            }],
-            index_status: '?',
-            worktree_status: '?',
-            binary: false,
-        };
-        assert_eq!(file.effective_status(), ('?', '?'));
-    }
-
-    #[test]
-    fn effective_status_new_file_deselect() {
-        // A_ → deselect → ??
-        let file = FileEntry {
-            path: "new.rs".into(),
-            hunks: vec![HunkEntry {
-                hunk: make_hunk("@@ -0,0 +1,1 @@\n+new\n"),
-                selected: false,
-                origin: HunkOrigin::Staged,
-            }],
-            index_status: 'A',
-            worktree_status: ' ',
-            binary: false,
-        };
-        assert_eq!(file.effective_status(), ('?', '?'));
-    }
-
-    #[test]
-    fn effective_status_deletion_deselect() {
-        // D_ → deselect → _D
-        let file = FileEntry {
-            path: "old.rs".into(),
-            hunks: vec![HunkEntry {
-                hunk: make_hunk("(file deleted)"),
-                selected: false,
-                origin: HunkOrigin::Staged,
-            }],
-            index_status: 'D',
-            worktree_status: ' ',
-            binary: false,
-        };
-        assert_eq!(file.effective_status(), (' ', 'D'));
-    }
-
-    // -- tree display tests ---------------------------------------------------
-
-    #[test]
-    fn display_rows_root_files_no_headers() {
-        let files = make_files();
-        let rows = build_display_rows(&files);
-        assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0], DisplayRow::File(0));
-        assert_eq!(rows[1], DisplayRow::File(1));
-    }
-
-    #[test]
-    fn display_rows_dir_files_have_header() {
-        let files = make_files_in_dir();
-        let rows = build_display_rows(&files);
-        // directory header + 2 files = 3 rows
-        assert_eq!(rows.len(), 3);
-        assert_eq!(
-            rows[0],
-            DisplayRow::Directory {
-                dir_start: 0,
-                dir_end: 1
-            }
-        );
-        assert_eq!(rows[1], DisplayRow::File(0));
-        assert_eq!(rows[2], DisplayRow::File(1));
-    }
-
-    #[test]
-    fn display_rows_mixed_root_and_dir() {
-        let files = make_files_mixed();
-        let rows = build_display_rows(&files);
-        // README.md (root), then ▼ src header, then src/main.rs, src/lib.rs
-        assert_eq!(rows.len(), 4);
-        assert_eq!(rows[0], DisplayRow::File(0)); // README.md
-        assert_eq!(
-            rows[1],
-            DisplayRow::Directory {
-                dir_start: 1,
-                dir_end: 2
-            }
-        );
-        assert_eq!(rows[2], DisplayRow::File(1)); // src/main.rs
-        assert_eq!(rows[3], DisplayRow::File(2)); // src/lib.rs
-    }
-
-    #[test]
-    fn navigate_through_dir_header() {
-        let mut app = HunkSelectorApp::new(make_files_in_dir(), make_theme());
-        // display_rows: [Dir(0..1), File(0), File(1)]
-        assert_eq!(app.cursor_pos, 0);
-        assert!(app.current_file_index().is_none()); // on dir header
-
-        app.navigate_down();
-        assert_eq!(app.cursor_pos, 1);
-        assert_eq!(app.current_file_index(), Some(0)); // on first file
-
-        app.navigate_down();
-        assert_eq!(app.cursor_pos, 2);
-        assert_eq!(app.current_file_index(), Some(1)); // on second file
-
-        // Can't go past last row.
-        app.navigate_down();
-        assert_eq!(app.cursor_pos, 2);
-    }
-
-    #[test]
-    fn toggle_directory_toggles_all_files() {
-        let mut app = HunkSelectorApp::new(make_files_in_dir(), make_theme());
-        // cursor_pos 0 = dir header
-        // File 0: one hunk selected. File 1: one hunk not selected.
-        assert!(app.files[0].hunks[0].selected);
-        assert!(!app.files[1].hunks[0].selected);
-
-        // Toggle dir: any_selected=true → deselect all.
-        app.toggle();
-        assert!(!app.files[0].hunks[0].selected);
-        assert!(!app.files[1].hunks[0].selected);
-
-        // Toggle again: none selected → select all.
-        app.toggle();
-        assert!(app.files[0].hunks[0].selected);
-        assert!(app.files[1].hunks[0].selected);
-    }
-
-    #[test]
-    fn right_pane_noop_on_dir_header() {
-        let mut app = HunkSelectorApp::new(make_files_in_dir(), make_theme());
-        app.active_pane = Pane::Right;
-
-        // On directory header — hunk navigation should be no-op.
-        assert_eq!(app.hunk_index, 0);
-        app.navigate_down();
-        assert_eq!(app.hunk_index, 0);
-
-        // Toggle on dir in right pane should be no-op.
-        app.toggle();
-        assert!(app.files[0].hunks[0].selected); // unchanged
-    }
-
-    #[test]
-    fn directory_of_extracts_parent() {
-        assert_eq!(directory_of("src/main.rs"), "src");
-        assert_eq!(directory_of("a/b/c.rs"), "a/b");
-        assert_eq!(directory_of("file.rs"), "");
-    }
-
-    #[test]
-    fn filename_of_extracts_name() {
-        assert_eq!(filename_of("src/main.rs"), "main.rs");
-        assert_eq!(filename_of("a/b/c.rs"), "c.rs");
-        assert_eq!(filename_of("file.rs"), "file.rs");
+        }];
+        HunkSelectorApp::new(files, TuiTheme::from_graph_theme(&Theme::dark()))
     }
 }
+
+#[cfg(test)]
+#[path = "hunk_selector_test.rs"]
+mod tests;

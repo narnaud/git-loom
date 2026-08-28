@@ -39,6 +39,7 @@
 - [branch](commands/branch.md)
 - [switch](commands/switch.md)
 - [status](commands/status.md)
+- [tui](commands/tui.md)
 - [show](commands/show.md)
 - [diff](commands/diff.md)
 - [trace](commands/trace.md)

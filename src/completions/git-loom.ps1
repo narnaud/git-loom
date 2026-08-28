@@ -35,6 +35,7 @@ $_gitLoomCompleter = {
         @{ Name = 'switch'; Description = 'Switch to any branch for testing (without weaving)' },
         # Inspection
         @{ Name = 'status'; Description = 'Show the branch-aware status' },
+        @{ Name = 'tui'; Description = 'Interactive status TUI (tree + diff, with actions)' },
         @{ Name = 'show'; Description = 'Show the diff and metadata for a commit (like git show)' },
         @{ Name = 'diff'; Description = 'Show a diff using short IDs (like git diff)' },
         @{ Name = 'trace'; Description = 'Show the latest command trace' },

@@ -37,6 +37,13 @@ pub struct Theme {
     pub remote_gone: Color,
     /// Conflicted file status: bold red, matching git convention.
     pub conflict: Color,
+    /// Background of the cursor/selected line in TUIs: a shade clearly
+    /// distinct from the terminal background while keeping the line's
+    /// foreground colors readable (dim text switches to `dim_selected`).
+    pub selection_bg: Color,
+    /// Replacement for `dim` on the cursor/selected line, with enough
+    /// contrast against `selection_bg`.
+    pub dim_selected: Color,
     /// Rotating colors for commit dots on feature branches.
     pub branch_dots: &'static [Color],
 }
@@ -58,6 +65,8 @@ impl Theme {
             remote_ahead: Color::Yellow,
             remote_gone: Color::Red,
             conflict: Color::Red,
+            selection_bg: Color::AnsiColor(239),
+            dim_selected: Color::AnsiColor(245),
             branch_dots: BRANCH_DOTS,
         }
     }
@@ -78,6 +87,8 @@ impl Theme {
             remote_ahead: Color::Yellow,
             remote_gone: Color::Red,
             conflict: Color::Red,
+            selection_bg: Color::AnsiColor(251),
+            dim_selected: Color::AnsiColor(242),
             branch_dots: BRANCH_DOTS,
         }
     }
@@ -114,7 +125,8 @@ pub struct RenderOpts {
 
 /// A logical section in the rendered status output. Sections are built from
 /// RepoInfo and rendered top-to-bottom with UTF-8 box-drawing characters.
-enum Section {
+/// Also consumed by `loom tui` to build its interactive tree.
+pub(crate) enum Section {
     /// Working tree status (always present, may contain zero changes).
     WorkingChanges(Vec<FileChange>),
     /// A feature branch: its name(s) and the commits it owns.
@@ -243,7 +255,7 @@ pub fn commits_in_branch(info: &RepoInfo, branch: &str) -> Vec<git2::Oid> {
 
 /// Group commits into sections: working changes, feature branches, loose
 /// commits, and the upstream marker.
-fn build_sections(info: RepoInfo) -> Vec<Section> {
+pub(crate) fn build_sections(info: RepoInfo) -> Vec<Section> {
     let commit_to_branch = assign_commits_to_branches(&info);
 
     // Group branches by tip OID to handle co-located branches (multiple
@@ -337,7 +349,7 @@ fn build_sections(info: RepoInfo) -> Vec<Section> {
 /// Check if the next branch section is stacked on top of the current one.
 /// Two branches are stacked if the first commit of the next branch is a parent
 /// of the last commit of the current branch.
-fn is_stacked_with_next(sections: &[Section], idx: usize) -> bool {
+pub(crate) fn is_stacked_with_next(sections: &[Section], idx: usize) -> bool {
     let Section::Branch { commits, .. } = &sections[idx] else {
         return false;
     };

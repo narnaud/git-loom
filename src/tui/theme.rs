@@ -13,7 +13,9 @@ pub struct TuiTheme {
     pub context: Style,
     /// Hunk headers (`@@ ... @@`).
     pub hunk_header: Style,
-    /// Currently selected item in the file list.
+    /// Cursor/selected line (file list, status tree): a background shade
+    /// clearly distinct from the terminal background; dim spans on that line
+    /// use [`TuiTheme::dim_selected`] to stay readable.
     pub file_selected: Style,
     /// Normal (unselected) item in the file list.
     pub file_normal: Style,
@@ -33,6 +35,30 @@ pub struct TuiTheme {
     pub file_fully_staged: Style,
     /// File name when partially staged (yellow/orange).
     pub file_partially_staged: Style,
+    /// Graph structure: lines, connectors, dots on the integration line.
+    pub graph: Style,
+    /// Branch names in brackets.
+    pub branch: Style,
+    /// Labels like (upstream) and [local changes].
+    pub label: Style,
+    /// Dimmed secondary text.
+    pub dim: Style,
+    /// Dimmed secondary text on the cursor/selected line.
+    pub dim_selected: Style,
+    /// Commit message text.
+    pub message: Style,
+    /// Short ID prefix (underlined).
+    pub shortid: Style,
+    /// Untracked file marker.
+    pub untracked: Style,
+    /// Remote tracking indicators.
+    pub remote_synced: Style,
+    pub remote_ahead: Style,
+    pub remote_gone: Style,
+    /// Marker for multi-selected rows in the status tree.
+    pub selection: Style,
+    /// Rotating colors for commit dots on feature branches.
+    pub branch_dots: Vec<Style>,
 }
 
 impl TuiTheme {
@@ -43,7 +69,7 @@ impl TuiTheme {
             removed: Style::default().fg(map_color(theme.unstaged)),
             context: Style::default().fg(map_color(theme.dim)),
             hunk_header: Style::default().fg(Color::Blue),
-            file_selected: Style::default().bg(Color::Blue),
+            file_selected: Style::default().bg(map_color(theme.selection_bg)),
             file_normal: Style::default(),
             status_bar: Style::default().fg(map_color(theme.dim)),
             border: Style::default().fg(map_color(theme.graph)),
@@ -55,6 +81,29 @@ impl TuiTheme {
             untracked_status: Style::default().fg(map_color(theme.unstaged)),
             file_fully_staged: Style::default().fg(map_color(theme.staged)),
             file_partially_staged: Style::default().fg(Color::Yellow),
+            graph: Style::default().fg(map_color(theme.graph)),
+            branch: Style::default()
+                .fg(map_color(theme.branch))
+                .add_modifier(Modifier::BOLD),
+            label: Style::default().fg(map_color(theme.label)),
+            dim: Style::default().fg(map_color(theme.dim)),
+            dim_selected: Style::default().fg(map_color(theme.dim_selected)),
+            message: Style::default().fg(map_color(theme.message)),
+            shortid: Style::default()
+                .fg(map_color(theme.shortid))
+                .add_modifier(Modifier::UNDERLINED),
+            untracked: Style::default().fg(map_color(theme.untracked)),
+            remote_synced: Style::default().fg(map_color(theme.remote_synced)),
+            remote_ahead: Style::default().fg(map_color(theme.remote_ahead)),
+            remote_gone: Style::default().fg(map_color(theme.remote_gone)),
+            selection: Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+            branch_dots: theme
+                .branch_dots
+                .iter()
+                .map(|c| Style::default().fg(map_color(*c)))
+                .collect(),
         }
     }
 }
