@@ -7,6 +7,7 @@ Workflow:
   init              Initialize a new integration branch
   update, up        Pull-rebase and update submodules
   push, pr          Push a branch to remote
+  agent             Install the loom skill for AI agents
 
 Staging:
   add               Stage files using short IDs or paths [-p for interactive hunks]
@@ -36,6 +37,7 @@ Recovery:
 
 Options:
       --no-color       Disable colored output
+      --agent          Machine-readable JSON status output for AI agents (see also LOOM_AGENT)
       --theme <THEME>  Color theme for graph output [default: auto] [possible values: auto, dark, light]
   -h, --help           Print help (see more with '--help')
   -V, --version        Print version

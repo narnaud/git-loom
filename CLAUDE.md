@@ -35,6 +35,8 @@ git-loom is a Git CLI tool written in Rust (edition 2024) that weaves your branc
 - `src/push.rs` — Push a feature branch to remote (plain, GitHub, Gerrit auto-detection).
 - `src/weave.rs` — Weave: structured graph model for integration topology, rebase todo generation, and execution.
 - `src/update.rs` — Pull-rebase the integration branch and update submodules.
+- `src/agent/` — AI agent integration: `agent init` installs the embedded skill (source: `skills/git-loom/SKILL.md` at the repo root).
+- `src/core/agent_mode.rs` — Agent mode (`--agent`/`LOOM_AGENT`): JSON status line, structured prompt answers.
 - `src/graph.rs` — Graph rendering logic for the status output.
 - `src/git.rs` — Git abstraction layer (uses `git2` crate).
 - `src/git_commands/` — Lower-level Git operations split by domain:
@@ -65,6 +67,8 @@ The `specs/` directory contains detailed design documents that describe each fea
 | `specs/015-swap.md` | Swap two commits or two branch sections |
 | `specs/016-diff.md` | Diff: short-ID–aware wrapper around git diff |
 | `specs/017-switch.md` | Switch to any branch for testing without weaving |
+| `specs/018-add.md` | Stage files using short IDs, paths, or `zz`; hunk-level staging with `-p` |
+| `specs/019-agent.md` | Agent integration: `agent init` skill install and `--agent` machine-readable mode |
 
 ## Build & Run Commands
 
