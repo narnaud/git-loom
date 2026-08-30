@@ -451,11 +451,7 @@ fn main() {
 
     // Completions don't need git, handle before version check
     if let Some(Command::Completions { shell }) = cli.command {
-        if let Err(e) = completions::run(shell) {
-            msg::error(&e.to_string());
-            std::process::exit(1);
-        }
-        return;
+        finish_and_exit(completions::run(shell));
     }
 
     // Agent setup needs no git or repo either (unless --project), works while
@@ -468,8 +464,7 @@ fn main() {
     }
 
     if let Err(e) = git::check_git_version() {
-        msg::error(&e.to_string());
-        std::process::exit(1);
+        finish_and_exit(Err(e));
     }
 
     // Initialize logger for commands that modify the repo (skip for
