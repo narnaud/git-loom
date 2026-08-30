@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.21.0](https://github.com/narnaud/git-loom/compare/v0.20.1...v0.21.0) (2026-08-30)
+
+
+### Features ✨
+
+* **agent:** add agent init to install the Claude skill ([c22c3d9](https://github.com/narnaud/git-loom/commit/c22c3d928f0369712a00949d182c9d9f8e31b996))
+* **cli:** add agent mode for machine-readable output ([3862748](https://github.com/narnaud/git-loom/commit/3862748d55245b1fa6265855e3df5169e2d9599f))
+* **cli:** pass unknown options through to git show and git diff ([83e4e5e](https://github.com/narnaud/git-loom/commit/83e4e5e495136b02bbe4261ecd65073d879dbd01))
+* **completions:** cover every command and its flags ([1a4884f](https://github.com/narnaud/git-loom/commit/1a4884f1ce7c8fbd14fc73c9137406b98085d50f))
+* **push:** ask to confirm suspected Gerrit remotes ([6ec0ca8](https://github.com/narnaud/git-loom/commit/6ec0ca873f1d503560aa7cdb32270ae12b10e2c5))
+* **show:** show all the commits a branch owns, not just its tip ([5abefd6](https://github.com/narnaud/git-loom/commit/5abefd6fb615cd4bce422cdbc5cb7ab6e194a76c))
+
+
+### Bug Fixes 🐞
+
+* **agent:** emit the JSON status from every exit path ([7e23c60](https://github.com/narnaud/git-loom/commit/7e23c6047794d6f35164981a2e7a48aa51701c10))
+* **agent:** stop the paused status from repeating itself ([3f19769](https://github.com/narnaud/git-loom/commit/3f1976945824487c43d43a5e9d2d392906f9f898))
+* **agent:** stop the skill from telling agents to stage with loom add ([26d537f](https://github.com/narnaud/git-loom/commit/26d537f36e21b75dc5904b25d69b746e9dcca5ce))
+* **cli:** tell the user what to do when a paused state has no rebase ([0ab8bd8](https://github.com/narnaud/git-loom/commit/0ab8bd89f6c7efa45a3b3774299a63594caafb1e))
+* **help:** make the grouped help respect --no-color and light terminals ([bc4b8a8](https://github.com/narnaud/git-loom/commit/bc4b8a869b478b7653b58578e82b5e505ba4aec3))
+
+
+### Documentation
+
+* add the agent integration spec ([5e6c35f](https://github.com/narnaud/git-loom/commit/5e6c35f1546d30f5a8ddad9d15ed0e75f8281dfb))
+* **agent:** correct spec examples that drifted from the code ([91db764](https://github.com/narnaud/git-loom/commit/91db76436cc855c2757eef80a7318c49a58576fd))
+* document the agent command and agent mode ([c243dc6](https://github.com/narnaud/git-loom/commit/c243dc6c8fca54522570b6d5d097292c354f5bd2))
+* Update commit documentation and spec ([141d9bc](https://github.com/narnaud/git-loom/commit/141d9bc300f2248db844de65ca4b7e80c3d52e4c))
+
+
+### Tests
+
+* **agent:** add the agent-mode integration test ([8959307](https://github.com/narnaud/git-loom/commit/89593072d43d9ca7ebaf6a7057a773cb4cd80e88))
+
 ## [0.20.1](https://github.com/narnaud/git-loom/compare/v0.20.0...v0.20.1) (2026-08-14)
 
 
