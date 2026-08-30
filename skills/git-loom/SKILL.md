@@ -100,7 +100,9 @@ When a status line says `"paused"`, or any loom command reports that an
 operation is paused:
 
 1. Inspect conflicts with `git status` / `git loom diff --agent`.
-2. Edit the conflicted files, then stage them: `git loom add <files> --agent`.
+2. Edit the conflicted files, then stage them with **raw** `git add <files>` —
+   while paused, `git loom add` is blocked along with every loom command
+   except `continue`, `abort`, `diff`, `show`, and `trace`.
 3. `git loom continue --agent` — repeats `paused` if new conflicts appear.
 4. To give up instead: `git loom abort --agent` restores the original state,
    including staged and working-tree changes.
