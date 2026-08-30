@@ -96,7 +96,7 @@ lines the command printed (some commands print several; none may be present).
 ```json
 {"status":"needs_input","kind":"select","prompt":"Select target branch",
  "options":["feature-auth","feature-ui"],"allow_other":true,
- "hint":"re-run with: loom commit -b <branch> -m <message> [files...]"}
+ "hint":"re-run with: loom commit -b <branch> -m <message> [files...] (a new name creates the branch)"}
 ```
 
 Emitted when the command would have opened an interactive prompt **before
@@ -118,7 +118,7 @@ Emitted when the command would have asked a yes/no question before touching
 history. Nothing was changed.
 
 ```json
-{"status":"paused","message":"Conflicts detected — resolve them with git",
+{"status":"paused","message":"Conflicts detected — the `loom update` is paused",
  "hint":"resolve conflicts, stage them, then run: loom continue (or loom abort)"}
 ```
 
@@ -131,7 +131,10 @@ before the pause.
 Running another command while an operation is already paused reports
 `{"status":"error"}` (the command did not run — reporting `paused` would let
 an agent mistake the pre-existing pause for its own command's progress); the
-`message` names `loom continue` / `loom abort` as the way forward.
+`message` names `loom continue` / `loom abort` as the way forward. Only
+`continue`, `abort`, `diff`, `show`, `trace`, `completions` and `agent` run
+while paused — `add` included, which is why conflict resolutions are staged
+with raw `git add`.
 
 ```json
 {"status":"error","message":"Branch 'foo' is not woven into the integration branch"}
@@ -257,7 +260,7 @@ $ git-loom commit --agent -m "Fix login validation"
 ```json
 {"status":"needs_input","kind":"select","prompt":"Select target branch",
  "options":["feature-auth","feature-ui"],"allow_other":true,
- "hint":"re-run with: loom commit -b <branch> -m <message> [files...]"}
+ "hint":"re-run with: loom commit -b <branch> -m <message> [files...] (a new name creates the branch)"}
 ```
 
 ```
@@ -295,8 +298,9 @@ $ git-loom update --agent -y
 ```
 
 ```json
-{"status":"paused","message":"Conflicts detected — resolve them with git",
- "hint":"resolve conflicts, stage them, then run: loom continue (or loom abort)"}
+{"status":"paused","message":"Conflicts detected — the `loom update` is paused",
+ "hint":"resolve conflicts, stage them, then run: loom continue (or loom abort)",
+ "messages":["Fetched latest changes"]}
 ```
 
 ```
