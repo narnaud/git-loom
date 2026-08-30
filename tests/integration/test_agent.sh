@@ -163,6 +163,12 @@ gl_capture status --agent
 assert_eq "1" "$CODE" "blocked_exit"
 assert_contains "$OUT" '"status":"error"' "blocked_status"
 
+# `loom add` is blocked too, which is why the skill tells the agent to stage
+# conflict resolutions with raw `git add`
+gl_capture add --agent zz
+assert_eq "1" "$CODE" "add_blocked_while_paused_exit"
+assert_contains "$OUT" '"status":"error"' "add_blocked_while_paused_status"
+
 echo "resolved content" > "$WORK/conflict.txt"
 git -C "$WORK" add conflict.txt
 
