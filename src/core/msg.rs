@@ -142,6 +142,14 @@ pub fn warn(message: &str) {
     print_message("!".yellow(), message, false);
 }
 
+/// Print a warning that is *not* collected into the agent `messages` list.
+///
+/// For warnings agent mode already reports structurally — the conflict pause
+/// becomes a `paused` status — so the JSON does not repeat itself.
+pub fn warn_reported(message: &str) {
+    print_message("!".yellow(), message, false);
+}
+
 /// Print an error message with a red cross to stderr.
 /// Additional lines are treated as hints and prefixed with a blue arrow.
 /// Text between backticks is highlighted in yellow.
