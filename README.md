@@ -23,6 +23,7 @@ Workflow:
   init              Initialize a new integration branch
   update, up        Pull-rebase and update submodules
   push, pr          Push a branch to remote
+  agent             Install the loom skill for AI agents
 
 Staging:
   add               Stage files using short IDs or paths [-p for interactive hunks]
