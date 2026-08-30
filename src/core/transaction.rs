@@ -126,12 +126,25 @@ pub fn delete(git_dir: &Path) -> Result<()> {
 
 /// Emit the standard conflict-pause warning for a resumable command.
 pub fn warn_conflict_paused(command: &str) {
+    crate::core::agent_mode::note_paused(
+        &format!("Conflicts detected — the `loom {}` is paused", command),
+        "resolve conflicts, stage them, then run: loom continue (or loom abort)",
+    );
     crate::core::msg::warn(&format!(
         "Conflicts detected — resolve them with git, then run:\n\
          `loom continue`   to complete the {}\n\
          `loom abort`      to cancel and restore original state",
         command
     ));
+}
+
+/// Emit the "conflicts remain" warning after a `loom continue` hit another conflict.
+fn warn_still_paused() {
+    crate::core::agent_mode::note_paused(
+        "Conflicts remain — the operation is still paused",
+        "resolve conflicts, stage them, then run: loom continue (or loom abort)",
+    );
+    crate::core::msg::warn("Conflicts remain — resolve them and run `loom continue` again");
 }
 
 /// Run `loom continue` (opens repo internally).
@@ -162,9 +175,7 @@ pub fn continue_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
     if git::rebase_is_in_progress(git_dir) {
         match git::continue_rebase(workdir)? {
             git::RebaseOutcome::Conflicted => {
-                crate::core::msg::warn(
-                    "Conflicts remain — resolve them and run `loom continue` again",
-                );
+                warn_still_paused();
                 return Ok(());
             }
             git::RebaseOutcome::Completed => {}
@@ -172,9 +183,7 @@ pub fn continue_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
     } else if git::merge_is_in_progress(git_dir) {
         match git::continue_merge(workdir, git_dir)? {
             git::MergeOutcome::Conflicted => {
-                crate::core::msg::warn(
-                    "Conflicts remain — resolve them and run `loom continue` again",
-                );
+                warn_still_paused();
                 return Ok(());
             }
             git::MergeOutcome::Completed => {}

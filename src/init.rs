@@ -75,6 +75,7 @@ fn detect_upstream(repo: &Repository) -> Result<String> {
             msg::select(
                 "Which remote branch should this integration track?",
                 candidates,
+                "no flag selects the upstream — ask the user, run `git remote set-head <remote> -a`, then re-run: loom init",
             )
         }
     }

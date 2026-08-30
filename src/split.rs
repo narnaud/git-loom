@@ -3,7 +3,7 @@ use git2::{Oid, Repository};
 
 use crate::core::repo::{self, Target, TargetKind};
 use crate::core::weave;
-use crate::core::{diff, graph, msg, staging};
+use crate::core::{agent_mode, diff, graph, msg, staging};
 use crate::git;
 use crate::tui::hunk_selector::FileEntry;
 
@@ -28,6 +28,17 @@ pub fn run(
     files: Vec<String>,
     theme: &graph::Theme,
 ) -> Result<()> {
+    // Without -m the first commit would open $GIT_EDITOR, which hangs a headless agent.
+    if agent_mode::enabled() && message.is_none() {
+        return Err(agent_mode::respond_needs_input(
+            agent_mode::InputKind::Text,
+            "Message for the first commit",
+            vec![],
+            false,
+            "re-run with: loom split <target> -m <message> [files...]",
+        ));
+    }
+
     let repo = repo::open_repo()?;
 
     let resolved = repo::resolve_arg(&repo, &target, &[TargetKind::Commit])?;
@@ -138,16 +149,11 @@ pub fn split_commit_with_selection(
 
 /// Show an interactive file picker for splitting.
 fn pick_files(files: &[String]) -> Result<Vec<String>> {
-    let selected = inquire::MultiSelect::new("Select files for the first commit:", files.to_vec())
-        .with_validator(|selection: &[inquire::list_option::ListOption<&String>]| {
-            if selection.is_empty() {
-                return Ok(inquire::validator::Validation::Invalid(
-                    "Must select at least one file".into(),
-                ));
-            }
-            Ok(inquire::validator::Validation::Valid)
-        })
-        .prompt()?;
+    let selected = msg::multi_select(
+        "Select files for the first commit:",
+        files.to_vec(),
+        "re-run with: loom split <target> -m <message> <files...>",
+    )?;
 
     if selected.len() == files.len() {
         bail!("Must leave at least one file for the second commit");

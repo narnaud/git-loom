@@ -80,5 +80,9 @@ fn pick_woven_branch(info: &repo::RepoInfo) -> Result<String> {
     if items.is_empty() {
         bail!("No woven branches to unmerge");
     }
-    msg::select("Select branch to unmerge", items)
+    msg::select(
+        "Select branch to unmerge",
+        items,
+        "re-run with: loom branch unmerge <branch>",
+    )
 }

@@ -13,7 +13,7 @@ use crate::core::weave::{self, RebaseOutcome, Weave};
 use crate::git;
 
 fn confirm_or_bail(skip: bool, prompt: &str) -> Result<()> {
-    if !skip && !msg::confirm(prompt)? {
+    if !skip && !msg::confirm(prompt, "re-run with: loom drop <target> -y")? {
         bail!("Cancelled");
     }
     Ok(())

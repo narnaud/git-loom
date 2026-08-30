@@ -20,7 +20,7 @@ mod trace;
 mod tui;
 mod update;
 
-use crate::core::{graph, msg, repo, transaction};
+use crate::core::{agent_mode, graph, msg, repo, transaction};
 
 use std::ffi::OsString;
 use std::io::IsTerminal;
@@ -126,6 +126,10 @@ struct Cli {
     #[arg(long)]
     no_color: bool,
 
+    /// Machine-readable JSON status output for AI agents (see also LOOM_AGENT)
+    #[arg(long, global = true)]
+    agent: bool,
+
     /// Color theme for graph output
     #[arg(long, default_value = "auto")]
     theme: ThemeArg,
@@ -170,7 +174,6 @@ enum Command {
         #[arg(long)]
         no_pr: bool,
     },
-
     // -- Staging --
     /// Stage files using short IDs, paths, or 'zz' for all
     Add {
@@ -400,6 +403,16 @@ fn paused_state_message(command: &str, interrupted: bool) -> String {
 fn main() {
     let cli = parse_cli(&std::env::args_os().collect::<Vec<_>>());
 
+    // Explicit opt-in only — never inferred from a missing terminal. The
+    // sequence-editor subprocess is excluded: it inherits LOOM_AGENT from its
+    // parent loom process, but its stderr flows through git and must stay clean.
+    let is_subprocess = matches!(cli.command, Some(Command::InternalWriteTodo { .. }));
+    agent_mode::set(
+        !is_subprocess
+            && (cli.agent
+                || std::env::var_os("LOOM_AGENT").is_some_and(|v| !v.is_empty() && v != "0")),
+    );
+
     if !colors_enabled(cli.no_color) {
         control::set_override(false);
     }
@@ -454,9 +467,21 @@ fn main() {
         if let Ok(Some(state)) = transaction::load(&git_dir) {
             let interrupted =
                 git::rebase_is_in_progress(&git_dir) || git::merge_is_in_progress(&git_dir);
-            msg::error(&paused_state_message(&state.command, interrupted));
-            std::process::exit(1);
+            finish_and_exit(Err(anyhow::anyhow!(paused_state_message(
+                &state.command,
+                interrupted
+            ))));
         }
+    }
+
+    // The hunk pickers are full-screen terminal UIs — reject `-p` in agent
+    // mode before any command stages anything (a guard at the picker itself
+    // backstops future call paths).
+    if agent_mode::enabled() && uses_patch_flag(&cli.command) {
+        finish_and_exit(Err(anyhow::anyhow!(
+            "--patch is interactive and unavailable in agent mode\n\
+             Pass explicit files instead"
+        )));
     }
 
     let theme = graph_theme(resolve_theme_mode(cli.theme));
@@ -513,10 +538,39 @@ fn main() {
 
     trace::finalize();
 
+    finish_and_exit(result);
+}
+
+/// Whether the command was invoked with `-p`/`--patch`.
+fn uses_patch_flag(command: &Option<Command>) -> bool {
+    matches!(
+        command,
+        Some(Command::Add { patch: true, .. })
+            | Some(Command::Commit { patch: true, .. })
+            | Some(Command::Fold { patch: true, .. })
+            | Some(Command::Split { patch: true, .. })
+    )
+}
+
+/// Report the command result and exit.
+///
+/// In agent mode the last line of stderr is always a single JSON status (see
+/// spec 019); prompts answered structurally (the `NeedsInput` marker) skip the
+/// human error line because the JSON is the message.
+fn finish_and_exit(result: anyhow::Result<()>) -> ! {
+    if agent_mode::enabled() {
+        if let Err(e) = &result
+            && e.downcast_ref::<agent_mode::NeedsInput>().is_none()
+        {
+            msg::error(&e.to_string());
+        }
+        std::process::exit(agent_mode::finish(&result));
+    }
     if let Err(e) = result {
         msg::error(&e.to_string());
         std::process::exit(1);
     }
+    std::process::exit(0);
 }
 
 /// Build the CLI and parse `args`. The help text is generated here rather than

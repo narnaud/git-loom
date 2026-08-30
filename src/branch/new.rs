@@ -24,7 +24,7 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
 
     let name = match name {
         Some(n) => n,
-        None => msg::input("Branch name", |s| {
+        None => msg::input("Branch name", "re-run with: loom branch new <name>", |s| {
             if s.trim().is_empty() {
                 Err("Branch name cannot be empty")
             } else {

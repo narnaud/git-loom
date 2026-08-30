@@ -4,6 +4,7 @@ use git2::Repository;
 use crate::branch;
 use crate::core::repo::{self, Target};
 
+use crate::core::agent_mode;
 use crate::core::msg;
 use crate::core::weave;
 use crate::git;
@@ -25,13 +26,18 @@ pub fn run(target: String, message: Option<String>) -> Result<()> {
                 Some(msg) => msg,
                 None => {
                     // Prompt for new branch name with current name as placeholder
-                    msg::input_with_placeholder("New branch name", &name, |s| {
-                        if s.trim().is_empty() {
-                            Err("Branch name cannot be empty")
-                        } else {
-                            Ok(())
-                        }
-                    })?
+                    msg::input_with_placeholder(
+                        "New branch name",
+                        &name,
+                        "re-run with: loom reword <target> -m <new-name>",
+                        |s| {
+                            if s.trim().is_empty() {
+                                Err("Branch name cannot be empty")
+                            } else {
+                                Ok(())
+                            }
+                        },
+                    )?
                 }
             };
             let new_name = new_name.trim().to_string();
@@ -54,6 +60,17 @@ pub fn run(target: String, message: Option<String>) -> Result<()> {
 /// 3. git commit --allow-empty --amend --only [-m "message"]
 /// 4. git rebase --continue
 pub fn reword_commit(repo: &Repository, commit_hash: &str, message: Option<String>) -> Result<()> {
+    // Without -m the amend would open $GIT_EDITOR, which hangs a headless agent.
+    if agent_mode::enabled() && message.is_none() {
+        return Err(agent_mode::respond_needs_input(
+            agent_mode::InputKind::Text,
+            "Commit message",
+            vec![],
+            false,
+            "re-run with: loom reword <target> -m <message>",
+        ));
+    }
+
     let workdir = repo::require_workdir(repo, "reword")?;
 
     let commit_oid = repo.revparse_single(commit_hash)?.peel_to_commit()?.id();

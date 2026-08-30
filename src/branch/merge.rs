@@ -150,5 +150,9 @@ fn pick_branch(repo: &Repository, info: &repo::RepoInfo, include_remote: bool) -
         bail!("No branches available to merge");
     }
 
-    msg::select("Select branch to weave", items)
+    msg::select(
+        "Select branch to weave",
+        items,
+        "re-run with: loom branch merge <branch>",
+    )
 }
