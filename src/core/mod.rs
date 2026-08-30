@@ -1,3 +1,4 @@
+pub mod agent_mode;
 pub mod cli_args;
 pub mod diff;
 pub mod graph;

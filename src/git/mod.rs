@@ -127,10 +127,17 @@ fn parse_git_version(version_str: &str) -> Option<(u32, u32)> {
 /// Note: stderr is not captured (it flows to the terminal directly),
 /// so the trace log will record an empty stderr string for these calls.
 pub fn run_git_interactive(workdir: &Path, args: &[&str]) -> Result<()> {
+    // A pty-hosted agent must never hang inside `less` — disable the pager.
+    let mut full_args: Vec<&str> = Vec::new();
+    if crate::core::agent_mode::enabled() {
+        full_args.extend(["-c", "core.pager=cat"]);
+    }
+    full_args.extend(args);
+
     let start = Instant::now();
     let status = Command::new("git")
         .current_dir(workdir)
-        .args(args)
+        .args(&full_args)
         .status()?;
 
     let duration_ms = start.elapsed().as_millis();

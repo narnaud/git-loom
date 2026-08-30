@@ -112,7 +112,11 @@ fn pick_branch(repo: &Repository) -> Result<(String, bool)> {
     }
 
     let names: Vec<String> = items.iter().map(|(n, _)| n.clone()).collect();
-    let selected = msg::select("Select branch to switch to", names)?;
+    let selected = msg::select(
+        "Select branch to switch to",
+        names,
+        "re-run with: loom switch <branch>",
+    )?;
     let is_remote = items
         .iter()
         .find(|(n, _)| n == &selected)

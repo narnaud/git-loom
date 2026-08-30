@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::repo;
 
+use crate::core::agent_mode;
 use crate::core::msg;
 use crate::core::transaction::{self, LoomState, Rollback};
 use crate::core::weave::Weave;
@@ -245,13 +246,30 @@ fn post_update(workdir: &Path, repo: &git2::Repository, ctx: &UpdateContext) -> 
             warn_msg.push_str(name);
         }
         msg::warn(&warn_msg);
-        let confirmed = ctx.skip_confirm
-            || repo::prune_gone_branches(repo)
-            || msg::confirm(if gone.len() == 1 {
-                "Remove it?"
-            } else {
-                "Remove them?"
-            })?;
+        // Post-mutation prompt: the pull-rebase already succeeded, so agent
+        // mode must not answer `needs_input` (that would imply nothing
+        // happened) — skip the optional pruning instead and say how to redo it.
+        let confirmed = if agent_mode::enabled() && !ctx.skip_confirm {
+            let confirmed = repo::prune_gone_branches(repo);
+            if !confirmed {
+                msg::warn(
+                    "Skipped removing gone branches (agent mode)\n\
+                     Re-run with `loom update -y` to remove them",
+                );
+            }
+            confirmed
+        } else {
+            ctx.skip_confirm
+                || repo::prune_gone_branches(repo)
+                || msg::confirm(
+                    if gone.len() == 1 {
+                        "Remove it?"
+                    } else {
+                        "Remove them?"
+                    },
+                    "re-run with: loom update -y",
+                )?
+        };
         if confirmed {
             for name in &gone {
                 // Capture the tip before deletion so users can revive the branch.

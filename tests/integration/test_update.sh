@@ -228,8 +228,10 @@ git -C "$WORK" commit -q -m "Add submodule"
 
 out=$(gl update 2>&1)
 assert_exit_ok $? "submodule_ok"
-assert_contains "$out" "Updating submodules" "submodule_spinner_start"
-assert_contains "$out" "Updated submodules"  "submodule_spinner_stop"
+# The spinner animation is skipped when stdout is not a terminal — captured
+# output contains only the final line, no "Updating submodules..." frames.
+assert_not_contains "$out" "Updating submodules" "submodule_spinner_no_frames"
+assert_contains "$out" "Updated submodules" "submodule_spinner_stop"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CHERRY-PICKED UPSTREAM COMMITS ARE FILTERED

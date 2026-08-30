@@ -6,6 +6,7 @@ use std::time::Instant;
 use anyhow::{Context, Result, bail};
 use git2::{BranchType, Repository, Sort};
 
+use crate::core::agent_mode;
 use crate::core::msg;
 use crate::core::repo;
 use crate::git;
@@ -97,7 +98,11 @@ fn resolve_branch(repo: &Repository, info: &repo::RepoInfo, branch_arg: &str) ->
 
 fn pick_branch(info: &repo::RepoInfo) -> Result<String> {
     let items: Vec<String> = info.branches.iter().map(|b| b.name.clone()).collect();
-    msg::select("Select branch to push", items)
+    msg::select(
+        "Select branch to push",
+        items,
+        "re-run with: loom push <branch>",
+    )
 }
 
 /// Detect the remote type from config, URL heuristics, or hook inspection.
@@ -204,6 +209,7 @@ fn recent_commits_have_change_id(repo: &Repository) -> bool {
 fn confirm_gerrit(workdir: &Path, upstream_label: &str) -> Result<RemoteType> {
     let is_gerrit = msg::confirm(
         "This remote looks like Gerrit (SSH port 29418 or Change-Id trailers). Is it a Gerrit remote?",
+        "set `git config loom.remote-type gerrit` (or plain), then re-run: loom push <branch>",
     )?;
     let value = if is_gerrit { "gerrit" } else { "plain" };
     git::run_git(workdir, &["config", "loom.remote-type", value])?;
@@ -451,13 +457,17 @@ fn pr_title_and_description(
         return Ok((subject.clone(), body.clone()));
     }
 
-    let title = msg::input("PR title", |s| {
-        if s.is_empty() {
-            Err("Title cannot be empty")
-        } else {
-            Ok(())
-        }
-    })?;
+    let title = msg::input(
+        "PR title",
+        "PR creation is skipped in agent mode — this prompt is unreachable there",
+        |s| {
+            if s.is_empty() {
+                Err("Title cannot be empty")
+            } else {
+                Ok(())
+            }
+        },
+    )?;
 
     let description = commits
         .iter()
@@ -549,6 +559,18 @@ fn push_github(
 
     if let Some(pr_url) = find_existing_github_pr(workdir, &pr_target_repo, branch) {
         msg::success(&format!("PR updated: {}", pr_url));
+        return Ok(());
+    }
+
+    // Post-mutation: the branch is already pushed, and `gh pr create --web`
+    // opens a browser — never do that behind an agent's back. Skip PR
+    // creation and say how to do it (see spec 019).
+    if agent_mode::enabled() {
+        msg::warn(&format!(
+            "Skipped opening the browser to create a PR (agent mode)\n\
+             Create it on GitHub, or run `loom push {}` interactively",
+            branch
+        ));
         return Ok(());
     }
 
@@ -784,6 +806,18 @@ fn push_azure(
         return Ok(());
     }
 
+    // Post-mutation: the branch is already pushed, and `az repos pr create
+    // --open` opens a browser — never do that behind an agent's back. Skip PR
+    // creation and say how to do it (see spec 019).
+    if agent_mode::enabled() {
+        msg::warn(&format!(
+            "Skipped opening the browser to create a PR (agent mode)\n\
+             Create it on Azure DevOps, or run `loom push {}` interactively",
+            branch
+        ));
+        return Ok(());
+    }
+
     let (title, description) = pr_title_and_description(repo, branch, base_oid)?;
 
     // Write description to a temp file and pass `--description @<path>` to az.
@@ -938,6 +972,7 @@ fn push_gerrit_no_pr(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
             branch
         ),
         vec![opt_as_is.clone(), opt_wip.clone(), "Cancel".to_string()],
+        "no flag answers this — ask the user; rename with `loom reword <branch> -m wip/<branch>` or re-run interactively",
     )?;
 
     if choice == opt_as_is {

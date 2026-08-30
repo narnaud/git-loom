@@ -4,6 +4,7 @@ use anyhow::{Context, Result, bail};
 use git2::Repository;
 use serde::{Deserialize, Serialize};
 
+use crate::core::agent_mode;
 use crate::core::graph;
 use crate::core::msg;
 use crate::core::repo;
@@ -28,6 +29,17 @@ pub fn run(
     files: Vec<String>,
     theme: &graph::Theme,
 ) -> Result<()> {
+    // Without -m the commit would open $GIT_EDITOR, which hangs a headless agent.
+    if agent_mode::enabled() && message.is_none() {
+        return Err(agent_mode::respond_needs_input(
+            agent_mode::InputKind::Text,
+            "Commit message",
+            vec![],
+            false,
+            "re-run with: loom commit -m <message> [-b <branch>] [files...]",
+        ));
+    }
+
     let repo = repo::open_repo()?;
     let workdir = repo::require_workdir(&repo, "commit")?.to_path_buf();
     let git_dir = repo.path().to_path_buf();
@@ -314,10 +326,16 @@ fn pick_branch(
         }
     };
 
+    let hint = "re-run with: loom commit -b <branch> -m <message> [files...] (a new name creates the branch)";
     let name = if branch_names.is_empty() {
-        msg::input("Branch name", not_empty)?
+        msg::input("Branch name", hint, not_empty)?
     } else {
-        msg::select_or_input("Select target branch", branch_names.clone(), not_empty)?
+        msg::select_or_input(
+            "Select target branch",
+            branch_names.clone(),
+            hint,
+            not_empty,
+        )?
     };
 
     let name = name.trim().to_string();

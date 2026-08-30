@@ -750,6 +750,14 @@ impl HunkSelectorApp {
 /// Returns `Ok(Some(files))` with updated selection state if the user confirms,
 /// or `Ok(None)` if cancelled / empty input.
 pub fn run_hunk_selector(files: Vec<FileEntry>, theme: TuiTheme) -> Result<Option<Vec<FileEntry>>> {
+    // Backstop for agent mode — the primary guard rejects `-p` at dispatch
+    // time, but any future call path must not open a full-screen TUI either.
+    if crate::core::agent_mode::enabled() {
+        anyhow::bail!(
+            "--patch is interactive and unavailable in agent mode\n\
+             Pass explicit files instead"
+        );
+    }
     if files.is_empty() {
         return Ok(None);
     }
