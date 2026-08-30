@@ -130,7 +130,7 @@ pub fn warn_conflict_paused(command: &str) {
         &format!("Conflicts detected — the `loom {}` is paused", command),
         "resolve conflicts, stage them, then run: loom continue (or loom abort)",
     );
-    crate::core::msg::warn(&format!(
+    crate::core::msg::warn_reported(&format!(
         "Conflicts detected — resolve them with git, then run:\n\
          `loom continue`   to complete the {}\n\
          `loom abort`      to cancel and restore original state",
@@ -144,7 +144,9 @@ fn warn_still_paused() {
         "Conflicts remain — the operation is still paused",
         "resolve conflicts, stage them, then run: loom continue (or loom abort)",
     );
-    crate::core::msg::warn("Conflicts remain — resolve them and run `loom continue` again");
+    crate::core::msg::warn_reported(
+        "Conflicts remain — resolve them and run `loom continue` again",
+    );
 }
 
 /// Run `loom continue` (opens repo internally).
