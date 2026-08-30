@@ -1,5 +1,6 @@
 mod absorb;
 mod add;
+mod agent;
 mod branch;
 mod commit;
 mod completions;
@@ -20,6 +21,7 @@ mod trace;
 mod tui;
 mod update;
 
+use crate::agent::AgentKind;
 use crate::core::{agent_mode, graph, msg, repo, transaction};
 
 use std::ffi::OsString;
@@ -64,6 +66,7 @@ const GROUPED_COMMANDS: &str = "\
   {l}init{r}              Initialize a new integration branch
   {l}update{r}, {l}up{r}        Pull-rebase and update submodules
   {l}push{r}, {l}pr{r}          Push a branch to remote
+  {l}agent{r}             Install the loom skill for AI agents
 
 {h}Staging:{r}
   {l}add{r}               Stage files using short IDs or paths [{l}-p{r} for interactive hunks]
@@ -174,6 +177,9 @@ enum Command {
         #[arg(long)]
         no_pr: bool,
     },
+    /// Set up AI agent integration (unrelated to `init`)
+    Agent(AgentCmd),
+
     // -- Staging --
     /// Stage files using short IDs, paths, or 'zz' for all
     Add {
@@ -338,6 +344,32 @@ enum Command {
 }
 
 #[derive(Args)]
+struct AgentCmd {
+    #[command(subcommand)]
+    action: AgentAction,
+}
+
+#[derive(Subcommand)]
+enum AgentAction {
+    /// Install the loom skill for an AI agent
+    Init {
+        /// AI agent to install the skill for
+        // Named `kind`, not `agent`: the global `--agent` flag already owns
+        // that clap id and the two would collide inside this subcommand.
+        #[arg(value_enum, default_value = "claude", value_name = "AGENT")]
+        kind: AgentKind,
+
+        /// Install into the repository (e.g. .claude/skills/) instead of the home directory
+        #[arg(long, conflicts_with = "dir")]
+        project: bool,
+
+        /// Override the install base directory (the skills/git-loom/SKILL.md suffix is appended)
+        #[arg(long, hide = true)]
+        dir: Option<std::path::PathBuf>,
+    },
+}
+
+#[derive(Args)]
 #[command(args_conflicts_with_subcommands = true)]
 struct BranchCmd {
     #[command(subcommand)]
@@ -424,6 +456,15 @@ fn main() {
             std::process::exit(1);
         }
         return;
+    }
+
+    // Agent setup needs no git or repo either (unless --project), works while
+    // an operation is paused, and is never trace-logged.
+    if let Some(Command::Agent(cmd)) = cli.command {
+        let result = match cmd.action {
+            AgentAction::Init { kind, project, dir } => agent::init::run(kind, project, dir),
+        };
+        finish_and_exit(result);
     }
 
     if let Err(e) = git::check_git_version() {
@@ -530,7 +571,7 @@ fn main() {
         Some(Command::Trace) => trace::run(),
         Some(Command::Continue) => transaction::continue_run(),
         Some(Command::Abort) => transaction::abort_run(),
-        Some(Command::Completions { .. }) => unreachable!(),
+        Some(Command::Completions { .. }) | Some(Command::Agent(_)) => unreachable!(),
         Some(Command::InternalWriteTodo { source, todo_file }) => {
             handle_write_todo(&source, &todo_file)
         }

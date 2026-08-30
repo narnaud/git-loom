@@ -1,0 +1,3 @@
+# Embedded assets are compiled into the binary with include_str! and are
+# byte-compared in tests, so they must always check out with LF endings.
+skills/** text eol=lf
