@@ -106,6 +106,19 @@ assert_contains "$OUT" '"status":"ok"' "drop_yes_status"
 assert_file_content "a.txt" "content a" "drop_yes_restored"
 
 # ══════════════════════════════════════════════════════════════════════════════
+# completions: dispatched early, but still ends with a JSON status
+# ══════════════════════════════════════════════════════════════════════════════
+
+describe "agent mode: completions still ends with a JSON status"
+gl_capture completions powershell --agent
+assert_exit_ok "$CODE" "completions_exit"
+assert_contains "$OUT" '"status":"ok"' "completions_status"
+
+gl_capture completions notashell --agent
+assert_eq "1" "$CODE" "completions_bad_shell_exit"
+assert_contains "$OUT" '"status":"error"' "completions_bad_shell_status"
+
+# ══════════════════════════════════════════════════════════════════════════════
 # error: -p is rejected
 # ══════════════════════════════════════════════════════════════════════════════
 
