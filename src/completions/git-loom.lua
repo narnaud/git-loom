@@ -65,6 +65,16 @@ local branch_matcher = clink.argmatcher()
     )
     :addflags("-t", "--target", "--help", "-h")
 
+local agent_init_matcher = clink.argmatcher()
+    :addarg("claude")
+    :addflags("--project", "--agent", "--help", "-h")
+
+local agent_matcher = clink.argmatcher()
+    :addarg(
+        "init" .. agent_init_matcher
+    )
+    :addflags("--help", "-h")
+
 local theme_matcher = clink.argmatcher()
     :addarg("auto", "dark", "light")
 
@@ -75,6 +85,7 @@ clink.argmatcher("git-loom")
         "update"    .. update_matcher,
         "push"      .. push_matcher,
         "pr"        .. push_matcher,
+        "agent"     .. agent_matcher,
         -- Staging
         "add"       .. add_matcher,
         -- Commits
@@ -102,4 +113,4 @@ clink.argmatcher("git-loom")
         "continue"  .. plain_matcher,
         "abort"     .. plain_matcher
     )
-    :addflags("--no-color", "--theme" .. theme_matcher, "--version", "--help", "-h")
+    :addflags("--no-color", "--theme" .. theme_matcher, "--agent", "--version", "--help", "-h")
