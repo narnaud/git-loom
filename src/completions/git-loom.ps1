@@ -14,6 +14,7 @@ $_gitLoomCompleter = {
         @{ Name = 'update'; Description = 'Pull-rebase the integration branch and update submodules' },
         @{ Name = 'push'; Description = 'Push a feature branch to remote' },
         @{ Name = 'pr'; Description = 'Alias of push' },
+        @{ Name = 'agent'; Description = 'Install the loom skill for AI agents' },
         # Staging
         @{ Name = 'add'; Description = 'Stage files using short IDs, paths, or zz for all' },
         # Commits
@@ -56,12 +57,17 @@ $_gitLoomCompleter = {
         @{ Name = '--help'; Description = 'Show help information' }
     )
 
+    # Valid anywhere (global flags).
+    $globalFlags = @(
+        @{ Name = '--agent'; Description = 'Machine-readable JSON status output for AI agents' }
+    )
+
     # Only valid before the subcommand.
     $topFlags = @(
         @{ Name = '--no-color'; Description = 'Disable colored output' },
         @{ Name = '--theme'; Description = 'Color theme: auto, dark, or light' },
         @{ Name = '--version'; Description = 'Show version information' }
-    ) + $helpFlags
+    ) + $globalFlags + $helpFlags
 
     $themeValues = @('auto', 'dark', 'light')
 
@@ -181,6 +187,30 @@ $_gitLoomCompleter = {
                 @{ Name = '--all'; Description = 'Show all changes, staged and unstaged' }
             )
         }
+        'agent' {
+            # The sub-subcommand is the first non-flag token after `agent`.
+            $agentSubcommand = $null
+            for ($i = $subIndex + 1; $i -lt $tokens.Count; $i++) {
+                if ($tokens[$i] -match '^-') { continue }
+                $agentSubcommand = $tokens[$i]
+                break
+            }
+
+            if ($null -eq $agentSubcommand -and -not ($wordToComplete -match '^-')) {
+                $agentSubs = @(
+                    @{ Name = 'init'; Description = 'Install the loom skill for an AI agent' }
+                )
+                return $agentSubs | Where-Object { $_.Name -like "$wordToComplete*" } | ForEach-Object {
+                    [System.Management.Automation.CompletionResult]::new($_.Name, $_.Name, 'ParameterValue', $_.Description)
+                }
+            }
+
+            if ($agentSubcommand -eq 'init') {
+                $subFlags = @(
+                    @{ Name = '--project'; Description = 'Install into the repository instead of the home directory' }
+                )
+            }
+        }
         'branch' {
             # The sub-subcommand is the first non-flag token after `branch`.
             $branchSubcommand = $null
@@ -225,7 +255,7 @@ $_gitLoomCompleter = {
     # back to PowerShell's file completion (commit, add, fold, ... take paths).
     if (-not ($wordToComplete -match '^-')) { return }
 
-    $allFlags = $subFlags + $helpFlags
+    $allFlags = $subFlags + $globalFlags + $helpFlags
     $allFlags | Where-Object { $_.Name -like "$wordToComplete*" } | ForEach-Object {
         [System.Management.Automation.CompletionResult]::new($_.Name, $_.Name, 'ParameterValue', $_.Description)
     }
