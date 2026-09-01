@@ -470,10 +470,10 @@ fn run_patch_fold_commit_to_commit(
     }
 
     if let Err(e) = apply_and_amend(workdir, &selections, &selected_patch, true) {
-        let _ = git::rebase_abort(workdir);
-        let _ = git::branch_delete(workdir, TRACK_BRANCH);
-        let _ = git::restore_staged_patch(workdir, &saved_staged);
-        return Err(e);
+        return Err(git::rebase_abort_then_cleanup(workdir, e, || {
+            let _ = git::branch_delete(workdir, TRACK_BRANCH);
+            let _ = git::restore_staged_patch(workdir, &saved_staged);
+        }));
     }
 
     let new_source_hash = git::rev_parse(workdir, "HEAD")?;
@@ -511,10 +511,10 @@ fn run_patch_fold_commit_to_commit(
     }
 
     if let Err(e) = apply_and_amend(workdir, &selections, &selected_patch, false) {
-        let _ = git::rebase_abort(workdir);
-        rollback(&saved_head, &saved_refs);
-        let _ = git::restore_staged_patch(workdir, &saved_staged);
-        return Err(e);
+        return Err(git::rebase_abort_then_cleanup(workdir, e, || {
+            rollback(&saved_head, &saved_refs);
+            let _ = git::restore_staged_patch(workdir, &saved_staged);
+        }));
     }
 
     let new_target_hash = git::rev_parse(workdir, "HEAD")?;
@@ -603,9 +603,9 @@ fn run_patch_fold_commit_to_unstaged(
         }
 
         if let Err(e) = apply_and_amend(workdir, &selections, &selected_patch, true) {
-            let _ = git::rebase_abort(workdir);
-            let _ = git::restore_staged_patch(workdir, &saved_staged);
-            return Err(e);
+            return Err(git::rebase_abort_then_cleanup(workdir, e, || {
+                let _ = git::restore_staged_patch(workdir, &saved_staged);
+            }));
         }
 
         new_hash = git::rev_parse(workdir, "HEAD")?;
@@ -1166,8 +1166,7 @@ fn fold_commit_file_to_unstaged(repo: &Repository, commit_hash: &str, path: &str
         weave::run_rebase_expecting_edit(workdir, Some(&graph.base_oid.to_string()), &todo)?;
 
         if let Err(e) = apply_and_amend_path(workdir, &file_diff, path, true) {
-            let _ = git::rebase_abort(workdir);
-            return Err(e);
+            return Err(git::rebase_abort_then_cleanup(workdir, e, || {}));
         }
 
         new_hash = git::rev_parse(workdir, "HEAD")?;
@@ -1263,9 +1262,9 @@ fn fold_commit_file_to_commit(
         }
 
         if let Err(e) = apply_and_amend_path(workdir, &file_diff, path, true) {
-            let _ = git::rebase_abort(workdir);
-            let _ = git::branch_delete(workdir, TRACK_BRANCH);
-            return Err(e);
+            return Err(git::rebase_abort_then_cleanup(workdir, e, || {
+                let _ = git::branch_delete(workdir, TRACK_BRANCH);
+            }));
         }
 
         // Capture source's new hash before continue moves HEAD;
@@ -1303,9 +1302,9 @@ fn fold_commit_file_to_commit(
         }
 
         if let Err(e) = apply_and_amend_path(workdir, &file_diff, path, false) {
-            let _ = git::rebase_abort(workdir);
-            rollback(&saved_head, &saved_refs);
-            return Err(e);
+            return Err(git::rebase_abort_then_cleanup(workdir, e, || {
+                rollback(&saved_head, &saved_refs);
+            }));
         }
 
         new_target_hash = git::rev_parse(workdir, "HEAD")?;
@@ -1332,8 +1331,7 @@ fn fold_commit_file_to_commit(
         weave::run_rebase_expecting_edit(workdir, Some(&graph.base_oid.to_string()), &todo)?;
 
         if let Err(e) = apply_and_amend_path(workdir, &file_diff, path, true) {
-            let _ = git::rebase_abort(workdir);
-            return Err(e);
+            return Err(git::rebase_abort_then_cleanup(workdir, e, || {}));
         }
 
         new_source_hash = git::rev_parse(workdir, "HEAD")?;
@@ -1341,12 +1339,12 @@ fn fold_commit_file_to_commit(
         git::continue_rebase_expecting_edit(workdir)?;
 
         if let Err(e) = apply_and_amend_path(workdir, &file_diff, path, false) {
-            let _ = git::rebase_abort(workdir);
-            let _ = git::reset_hard(workdir, &saved_head);
-            if let Err(re) = repo::restore_branch_refs(workdir, &saved_refs) {
-                msg::warn(&format!("failed to restore branch refs: {re}"));
-            }
-            return Err(e);
+            return Err(git::rebase_abort_then_cleanup(workdir, e, || {
+                let _ = git::reset_hard(workdir, &saved_head);
+                if let Err(re) = repo::restore_branch_refs(workdir, &saved_refs) {
+                    msg::warn(&format!("failed to restore branch refs: {re}"));
+                }
+            }));
         }
 
         new_target_hash = git::rev_parse(workdir, "HEAD")?;

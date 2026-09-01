@@ -191,15 +191,51 @@ loom abort
 
 1. Loads `.git/loom/state.json`. If the file does not exist, falls back to the
    stateless path below.
-2. Aborts the active rebase if one is in progress.
-3. Applies shared rollback:
-   - Hard-resets HEAD to `saved_head`
-   - Restores all branch refs from `saved_refs`
+2. Aborts the active rebase or merge if one is in progress. If the abort itself
+   fails (a concurrent git process, a stale `index.lock`), the command stops
+   there: the rollback is not applied on top of a live rebase, and the state
+   file stays so the user can retry once the repository is free.
+3. Applies the rollback the command saved:
+   - `reset --mixed` to `reset_mixed_to` (if non-empty)
+   - `reset --hard` to `reset_hard_to` (if non-empty)
    - Deletes branches listed in `delete_branches`
    - Re-applies `saved_staged_patch` (if non-empty)
    - Re-applies `saved_worktree_patch` (if non-empty)
+
+   If a step here fails, the state file stays as well, for the same reason: the
+   rollback is half-applied, and it is the only record of what is left to undo.
+   The message says so rather than blaming git — the abort already succeeded.
 4. Deletes the state file.
 5. Reports success.
+
+The same rule holds outside `loom abort`. Wherever a command aborts its own
+rebase and then cleans up after itself — deleting a temp branch, resetting
+refs, restoring a saved patch, removing the state file — the cleanup is skipped
+only when a rebase is *still running* after a failed abort, since that is the
+case where it would make the mess worse. It runs when the abort succeeded, and
+equally when there was no rebase to abort: a command that failed before
+starting one (the worktree check, for instance) has nothing in progress, and
+skipping the cleanup there would strand exactly what it was about to remove.
+
+The error reported in every case keeps the command's own failure visible. Only
+one message reaches the user, so replacing the cause with a hint about the
+abort would hide why the command failed at all.
+
+### The state file is never deleted to recover
+
+A corrupted or unreadable state file is not fixed by deleting it. It is the only
+record of what `loom abort` would undo, and without it an abort runs
+`git rebase --abort` and nothing else — a temp branch, a pre-rebase commit and a
+saved staged patch all stay behind with no way back. The error tells the user to
+move it aside instead, so the contents survive.
+
+The file is written through a temp file that is renamed into place, so a process
+killed mid-write leaves either the old state or the new one, never a truncated
+one. The temp file has a random name and is removed when it goes out of scope,
+so two loom processes saving at once cannot overwrite each other's and a crash
+between the two steps leaves nothing behind. This protects against a killed
+process, not a power cut, which would additionally need the rename itself made
+durable with an fsync on the containing directory.
 
 ## Stateless Continue and Abort
 
@@ -241,9 +277,11 @@ many times as needed until the rebase completes.
 - **`loom continue` / `loom abort` with no state file**: See "Stateless Continue
   and Abort" — they act on an in-progress rebase or merge, and error with
   `"No loom operation is in progress"` when there is none.
-- **Corrupted state file**: Both commands error with a descriptive parse
-  failure message. The user must recover manually using `git rebase --abort`
-  if a rebase is in progress.
+- **Corrupted state file**: Both commands error with a parse failure message
+  that names the file and tells the user to move it aside — never to delete it
+  — and run `loom abort`. The state file is written to a temp file and renamed,
+  so a killed process leaves either the old state or the new one, never a
+  truncated file.
 
 ## Command-Specific Resume Context
 

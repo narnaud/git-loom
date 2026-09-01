@@ -144,6 +144,49 @@ pub fn rebase_progress(git_dir: &Path) -> Option<(usize, usize)> {
     Some((read("msgnum")?, read("end")?))
 }
 
+/// Roll `cause` back: abort the rebase if one is running, then run `cleanup`.
+///
+/// The cleanup a caller wants here — deleting a temp branch, resetting refs,
+/// restoring a saved patch, dropping the state file — assumes no rebase is
+/// under way. So it runs in exactly two cases: the abort succeeded, or there
+/// was no rebase to abort (the command failed before starting one). Only a
+/// rebase that is still running after a *failed* abort skips it, because
+/// resetting refs on top of that would make the mess worse.
+///
+/// Returns the error to report, which always keeps `cause` visible: the
+/// top-level handler prints one message, so a `context` would hide the reason
+/// the command failed in the first place.
+pub fn rebase_abort_then_cleanup(
+    workdir: &Path,
+    cause: anyhow::Error,
+    cleanup: impl FnOnce(),
+) -> anyhow::Error {
+    // If the git dir cannot be found, assume the worst and try the abort: a
+    // skipped cleanup strands a temp branch, while cleaning up on top of a live
+    // rebase can throw work away.
+    let running = super::absolute_git_dir(workdir)
+        .map(|git_dir| rebase_is_in_progress(&git_dir))
+        .unwrap_or(true);
+
+    if !running {
+        cleanup();
+        return cause;
+    }
+
+    match rebase_abort(workdir) {
+        Ok(()) => {
+            cleanup();
+            cause
+        }
+        Err(_) => anyhow::anyhow!(
+            "{cause}\n\
+             The abort failed too, so the repository is left mid-rebase.\n\
+             Run `loom abort` once git is free ({})",
+            super::ABORT_FAILED_CAUSE
+        ),
+    }
+}
+
 /// Abort a rebase that failed, and build the error to report.
 ///
 /// Two things the caller cannot assume: the rebase may have stopped for a
@@ -159,8 +202,9 @@ pub fn abort_after_failure(workdir: &Path) -> anyhow::Error {
              Run `loom trace` to see why"
         ),
         Err(_) => anyhow::anyhow!(
-            "Rebase failed, and `git rebase --abort` failed too — the repository is left mid-rebase.\n\
-             Check that no other git process is running, then run `loom abort`."
+            "Rebase failed, and the abort failed too — the repository is left mid-rebase.\n\
+             Run `loom abort` once git is free ({}).",
+            super::ABORT_FAILED_CAUSE
         ),
     }
 }

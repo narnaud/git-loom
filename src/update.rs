@@ -163,10 +163,14 @@ pub fn run(skip_confirm: bool) -> Result<()> {
             transaction::warn_paused_at_edit(Some("update"));
         }
         Err(e) => {
-            let _ = git::rebase_abort(&workdir);
-            transaction::delete(&git_dir)?;
             spinner.error("Rebase failed");
-            return Err(e);
+            return Err(git::rebase_abort_then_cleanup(&workdir, e, || {
+                if let Err(e) = transaction::delete(&git_dir) {
+                    // Left behind, it blocks every later loom command with a
+                    // "paused" message for an operation that is over.
+                    msg::warn(&format!("could not remove the loom state file: {e}"));
+                }
+            }));
         }
     }
 

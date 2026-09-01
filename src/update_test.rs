@@ -1184,3 +1184,41 @@ fn update_keeps_other_branches_when_one_lands_upstream() {
         "feature-a should be rebased onto the new upstream tip"
     );
 }
+
+/// `update` can fail before its rebase ever starts — here because a woven
+/// branch is checked out in another worktree. The state file it saved just
+/// beforehand must still be removed: left behind, it blocks every later loom
+/// command with a "paused" message for an operation that never began.
+#[test]
+fn update_removes_its_state_when_the_rebase_never_starts() {
+    let test_repo = TestRepo::new_with_remote();
+    let merge_base_oid = test_repo.head_oid();
+
+    test_repo.create_branch_at_commit("feature-a", merge_base_oid);
+    test_repo.switch_branch("feature-a");
+    test_repo.commit("Feature A work", "feature-a.txt");
+    test_repo.switch_branch("integration");
+    test_repo.merge_no_ff("feature-a");
+
+    test_repo.add_remote_commits(&["Remote work"]);
+
+    // Checking the woven branch out elsewhere makes `run_rebase` refuse up
+    // front, before any rebase exists to abort.
+    let wt = test_repo.workdir().parent().unwrap().join("wt");
+    crate::git::run_git(
+        &test_repo.workdir(),
+        &["worktree", "add", wt.to_str().unwrap(), "feature-a"],
+    )
+    .unwrap();
+
+    let err = test_repo
+        .in_dir(|| super::run(false))
+        .expect_err("the rebase cannot run with feature-a checked out elsewhere");
+    assert!(err.to_string().contains("feature-a"), "{err}");
+
+    assert!(
+        !crate::core::transaction::state_path(test_repo.repo.path()).exists(),
+        "no rebase ever started, so the state file must not be left behind"
+    );
+    assert!(!crate::git::rebase_is_in_progress(test_repo.repo.path()));
+}

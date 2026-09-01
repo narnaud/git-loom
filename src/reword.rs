@@ -98,8 +98,7 @@ pub fn reword_commit(repo: &Repository, commit_hash: &str, message: Option<Strin
 
     // Step 2: Amend the commit message
     if let Err(e) = git::commit_amend(workdir, message.as_deref()) {
-        let _ = git::rebase_abort(workdir);
-        return Err(e);
+        return Err(git::rebase_abort_then_cleanup(workdir, e, || {}));
     }
 
     // Capture the new hash right after amending (before rebase --continue moves HEAD)

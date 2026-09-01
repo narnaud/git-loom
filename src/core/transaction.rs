@@ -80,18 +80,31 @@ pub fn state_path(git_dir: &Path) -> PathBuf {
 /// Creates `.git/loom/` if it does not exist.
 pub fn save(git_dir: &Path, state: &LoomState) -> Result<()> {
     let path = state_path(git_dir);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).with_context(|| {
-            format!(
-                "Failed to create loom state directory '{}'",
-                parent.display()
-            )
-        })?;
-    }
+    let parent = path
+        .parent()
+        .context("State file path has no parent directory")?;
+    std::fs::create_dir_all(parent).with_context(|| {
+        format!(
+            "Failed to create loom state directory '{}'",
+            parent.display()
+        )
+    })?;
+
+    // Write beside the real file and rename over it, so a process killed
+    // mid-write leaves either the old state or the new one — never a truncated
+    // file that both `loom continue` and `loom abort` would refuse to read.
+    // The temp file has a random name and is removed on drop, so a crash
+    // between the two steps litters nothing and two loom processes saving at
+    // once cannot overwrite each other's.
     let json = serde_json::to_string_pretty(state)?;
-    std::fs::write(&path, json)
-        .with_context(|| format!("Failed to write state file '{}'", path.display()))?;
-    Ok(())
+    (|| -> std::io::Result<()> {
+        use std::io::Write;
+        let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
+        tmp.write_all(json.as_bytes())?;
+        tmp.persist(&path)?;
+        Ok(())
+    })()
+    .with_context(|| format!("Failed to write state file '{}'", path.display()))
 }
 
 /// Load the state file. Returns `None` if the file does not exist.
@@ -102,8 +115,18 @@ pub fn load(git_dir: &Path) -> Result<Option<LoomState>> {
     }
     let json = std::fs::read_to_string(&path)
         .with_context(|| format!("Failed to read state file '{}'", path.display()))?;
-    let state: LoomState = serde_json::from_str(&json)
-        .with_context(|| format!("State file '{}' is corrupted or invalid", path.display()))?;
+    let state: LoomState = serde_json::from_str(&json).with_context(|| {
+        // Never suggest deleting it: the file is the only record of what to
+        // undo, and without it `loom abort` runs `git rebase --abort` and
+        // nothing else — a temp branch, a pre-rebase commit and a saved staged
+        // patch would all be stranded with no way back.
+        format!(
+            "State file '{}' is corrupted or invalid\n\
+             Move it aside (keep it — it is the only record of what `loom abort` would undo),\n\
+             then run `loom abort` to cancel whatever git still has in progress",
+            path.display()
+        )
+    })?;
     Ok(Some(state))
 }
 
@@ -254,10 +277,26 @@ pub fn continue_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// What to say when the abort itself fails: nothing was rolled back, so running
+/// `loom abort` again once git is free finishes the job.
+static ABORT_FAILED_HINT: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    format!(
+        "the abort failed — the loom state was kept, so run `loom abort` again once git is free\n\
+         ({})",
+        git::ABORT_FAILED_CAUSE
+    )
+});
+
+/// What to say when the abort worked but the rollback after it did not. Blaming
+/// git would be wrong here — git is free, and the undo is half-applied.
+const ROLLBACK_FAILED_HINT: &str =
+    "the rollback is only half-applied — the loom state was kept so `loom abort` can finish it";
+
 /// Implement `loom abort`.
 ///
 /// 1. Aborts any active rebase (`git rebase --abort` restores HEAD, branch
 ///    refs via `--update-refs`, and any autostashed working-tree changes).
+///    If that fails, stops there and keeps the state file.
 /// 2. Calls `rollback.apply_abort()` for any cleanup `git rebase --abort`
 ///    cannot do on its own (un-committing staged changes, deleting temp branches,
 ///    restoring saved patches).
@@ -267,13 +306,19 @@ pub fn abort_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
         return abort_without_state(workdir, git_dir);
     };
 
+    // A failed abort leaves the rebase running: rolling back on top of it
+    // (`reset --hard`, branch deletions) would make the mess worse, and the
+    // state file is the only record of what to undo — so keep both and stop.
     if git::rebase_is_in_progress(git_dir) {
-        let _ = git::rebase_abort(workdir);
+        git::rebase_abort(workdir).context(ABORT_FAILED_HINT.as_str())?;
     } else if git::merge_is_in_progress(git_dir) {
-        let _ = git::merge_abort(workdir);
+        git::merge_abort(workdir).context(ABORT_FAILED_HINT.as_str())?;
     }
 
-    state.rollback.apply_abort(workdir)?;
+    state
+        .rollback
+        .apply_abort(workdir)
+        .context(ROLLBACK_FAILED_HINT)?;
     delete(git_dir)?;
 
     crate::core::msg::success(&format!(
@@ -325,12 +370,13 @@ fn continue_without_state(workdir: &Path, git_dir: &Path) -> Result<()> {
 /// progress, so the repository never stays stuck mid-rewrite.
 fn abort_without_state(workdir: &Path, git_dir: &Path) -> Result<()> {
     if git::rebase_is_in_progress(git_dir) {
-        git::rebase_abort(workdir)
-            .context("`git rebase --abort` failed — is another git process running?")?;
+        git::rebase_abort(workdir).with_context(|| {
+            format!("`git rebase --abort` failed ({})", git::ABORT_FAILED_CAUSE)
+        })?;
         crate::core::msg::success("Aborted the rebase in progress");
     } else if git::merge_is_in_progress(git_dir) {
         git::merge_abort(workdir)
-            .context("`git merge --abort` failed — is another git process running?")?;
+            .with_context(|| format!("`git merge --abort` failed ({})", git::ABORT_FAILED_CAUSE))?;
         crate::core::msg::success("Aborted the merge in progress");
     } else {
         bail!("No loom operation is in progress");
@@ -392,7 +438,21 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, b"not valid json").unwrap();
         let result = load(dir.path());
-        assert!(result.is_err());
+        let err = format!("{:#}", result.unwrap_err());
+        assert!(err.contains("state.json"), "{err}");
+        assert!(err.contains("loom abort"), "{err}");
+    }
+
+    /// The directory a save leaves behind must hold the state file and nothing
+    /// else: a temp file that outlived its write would accumulate forever.
+    fn loom_dir_entries(git_dir: &Path) -> Vec<String> {
+        let dir = state_path(git_dir).parent().unwrap().to_path_buf();
+        let mut names: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
     }
 
     #[test]
@@ -404,11 +464,133 @@ mod tests {
             context: serde_json::Value::Null,
         };
         save(dir.path(), &state).unwrap();
-        assert!(state_path(dir.path()).exists());
+        assert_eq!(
+            loom_dir_entries(dir.path()),
+            vec!["state.json"],
+            "the temp file the write goes through must not survive it"
+        );
         delete(dir.path()).unwrap();
         assert!(!state_path(dir.path()).exists());
         // Second delete is a no-op
         delete(dir.path()).unwrap();
+    }
+
+    /// `save` writes through a temp file and renames it over the real one, so
+    /// it must replace a state file that is already there — and leave no temp
+    /// file behind whichever way it goes.
+    #[test]
+    fn save_replaces_an_existing_state_without_leaving_a_temp_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let make = |command: &str| LoomState {
+            command: command.to_string(),
+            rollback: Rollback::default(),
+            context: serde_json::Value::Null,
+        };
+
+        save(dir.path(), &make("update")).unwrap();
+        save(dir.path(), &make("commit")).unwrap();
+
+        let loaded = load(dir.path()).unwrap().expect("state should load");
+        assert_eq!(
+            loaded.command, "commit",
+            "the rename must replace the old state"
+        );
+        assert_eq!(
+            loom_dir_entries(dir.path()),
+            vec!["state.json"],
+            "no temp file may outlive the saves"
+        );
+    }
+
+    /// A temp file a killed process left behind belongs to no live save, so it
+    /// must not stop a later one — and must not be mistaken for the state.
+    #[test]
+    fn a_stale_temp_file_does_not_break_the_next_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = state_path(dir.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        // A previous run died between creating its temp file and renaming it.
+        // The name is whatever `tempfile` picked for that process.
+        let stale = path.with_file_name(".tmpAbC123");
+        std::fs::write(&stale, b"truncated {\"comm").unwrap();
+
+        save(
+            dir.path(),
+            &LoomState {
+                command: "commit".to_string(),
+                rollback: Rollback::default(),
+                context: serde_json::Value::Null,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            load(dir.path())
+                .unwrap()
+                .expect("state should load")
+                .command,
+            "commit"
+        );
+        assert!(
+            state_path(dir.path()).exists(),
+            "the stale file must not have been renamed over the real one"
+        );
+    }
+
+    /// A truncated state file is what the temp-file-and-rename exists to
+    /// prevent. If one does turn up, the error must not tell the user to delete
+    /// it: the file is the only record of what `loom abort` would roll back.
+    #[test]
+    fn corrupt_state_error_never_suggests_deleting_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = state_path(dir.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"{\"command\": \"comm").unwrap();
+
+        let err = format!("{:#}", load(dir.path()).unwrap_err());
+        assert!(
+            !err.to_lowercase().contains("delete"),
+            "deleting the state strands the rollback it records, got: {err}"
+        );
+        assert!(err.contains("Move it aside"), "{err}");
+    }
+
+    /// The abort can succeed and the rollback after it still fail. The state
+    /// file has to survive that: it is the only record of the half-applied undo,
+    /// and the message must not blame git, which is not holding anything.
+    #[test]
+    fn a_failed_rollback_keeps_the_state_and_does_not_blame_git() {
+        let test_repo = crate::core::test_helpers::TestRepo::new();
+        test_repo.commit("first", "a.txt");
+        let workdir = test_repo.workdir();
+        let git_dir = test_repo.repo.path().to_path_buf();
+
+        // No rebase is in progress, so `abort_cmd` goes straight to the
+        // rollback — which cannot reset to an OID that is not in the repo.
+        save(
+            &git_dir,
+            &LoomState {
+                command: "commit".to_string(),
+                rollback: Rollback {
+                    reset_mixed_to: "0".repeat(40),
+                    ..Default::default()
+                },
+                context: serde_json::Value::Null,
+            },
+        )
+        .unwrap();
+
+        let err = abort_cmd(&workdir, &git_dir).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("half-applied"), "{msg}");
+        assert!(
+            !msg.contains("index.lock"),
+            "the abort worked — git is not what failed here: {msg}"
+        );
+        assert!(
+            state_path(&git_dir).exists(),
+            "the record of what is left to undo must survive"
+        );
     }
 
     /// A rebase paused at an `edit` step is not a finished one: `continue_cmd`

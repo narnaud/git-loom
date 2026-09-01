@@ -217,6 +217,24 @@ assert_rebase_in_progress() {
         || fail "${label:+[$label] }a rebase should be in progress"
 }
 
+assert_no_rebase_in_progress() {
+    local label="${1:-}"
+    [[ ! -d "$WORK/.git/rebase-merge" && ! -d "$WORK/.git/rebase-apply" ]] \
+        || fail "${label:+[$label] }no rebase should be in progress"
+}
+
+assert_merge_in_progress() {
+    local label="${1:-}"
+    [[ -f "$WORK/.git/MERGE_HEAD" ]] \
+        || fail "${label:+[$label] }a merge should be in progress"
+}
+
+assert_no_merge_in_progress() {
+    local label="${1:-}"
+    [[ ! -f "$WORK/.git/MERGE_HEAD" ]] \
+        || fail "${label:+[$label] }no merge should be in progress"
+}
+
 assert_state_file() {
     local label="${1:-}"
     [[ -f "$WORK/.git/loom/state.json" ]] \

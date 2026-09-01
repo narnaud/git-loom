@@ -232,4 +232,81 @@ if [[ -d "$WORK/.git/rebase-merge" ]]; then
     fail "edit_pause_rebase_finished: rebase should be over"
 fi
 
+# ══════════════════════════════════════════════════════════════════════════════
+# A failed abort must not roll back on top of a live rebase
+# ══════════════════════════════════════════════════════════════════════════════
+
+describe "abort: a failing git rebase --abort leaves the rollback undone"
+# `commit` is the case with something to roll back: it creates a branch and a
+# commit before the rebase, so a rollback that runs anyway is visible.
+setup_repo_with_remote
+commit_file "Base commit" "conflict.txt"
+commit_file "Integration change" "conflict.txt"
+OLD_HEAD="$(head_hash)"
+
+# Weaving this under the integration commit replays it onto a different
+# version of the same line, which conflicts.
+echo "feature change" > "$WORK/conflict.txt"
+gl_capture commit -b feat -m "Feature change" zz
+assert_state_file "failed_abort_state_file"
+assert_rebase_in_progress "failed_abort_rebase_running"
+
+# A held index.lock makes `git rebase --abort` fail, as a concurrent git
+# process would.
+HEAD_BEFORE="$(head_hash)"
+touch "$WORK/.git/index.lock"
+gl_capture abort
+assert_exit_fail "$CODE" "failed_abort_fails"
+assert_branch_exists "feat" "failed_abort_rollback_not_applied"
+assert_state_file "failed_abort_state_kept"
+assert_rebase_in_progress "failed_abort_rebase_kept"
+# Nothing was rolled back: the `reset --mixed` never ran either.
+assert_eq "$HEAD_BEFORE" "$(head_hash)" "failed_abort_head_untouched"
+# "loom abort" alone also matches the ordinary conflict message, so assert on
+# the part that only the kept-state hint says.
+assert_contains "$OUT" "state was kept" "failed_abort_msg"
+
+# Once the lock is gone, abort works and restores the original state
+rm -f "$WORK/.git/index.lock"
+gl_capture abort
+assert_exit_ok "$CODE" "failed_abort_retry_ok"
+assert_no_state_file "failed_abort_retry_state_removed"
+assert_no_rebase_in_progress "failed_abort_retry_rebase_gone"
+assert_eq "$OLD_HEAD" "$(head_hash)" "failed_abort_retry_head_restored"
+assert_branch_not_exists "feat" "failed_abort_retry_branch_removed"
+
+# A conflicted `branch merge` is the merge-side twin of the case above: the
+# state file describes a merge, so `loom abort` runs `git merge --abort`.
+describe "abort: a failing git merge --abort keeps the state too"
+setup_repo_with_remote
+create_feature_branch "g-failed-abort"
+switch_to g-failed-abort
+echo "feature content" > "$WORK/shared.txt"
+git -C "$WORK" add shared.txt
+git -C "$WORK" commit -q -m "Feature change"
+switch_to integration
+echo "integration content" > "$WORK/shared.txt"
+git -C "$WORK" add shared.txt
+git -C "$WORK" commit -q -m "Integration change"
+OLD_HEAD="$(head_hash)"
+
+gl_capture branch merge g-failed-abort
+assert_state_file "failed_merge_abort_state"
+assert_merge_in_progress "failed_merge_abort_merge_running"
+
+touch "$WORK/.git/index.lock"
+gl_capture abort
+assert_exit_fail "$CODE" "failed_merge_abort_fails"
+assert_state_file "failed_merge_abort_state_kept"
+assert_merge_in_progress "failed_merge_abort_merge_kept"
+assert_contains "$OUT" "state was kept" "failed_merge_abort_msg"
+
+# Once the lock is gone the retry goes through, as for the rebase case.
+rm -f "$WORK/.git/index.lock"
+gl_capture abort
+assert_exit_ok "$CODE" "failed_merge_abort_retry_ok"
+assert_no_state_file "failed_merge_abort_retry_state_removed"
+assert_no_merge_in_progress "failed_merge_abort_retry_merge_gone"
+assert_eq "$OLD_HEAD" "$(head_hash)" "failed_merge_abort_retry_head_restored"
+
 pass
