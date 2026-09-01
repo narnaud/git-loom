@@ -247,9 +247,21 @@ rebase the user started with raw git.
 In that case:
 
 - `loom continue` runs `git rebase --continue` (or `git merge --continue`) and
-  reports the outcome, pausing again if another conflict comes up.
-- `loom abort` runs `git rebase --abort` (or `git merge --abort`). If the abort
-  itself fails, the error says so instead of claiming success.
+  reports `"Completed the <rebase|merge> git had in progress (no loom state, so
+  nothing else was done)"`, pausing again if it stops at another conflict or an
+  `edit` step.
+- `loom abort` runs `git rebase --abort` (or `git merge --abort`) and reports
+  `"Canceled the <rebase|merge> git had in progress (no loom state to roll
+  back)"`. If the abort itself fails, the error says so instead of claiming
+  success.
+
+Both say that git's own step is all that ran. There is no state file, so
+`loom continue` finishes no command off — no saved patch re-staged, no temp
+branch removed, no per-command success line such as `✓ Updated branch …` — and
+`loom abort` undoes nothing beyond git's abort: a commit or temp branch an
+earlier loom command created before its rebase started stays behind. A pause at
+an `edit` step offers `loom abort` as "to cancel it (no loom state to roll
+back)" for the same reason.
 
 With neither a state file nor an in-progress rebase or merge, both still error
 with `"No loom operation is in progress"`.

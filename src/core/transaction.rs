@@ -181,11 +181,18 @@ pub fn warn_conflict_paused(workdir: &Path, command: &str) {
 /// there, but the rebase is not over.
 ///
 /// `command` is the loom command the rebase belongs to, or `None` when there is
-/// no state file to say which one it was.
+/// no state file to say which one it was — and then `loom abort` cancels the
+/// rebase without rolling anything else back, so it must not promise more.
 pub fn warn_paused_at_edit(command: Option<&str>) {
-    let owner = match command {
-        Some(c) => format!("The `loom {}` is paused at an `edit` step", c),
-        None => "The rebase is paused at an `edit` step".to_string(),
+    let (owner, abort_hint) = match command {
+        Some(c) => (
+            format!("The `loom {}` is paused at an `edit` step", c),
+            "to cancel and restore original state",
+        ),
+        None => (
+            "The rebase is paused at an `edit` step".to_string(),
+            "to cancel it (no loom state to roll back)",
+        ),
     };
     crate::core::agent_mode::note_paused(
         &owner,
@@ -194,26 +201,30 @@ pub fn warn_paused_at_edit(command: Option<&str>) {
     crate::core::msg::warn_reported(&format!(
         "{} — finish the work there, then run:\n\
          `loom continue`   to carry on\n\
-         `loom abort`      to cancel and restore original state",
-        owner
+         `loom abort`      {}",
+        owner, abort_hint
     ));
 }
 
 /// Emit the still-paused warning after a `loom continue` stopped again.
-fn warn_still_paused(workdir: &Path) {
+///
+/// `subject` names what is still paused: the loom operation, or the bare
+/// `rebase`/`merge` when no state file says which command it belongs to.
+fn warn_still_paused(workdir: &Path, subject: &str) {
     if !git::has_unmerged_paths(workdir) {
         crate::core::agent_mode::note_paused(
-            "The rebase stopped again — the operation is still paused",
+            &format!("The {} stopped again — it is still paused", subject),
             "run loom trace to see why, fix it, then run: loom continue (or loom abort)",
         );
-        crate::core::msg::warn_reported(
-            "The rebase stopped again — run `loom trace` to see why, then `loom continue`",
-        );
+        crate::core::msg::warn_reported(&format!(
+            "The {} stopped again — run `loom trace` to see why, then `loom continue`",
+            subject
+        ));
         return;
     }
 
     crate::core::agent_mode::note_paused(
-        "Conflicts remain — the operation is still paused",
+        &format!("Conflicts remain — the {} is still paused", subject),
         "resolve conflicts, stage them, then run: loom continue (or loom abort)",
     );
     crate::core::msg::warn_reported(
@@ -255,7 +266,7 @@ pub fn continue_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
                 return Ok(());
             }
             git::RebaseOutcome::Stopped => {
-                warn_still_paused(workdir);
+                warn_still_paused(workdir, "operation");
                 return Ok(());
             }
             git::RebaseOutcome::Completed => {}
@@ -263,7 +274,7 @@ pub fn continue_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
     } else if git::merge_is_in_progress(git_dir) {
         match git::continue_merge(workdir, git_dir)? {
             git::MergeOutcome::Stopped => {
-                warn_still_paused(workdir);
+                warn_still_paused(workdir, "operation");
                 return Ok(());
             }
             git::MergeOutcome::Completed => {}
@@ -328,60 +339,93 @@ pub fn abort_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Error for `continue`/`abort` with neither a state file nor git work to drive.
+const NO_OPERATION: &str = "No loom operation is in progress";
+
+/// The git operation a stateless `continue`/`abort` acts on.
+#[derive(Clone, Copy)]
+enum GitOp {
+    Rebase,
+    Merge,
+}
+
+impl GitOp {
+    fn as_str(self) -> &'static str {
+        match self {
+            GitOp::Rebase => "rebase",
+            GitOp::Merge => "merge",
+        }
+    }
+}
+
 /// `loom continue` with no state file: finish a rebase or merge git still has
 /// in progress. A command whose conflict path is not resumable, or one that
 /// died before saving state, can leave one behind.
 fn continue_without_state(workdir: &Path, git_dir: &Path) -> Result<()> {
-    let what = if git::rebase_is_in_progress(git_dir) {
-        "rebase"
-    } else {
-        "merge"
-    };
-
     if git::rebase_is_in_progress(git_dir) {
         match git::continue_rebase(workdir)? {
-            git::RebaseOutcome::Paused => {
-                warn_paused_at_edit(None);
-                return Ok(());
-            }
-            git::RebaseOutcome::Stopped => {
-                warn_still_paused(workdir);
-                return Ok(());
-            }
-            git::RebaseOutcome::Completed => {}
+            git::RebaseOutcome::Paused => warn_paused_at_edit(None),
+            git::RebaseOutcome::Stopped => warn_still_paused(workdir, GitOp::Rebase.as_str()),
+            git::RebaseOutcome::Completed => report_stateless_continue(GitOp::Rebase),
         }
     } else if git::merge_is_in_progress(git_dir) {
         match git::continue_merge(workdir, git_dir)? {
-            git::MergeOutcome::Stopped => {
-                warn_still_paused(workdir);
-                return Ok(());
-            }
-            git::MergeOutcome::Completed => {}
+            git::MergeOutcome::Stopped => warn_still_paused(workdir, GitOp::Merge.as_str()),
+            git::MergeOutcome::Completed => report_stateless_continue(GitOp::Merge),
         }
     } else {
-        bail!("No loom operation is in progress");
+        bail!(NO_OPERATION);
     }
-
-    crate::core::msg::success(&format!("Completed the {what} in progress"));
     Ok(())
+}
+
+/// Report a stateless `continue`, spelling out that only git's own step ran:
+/// with no state file there is no command to finish off, so no saved patch is
+/// re-staged, no temp branch removed, and no per-command success line printed.
+fn report_stateless_continue(op: GitOp) {
+    crate::core::msg::success(&format!(
+        "Completed the {} git had in progress (no loom state, so nothing else was done)",
+        op.as_str()
+    ));
+}
+
+/// Report a stateless `abort`, spelling out that only git's own abort ran: with
+/// no state file, a commit or temp branch a loom command left behind stays.
+fn report_stateless_abort(op: GitOp) {
+    crate::core::msg::success(&format!(
+        "Canceled the {} git had in progress (no loom state to roll back)",
+        op.as_str()
+    ));
+}
+
+/// What to say when a stateless abort fails. There is no loom state to keep, so
+/// unlike [`ABORT_FAILED_HINT`] this only reports git's failure and its cause.
+fn stateless_abort_failed(op: GitOp) -> String {
+    format!(
+        "`git {} --abort` failed ({})",
+        op.as_str(),
+        git::ABORT_FAILED_CAUSE
+    )
 }
 
 /// `loom abort` with no state file: cancel the rebase or merge git still has in
 /// progress, so the repository never stays stuck mid-rewrite.
 fn abort_without_state(workdir: &Path, git_dir: &Path) -> Result<()> {
-    if git::rebase_is_in_progress(git_dir) {
-        git::rebase_abort(workdir).with_context(|| {
-            format!("`git rebase --abort` failed ({})", git::ABORT_FAILED_CAUSE)
-        })?;
-        crate::core::msg::success("Aborted the rebase in progress");
+    let op = if git::rebase_is_in_progress(git_dir) {
+        GitOp::Rebase
     } else if git::merge_is_in_progress(git_dir) {
-        git::merge_abort(workdir)
-            .with_context(|| format!("`git merge --abort` failed ({})", git::ABORT_FAILED_CAUSE))?;
-        crate::core::msg::success("Aborted the merge in progress");
+        GitOp::Merge
     } else {
-        bail!("No loom operation is in progress");
-    }
+        bail!(NO_OPERATION);
+    };
 
+    match op {
+        GitOp::Rebase => git::rebase_abort(workdir),
+        GitOp::Merge => git::merge_abort(workdir),
+    }
+    .with_context(|| stateless_abort_failed(op))?;
+
+    report_stateless_abort(op);
     Ok(())
 }
 

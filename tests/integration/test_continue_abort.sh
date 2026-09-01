@@ -122,16 +122,24 @@ assert_log_not_contains "Upstream change" "update_abort_upstream_gone"
 # Stray rebase: git has a rebase in progress but no loom state file
 # ══════════════════════════════════════════════════════════════════════════════
 
+# Set up a conflict and fetch, leaving the ref to conflict with in $UPSTREAM.
+setup_conflict_and_fetch() {
+    setup_conflict
+    UPSTREAM="$(git -C "$WORK" rev-parse --abbrev-ref --symbolic-full-name @{u})"
+    git -C "$WORK" fetch -q origin
+}
+
 # Leave a plain `git rebase` paused on a conflict, with no loom state file.
 setup_stray_rebase() {
-    setup_conflict
-    STRAY_HEAD="$(head_hash)"
-    local upstream
-    upstream="$(git -C "$WORK" rev-parse --abbrev-ref --symbolic-full-name @{u})"
-    git -C "$WORK" fetch -q origin
-    git -C "$WORK" rebase "$upstream" >/dev/null 2>&1 || true
-    [[ -d "$WORK/.git/rebase-merge" || -d "$WORK/.git/rebase-apply" ]] \
-        || { echo "[NOK] setup_stray_rebase: no rebase in progress"; exit 1; }
+    setup_conflict_and_fetch
+    git -C "$WORK" rebase "$UPSTREAM" >/dev/null 2>&1 || true
+    assert_rebase_in_progress "setup_stray_rebase"
+}
+
+setup_stray_merge() {
+    setup_conflict_and_fetch
+    git -C "$WORK" merge "$UPSTREAM" >/dev/null 2>&1 || true
+    assert_merge_in_progress "setup_stray_merge"
 }
 
 describe "stray rebase: status reports it instead of a detached HEAD"
@@ -145,12 +153,10 @@ describe "stray rebase: abort cancels it"
 setup_stray_rebase
 gl_capture abort
 assert_exit_ok "$CODE" "stray_abort_ok"
-assert_contains "$OUT" "Aborted" "stray_abort_msg"
-assert_eq "$STRAY_HEAD" "$(head_hash)" "stray_abort_head_restored"
-if [[ -d "$WORK/.git/rebase-merge" ]]; then
-    echo "[NOK] stray_abort_rebase_gone"
-    exit 1
-fi
+assert_contains "$OUT" "Canceled the rebase" "stray_abort_msg"
+assert_contains "$OUT" "no loom state" "stray_abort_no_rollback_note"
+assert_eq "$OLD_HEAD" "$(head_hash)" "stray_abort_head_restored"
+assert_no_rebase_in_progress "stray_abort_rebase_gone"
 
 describe "stray rebase: continue finishes it"
 setup_stray_rebase
@@ -158,8 +164,37 @@ echo "resolved content" > "$WORK/conflict.txt"
 git -C "$WORK" add conflict.txt
 gl_capture continue
 assert_exit_ok "$CODE" "stray_continue_ok"
+assert_contains "$OUT" "Completed the rebase git had in progress" "stray_continue_msg"
+assert_contains "$OUT" "no loom state, so nothing else was done" "stray_continue_no_state_note"
 assert_log_contains "Upstream change" "stray_continue_upstream_in_log"
 assert_log_contains "Local change" "stray_continue_local_in_log"
+assert_no_rebase_in_progress "stray_continue_rebase_finished"
+assert_no_state_file "stray_continue_no_state_file"
+
+describe "stray merge: abort cancels it"
+setup_stray_merge
+
+gl_capture abort
+assert_exit_ok "$CODE" "stray_merge_abort_ok"
+assert_contains "$OUT" "Canceled the merge" "stray_merge_abort_msg"
+assert_contains "$OUT" "no loom state to roll back" "stray_merge_abort_no_rollback_note"
+assert_file_content "conflict.txt" "local content" "stray_merge_abort_worktree_restored"
+assert_log_not_contains "Upstream change" "stray_merge_abort_upstream_gone"
+assert_no_merge_in_progress "stray_merge_abort_merge_gone"
+
+describe "stray merge: continue finishes it"
+setup_stray_merge
+echo "resolved content" > "$WORK/conflict.txt"
+git -C "$WORK" add conflict.txt
+
+gl_capture continue
+assert_exit_ok "$CODE" "stray_merge_continue_ok"
+assert_contains "$OUT" "Completed the merge git had in progress" "stray_merge_continue_msg"
+assert_contains "$OUT" "no loom state, so nothing else was done" "stray_merge_continue_no_state_note"
+assert_log_contains "Upstream change" "stray_merge_continue_upstream_in_log"
+assert_head_parent_count 2 "stray_merge_continue_made_merge_commit"
+assert_no_merge_in_progress "stray_merge_continue_merge_finished"
+assert_no_state_file "stray_merge_continue_no_state_file"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Non-conflict stop: an untracked file blocks the rebase, nothing is conflicted
@@ -228,9 +263,7 @@ assert_head_msg "c4" "edit_pause_advanced_two_steps"
 gl_capture continue
 assert_exit_ok "$CODE" "edit_pause_continue3_ok"
 assert_contains "$OUT" "Completed" "edit_pause_final_completed"
-if [[ -d "$WORK/.git/rebase-merge" ]]; then
-    fail "edit_pause_rebase_finished: rebase should be over"
-fi
+assert_no_rebase_in_progress "edit_pause_rebase_finished"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # A failed abort must not roll back on top of a live rebase
