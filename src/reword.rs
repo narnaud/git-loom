@@ -128,8 +128,8 @@ pub fn reword_commit(repo: &Repository, commit_hash: &str, message: Option<Strin
             transaction::delete(&git_dir)?;
             report_reworded(&ctx);
         }
-        git::RebaseOutcome::Conflicted => {
-            transaction::warn_conflict_paused("reword");
+        git::RebaseOutcome::Stopped => {
+            transaction::warn_conflict_paused(workdir, "reword");
         }
     }
 

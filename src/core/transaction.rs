@@ -119,8 +119,29 @@ pub fn delete(git_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Emit the standard conflict-pause warning for a resumable command.
-pub fn warn_conflict_paused(command: &str) {
+/// Emit the pause warning for a resumable command whose rebase stopped.
+///
+/// A conflict is the usual reason, but not the only one (an untracked file in
+/// the way, a stale `index.lock`), so the message follows what the index
+/// actually says.
+pub fn warn_conflict_paused(workdir: &Path, command: &str) {
+    if !git::has_unmerged_paths(workdir) {
+        crate::core::agent_mode::note_paused(
+            &format!(
+                "The `loom {}` is paused — the rebase stopped part-way",
+                command
+            ),
+            "run loom trace to see why, fix it, then run: loom continue (or loom abort)",
+        );
+        crate::core::msg::warn_reported(&format!(
+            "The rebase stopped part-way — run `loom trace` to see why, then:\n\
+             `loom continue`   to complete the {}\n\
+             `loom abort`      to cancel and restore original state",
+            command
+        ));
+        return;
+    }
+
     crate::core::agent_mode::note_paused(
         &format!("Conflicts detected — the `loom {}` is paused", command),
         "resolve conflicts, stage them, then run: loom continue (or loom abort)",
@@ -133,8 +154,19 @@ pub fn warn_conflict_paused(command: &str) {
     ));
 }
 
-/// Emit the "conflicts remain" warning after a `loom continue` hit another conflict.
-fn warn_still_paused() {
+/// Emit the still-paused warning after a `loom continue` stopped again.
+fn warn_still_paused(workdir: &Path) {
+    if !git::has_unmerged_paths(workdir) {
+        crate::core::agent_mode::note_paused(
+            "The rebase stopped again — the operation is still paused",
+            "run loom trace to see why, fix it, then run: loom continue (or loom abort)",
+        );
+        crate::core::msg::warn_reported(
+            "The rebase stopped again — run `loom trace` to see why, then `loom continue`",
+        );
+        return;
+    }
+
     crate::core::agent_mode::note_paused(
         "Conflicts remain — the operation is still paused",
         "resolve conflicts, stage them, then run: loom continue (or loom abort)",
@@ -173,16 +205,16 @@ pub fn continue_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
 
     if git::rebase_is_in_progress(git_dir) {
         match git::continue_rebase(workdir)? {
-            git::RebaseOutcome::Conflicted => {
-                warn_still_paused();
+            git::RebaseOutcome::Stopped => {
+                warn_still_paused(workdir);
                 return Ok(());
             }
             git::RebaseOutcome::Completed => {}
         }
     } else if git::merge_is_in_progress(git_dir) {
         match git::continue_merge(workdir, git_dir)? {
-            git::MergeOutcome::Conflicted => {
-                warn_still_paused();
+            git::MergeOutcome::Stopped => {
+                warn_still_paused(workdir);
                 return Ok(());
             }
             git::MergeOutcome::Completed => {}
@@ -237,16 +269,16 @@ fn continue_without_state(workdir: &Path, git_dir: &Path) -> Result<()> {
 
     if git::rebase_is_in_progress(git_dir) {
         match git::continue_rebase(workdir)? {
-            git::RebaseOutcome::Conflicted => {
-                warn_still_paused();
+            git::RebaseOutcome::Stopped => {
+                warn_still_paused(workdir);
                 return Ok(());
             }
             git::RebaseOutcome::Completed => {}
         }
     } else if git::merge_is_in_progress(git_dir) {
         match git::continue_merge(workdir, git_dir)? {
-            git::MergeOutcome::Conflicted => {
-                warn_still_paused();
+            git::MergeOutcome::Stopped => {
+                warn_still_paused(workdir);
                 return Ok(());
             }
             git::MergeOutcome::Completed => {}

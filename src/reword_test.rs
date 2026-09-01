@@ -411,7 +411,7 @@ fn woven_repo_with_hand_resolved_merge(test_repo: &TestRepo) -> git2::Oid {
     let workdir = test_repo.workdir();
     let outcome = crate::git::merge_no_ff(&workdir, test_repo.repo.path(), "feature-b").unwrap();
     assert!(
-        matches!(outcome, crate::git::MergeOutcome::Conflicted),
+        matches!(outcome, crate::git::MergeOutcome::Stopped),
         "the second merge should conflict"
     );
     test_repo.write_file("shared.txt", "first\nfrom-a\nfrom-b\nlast\n");

@@ -616,7 +616,7 @@ impl TestRepo {
             crate::git::merge_no_ff(self.workdir().as_path(), self.repo.path(), branch).unwrap();
         assert!(
             matches!(outcome, crate::git::MergeOutcome::Completed),
-            "merge_no_ff: expected Completed, got Conflicted"
+            "merge_no_ff: expected Completed, got Stopped"
         );
     }
 

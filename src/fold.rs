@@ -252,7 +252,7 @@ fn move_commits_and_report(
 
     match move_commits_to_branch(repo, commit_hashes, branch_name) {
         Ok(RebaseOutcome::Completed) => {}
-        Ok(RebaseOutcome::Conflicted) => {
+        Ok(RebaseOutcome::Stopped) => {
             let err = git::abort_after_failure(workdir);
             // Only remove the branch once the rebase is really gone — while it
             // is still in progress the branch may be the checked-out ref.
@@ -924,8 +924,8 @@ fn fold_files_into_commit(
                 new_hash = git::rev_parse(workdir, TRACK_BRANCH)?;
                 let _ = git::branch_delete(workdir, TRACK_BRANCH);
             }
-            RebaseOutcome::Conflicted => {
-                transaction::warn_conflict_paused(COMMAND);
+            RebaseOutcome::Stopped => {
+                transaction::warn_conflict_paused(workdir, COMMAND);
                 return Ok(());
             }
         }
@@ -991,8 +991,8 @@ fn fold_commit_into_commit(repo: &Repository, source_hash: &str, target_hash: &s
                 git::short_hash(&new_hash)
             ));
         }
-        RebaseOutcome::Conflicted => {
-            transaction::warn_conflict_paused(COMMAND);
+        RebaseOutcome::Stopped => {
+            transaction::warn_conflict_paused(workdir, COMMAND);
         }
     }
 
@@ -1026,8 +1026,8 @@ fn fold_commit_to_branch(repo: &Repository, commit_hash: &str, branch_name: &str
                 git::short_hash(&new_hash)
             ));
         }
-        RebaseOutcome::Conflicted => {
-            transaction::warn_conflict_paused(COMMAND);
+        RebaseOutcome::Stopped => {
+            transaction::warn_conflict_paused(workdir, COMMAND);
         }
     }
 
@@ -1409,8 +1409,8 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
                     );
                 }
             }
-            RebaseOutcome::Conflicted => {
-                transaction::warn_conflict_paused(COMMAND);
+            RebaseOutcome::Stopped => {
+                transaction::warn_conflict_paused(workdir, COMMAND);
                 return Ok(());
             }
         }

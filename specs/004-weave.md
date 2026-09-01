@@ -150,7 +150,7 @@ Key behaviors:
 - Empty commits are preserved
 - On conflict, the outcome depends on the calling command. Commands that own
   the paused state (e.g., `update`, `commit`, `absorb`, `drop commit`, simple
-  `fold` paths) surface a `Conflicted` outcome and leave the rebase paused for
+  `fold` paths) surface a `Stopped` outcome and leave the rebase paused for
   the user to resolve with `loom continue` or `loom abort`. Out-of-scope
   commands (e.g., `reword`, `split`, excluded `fold` paths) abort explicitly
   and leave the repository in its original state

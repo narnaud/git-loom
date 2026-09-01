@@ -5,13 +5,14 @@ use anyhow::Result;
 /// Outcome of a merge operation.
 pub enum MergeOutcome {
     Completed,
-    Conflicted,
+    /// The merge stopped part-way and git left `MERGE_HEAD` on disk.
+    Stopped,
 }
 
 /// Merge a branch into the current branch, forcing a merge commit.
 ///
 /// Wraps `git merge --no-ff <branch> --no-edit`.
-/// Returns `Conflicted` if the merge stopped due to conflicts,
+/// Returns `Stopped` if the merge stopped part-way,
 /// `Completed` on success, or `Err` on any other failure.
 pub fn merge_no_ff(workdir: &Path, git_dir: &Path, branch: &str) -> Result<MergeOutcome> {
     run_merge_cmd(workdir, git_dir, &["merge", "--no-ff", branch, "--no-edit"])
@@ -30,7 +31,7 @@ fn run_merge_cmd(workdir: &Path, git_dir: &Path, args: &[&str]) -> Result<MergeO
         Ok(()) => Ok(MergeOutcome::Completed),
         Err(e) => {
             if merge_is_in_progress(git_dir) {
-                Ok(MergeOutcome::Conflicted)
+                Ok(MergeOutcome::Stopped)
             } else {
                 Err(e)
             }

@@ -45,7 +45,7 @@ pub fn run(branch: Option<String>, all: bool) -> Result<()> {
         MergeOutcome::Completed => {
             msg::success(&format!("Woven `{}` into integration branch", local_name));
         }
-        MergeOutcome::Conflicted => {
+        MergeOutcome::Stopped => {
             let state = LoomState {
                 command: "merge".to_string(),
                 rollback: Rollback::default(),
@@ -54,7 +54,7 @@ pub fn run(branch: Option<String>, all: bool) -> Result<()> {
                 })?,
             };
             transaction::save(&git_dir, &state)?;
-            transaction::warn_conflict_paused("merge");
+            transaction::warn_conflict_paused(workdir, "merge");
         }
     }
 
