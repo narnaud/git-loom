@@ -134,6 +134,13 @@ setup_stray_rebase() {
         || { echo "[NOK] setup_stray_rebase: no rebase in progress"; exit 1; }
 }
 
+describe "stray rebase: status reports it instead of a detached HEAD"
+setup_stray_rebase
+gl_capture status
+assert_exit_fail "$CODE" "stray_status_fails"
+assert_contains "$OUT" "rebase is in progress" "stray_status_msg"
+assert_contains "$OUT" "loom abort" "stray_status_abort_hint"
+
 describe "stray rebase: abort cancels it"
 setup_stray_rebase
 gl_capture abort

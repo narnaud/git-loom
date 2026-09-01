@@ -107,6 +107,25 @@ pub fn rebase_is_in_progress(git_dir: &Path) -> bool {
     git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists()
 }
 
+/// Step numbers of a paused rebase, as `(current, total)`.
+///
+/// Read from the `msgnum`/`end` files git keeps in the rebase state directory.
+/// Returns `None` if no rebase is in progress or the files are unreadable.
+pub fn rebase_progress(git_dir: &Path) -> Option<(usize, usize)> {
+    let dir = ["rebase-merge", "rebase-apply"]
+        .iter()
+        .map(|d| git_dir.join(d))
+        .find(|d| d.exists())?;
+    let read = |name: &str| -> Option<usize> {
+        std::fs::read_to_string(dir.join(name))
+            .ok()?
+            .trim()
+            .parse()
+            .ok()
+    };
+    Some((read("msgnum")?, read("end")?))
+}
+
 /// Abort a rebase that failed, and build the error to report.
 ///
 /// Two things the caller cannot assume: the rebase may have stopped for a

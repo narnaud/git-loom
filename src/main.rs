@@ -432,6 +432,21 @@ fn paused_state_message(command: &str, interrupted: bool) -> String {
     }
 }
 
+/// Message shown when git has a rebase or merge in progress that no loom state
+/// file describes — an operation that failed before it could save state, or one
+/// the user started with raw git.
+fn stray_rebase_message(rebasing: bool, step: Option<(usize, usize)>) -> String {
+    let what = if rebasing { "rebase" } else { "merge" };
+    let progress = match step {
+        Some((current, total)) => format!(" (stopped at step {current}/{total})"),
+        None => String::new(),
+    };
+    format!(
+        "A git {what} is in progress{progress}, but no loom operation is recorded.\n\
+         Resolve any conflicts and run `loom continue` to finish it, or `loom abort` to cancel it."
+    )
+}
+
 fn main() {
     let cli = parse_cli(&std::env::args_os().collect::<Vec<_>>());
 
@@ -500,13 +515,20 @@ fn main() {
     );
     if !is_exempt && let Ok(repo) = repo::open_repo() {
         let git_dir = repo.path().to_path_buf();
+        let rebasing = git::rebase_is_in_progress(&git_dir);
+        let interrupted = rebasing || git::merge_is_in_progress(&git_dir);
         if let Ok(Some(state)) = transaction::load(&git_dir) {
-            let interrupted =
-                git::rebase_is_in_progress(&git_dir) || git::merge_is_in_progress(&git_dir);
             finish_and_exit(Err(anyhow::anyhow!(paused_state_message(
                 &state.command,
                 interrupted
             ))));
+        } else if interrupted {
+            let step = if rebasing {
+                git::rebase_progress(&git_dir)
+            } else {
+                None
+            };
+            finish_and_exit(Err(anyhow::anyhow!(stray_rebase_message(rebasing, step))));
         }
     }
 
