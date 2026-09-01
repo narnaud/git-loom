@@ -1188,6 +1188,11 @@ pub fn run_rebase(
 
     use crate::trace as loom_trace;
 
+    // Neither way this rebase moves a branch ref goes through git's check
+    // against moving a branch checked out in another worktree, so do it here,
+    // before anything is rewritten.
+    git::ensure_not_checked_out_elsewhere(workdir, &rewritten_branches(workdir, todo_content))?;
+
     let self_exe = git::loom_exe_path()?;
 
     // Write todo content to a temp file
@@ -1288,6 +1293,20 @@ pub fn run_rebase(
     let _ = temp_path.close();
 
     Ok(RebaseOutcome::Completed)
+}
+
+/// Branches this rebase will move: every `update-ref refs/heads/<name>` line in
+/// the todo, plus HEAD's own branch, which moves when the rebase completes.
+fn rewritten_branches(workdir: &Path, todo: &str) -> Vec<String> {
+    let mut branches: Vec<String> = todo
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("update-ref refs/heads/"))
+        .map(str::to_string)
+        .collect();
+    if let Ok(current) = git::current_branch(workdir) {
+        branches.push(current);
+    }
+    branches
 }
 
 /// Returns OIDs in `base..HEAD` that have cherry-pick equivalents in `upstream`.

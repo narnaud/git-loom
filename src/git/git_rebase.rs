@@ -3,6 +3,7 @@ use std::path::Path;
 use anyhow::Result;
 
 /// Outcome of a rebase operation.
+#[derive(Debug)]
 pub enum RebaseOutcome {
     Completed,
     Conflicted,

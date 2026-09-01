@@ -4,6 +4,7 @@ pub mod git_commit;
 pub mod git_diff;
 pub mod git_merge;
 pub mod git_rebase;
+pub mod git_worktree;
 
 pub use git_apply::{
     apply_cached_patch, apply_cached_patch_reverse, apply_patch, apply_patch_reverse,
@@ -29,6 +30,7 @@ pub use git_rebase::{
     RebaseOutcome, abort_after_failure, continue_rebase, continue_rebase_or_abort, rebase,
     rebase_abort, rebase_is_in_progress,
 };
+pub use git_worktree::ensure_not_checked_out_elsewhere;
 
 use std::path::Path;
 use std::process::Command;
@@ -167,6 +169,17 @@ pub fn restore_files_to_head(workdir: &Path, files: &[&str]) -> Result<()> {
     let mut args = vec!["checkout", "HEAD", "--"];
     args.extend(files);
     run_git(workdir, &args)
+}
+
+/// The branch HEAD points at, without the `refs/heads/` prefix.
+///
+/// Errors when HEAD is detached.
+pub fn current_branch(workdir: &Path) -> Result<String> {
+    Ok(
+        run_git_stdout(workdir, &["symbolic-ref", "--quiet", "--short", "HEAD"])?
+            .trim()
+            .to_string(),
+    )
 }
 
 /// Resolve a git ref to its full commit hash.
