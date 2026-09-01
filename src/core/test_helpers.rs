@@ -15,6 +15,15 @@ use tempfile::TempDir;
 /// calls would corrupt each other's working directory.
 static IN_DIR_LOCK: Mutex<()> = Mutex::new(());
 
+/// Whether `output` mentions `path`.
+///
+/// Compares with forward slashes: git prints paths that way on Windows too,
+/// while `Path` there renders them with backslashes.
+pub fn mentions_path(output: &str, path: &Path) -> bool {
+    let wanted = path.display().to_string().replace('\\', "/");
+    output.replace('\\', "/").contains(&wanted)
+}
+
 /// A test repository wrapper with convenient helper methods.
 pub struct TestRepo {
     pub repo: Repository,

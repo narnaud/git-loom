@@ -218,3 +218,23 @@ or `loom abort` to complete or cancel the operation.
 `reword` is the only command that can operate outside an integration branch
 context. When the full graph cannot be built, `reword` falls back to a
 simpler linear approach that doesn't require the Weave data model.
+
+## Worktree Ref Safety
+
+A weave rebase moves branch refs two ways, and neither goes through git's
+porcelain check against moving a branch that is checked out in another
+worktree:
+
+- the `update-ref` directives move the feature branches;
+- completing the rebase moves HEAD's own branch (which is why a branch
+  force-checked-out in a second worktree is at risk too).
+
+Moving such a ref desyncs that worktree: its index and files stay at the old
+tip, so `git status` there reports the old→new delta as phantom staged changes.
+Before executing the todo, loom therefore maps every branch it is about to move
+(`git worktree list --porcelain`) and refuses the whole operation — naming the
+branch and the worktree path — if one of them is checked out elsewhere.
+
+The worktree loom runs in is exempt: there, ref, index and files move together.
+Detached-HEAD worktrees hold no branch, and bare or prunable ones (directory
+gone) are ignored.
