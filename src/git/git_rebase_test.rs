@@ -69,3 +69,84 @@ fn continue_rebase_reports_paused_at_next_edit() {
     );
     assert!(!super::rebase_is_in_progress(&git_dir));
 }
+
+/// A command can fail before its rebase ever starts — the worktree check, the
+/// git-dir lookup, a missing loom binary. There is nothing to abort then, so
+/// the cleanup must still run: skipping it strands the temp branch, saved
+/// patch or state file the caller was about to remove.
+#[test]
+fn cleanup_runs_when_there_was_no_rebase_to_abort() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("first", "a.txt");
+    let workdir = test_repo.workdir();
+    assert!(!super::rebase_is_in_progress(test_repo.repo.path()));
+
+    let mut cleaned = false;
+    let err =
+        super::rebase_abort_then_cleanup(&workdir, anyhow::anyhow!("boom"), || cleaned = true);
+
+    assert!(cleaned, "nothing was running, so the cleanup must happen");
+    assert_eq!(
+        err.to_string(),
+        "boom",
+        "the command's own failure is what the user needs to see"
+    );
+}
+
+/// With a rebase actually running, the abort has to happen before the cleanup,
+/// and the caller's error is still the one reported.
+#[test]
+fn a_live_rebase_is_aborted_before_the_cleanup_runs() {
+    let test_repo = TestRepo::new();
+    let base = test_repo.commit("base", "base.txt");
+    let c1 = test_repo.commit("first", "a.txt");
+    let workdir = test_repo.workdir();
+
+    let todo = format!("label onto\n\nreset onto\nedit {c1}\n");
+    weave::run_rebase(&workdir, Some(&base.to_string()), &todo).unwrap();
+    assert!(super::rebase_is_in_progress(test_repo.repo.path()));
+
+    let mut cleaned = false;
+    let err =
+        super::rebase_abort_then_cleanup(&workdir, anyhow::anyhow!("boom"), || cleaned = true);
+
+    assert!(cleaned, "the abort worked, so the cleanup must follow");
+    assert!(
+        !super::rebase_is_in_progress(test_repo.repo.path()),
+        "the rebase should be gone"
+    );
+    assert_eq!(err.to_string(), "boom");
+}
+
+/// When the abort fails the rebase is still running, so the cleanup is skipped
+/// — and the reported error must still carry the original failure, not replace
+/// it with the hint.
+#[test]
+fn a_failed_abort_skips_the_cleanup_and_keeps_the_cause() {
+    let test_repo = TestRepo::new();
+    let base = test_repo.commit("base", "base.txt");
+    let c1 = test_repo.commit("first", "a.txt");
+    let workdir = test_repo.workdir();
+
+    let todo = format!("label onto\n\nreset onto\nedit {c1}\n");
+    weave::run_rebase(&workdir, Some(&base.to_string()), &todo).unwrap();
+
+    // A held index.lock makes the abort fail, as a concurrent git process would.
+    let lock = test_repo.repo.path().join("index.lock");
+    std::fs::write(&lock, b"").unwrap();
+
+    let mut cleaned = false;
+    let err =
+        super::rebase_abort_then_cleanup(&workdir, anyhow::anyhow!("boom"), || cleaned = true);
+
+    assert!(
+        !cleaned,
+        "cleaning up on top of a live rebase is what this guards against"
+    );
+    let msg = err.to_string();
+    assert!(msg.contains("boom"), "the cause must survive, got: {msg}");
+    assert!(msg.contains("left mid-rebase"), "{msg}");
+
+    std::fs::remove_file(&lock).unwrap();
+    super::rebase_abort(&workdir).unwrap();
+}

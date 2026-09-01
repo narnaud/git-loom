@@ -28,7 +28,8 @@ pub use git_merge::{MergeOutcome, continue_merge, merge_abort, merge_is_in_progr
 pub use git_rebase::rebase_onto;
 pub use git_rebase::{
     RebaseOutcome, abort_after_failure, continue_rebase, continue_rebase_expecting_edit,
-    has_unmerged_paths, rebase, rebase_abort, rebase_is_in_progress, rebase_progress,
+    has_unmerged_paths, rebase, rebase_abort, rebase_abort_then_cleanup, rebase_is_in_progress,
+    rebase_progress,
 };
 pub use git_worktree::ensure_not_checked_out_elsewhere;
 
@@ -39,6 +40,10 @@ use std::time::Instant;
 use anyhow::{Context, Result, bail};
 
 use crate::trace as loom_trace;
+
+/// The usual reason an abort fails, wherever that is reported — rebase or merge.
+pub const ABORT_FAILED_CAUSE: &str =
+    "a stale `.git/index.lock` or a concurrent git process is the usual cause";
 
 /// Minimum Git version required (--update-refs was added in 2.38).
 const MIN_GIT_VERSION: (u32, u32) = (2, 38);

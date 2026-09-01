@@ -203,10 +203,7 @@ fn perform_non_head_with(
     weave::start_edit_rebase(repo, workdir, commit_oid)?;
     let result = match do_head_split() {
         Ok(hashes) => hashes,
-        Err(e) => {
-            let _ = git::rebase_abort(workdir);
-            return Err(e);
-        }
+        Err(e) => return Err(git::rebase_abort_then_cleanup(workdir, e, || {})),
     };
     // Continue the rebase — later commits are replayed on top of the split
     // commits, so hash1 and hash2 remain valid (they are ancestors).
