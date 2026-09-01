@@ -1,13 +1,26 @@
-use anyhow::Result;
+use std::path::Path;
+
+use anyhow::{Context, Result};
 use git2::Repository;
+use serde::{Deserialize, Serialize};
 
 use crate::branch;
 use crate::core::repo::{self, Target};
 
 use crate::core::agent_mode;
 use crate::core::msg;
+use crate::core::transaction::{self, LoomState, Rollback};
 use crate::core::weave;
 use crate::git;
+
+/// Resume context for a `reword` paused by a conflict.
+#[derive(Serialize, Deserialize)]
+struct RewordContext {
+    /// Short hash of the reworded commit, as it was before the rebase.
+    display: String,
+    /// Short hash the reworded commit now has.
+    new_display: String,
+}
 
 /// Reword a commit message or rename a branch.
 pub fn run(target: String, message: Option<String>) -> Result<()> {
@@ -59,6 +72,11 @@ pub fn run(target: String, message: Option<String>) -> Result<()> {
 /// 2. Run rebase (pauses at the target commit)
 /// 3. git commit --allow-empty --amend --only [-m "message"]
 /// 4. git rebase --continue
+///
+/// Step 4 can conflict: rewriting the target changes the SHAs above it, so any
+/// merge commit in the way has to be rebuilt, and a merge that was resolved by
+/// hand conflicts again. That is resumable work, so the reword pauses for
+/// `loom continue` rather than throwing the amend away.
 pub fn reword_commit(repo: &Repository, commit_hash: &str, message: Option<String>) -> Result<()> {
     // Without -m the amend would open $GIT_EDITOR, which hangs a headless agent.
     if agent_mode::enabled() && message.is_none() {
@@ -87,16 +105,50 @@ pub fn reword_commit(repo: &Repository, commit_hash: &str, message: Option<Strin
     // Capture the new hash right after amending (before rebase --continue moves HEAD)
     let new_hash = repo.head()?.peel_to_commit()?.id().to_string();
 
-    // Step 3: Continue the rebase (abort automatically on conflict)
-    git::continue_rebase_or_abort(workdir)?;
+    // Step 3: Save resume state, then continue the rebase.
+    let ctx = RewordContext {
+        display: git::short_hash(commit_hash).to_string(),
+        new_display: git::short_hash(&new_hash).to_string(),
+    };
+    let git_dir = repo.path().to_path_buf();
+    transaction::save(
+        &git_dir,
+        &LoomState {
+            command: "reword".to_string(),
+            // Nothing to undo beyond the rebase itself: `git rebase --abort`
+            // discards the amend along with it, and reword creates no commits,
+            // branches, or saved patches of its own.
+            rollback: Rollback::default(),
+            context: serde_json::to_value(&ctx)?,
+        },
+    )?;
 
-    msg::success(&format!(
-        "Updated commit message for `{}` (now `{}`)",
-        git::short_hash(commit_hash),
-        git::short_hash(&new_hash)
-    ));
+    match git::continue_rebase(workdir)? {
+        git::RebaseOutcome::Completed => {
+            transaction::delete(&git_dir)?;
+            report_reworded(&ctx);
+        }
+        git::RebaseOutcome::Conflicted => {
+            transaction::warn_conflict_paused("reword");
+        }
+    }
 
     Ok(())
+}
+
+/// Resume a `reword` after a conflict has been resolved.
+pub fn after_continue(_workdir: &Path, context: &serde_json::Value) -> Result<()> {
+    let ctx: RewordContext =
+        serde_json::from_value(context.clone()).context("Failed to parse reword resume context")?;
+    report_reworded(&ctx);
+    Ok(())
+}
+
+fn report_reworded(ctx: &RewordContext) {
+    msg::success(&format!(
+        "Updated commit message for `{}` (now `{}`)",
+        ctx.display, ctx.new_display
+    ));
 }
 
 /// Rename a branch using git branch -m.

@@ -368,3 +368,184 @@ fn reword_branch_by_full_name_via_run() {
         "New branch should exist after rename"
     );
 }
+
+// ── Conflict pause / continue / abort ──────────────────────────────────
+
+/// Build a woven integration branch whose second merge had to be resolved by
+/// hand — the shape that makes a reword conflict.
+///
+/// Both feature branches insert a line into the same empty gap, so merging the
+/// second one conflicts. Rewording below the merges forces git to rebuild them,
+/// and with no rerere entry the merge conflicts again.
+///
+/// Returns the OID of `feature-a`'s only commit, the reword target.
+fn woven_repo_with_hand_resolved_merge(test_repo: &TestRepo) -> git2::Oid {
+    // Keep the machine's own rerere cache out of it: a recorded resolution
+    // would be replayed and the reword would not conflict at all.
+    test_repo.set_config("rerere.enabled", "false");
+
+    test_repo.write_file("shared.txt", "first\nlast\n");
+    test_repo.stage_files(&["shared.txt"]);
+    test_repo.commit_staged("Add shared file");
+    let shared_base = test_repo.head_oid().to_string();
+
+    test_repo.create_branch_at("feature-a", &shared_base);
+    test_repo.switch_branch("feature-a");
+    test_repo.write_file("shared.txt", "first\nfrom-a\nlast\n");
+    test_repo.stage_files(&["shared.txt"]);
+    test_repo.commit_staged("A1");
+    let a1 = test_repo.head_oid();
+    test_repo.switch_branch("integration");
+
+    test_repo.create_branch_at("feature-b", &shared_base);
+    test_repo.switch_branch("feature-b");
+    test_repo.write_file("shared.txt", "first\nfrom-b\nlast\n");
+    test_repo.stage_files(&["shared.txt"]);
+    test_repo.commit_staged("B1");
+    test_repo.switch_branch("integration");
+
+    test_repo.merge_no_ff("feature-a");
+
+    // The second merge conflicts; resolving it by hand is what leaves a tree no
+    // replay can reproduce on its own.
+    let workdir = test_repo.workdir();
+    let outcome = crate::git::merge_no_ff(&workdir, test_repo.repo.path(), "feature-b").unwrap();
+    assert!(
+        matches!(outcome, crate::git::MergeOutcome::Conflicted),
+        "the second merge should conflict"
+    );
+    test_repo.write_file("shared.txt", "first\nfrom-a\nfrom-b\nlast\n");
+    test_repo.stage_files(&["shared.txt"]);
+    crate::git::continue_merge(&workdir, test_repo.repo.path()).unwrap();
+
+    a1
+}
+
+fn state_path(test_repo: &TestRepo) -> std::path::PathBuf {
+    test_repo.repo.path().join("loom").join("state.json")
+}
+
+/// Rewording below a hand-resolved merge makes git rebuild that merge and hit
+/// the same conflict. The reword must pause with saved state instead of
+/// aborting, so `loom continue` can finish it once the conflict is resolved.
+#[test]
+fn reword_conflict_pauses_and_continues() {
+    let test_repo = TestRepo::new_with_remote();
+    let a1 = woven_repo_with_hand_resolved_merge(&test_repo);
+
+    let result = super::reword_commit(
+        &test_repo.repo,
+        &a1.to_string(),
+        Some("A1 reworded".to_string()),
+    );
+    assert!(
+        result.is_ok(),
+        "reword should pause, not fail: {:?}",
+        result
+    );
+    assert!(
+        state_path(&test_repo).exists(),
+        "loom state must exist while the reword is paused"
+    );
+    assert!(
+        crate::git::rebase_is_in_progress(test_repo.repo.path()),
+        "the rebase should still be paused for the user"
+    );
+
+    // Resolve the replayed merge the same way it was resolved originally.
+    test_repo.write_file("shared.txt", "first\nfrom-a\nfrom-b\nlast\n");
+    test_repo.stage_files(&["shared.txt"]);
+
+    let workdir = test_repo.workdir();
+    let git_dir = test_repo.repo.path().to_path_buf();
+    crate::core::transaction::continue_cmd(&workdir, &git_dir).unwrap();
+
+    assert!(
+        !state_path(&test_repo).exists(),
+        "state must be cleared once the reword completes"
+    );
+    assert!(!crate::git::rebase_is_in_progress(test_repo.repo.path()));
+    assert!(
+        test_repo
+            .commit_messages()
+            .contains(&"A1 reworded".to_string()),
+        "reworded message should be in history, got: {:?}",
+        test_repo.commit_messages()
+    );
+    assert_eq!(
+        test_repo.read_file("shared.txt"),
+        "first\nfrom-a\nfrom-b\nlast\n",
+        "the resolution should survive"
+    );
+    assert_eq!(
+        test_repo.head_commit().parent_count(),
+        2,
+        "integration should still be a merge commit"
+    );
+}
+
+/// `loom abort` after a paused reword must undo the amend along with the
+/// rebase, leaving the original message and refs untouched.
+#[test]
+fn reword_conflict_abort_restores_original_state() {
+    let test_repo = TestRepo::new_with_remote();
+    let a1 = woven_repo_with_hand_resolved_merge(&test_repo);
+    let original_head = test_repo.head_oid();
+    let original_feature_a = test_repo.get_branch_target("feature-a");
+
+    let result = super::reword_commit(
+        &test_repo.repo,
+        &a1.to_string(),
+        Some("A1 reworded".to_string()),
+    );
+    assert!(
+        result.is_ok(),
+        "reword should pause, not fail: {:?}",
+        result
+    );
+
+    let workdir = test_repo.workdir();
+    let git_dir = test_repo.repo.path().to_path_buf();
+    crate::core::transaction::abort_cmd(&workdir, &git_dir).unwrap();
+
+    assert!(!state_path(&test_repo).exists(), "state must be cleared");
+    assert!(!crate::git::rebase_is_in_progress(test_repo.repo.path()));
+    assert_eq!(
+        test_repo.head_oid(),
+        original_head,
+        "abort must restore the original integration tip"
+    );
+    assert_eq!(
+        test_repo.get_branch_target("feature-a"),
+        original_feature_a,
+        "abort must restore feature-a"
+    );
+    assert!(
+        !test_repo
+            .commit_messages()
+            .contains(&"A1 reworded".to_string()),
+        "the amend must be undone, got: {:?}",
+        test_repo.commit_messages()
+    );
+}
+
+/// A reword that completes normally must not leave state behind for the paused
+/// -operation guard to trip over.
+#[test]
+fn reword_without_conflict_leaves_no_state() {
+    let test_repo = TestRepo::new();
+    let c1 = test_repo.commit("First commit", "file1.txt");
+    test_repo.commit("Second commit", "file2.txt");
+
+    super::reword_commit(
+        &test_repo.repo,
+        &c1.to_string(),
+        Some("Reworded first".to_string()),
+    )
+    .unwrap();
+
+    assert!(
+        !state_path(&test_repo).exists(),
+        "a clean reword must clear its state file"
+    );
+}

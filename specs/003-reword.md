@@ -55,12 +55,32 @@ ensuring hooks, configuration, and edge cases are handled correctly.
 - Preserves merge commits and empty commits
 - Stashes/restores working tree changes automatically
 - Aborts cleanly on errors, never leaving the repository in a dirty state
+- Pauses for `loom continue` if replaying the descendants conflicts
 
 **What changes:**
 
 - Target commit gets new message (and new hash)
 - All descendant commits get new hashes (but same content/messages)
 - Branch refs are updated to point to new commit hashes
+
+**Conflicts:**
+
+Rewriting the target changes the hash of every commit above it, so any merge
+commit in the way has to be rebuilt rather than reused. A merge that was
+originally resolved by hand will conflict again, because a merge commit records
+its result tree, not the resolution that produced it. (`rerere`, when enabled,
+replays the recorded resolution and the conflict resolves itself.)
+
+When that happens the reword pauses instead of discarding the amend:
+
+```
+! Conflicts detected — resolve them with git, then run:
+  `loom continue`   to complete the reword
+  `loom abort`      to cancel and restore original state
+```
+
+`loom abort` restores the original message, HEAD, and all branch refs. See
+[spec 014](014-continue-abort.md).
 
 **What stays the same:**
 
