@@ -27,7 +27,7 @@ pub use git_merge::{MergeOutcome, continue_merge, merge_abort, merge_is_in_progr
 pub use git_rebase::rebase_onto;
 pub use git_rebase::{
     RebaseOutcome, abort_after_failure, continue_rebase, continue_rebase_or_abort, rebase,
-    rebase_abort, rebase_is_in_progress,
+    rebase_abort, rebase_is_in_progress, rebase_progress,
 };
 
 use std::path::Path;

@@ -187,6 +187,17 @@ In that case:
 With neither a state file nor an in-progress rebase or merge, both still error
 with `"No loom operation is in progress"`.
 
+Other commands are blocked while such a rebase is in progress, with a message
+naming the step it stopped at:
+
+```
+A git rebase is in progress (stopped at step 32/35), but no loom operation is recorded.
+Resolve any conflicts and run `loom continue` to finish it, or `loom abort` to cancel it.
+```
+
+This replaces the bare `HEAD is detached` that `loom status` would otherwise
+report.
+
 ## Double-Conflict Behavior
 
 If `loom continue` encounters another conflict after running `git rebase
