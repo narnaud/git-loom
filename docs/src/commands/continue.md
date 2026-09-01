@@ -34,7 +34,8 @@ git loom continue
 
 1. Loads the saved state from `.git/loom/state.json`
 2. If a rebase is still in progress, runs `git rebase --continue`
-   - If that hits **another conflict**: stays paused, keeps the state file, exits successfully
+   - If that stops again (a **conflict**, or anything else): stays paused, keeps the state file, exits successfully
+   - If it only reaches the next **`edit` step**: stays paused, keeps the state file, says so
    - If it completes: moves on
 3. If no rebase is in progress (e.g. you already ran `git rebase --continue` manually): skips to dispatch
 4. Dispatches to the interrupted command's post-rebase work (restoring staged patches, printing the success message, etc.)
@@ -84,7 +85,23 @@ While a loom operation is paused, most commands are blocked. The following are s
 ## Without a Saved State File
 
 If git has a rebase or merge in progress that no loom state file describes,
-`loom continue` finishes it (`git rebase --continue`) and reports the outcome.
+`loom continue` finishes it (`git rebase --continue`) and reports the outcome —
+including a rebase that only reached the next `edit` step, below.
+
+## Pausing at an `edit` Step
+
+`git rebase --continue` exits successfully when it only advances to the next
+`edit` step, so a completed run and a rebase that is still half-done look the
+same from outside. Loom checks and says which one happened:
+
+```
+! The `loom drop` is paused at an `edit` step — finish the work there, then run:
+  `loom continue`   to carry on
+  `loom abort`      to cancel and restore original state
+```
+
+With no state file there is no command to name, so the line opens with
+"The rebase is paused at an `edit` step" instead.
 
 ## Error: No Operation in Progress
 

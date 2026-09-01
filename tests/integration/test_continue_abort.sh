@@ -194,4 +194,43 @@ gl_capture abort
 assert_exit_ok "$CODE" "untracked_stop_abort_ok"
 assert_no_state_file "untracked_stop_state_removed"
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Edit pause: git rebase --continue exits 0 while the rebase is far from over
+# ══════════════════════════════════════════════════════════════════════════════
+
+describe "edit pause: continue does not claim the rebase completed"
+setup_repo_with_remote
+for i in 1 2 3 4; do commit_file "c$i" "f$i.txt"; done
+# `sed -i` is GNU-only, so rewrite the todo through a temp file instead.
+GIT_SEQUENCE_EDITOR='f() { sed "s/^pick/edit/" "$1" > "$1.new" && mv "$1.new" "$1"; }; f' \
+    git -C "$WORK" rebase -i HEAD~3 >/dev/null 2>&1
+# c2, c3 and c4 are each an `edit`, so the rebase stops three times. HEAD
+# names the step it is sitting on, which says how far it got without reading
+# git's own rebase directory.
+assert_rebase_in_progress "edit_pause_first_stop"
+assert_head_msg "c2" "edit_pause_stopped_at_c2"
+
+gl_capture continue
+assert_exit_ok "$CODE" "edit_pause_continue_ok"
+assert_contains "$OUT" "paused at an" "edit_pause_msg"
+assert_not_contains "$OUT" "Completed" "edit_pause_no_false_success"
+assert_rebase_in_progress "edit_pause_still_rebasing"
+assert_head_msg "c3" "edit_pause_advanced_one_step"
+
+# The next continue reaches the last `edit` — still not the end of the rebase.
+gl_capture continue
+assert_exit_ok "$CODE" "edit_pause_continue2_ok"
+assert_contains "$OUT" "paused at an" "edit_pause_msg2"
+assert_not_contains "$OUT" "Completed" "edit_pause_no_false_success2"
+assert_rebase_in_progress "edit_pause_still_rebasing2"
+assert_head_msg "c4" "edit_pause_advanced_two_steps"
+
+# Only past the last one does continue report completion.
+gl_capture continue
+assert_exit_ok "$CODE" "edit_pause_continue3_ok"
+assert_contains "$OUT" "Completed" "edit_pause_final_completed"
+if [[ -d "$WORK/.git/rebase-merge" ]]; then
+    fail "edit_pause_rebase_finished: rebase should be over"
+fi
+
 pass

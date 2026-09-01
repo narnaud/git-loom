@@ -252,7 +252,7 @@ fn move_commits_and_report(
 
     match move_commits_to_branch(repo, commit_hashes, branch_name) {
         Ok(RebaseOutcome::Completed) => {}
-        Ok(RebaseOutcome::Stopped) => {
+        Ok(RebaseOutcome::Stopped | RebaseOutcome::Paused) => {
             let err = git::abort_after_failure(workdir);
             // Only remove the branch once the rebase is really gone — while it
             // is still in progress the branch may be the checked-out ref.
@@ -461,7 +461,9 @@ fn run_patch_fold_commit_to_commit(
     let todo = graph.to_todo();
     git::branch_force_create(workdir, TRACK_BRANCH, target_hash)?;
 
-    if let Err(e) = weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo) {
+    if let Err(e) =
+        weave::run_rebase_expecting_edit(workdir, Some(&graph.base_oid.to_string()), &todo)
+    {
         let _ = git::branch_delete(workdir, TRACK_BRANCH);
         let _ = git::restore_staged_patch(workdir, &saved_staged);
         return Err(e);
@@ -476,7 +478,7 @@ fn run_patch_fold_commit_to_commit(
 
     let new_source_hash = git::rev_parse(workdir, "HEAD")?;
 
-    if let Err(e) = git::continue_rebase_or_abort(workdir) {
+    if let Err(e) = git::continue_rebase_expecting_edit(workdir) {
         let _ = git::branch_delete(workdir, TRACK_BRANCH);
         let _ = git::restore_staged_patch(workdir, &saved_staged);
         return Err(e);
@@ -500,7 +502,8 @@ fn run_patch_fold_commit_to_commit(
         }
     };
 
-    if let Err(e) = weave::run_rebase_or_abort(workdir, Some(&graph2.base_oid.to_string()), &todo2)
+    if let Err(e) =
+        weave::run_rebase_expecting_edit(workdir, Some(&graph2.base_oid.to_string()), &todo2)
     {
         rollback(&saved_head, &saved_refs);
         let _ = git::restore_staged_patch(workdir, &saved_staged);
@@ -516,7 +519,7 @@ fn run_patch_fold_commit_to_commit(
 
     let new_target_hash = git::rev_parse(workdir, "HEAD")?;
 
-    if let Err(e) = git::continue_rebase_or_abort(workdir) {
+    if let Err(e) = git::continue_rebase_expecting_edit(workdir) {
         rollback(&saved_head, &saved_refs);
         let _ = git::restore_staged_patch(workdir, &saved_staged);
         return Err(e);
@@ -593,7 +596,7 @@ fn run_patch_fold_commit_to_unstaged(
         graph.edit_commit(target_oid);
         let todo = graph.to_todo();
         if let Err(e) =
-            weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo)
+            weave::run_rebase_expecting_edit(workdir, Some(&graph.base_oid.to_string()), &todo)
         {
             let _ = git::restore_staged_patch(workdir, &saved_staged);
             return Err(e);
@@ -606,7 +609,7 @@ fn run_patch_fold_commit_to_unstaged(
         }
 
         new_hash = git::rev_parse(workdir, "HEAD")?;
-        git::continue_rebase_or_abort(workdir)?;
+        git::continue_rebase_expecting_edit(workdir)?;
 
         if let Err(e) = git::apply_patch(workdir, &selected_patch) {
             let _ = git::reset_hard(workdir, &saved_head);
@@ -924,6 +927,10 @@ fn fold_files_into_commit(
                 new_hash = git::rev_parse(workdir, TRACK_BRANCH)?;
                 let _ = git::branch_delete(workdir, TRACK_BRANCH);
             }
+            RebaseOutcome::Paused => {
+                transaction::warn_paused_at_edit(Some(COMMAND));
+                return Ok(());
+            }
             RebaseOutcome::Stopped => {
                 transaction::warn_conflict_paused(workdir, COMMAND);
                 return Ok(());
@@ -991,6 +998,9 @@ fn fold_commit_into_commit(repo: &Repository, source_hash: &str, target_hash: &s
                 git::short_hash(&new_hash)
             ));
         }
+        RebaseOutcome::Paused => {
+            transaction::warn_paused_at_edit(Some(COMMAND));
+        }
         RebaseOutcome::Stopped => {
             transaction::warn_conflict_paused(workdir, COMMAND);
         }
@@ -1025,6 +1035,9 @@ fn fold_commit_to_branch(repo: &Repository, commit_hash: &str, branch_name: &str
                 branch_name,
                 git::short_hash(&new_hash)
             ));
+        }
+        RebaseOutcome::Paused => {
+            transaction::warn_paused_at_edit(Some(COMMAND));
         }
         RebaseOutcome::Stopped => {
             transaction::warn_conflict_paused(workdir, COMMAND);
@@ -1150,7 +1163,7 @@ fn fold_commit_file_to_unstaged(repo: &Repository, commit_hash: &str, path: &str
         graph.edit_commit(target_oid);
 
         let todo = graph.to_todo();
-        weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo)?;
+        weave::run_rebase_expecting_edit(workdir, Some(&graph.base_oid.to_string()), &todo)?;
 
         if let Err(e) = apply_and_amend_path(workdir, &file_diff, path, true) {
             let _ = git::rebase_abort(workdir);
@@ -1159,7 +1172,7 @@ fn fold_commit_file_to_unstaged(repo: &Repository, commit_hash: &str, path: &str
 
         new_hash = git::rev_parse(workdir, "HEAD")?;
 
-        git::continue_rebase_or_abort(workdir)?;
+        git::continue_rebase_expecting_edit(workdir)?;
 
         // Re-apply changes to working tree
         if let Err(e) = git::apply_patch(workdir, &file_diff) {
@@ -1243,7 +1256,7 @@ fn fold_commit_file_to_commit(
         git::branch_force_create(workdir, TRACK_BRANCH, target_hash)?;
 
         if let Err(e) =
-            weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo)
+            weave::run_rebase_expecting_edit(workdir, Some(&graph.base_oid.to_string()), &todo)
         {
             let _ = git::branch_delete(workdir, TRACK_BRANCH);
             return Err(e);
@@ -1259,7 +1272,7 @@ fn fold_commit_file_to_commit(
         // it will be tracked through phase 2 via a temp branch.
         let phase1_source_hash = git::rev_parse(workdir, "HEAD")?;
 
-        if let Err(e) = git::continue_rebase_or_abort(workdir) {
+        if let Err(e) = git::continue_rebase_expecting_edit(workdir) {
             let _ = git::branch_delete(workdir, TRACK_BRANCH);
             return Err(e);
         }
@@ -1283,7 +1296,7 @@ fn fold_commit_file_to_commit(
         let todo2 = graph2.to_todo();
 
         if let Err(e) =
-            weave::run_rebase_or_abort(workdir, Some(&graph2.base_oid.to_string()), &todo2)
+            weave::run_rebase_expecting_edit(workdir, Some(&graph2.base_oid.to_string()), &todo2)
         {
             rollback(&saved_head, &saved_refs);
             return Err(e);
@@ -1297,7 +1310,7 @@ fn fold_commit_file_to_commit(
 
         new_target_hash = git::rev_parse(workdir, "HEAD")?;
 
-        if let Err(e) = git::continue_rebase_or_abort(workdir) {
+        if let Err(e) = git::continue_rebase_expecting_edit(workdir) {
             rollback(&saved_head, &saved_refs);
             return Err(e);
         }
@@ -1316,7 +1329,7 @@ fn fold_commit_file_to_commit(
         graph.edit_commit(target_oid);
 
         let todo = graph.to_todo();
-        weave::run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo)?;
+        weave::run_rebase_expecting_edit(workdir, Some(&graph.base_oid.to_string()), &todo)?;
 
         if let Err(e) = apply_and_amend_path(workdir, &file_diff, path, true) {
             let _ = git::rebase_abort(workdir);
@@ -1325,7 +1338,7 @@ fn fold_commit_file_to_commit(
 
         new_source_hash = git::rev_parse(workdir, "HEAD")?;
 
-        git::continue_rebase_or_abort(workdir)?;
+        git::continue_rebase_expecting_edit(workdir)?;
 
         if let Err(e) = apply_and_amend_path(workdir, &file_diff, path, false) {
             let _ = git::rebase_abort(workdir);
@@ -1338,7 +1351,7 @@ fn fold_commit_file_to_commit(
 
         new_target_hash = git::rev_parse(workdir, "HEAD")?;
 
-        git::continue_rebase_or_abort(workdir)?;
+        git::continue_rebase_expecting_edit(workdir)?;
     }
 
     msg::success(&format!(
@@ -1408,6 +1421,10 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
                         "Failed to apply changes to working directory, operation rolled back",
                     );
                 }
+            }
+            RebaseOutcome::Paused => {
+                transaction::warn_paused_at_edit(Some(COMMAND));
+                return Ok(());
             }
             RebaseOutcome::Stopped => {
                 transaction::warn_conflict_paused(workdir, COMMAND);

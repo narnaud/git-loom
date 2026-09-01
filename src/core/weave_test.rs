@@ -1116,3 +1116,37 @@ fn swap_commits_on_integration_line_with_interleaved_merge() {
         panic!("Expected Pick at 2");
     }
 }
+
+/// `run_rebase_or_abort` is for callers whose todo has nowhere to stop on
+/// purpose. If such a rebase does come back paused, something put a step in the
+/// todo that the caller does not know how to drive — reporting success there
+/// would leave it doing its post-rebase work on a detached, mid-rebase HEAD.
+#[test]
+fn run_rebase_or_abort_rejects_a_paused_rebase() {
+    use crate::core::test_helpers::TestRepo;
+
+    let test_repo = TestRepo::new();
+    let base = test_repo.commit("base", "base.txt");
+    let c1 = test_repo.commit("first", "a.txt");
+    let c2 = test_repo.commit("second", "b.txt");
+    let workdir = test_repo.workdir();
+    let git_dir = test_repo.repo.path().to_path_buf();
+
+    let todo = format!("label onto\n\nreset onto\nedit {c1}\npick {c2}\n");
+    let err = super::run_rebase_or_abort(&workdir, Some(&base.to_string()), &todo)
+        .expect_err("a rebase left paused must not be reported as done");
+
+    // And it cleans up after itself, rather than stranding the repository.
+    assert!(
+        !crate::git::rebase_is_in_progress(&git_dir),
+        "the failed rebase should have been aborted, got: {err}"
+    );
+
+    // The edit-driving wrapper takes the same rebase as success.
+    assert!(
+        super::run_rebase_expecting_edit(&workdir, Some(&base.to_string()), &todo).is_ok(),
+        "a caller that drives the `edit` itself expects the pause"
+    );
+    assert!(crate::git::rebase_is_in_progress(&git_dir));
+    crate::git::rebase_abort(&workdir).unwrap();
+}

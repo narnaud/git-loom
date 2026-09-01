@@ -3,9 +3,13 @@ use std::path::Path;
 use anyhow::Result;
 
 /// Outcome of a rebase operation.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum RebaseOutcome {
+    /// The rebase finished and git left no state behind.
     Completed,
+    /// git exited successfully but the rebase is still in progress: it stopped
+    /// at an `edit` or `break` step.
+    Paused,
     /// The rebase stopped part-way and git left its state on disk. A conflict
     /// is the usual reason, but not the only one — see [`abort_after_failure`].
     Stopped,
@@ -13,8 +17,9 @@ pub enum RebaseOutcome {
 
 /// Continue an in-progress rebase.
 ///
-/// Returns `Completed` if the rebase finished, or `Stopped` if it stopped
-/// again. Does NOT abort — the caller is responsible.
+/// Returns `Completed` if the rebase finished, `Paused` if it advanced to the
+/// next `edit`/`break` step, or `Stopped` if it stopped again. Does NOT abort —
+/// the caller is responsible.
 ///
 /// Sets `GIT_EDITOR=true` to suppress the editor for commit messages
 /// during `--continue` (matching the suppression applied during the
@@ -24,6 +29,11 @@ pub fn continue_rebase(workdir: &Path) -> Result<RebaseOutcome> {
     use std::time::Instant;
 
     use crate::trace as loom_trace;
+
+    // Resolve this before continuing: failing afterwards would report an error
+    // for a rebase that already moved on, and the caller would keep its state
+    // file for a step that is done.
+    let git_dir = super::absolute_git_dir(workdir)?;
 
     let start = Instant::now();
     let output = Command::new("git")
@@ -42,11 +52,17 @@ pub fn continue_rebase(workdir: &Path) -> Result<RebaseOutcome> {
         &stderr,
     );
 
-    if output.status.success() {
-        Ok(RebaseOutcome::Completed)
-    } else {
-        Ok(RebaseOutcome::Stopped)
+    if !output.status.success() {
+        return Ok(RebaseOutcome::Stopped);
     }
+
+    // Exit 0 does not mean the rebase is over: git also exits 0 when it stops
+    // at an `edit` or `break` step.
+    if rebase_is_in_progress(&git_dir) {
+        return Ok(RebaseOutcome::Paused);
+    }
+
+    Ok(RebaseOutcome::Completed)
 }
 
 /// Run a plain `git rebase` with the given extra args.
@@ -156,13 +172,16 @@ pub fn has_unmerged_paths(workdir: &Path) -> bool {
         .is_ok_and(|out| !out.trim().is_empty())
 }
 
-/// Continue an in-progress rebase, aborting automatically on conflict.
+/// Continue a rebase whose todo this caller filled with `edit` steps, aborting
+/// automatically on conflict.
 ///
-/// Used by out-of-scope callers (`fold` edit-and-continue paths,
-/// `split`, `reword`) that want the old hard-fail behavior.
-pub fn continue_rebase_or_abort(workdir: &Path) -> Result<()> {
+/// Reaching the next `edit` is the expected outcome here, so `Paused` is
+/// success. Only for callers that put those steps in the todo themselves
+/// (`fold`'s edit-and-continue and multi-phase paths, `split`) — a caller whose
+/// todo has none would take a rebase left mid-flight for a finished one.
+pub fn continue_rebase_expecting_edit(workdir: &Path) -> Result<()> {
     match continue_rebase(workdir)? {
-        RebaseOutcome::Completed => Ok(()),
+        RebaseOutcome::Completed | RebaseOutcome::Paused => Ok(()),
         RebaseOutcome::Stopped => Err(abort_after_failure(workdir)),
     }
 }

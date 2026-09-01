@@ -180,6 +180,12 @@ assert_msg_at() {
         || fail "${label:+[$label] }message at ~$steps: expected '$expected', got '$actual'"
 }
 
+assert_rebase_in_progress() {
+    local label="${1:-}"
+    [[ -d "$WORK/.git/rebase-merge" || -d "$WORK/.git/rebase-apply" ]] \
+        || fail "${label:+[$label] }a rebase should be in progress"
+}
+
 assert_state_file() {
     local label="${1:-}"
     [[ -f "$WORK/.git/loom/state.json" ]] \

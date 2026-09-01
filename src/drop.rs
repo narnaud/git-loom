@@ -220,6 +220,9 @@ fn drop_commit(repo: &Repository, commit_hash: &str, skip_confirm: bool) -> Resu
         RebaseOutcome::Stopped => {
             transaction::warn_conflict_paused(workdir, "drop");
         }
+        RebaseOutcome::Paused => {
+            transaction::warn_paused_at_edit(Some("drop"));
+        }
     }
 
     Ok(())
