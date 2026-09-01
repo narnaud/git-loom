@@ -32,3 +32,40 @@ fn continue_rebase_captures_output_to_trace() {
         "trace should record the continue step, got:\n{content}"
     );
 }
+
+/// A rebase whose todo still has an `edit` step ahead of it is not over when
+/// `git rebase --continue` exits 0: it merely advanced to that next step.
+/// Reporting `Completed` there would let the caller finish off a command while
+/// the repository sits detached mid-rebase.
+#[test]
+fn continue_rebase_reports_paused_at_next_edit() {
+    let test_repo = TestRepo::new();
+    let base = test_repo.commit("base", "base.txt");
+    let c1 = test_repo.commit("first", "a.txt");
+    let c2 = test_repo.commit("second", "b.txt");
+    let c3 = test_repo.commit("third", "c.txt");
+    let workdir = test_repo.workdir();
+    let git_dir = test_repo.repo.path().to_path_buf();
+
+    // Two `edit` steps: the rebase stops at the first, and continuing from it
+    // stops at the second.
+    let todo = format!("label onto\n\nreset onto\nedit {c1}\nedit {c2}\npick {c3}\n");
+    assert_eq!(
+        weave::run_rebase(&workdir, Some(&base.to_string()), &todo).unwrap(),
+        super::RebaseOutcome::Paused,
+        "the rebase stops at the first `edit`, it has not completed"
+    );
+
+    assert_eq!(
+        super::continue_rebase(&workdir).unwrap(),
+        super::RebaseOutcome::Paused,
+        "the second `edit` is still ahead — the rebase is not over"
+    );
+
+    // Only once the last `edit` is passed does it actually finish.
+    assert_eq!(
+        super::continue_rebase(&workdir).unwrap(),
+        super::RebaseOutcome::Completed
+    );
+    assert!(!super::rebase_is_in_progress(&git_dir));
+}

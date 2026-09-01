@@ -154,6 +154,28 @@ pub fn warn_conflict_paused(workdir: &Path, command: &str) {
     ));
 }
 
+/// Emit the warning for a rebase that reached an `edit` step: git exits 0
+/// there, but the rebase is not over.
+///
+/// `command` is the loom command the rebase belongs to, or `None` when there is
+/// no state file to say which one it was.
+pub fn warn_paused_at_edit(command: Option<&str>) {
+    let owner = match command {
+        Some(c) => format!("The `loom {}` is paused at an `edit` step", c),
+        None => "The rebase is paused at an `edit` step".to_string(),
+    };
+    crate::core::agent_mode::note_paused(
+        &owner,
+        "finish the work there, then run: loom continue (or loom abort)",
+    );
+    crate::core::msg::warn_reported(&format!(
+        "{} — finish the work there, then run:\n\
+         `loom continue`   to carry on\n\
+         `loom abort`      to cancel and restore original state",
+        owner
+    ));
+}
+
 /// Emit the still-paused warning after a `loom continue` stopped again.
 fn warn_still_paused(workdir: &Path) {
     if !git::has_unmerged_paths(workdir) {
@@ -205,6 +227,10 @@ pub fn continue_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
 
     if git::rebase_is_in_progress(git_dir) {
         match git::continue_rebase(workdir)? {
+            git::RebaseOutcome::Paused => {
+                warn_paused_at_edit(Some(&state.command));
+                return Ok(());
+            }
             git::RebaseOutcome::Stopped => {
                 warn_still_paused(workdir);
                 return Ok(());
@@ -269,6 +295,10 @@ fn continue_without_state(workdir: &Path, git_dir: &Path) -> Result<()> {
 
     if git::rebase_is_in_progress(git_dir) {
         match git::continue_rebase(workdir)? {
+            git::RebaseOutcome::Paused => {
+                warn_paused_at_edit(None);
+                return Ok(());
+            }
             git::RebaseOutcome::Stopped => {
                 warn_still_paused(workdir);
                 return Ok(());
@@ -379,5 +409,56 @@ mod tests {
         assert!(!state_path(dir.path()).exists());
         // Second delete is a no-op
         delete(dir.path()).unwrap();
+    }
+
+    /// A rebase paused at an `edit` step is not a finished one: `continue_cmd`
+    /// must keep the state file and leave the command's post-rebase work for
+    /// later, however successfully `git rebase --continue` exits.
+    #[test]
+    fn continue_keeps_state_when_the_rebase_only_reaches_an_edit() {
+        let test_repo = crate::core::test_helpers::TestRepo::new();
+        let first = test_repo.commit("first", "a.txt");
+        test_repo.commit("second", "b.txt");
+        test_repo.commit("third", "c.txt");
+        let workdir = test_repo.workdir();
+        let git_dir = test_repo.repo.path().to_path_buf();
+
+        // Every commit an `edit`, so the rebase stops twice: once now, and
+        // once more when `loom continue` runs `git rebase --continue`.
+        crate::git::run_git(
+            &workdir,
+            &[
+                "-c",
+                // `sed -i` is GNU-only; rewrite through a temp file instead.
+                "sequence.editor=f() { sed 's/^pick/edit/' \"$1\" > \"$1.new\" && mv \"$1.new\" \"$1\"; }; f",
+                "rebase",
+                "-i",
+                &first.to_string(),
+            ],
+        )
+        .unwrap();
+
+        // The context is null, which `drop::after_continue` cannot parse: if
+        // the dispatch runs at all, the test fails.
+        save(
+            &git_dir,
+            &LoomState {
+                command: "drop".to_string(),
+                rollback: Rollback::default(),
+                context: serde_json::Value::Null,
+            },
+        )
+        .unwrap();
+
+        continue_cmd(&workdir, &git_dir).unwrap();
+
+        assert!(
+            crate::git::rebase_is_in_progress(&git_dir),
+            "the rebase only advanced to the next `edit` step"
+        );
+        assert!(
+            state_path(&git_dir).exists(),
+            "the state must survive a rebase that is still in progress"
+        );
     }
 }

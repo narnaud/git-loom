@@ -1131,7 +1131,7 @@ pub fn start_edit_rebase(repo: &Repository, workdir: &Path, commit_oid: Oid) -> 
     if let Ok(mut graph) = Weave::from_repo(repo) {
         graph.edit_commit(commit_oid);
         let todo = graph.to_todo();
-        return run_rebase_or_abort(workdir, Some(&graph.base_oid.to_string()), &todo);
+        return run_rebase_expecting_edit(workdir, Some(&graph.base_oid.to_string()), &todo);
     }
 
     // Fallback: build a minimal linear todo for non-integration repos
@@ -1198,16 +1198,21 @@ fn build_and_run_linear_edit(repo: &Repository, workdir: &Path, commit_oid: Oid)
         todo.push('\n');
     }
 
-    run_rebase_or_abort(workdir, upstream.as_deref(), &todo)
+    run_rebase_expecting_edit(workdir, upstream.as_deref(), &todo)
 }
 
 /// Outcome of a weave-based rebase.
 pub use crate::git::RebaseOutcome;
 
-/// Execute a weave-based rebase, aborting automatically on conflict.
+/// Execute a weave-based rebase, aborting automatically if it stops.
 ///
-/// This is the legacy wrapper for out-of-scope callers (`reword`, `split`,
-/// and excluded `fold` paths). Use `run_rebase` directly for resumable commands.
+/// The rebase is expected to run to the end: a todo with no `edit` or `break`
+/// in it has nowhere to stop on purpose, so anything short of `Completed` is a
+/// failure. Callers that do drive `edit` steps want
+/// [`run_rebase_expecting_edit`] instead.
+///
+/// For out-of-scope callers — the ones that do not save `LoomState` and so
+/// cannot be resumed. Use `run_rebase` directly for resumable commands.
 pub fn run_rebase_or_abort(
     workdir: &Path,
     upstream: Option<&str>,
@@ -1215,6 +1220,23 @@ pub fn run_rebase_or_abort(
 ) -> Result<()> {
     match run_rebase(workdir, upstream, todo_content)? {
         RebaseOutcome::Completed => Ok(()),
+        RebaseOutcome::Stopped | RebaseOutcome::Paused => Err(git::abort_after_failure(workdir)),
+    }
+}
+
+/// Execute a weave-based rebase whose todo this caller filled with `edit`
+/// steps, aborting automatically if it stops for any other reason.
+///
+/// Stopping at the first `edit` is the point of the call, so `Paused` is
+/// success. The caller drives the rebase from there and finishes it with
+/// [`git::continue_rebase_expecting_edit`].
+pub fn run_rebase_expecting_edit(
+    workdir: &Path,
+    upstream: Option<&str>,
+    todo_content: &str,
+) -> Result<()> {
+    match run_rebase(workdir, upstream, todo_content)? {
+        RebaseOutcome::Completed | RebaseOutcome::Paused => Ok(()),
         RebaseOutcome::Stopped => Err(git::abort_after_failure(workdir)),
     }
 }
@@ -1229,8 +1251,9 @@ pub fn run_rebase_or_abort(
 /// `<upstream>` argument to `git rebase`, NOT with a `^` suffix. For root
 /// commits, pass `None` to use `--root`.
 ///
-/// Returns `RebaseOutcome::Completed` on success, `RebaseOutcome::Stopped`
-/// if the rebase stopped due to a conflict. Does NOT abort on conflict.
+/// Returns `RebaseOutcome::Completed` once the rebase is over,
+/// `RebaseOutcome::Paused` if it stopped at an `edit` step the todo asked for,
+/// and `RebaseOutcome::Stopped` if it stopped part-way. Does NOT abort.
 pub fn run_rebase(
     workdir: &Path,
     upstream: Option<&str>,
@@ -1246,6 +1269,12 @@ pub fn run_rebase(
     // against moving a branch checked out in another worktree, so do it here,
     // before anything is rewritten.
     git::ensure_not_checked_out_elsewhere(workdir, &rewritten_branches(workdir, todo_content))?;
+
+    // Resolve the git dir up front. Both exits below need it to tell a finished
+    // rebase from one still on disk, and failing here — before anything is
+    // rewritten — is harmless, while failing afterwards would strand a
+    // resumable command's state file with its rebase already done.
+    let git_dir = git::absolute_git_dir(workdir)?;
 
     let self_exe = git::loom_exe_path()?;
 
@@ -1329,22 +1358,23 @@ pub fn run_rebase(
         // Clean up the temp file — don't abort the rebase here; callers
         // decide whether to abort (out-of-scope) or pause (resumable).
         let _ = temp_path.close();
-        // Distinguish a genuine merge conflict (git left rebase state on disk)
-        // from a generic failure (bad todo, missing ref, sequence-editor error).
-        // The plain `git rebase` wrapper uses the same check.
-        if let Ok(git_dir_str) = git::run_git_stdout(workdir, &["rev-parse", "--absolute-git-dir"])
-        {
-            let git_dir = std::path::Path::new(git_dir_str.trim());
-            if git::rebase_is_in_progress(git_dir) {
-                return Ok(RebaseOutcome::Stopped);
-            }
+        // Distinguish a rebase that stopped part-way (git left its state on
+        // disk) from a generic failure (bad todo, missing ref, sequence-editor
+        // error). The plain `git rebase` wrapper uses the same check.
+        if git::rebase_is_in_progress(&git_dir) {
+            return Ok(RebaseOutcome::Stopped);
         }
-        let stderr_msg = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("git rebase failed: {}", stderr_msg.trim());
+        anyhow::bail!("git rebase failed");
     }
 
     // Clean up the temp file
     let _ = temp_path.close();
+
+    // Exit 0 does not mean the rebase is over: git also exits 0 when the todo
+    // stops it at an `edit` step.
+    if git::rebase_is_in_progress(&git_dir) {
+        return Ok(RebaseOutcome::Paused);
+    }
 
     Ok(RebaseOutcome::Completed)
 }

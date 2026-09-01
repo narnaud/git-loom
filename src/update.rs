@@ -138,6 +138,10 @@ pub fn run(skip_confirm: bool) -> Result<()> {
             spinner.error("Rebase paused");
             transaction::warn_conflict_paused(&workdir, "update");
         }
+        Ok(RebaseOutcome::Paused) => {
+            spinner.error("Rebase paused");
+            transaction::warn_paused_at_edit(Some("update"));
+        }
         Err(e) => {
             let _ = git::rebase_abort(&workdir);
             transaction::delete(&git_dir)?;

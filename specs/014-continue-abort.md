@@ -67,6 +67,25 @@ instead of telling the user to resolve conflicts that do not exist. This
 applies both to the pause message of a resumable command and to the error an
 out-of-scope command reports after aborting.
 
+## Exit 0 Is Not "Finished"
+
+`git rebase --continue` exits 0 both when the rebase is over and when it merely
+advances to the next `edit`/`break` step, so the outcome of a rebase has three
+states, not two: finished, paused at a step the todo asked for, and stopped
+part-way.
+
+Which of the last two counts as success depends on the caller, so the two are
+never merged into one outcome:
+
+- A command that put the `edit` steps in the todo itself (`split`, the
+  edit-and-continue and multi-phase `fold` paths) drives them one by one, so
+  reaching the next pause is the expected result.
+- A command whose todo has no such step has nowhere to stop on purpose. A pause
+  there means the rebase is still mid-flight, and treating it as finished would
+  run the command's post-rebase work on a detached HEAD.
+- `loom continue` reports the pause, names the command it belongs to, and leaves
+  the state file in place.
+
 ## Paused Operation Lifecycle
 
 ```

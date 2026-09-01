@@ -27,12 +27,12 @@ pub use git_merge::{MergeOutcome, continue_merge, merge_abort, merge_is_in_progr
 #[cfg(test)]
 pub use git_rebase::rebase_onto;
 pub use git_rebase::{
-    RebaseOutcome, abort_after_failure, continue_rebase, continue_rebase_or_abort,
+    RebaseOutcome, abort_after_failure, continue_rebase, continue_rebase_expecting_edit,
     has_unmerged_paths, rebase, rebase_abort, rebase_is_in_progress, rebase_progress,
 };
 pub use git_worktree::ensure_not_checked_out_elsewhere;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
@@ -42,6 +42,17 @@ use crate::trace as loom_trace;
 
 /// Minimum Git version required (--update-refs was added in 2.38).
 const MIN_GIT_VERSION: (u32, u32) = (2, 38);
+
+/// Absolute path of the git dir for `workdir`.
+///
+/// Always asks git: a linked worktree has a `.git` file pointing into the main
+/// repository rather than a directory, and `GIT_DIR` in the environment
+/// overrides both. Guessing `workdir/.git` would disagree with git in either
+/// case, and loom does run under a git-set environment as the sequence editor.
+pub fn absolute_git_dir(workdir: &Path) -> Result<PathBuf> {
+    let out = run_git_stdout(workdir, &["rev-parse", "--absolute-git-dir"])?;
+    Ok(PathBuf::from(out.trim()))
+}
 
 /// Run a git command, capture output, trace-log it, and bail on failure.
 fn run_git_captured(workdir: &Path, args: &[&str]) -> Result<std::process::Output> {

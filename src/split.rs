@@ -211,7 +211,7 @@ fn perform_non_head_with(
     // Continue the rebase — later commits are replayed on top of the split
     // commits, so hash1 and hash2 remain valid (they are ancestors).
     // Abort automatically on conflict — split does not save LoomState.
-    git::continue_rebase_or_abort(workdir)?;
+    git::continue_rebase_expecting_edit(workdir)?;
     Ok(result)
 }
 

@@ -155,6 +155,9 @@ pub fn run(
         RebaseOutcome::Stopped => {
             transaction::warn_conflict_paused(&workdir, "commit");
         }
+        RebaseOutcome::Paused => {
+            transaction::warn_paused_at_edit(Some("commit"));
+        }
     }
 
     Ok(())
