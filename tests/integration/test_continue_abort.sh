@@ -118,4 +118,40 @@ assert_eq "$OLD_HEAD" "$new_head" "update_abort_head_restored"
 # Upstream commit must NOT be in local log
 assert_log_not_contains "Upstream change" "update_abort_upstream_gone"
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Stray rebase: git has a rebase in progress but no loom state file
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Leave a plain `git rebase` paused on a conflict, with no loom state file.
+setup_stray_rebase() {
+    setup_conflict
+    STRAY_HEAD="$(head_hash)"
+    local upstream
+    upstream="$(git -C "$WORK" rev-parse --abbrev-ref --symbolic-full-name @{u})"
+    git -C "$WORK" fetch -q origin
+    git -C "$WORK" rebase "$upstream" >/dev/null 2>&1 || true
+    [[ -d "$WORK/.git/rebase-merge" || -d "$WORK/.git/rebase-apply" ]] \
+        || { echo "[NOK] setup_stray_rebase: no rebase in progress"; exit 1; }
+}
+
+describe "stray rebase: abort cancels it"
+setup_stray_rebase
+gl_capture abort
+assert_exit_ok "$CODE" "stray_abort_ok"
+assert_contains "$OUT" "Aborted" "stray_abort_msg"
+assert_eq "$STRAY_HEAD" "$(head_hash)" "stray_abort_head_restored"
+if [[ -d "$WORK/.git/rebase-merge" ]]; then
+    echo "[NOK] stray_abort_rebase_gone"
+    exit 1
+fi
+
+describe "stray rebase: continue finishes it"
+setup_stray_rebase
+echo "resolved content" > "$WORK/conflict.txt"
+git -C "$WORK" add conflict.txt
+gl_capture continue
+assert_exit_ok "$CODE" "stray_continue_ok"
+assert_log_contains "Upstream change" "stray_continue_upstream_in_log"
+assert_log_contains "Local change" "stray_continue_local_in_log"
+
 pass

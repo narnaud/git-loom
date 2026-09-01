@@ -140,7 +140,8 @@ Run `loom abort` to discard it instead.
 loom continue
 ```
 
-1. Loads `.git/loom/state.json`. Errors if the file does not exist.
+1. Loads `.git/loom/state.json`. If the file does not exist, falls back to the
+   stateless path below.
 2. If a rebase is still in progress (`MERGE_HEAD` or `rebase-merge/` exists):
    - Runs `git rebase --continue`.
    - If `--continue` encounters another conflict: stays paused, keeps the state
@@ -157,7 +158,8 @@ loom continue
 loom abort
 ```
 
-1. Loads `.git/loom/state.json`. Errors if the file does not exist.
+1. Loads `.git/loom/state.json`. If the file does not exist, falls back to the
+   stateless path below.
 2. Aborts the active rebase if one is in progress.
 3. Applies shared rollback:
    - Hard-resets HEAD to `saved_head`
@@ -168,6 +170,23 @@ loom abort
 4. Deletes the state file.
 5. Reports success.
 
+## Stateless Continue and Abort
+
+Git can be left with a rebase or merge in progress that no state file describes:
+an out-of-scope command whose own abort failed (a stale `index.lock`, a
+concurrent git process), a loom process killed before it could save state, or a
+rebase the user started with raw git.
+
+In that case:
+
+- `loom continue` runs `git rebase --continue` (or `git merge --continue`) and
+  reports the outcome, pausing again if another conflict comes up.
+- `loom abort` runs `git rebase --abort` (or `git merge --abort`). If the abort
+  itself fails, the error says so instead of claiming success.
+
+With neither a state file nor an in-progress rebase or merge, both still error
+with `"No loom operation is in progress"`.
+
 ## Double-Conflict Behavior
 
 If `loom continue` encounters another conflict after running `git rebase
@@ -177,10 +196,9 @@ many times as needed until the rebase completes.
 
 ## Missing or Corrupted State
 
-- **`loom continue` with no state file**: Errors with
-  `"No loom operation is in progress"`.
-- **`loom abort` with no state file**: Errors with
-  `"No loom operation is in progress"`.
+- **`loom continue` / `loom abort` with no state file**: See "Stateless Continue
+  and Abort" — they act on an in-progress rebase or merge, and error with
+  `"No loom operation is in progress"` when there is none.
 - **Corrupted state file**: Both commands error with a descriptive parse
   failure message. The user must recover manually using `git rebase --abort`
   if a rebase is in progress.

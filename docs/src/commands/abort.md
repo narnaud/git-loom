@@ -41,7 +41,20 @@ After aborting a `commit`, the committed content is returned to the **working
 tree as unstaged changes** (via `git reset --mixed`) rather than being
 discarded. Your work is preserved; the commit is simply undone.
 
+## Without a Saved State File
+
+If git has a rebase or merge in progress that no loom state file describes — a
+command that failed before it could save state, or a rebase you started with
+raw git — `loom abort` cancels it anyway:
+
+```bash
+git loom abort
+# ✓ Aborted the rebase in progress
+```
+
 ## Error: No Operation in Progress
+
+With neither a state file nor a rebase or merge in progress:
 
 ```bash
 git loom abort
