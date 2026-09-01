@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 
 /// Outcome of a rebase operation.
 pub enum RebaseOutcome {
@@ -107,6 +107,34 @@ pub fn rebase_is_in_progress(git_dir: &Path) -> bool {
     git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists()
 }
 
+/// Abort a rebase that failed, and build the error to report.
+///
+/// Two things the caller cannot assume: the rebase may have stopped for a
+/// reason other than a conflict (a stale `index.lock`, a concurrent git
+/// process), and the abort itself may fail — saying "aborted" then would strand
+/// the user in a half-rewritten repository.
+pub fn abort_after_failure(workdir: &Path) -> anyhow::Error {
+    let conflicted = has_unmerged_paths(workdir);
+    match rebase_abort(workdir) {
+        Ok(()) if conflicted => anyhow::anyhow!("Rebase failed with conflicts — aborted"),
+        Ok(()) => anyhow::anyhow!(
+            "Rebase stopped before finishing — aborted\n\
+             Run `loom trace` to see why"
+        ),
+        Err(_) => anyhow::anyhow!(
+            "Rebase failed, and `git rebase --abort` failed too — the repository is left mid-rebase.\n\
+             Check that no other git process is running, then run `loom abort`."
+        ),
+    }
+}
+
+/// Whether the index has unmerged entries — i.e. the operation really did stop
+/// on a conflict.
+fn has_unmerged_paths(workdir: &Path) -> bool {
+    super::run_git_stdout(workdir, &["diff", "--name-only", "--diff-filter=U"])
+        .is_ok_and(|out| !out.trim().is_empty())
+}
+
 /// Continue an in-progress rebase, aborting automatically on conflict.
 ///
 /// Used by out-of-scope callers (`fold` edit-and-continue paths,
@@ -114,10 +142,7 @@ pub fn rebase_is_in_progress(git_dir: &Path) -> bool {
 pub fn continue_rebase_or_abort(workdir: &Path) -> Result<()> {
     match continue_rebase(workdir)? {
         RebaseOutcome::Completed => Ok(()),
-        RebaseOutcome::Conflicted => {
-            let _ = rebase_abort(workdir);
-            bail!("Rebase failed with conflicts — aborted");
-        }
+        RebaseOutcome::Conflicted => Err(abort_after_failure(workdir)),
     }
 }
 

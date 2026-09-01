@@ -1161,10 +1161,7 @@ pub fn run_rebase_or_abort(
 ) -> Result<()> {
     match run_rebase(workdir, upstream, todo_content)? {
         RebaseOutcome::Completed => Ok(()),
-        RebaseOutcome::Conflicted => {
-            let _ = git::rebase_abort(workdir);
-            bail!("Rebase failed with conflicts — aborted");
-        }
+        RebaseOutcome::Conflicted => Err(git::abort_after_failure(workdir)),
     }
 }
 
