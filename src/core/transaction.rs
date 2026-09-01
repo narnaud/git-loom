@@ -107,11 +107,6 @@ pub fn load(git_dir: &Path) -> Result<Option<LoomState>> {
     Ok(Some(state))
 }
 
-/// Load the state file, erroring if it does not exist.
-pub fn load_required(git_dir: &Path) -> Result<LoomState> {
-    load(git_dir)?.with_context(|| "No loom operation is in progress".to_string())
-}
-
 /// Delete the state file.
 ///
 /// No-ops if the file does not exist.
@@ -172,7 +167,9 @@ pub fn abort_run() -> Result<()> {
 /// 3. Otherwise dispatches to the command-specific `after_continue` handler.
 /// 4. Deletes state only after dispatch succeeds.
 pub fn continue_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
-    let state = load_required(git_dir)?;
+    let Some(state) = load(git_dir)? else {
+        return continue_without_state(workdir, git_dir);
+    };
 
     if git::rebase_is_in_progress(git_dir) {
         match git::continue_rebase(workdir)? {
@@ -208,7 +205,9 @@ pub fn continue_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
 ///    restoring saved patches).
 /// 3. Deletes state.
 pub fn abort_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
-    let state = load_required(git_dir)?;
+    let Some(state) = load(git_dir)? else {
+        return abort_without_state(workdir, git_dir);
+    };
 
     if git::rebase_is_in_progress(git_dir) {
         let _ = git::rebase_abort(workdir);
@@ -223,6 +222,58 @@ pub fn abort_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
         "Aborted `loom {}` and restored original state",
         state.command
     ));
+    Ok(())
+}
+
+/// `loom continue` with no state file: finish a rebase or merge git still has
+/// in progress. A command whose conflict path is not resumable, or one that
+/// died before saving state, can leave one behind.
+fn continue_without_state(workdir: &Path, git_dir: &Path) -> Result<()> {
+    let what = if git::rebase_is_in_progress(git_dir) {
+        "rebase"
+    } else {
+        "merge"
+    };
+
+    if git::rebase_is_in_progress(git_dir) {
+        match git::continue_rebase(workdir)? {
+            git::RebaseOutcome::Conflicted => {
+                warn_still_paused();
+                return Ok(());
+            }
+            git::RebaseOutcome::Completed => {}
+        }
+    } else if git::merge_is_in_progress(git_dir) {
+        match git::continue_merge(workdir, git_dir)? {
+            git::MergeOutcome::Conflicted => {
+                warn_still_paused();
+                return Ok(());
+            }
+            git::MergeOutcome::Completed => {}
+        }
+    } else {
+        bail!("No loom operation is in progress");
+    }
+
+    crate::core::msg::success(&format!("Completed the {what} in progress"));
+    Ok(())
+}
+
+/// `loom abort` with no state file: cancel the rebase or merge git still has in
+/// progress, so the repository never stays stuck mid-rewrite.
+fn abort_without_state(workdir: &Path, git_dir: &Path) -> Result<()> {
+    if git::rebase_is_in_progress(git_dir) {
+        git::rebase_abort(workdir)
+            .context("`git rebase --abort` failed — is another git process running?")?;
+        crate::core::msg::success("Aborted the rebase in progress");
+    } else if git::merge_is_in_progress(git_dir) {
+        git::merge_abort(workdir)
+            .context("`git merge --abort` failed — is another git process running?")?;
+        crate::core::msg::success("Aborted the merge in progress");
+    } else {
+        bail!("No loom operation is in progress");
+    }
+
     Ok(())
 }
 
@@ -269,19 +320,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let result = load(dir.path()).unwrap();
         assert!(result.is_none());
-    }
-
-    #[test]
-    fn load_required_errors_on_missing() {
-        let dir = tempfile::tempdir().unwrap();
-        let result = load_required(dir.path());
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("No loom operation is in progress")
-        );
     }
 
     #[test]

@@ -80,7 +80,14 @@ While a loom operation is paused, most commands are blocked. The following are s
 - `continue` — resume the paused operation
 - `abort` — cancel the paused operation
 
+## Without a Saved State File
+
+If git has a rebase or merge in progress that no loom state file describes,
+`loom continue` finishes it (`git rebase --continue`) and reports the outcome.
+
 ## Error: No Operation in Progress
+
+With neither a state file nor a rebase or merge in progress:
 
 ```bash
 git loom continue
