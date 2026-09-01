@@ -253,11 +253,13 @@ fn move_commits_and_report(
     match move_commits_to_branch(repo, commit_hashes, branch_name) {
         Ok(RebaseOutcome::Completed) => {}
         Ok(RebaseOutcome::Conflicted) => {
-            let _ = git::rebase_abort(workdir);
-            if created {
+            let err = git::abort_after_failure(workdir);
+            // Only remove the branch once the rebase is really gone — while it
+            // is still in progress the branch may be the checked-out ref.
+            if created && !git::rebase_is_in_progress(repo.path()) {
                 let _ = git::branch_delete(workdir, branch_name);
             }
-            bail!("Rebase failed with conflicts — aborted");
+            return Err(err);
         }
         Err(e) => {
             if created {
