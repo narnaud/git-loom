@@ -55,6 +55,18 @@ The state file contains:
 
 The `.git/loom/` directory is created lazily when state is first saved.
 
+## Why a Rebase Stops
+
+A conflict is the usual reason a rebase stops, but not the only one: an
+untracked file in the way of a picked commit, a stale `index.lock`, a
+permission or disk error all leave the rebase paused with a clean index.
+
+Loom therefore checks for unmerged paths before describing the pause. With
+none, the message says the rebase stopped part-way and points at `loom trace`
+instead of telling the user to resolve conflicts that do not exist. This
+applies both to the pause message of a resumable command and to the error an
+out-of-scope command reports after aborting.
+
 ## Paused Operation Lifecycle
 
 ```

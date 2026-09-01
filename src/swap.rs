@@ -61,8 +61,8 @@ fn swap_two_commits(repo: &Repository, hash_a: String, hash_b: String) -> Result
                 display_a, display_b
             ));
         }
-        RebaseOutcome::Conflicted => {
-            transaction::warn_conflict_paused("swap");
+        RebaseOutcome::Stopped => {
+            transaction::warn_conflict_paused(workdir, "swap");
         }
     }
 

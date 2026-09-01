@@ -77,13 +77,14 @@ setup_conflict
 
 gl_capture update
 assert_state_file "state_file_exists_after_conflict"
+assert_contains "$OUT" "Conflicts detected" "update_conflict_msg"
 assert_contains "$OUT" "loom continue" "update_conflict_continue_hint"
 assert_contains "$OUT" "loom abort"    "update_conflict_abort_hint"
 
-# A blocked command during a real pause reports the conflict, not a stale state
+# A blocked command during a real pause reports the live operation, not a stale state
 gl_capture status
 assert_exit_fail "$CODE" "blocked_during_conflict"
-assert_contains "$OUT" "paused due to conflicts" "blocked_during_conflict_hint"
+assert_contains "$OUT" "still in progress" "blocked_during_conflict_hint"
 
 # Resolve the conflict and stage it
 echo "resolved content" > "$WORK/conflict.txt"
@@ -160,5 +161,37 @@ gl_capture continue
 assert_exit_ok "$CODE" "stray_continue_ok"
 assert_log_contains "Upstream change" "stray_continue_upstream_in_log"
 assert_log_contains "Local change" "stray_continue_local_in_log"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Non-conflict stop: an untracked file blocks the rebase, nothing is conflicted
+# ══════════════════════════════════════════════════════════════════════════════
+
+describe "untracked file in the way: the pause message does not claim conflicts"
+setup_repo_with_remote
+echo "committed content" > "$WORK/foo.txt"
+git -C "$WORK" add foo.txt
+git -C "$WORK" commit -q -m "add foo.txt"
+git -C "$WORK" rm -q foo.txt
+git -C "$WORK" commit -q -m "delete foo.txt"
+DELETE_COMMIT="$(git -C "$WORK" rev-parse --short HEAD)"
+# Dropping the delete re-picks "add foo.txt", which this untracked file blocks.
+echo "untracked content" > "$WORK/foo.txt"
+
+gl_capture drop "$DELETE_COMMIT" --yes
+assert_contains "$OUT" "stopped part-way" "untracked_stop_msg"
+assert_not_contains "$OUT" "Conflicts detected" "untracked_stop_no_conflict_claim"
+assert_state_file "untracked_stop_state_file"
+
+# The file is still in the way, so the continue stops again — with a clean
+# index, which the "conflicts remain" message would misdescribe.
+gl_capture continue
+assert_exit_ok "$CODE" "untracked_continue_ok"
+assert_contains "$OUT" "stopped again" "untracked_continue_msg"
+assert_not_contains "$OUT" "Conflicts remain" "untracked_continue_no_conflict_claim"
+assert_state_file "untracked_continue_state_file"
+
+gl_capture abort
+assert_exit_ok "$CODE" "untracked_stop_abort_ok"
+assert_no_state_file "untracked_stop_state_removed"
 
 pass

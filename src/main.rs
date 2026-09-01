@@ -423,8 +423,8 @@ struct BranchNewArgs {
 fn paused_state_message(command: &str, interrupted: bool) -> String {
     if interrupted {
         format!(
-            "A `loom {command}` is paused due to conflicts.\n\
-             Resolve them, then run `loom continue` to resume, or `loom abort` to cancel."
+            "A `loom {command}` is paused, with a rebase or merge still in progress.\n\
+             Resolve what stopped it, then run `loom continue` to resume, or `loom abort` to cancel."
         )
     } else {
         format!(

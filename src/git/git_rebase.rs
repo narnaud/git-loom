@@ -6,14 +6,15 @@ use anyhow::Result;
 #[derive(Debug)]
 pub enum RebaseOutcome {
     Completed,
-    Conflicted,
+    /// The rebase stopped part-way and git left its state on disk. A conflict
+    /// is the usual reason, but not the only one — see [`abort_after_failure`].
+    Stopped,
 }
 
 /// Continue an in-progress rebase.
 ///
-/// Returns `Completed` if the rebase finished without conflicts,
-/// or `Conflicted` if a new conflict was encountered.
-/// Does NOT abort on conflict — the caller is responsible.
+/// Returns `Completed` if the rebase finished, or `Stopped` if it stopped
+/// again. Does NOT abort — the caller is responsible.
 ///
 /// Sets `GIT_EDITOR=true` to suppress the editor for commit messages
 /// during `--continue` (matching the suppression applied during the
@@ -44,15 +45,15 @@ pub fn continue_rebase(workdir: &Path) -> Result<RebaseOutcome> {
     if output.status.success() {
         Ok(RebaseOutcome::Completed)
     } else {
-        Ok(RebaseOutcome::Conflicted)
+        Ok(RebaseOutcome::Stopped)
     }
 }
 
 /// Run a plain `git rebase` with the given extra args.
 ///
 /// Returns `RebaseOutcome::Completed` on success, or
-/// `RebaseOutcome::Conflicted` if the rebase stopped due to a conflict
-/// (detected by the presence of `rebase-merge/` or `rebase-apply/`).
+/// `RebaseOutcome::Stopped` if git left its state behind (detected by the
+/// presence of `rebase-merge/` or `rebase-apply/`), whatever stopped it.
 /// Any other failure (e.g., bad args) is returned as `Err`.
 pub fn rebase(git_dir: &Path, workdir: &Path, upstream: &str) -> Result<RebaseOutcome> {
     match super::run_git(
@@ -68,7 +69,7 @@ pub fn rebase(git_dir: &Path, workdir: &Path, upstream: &str) -> Result<RebaseOu
         Ok(()) => Ok(RebaseOutcome::Completed),
         Err(e) => {
             if rebase_is_in_progress(git_dir) {
-                Ok(RebaseOutcome::Conflicted)
+                Ok(RebaseOutcome::Stopped)
             } else {
                 Err(e)
             }
@@ -150,7 +151,7 @@ pub fn abort_after_failure(workdir: &Path) -> anyhow::Error {
 
 /// Whether the index has unmerged entries — i.e. the operation really did stop
 /// on a conflict.
-fn has_unmerged_paths(workdir: &Path) -> bool {
+pub fn has_unmerged_paths(workdir: &Path) -> bool {
     super::run_git_stdout(workdir, &["diff", "--name-only", "--diff-filter=U"])
         .is_ok_and(|out| !out.trim().is_empty())
 }
@@ -162,7 +163,7 @@ fn has_unmerged_paths(workdir: &Path) -> bool {
 pub fn continue_rebase_or_abort(workdir: &Path) -> Result<()> {
     match continue_rebase(workdir)? {
         RebaseOutcome::Completed => Ok(()),
-        RebaseOutcome::Conflicted => Err(abort_after_failure(workdir)),
+        RebaseOutcome::Stopped => Err(abort_after_failure(workdir)),
     }
 }
 

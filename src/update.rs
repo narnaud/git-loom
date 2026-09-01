@@ -134,9 +134,9 @@ pub fn run(skip_confirm: bool) -> Result<()> {
             let repo2 = git2::Repository::discover(&workdir)?;
             post_update(&workdir, &repo2, &ctx)?;
         }
-        Ok(RebaseOutcome::Conflicted) => {
-            spinner.error("Rebase paused due to conflicts");
-            transaction::warn_conflict_paused("update");
+        Ok(RebaseOutcome::Stopped) => {
+            spinner.error("Rebase paused");
+            transaction::warn_conflict_paused(&workdir, "update");
         }
         Err(e) => {
             let _ = git::rebase_abort(&workdir);

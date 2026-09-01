@@ -1195,7 +1195,7 @@ pub fn run_rebase_or_abort(
 ) -> Result<()> {
     match run_rebase(workdir, upstream, todo_content)? {
         RebaseOutcome::Completed => Ok(()),
-        RebaseOutcome::Conflicted => Err(git::abort_after_failure(workdir)),
+        RebaseOutcome::Stopped => Err(git::abort_after_failure(workdir)),
     }
 }
 
@@ -1209,7 +1209,7 @@ pub fn run_rebase_or_abort(
 /// `<upstream>` argument to `git rebase`, NOT with a `^` suffix. For root
 /// commits, pass `None` to use `--root`.
 ///
-/// Returns `RebaseOutcome::Completed` on success, `RebaseOutcome::Conflicted`
+/// Returns `RebaseOutcome::Completed` on success, `RebaseOutcome::Stopped`
 /// if the rebase stopped due to a conflict. Does NOT abort on conflict.
 pub fn run_rebase(
     workdir: &Path,
@@ -1316,7 +1316,7 @@ pub fn run_rebase(
         {
             let git_dir = std::path::Path::new(git_dir_str.trim());
             if git::rebase_is_in_progress(git_dir) {
-                return Ok(RebaseOutcome::Conflicted);
+                return Ok(RebaseOutcome::Stopped);
             }
         }
         let stderr_msg = String::from_utf8_lossy(&output.stderr);

@@ -217,8 +217,8 @@ fn drop_commit(repo: &Repository, commit_hash: &str, skip_confirm: bool) -> Resu
             transaction::delete(&git_dir)?;
             msg::success(&format!("Dropped commit `{}`", short_hash));
         }
-        RebaseOutcome::Conflicted => {
-            transaction::warn_conflict_paused("drop");
+        RebaseOutcome::Stopped => {
+            transaction::warn_conflict_paused(workdir, "drop");
         }
     }
 

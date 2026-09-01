@@ -152,8 +152,8 @@ pub fn run(
             transaction::delete(&git_dir)?;
             post_commit(&workdir, &branch_name, &saved_staged)?;
         }
-        RebaseOutcome::Conflicted => {
-            transaction::warn_conflict_paused("commit");
+        RebaseOutcome::Stopped => {
+            transaction::warn_conflict_paused(&workdir, "commit");
         }
     }
 

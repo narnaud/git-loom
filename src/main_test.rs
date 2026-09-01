@@ -116,7 +116,7 @@ fn stray_rebase_message_names_the_step_and_both_ways_out() {
 #[test]
 fn paused_message_points_at_continue_and_abort() {
     let paused = paused_state_message("update", true);
-    assert!(paused.contains("paused due to conflicts"), "{paused}");
+    assert!(paused.contains("still in progress"), "{paused}");
     assert!(paused.contains("loom continue"), "{paused}");
     assert!(paused.contains("loom abort"), "{paused}");
 

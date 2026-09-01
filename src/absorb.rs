@@ -294,8 +294,8 @@ fn apply_plan(repo: &Repository, workdir: &Path, git_dir: &Path, plan: AbsorbPla
                 plan.num_commits,
             )?;
         }
-        RebaseOutcome::Conflicted => {
-            transaction::warn_conflict_paused("absorb");
+        RebaseOutcome::Stopped => {
+            transaction::warn_conflict_paused(workdir, "absorb");
         }
     }
 
