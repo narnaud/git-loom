@@ -65,9 +65,10 @@ git add shared.rs && git loom continue
 | `commit` | ✓ |
 | `absorb` | ✓ |
 | `drop <commit>` | ✓ |
+| `reword <commit>` | ✓ |
 | `fold` (simple paths) | ✓ |
 | `drop <branch>` | — (aborts immediately) |
-| `reword` | — (aborts immediately) |
+| `reword <branch>` | — (a rename never rebases) |
 | `split` | — (aborts immediately) |
 | `fold` (edit/multi-phase paths) | — (aborts immediately) |
 

@@ -17,6 +17,7 @@ The following commands support resumable conflict handling:
 - `commit`
 - `absorb`
 - `drop commit` (not `drop branch`)
+- `reword` (commit reword; branch rename never rebases)
 - Simple single-rebase `fold` paths:
   - `fold_files_into_commit` non-HEAD path
   - `fold_commit_into_commit`
@@ -29,7 +30,6 @@ The following commands retain the old hard-fail behavior: if they encounter a
 conflict they abort immediately and leave the repository in its original state:
 
 - `drop branch`
-- `reword`
 - `split`
 - `fold` edit-and-continue paths
 - `fold` multi-phase paths
@@ -253,6 +253,27 @@ message.
 ```
 
 After continue: prints the drop success message.
+
+### `reword` context
+
+```json
+{
+  "display": "<short hash of the commit before the rebase>",
+  "new_display": "<short hash the commit now has>"
+}
+```
+
+After continue: prints the reword success message.
+
+A `reword` conflicts only in its final phase. The rebase pauses at the target
+with an `edit`, the amend happens, and `git rebase --continue` then replays
+everything above — including any merge commit, whose parents have changed and
+which therefore has to be remerged from scratch. A merge that was originally
+resolved by hand conflicts again at that point, because a merge commit records
+its result tree, never the resolution that produced it.
+
+Aborting needs no `rollback` fields: the amend is made inside the rebase, so
+`git rebase --abort` discards it along with everything else.
 
 ### `fold` context
 

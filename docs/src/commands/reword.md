@@ -34,6 +34,24 @@ Changes the commit message using git's native interactive rebase. All descendant
 
 **What stays the same:** commit content (files, diffs), topology, and branches outside the ancestry chain.
 
+#### Conflicts
+
+Every commit above the target gets a new hash, so any merge commit in the way has to be rebuilt instead of reused. A merge you originally resolved by hand will conflict again — a merge commit records the tree it produced, never the resolution that produced it. (With `rerere` enabled, git replays your recorded resolution and you will usually not see the conflict at all.)
+
+When that happens the reword pauses rather than throwing away the new message:
+
+```bash
+git loom reword ab -m "Fix authentication bug"
+# ! Conflicts detected — resolve them with git, then run:
+#   `loom continue`   to complete the reword
+#   `loom abort`      to cancel and restore original state
+
+git add shared.rs && git loom continue
+# ✓ Updated commit message for `ab12cd3` (now `e45f678`)
+```
+
+`git loom abort` restores the original message, HEAD, and every branch ref. See [continue](continue.md) and [abort](abort.md).
+
 ### When Target is a Branch
 
 Renames the branch using `git branch -m`.
