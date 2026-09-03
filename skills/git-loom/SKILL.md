@@ -25,7 +25,12 @@ fine.
 3. **Always pass `-m <message>`** to `commit`, `split`, and `reword` (commit
    targets), and be explicit about targets (`-b <branch>` for commit) —
    omitted arguments would need a prompt.
-4. Interpret the JSON status:
+4. **Never use the `zz` short ID**, except as the destination of
+   `git loom fold <commit> zz` (uncommitting). Always name the files you mean:
+   `git loom add <files>`, `git loom commit -b <branch> -m "<msg>" <files...>`,
+   `git loom drop <files...>`. `zz` sweeps up every local change, including
+   unrelated edits the user did not ask you to touch.
+5. Interpret the JSON status:
    - `{"status":"ok","messages":[...]}` — success (exit 0). `messages` may
      note skipped optional follow-ups (e.g. PR creation) with how to do them.
    - `{"status":"needs_input",...}` / `{"status":"needs_confirmation",...}`
@@ -40,7 +45,7 @@ fine.
      `git loom trace` shows the underlying git commands.
    - Exit 2 with no JSON — the invocation itself was malformed (CLI usage
      error).
-5. If a `messages` entry says **this skill differs from the one loom ships**,
+6. If a `messages` entry says **this skill differs from the one loom ships**,
    run the `git-loom agent init` command it names — the skill you loaded is
    not the one this loom version expects, and may describe commands that have
    since changed. Then tell the user to restart their session to pick it up.
@@ -51,7 +56,8 @@ Run `git loom status --agent` first and after every mutation. It prints a
 graph of the integration branch, its feature branches, commits, and local
 changes — each with a **short ID**:
 
-- `zz` — the working tree / all local changes
+- `zz` — the working tree / all local changes (only ever use it as the
+  *destination* of `git loom fold <commit> zz`; see the invocation rules)
 - two letters (e.g. `fa`, `ma`) — a branch (`feature-auth`) or file (`main.rs`)
 - hex prefix (e.g. `d0`, `3ac`) — a commit (prefix of the printed hash)
 - `d0:1` — file #1 inside commit `d0` (visible with `status -f`)
@@ -65,8 +71,8 @@ branches.
 
 | Instead of | Use |
 |---|---|
-| `git add <files>` | `git loom add <files>` (`zz` = stage everything) |
-| `git commit` | `git loom commit -b <branch> -m "<msg>" [files...]` — commits onto a feature branch without leaving integration; a new branch name creates the branch; no files = the staged changes; `zz` = all changes |
+| `git add <files>` | `git loom add <files>` — list the files explicitly, never `zz` |
+| `git commit` | `git loom commit -b <branch> -m "<msg>" <files...>` — commits onto a feature branch without leaving integration; a new branch name creates the branch. Always name the files to commit (or omit them to commit exactly what you staged with `git loom add`); never `zz` |
 | `git commit --amend` (files into HEAD or any commit) | `git loom fold <files...> <commit>` (staged changes: `git loom fold <commit>`) |
 | `git rebase -i` + fixup | `git loom fold <commit> <commit>` or `git loom absorb` (auto-distributes working-tree changes into the commits that introduced those lines; `-n` for a dry run) |
 | moving a commit to another branch | `git loom fold <commit> <branch>` (`-c` creates a new branch from it) |
@@ -75,7 +81,7 @@ branches.
 | `git commit --amend -m` / editing any message | `git loom reword <commit> -m "<msg>"` |
 | renaming a branch | `git loom reword <branch> -m <new-name>` |
 | reordering commits | `git loom swap <a> <b>` |
-| `git reset` / deleting a commit or branch / discarding changes | `git loom drop <target> -y` (`zz` discards all local changes — confirm with the user first) |
+| `git reset` / deleting a commit or branch / discarding changes | `git loom drop <target> -y` — name the commit, branch, or files to drop; never `zz` |
 | creating a branch | usually just `git loom commit -b <new-name> ...`; empty branch: `git loom branch new <name>` |
 | merging a branch into integration | `git loom branch merge <branch>` / `git loom branch unmerge <branch>` |
 | `git pull --rebase` | `git loom update -y` |
@@ -96,7 +102,9 @@ the weave:
 - `git merge` into the integration branch
 
 Also never pipe answers into loom prompts and never pass `-p`/`--patch`; in
-agent mode prompts are answered by re-invoking with explicit arguments.
+agent mode prompts are answered by re-invoking with explicit arguments. And
+never pass `zz` to `add`, `commit`, `drop`, or anything else — the sole
+exception is `git loom fold <commit> zz`.
 
 ## Conflict handling
 
