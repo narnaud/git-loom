@@ -32,6 +32,18 @@ Installs a skill file at `~/.claude/skills/git-loom/SKILL.md` (or under the work
 - File differs → overwritten (`Updated Claude skill at ...`)
 - File identical → untouched (`Claude skill already up to date`)
 
+### Keeping the skill up to date
+
+The skill is compiled into the loom binary, so loom can see when an installed copy no longer matches what it ships. In agent mode every invocation checks the installed skills — the home one, plus the in-repo one when inside a work tree — and warns on any that differ:
+
+```json
+{"status":"ok","messages":["The Claude git-loom skill at `~/.claude/skills/git-loom/SKILL.md` differs from the one this loom ships. Run `git-loom agent init` to refresh it (local edits are overwritten). Restart Claude Code to pick up the new skill."]}
+```
+
+The notice exists only in the JSON — it is not printed as a `!` line, since the agent parses the JSON and would otherwise read it twice. It rides on `ok` and `paused` responses; an `error` response carries no `messages`, and the check simply reports again on the next command that succeeds. Nothing is rewritten automatically, and a location with no skill installed is never mentioned.
+
+Because the comparison is byte-for-byte, the installed skill is not a file to edit: any local change is reported as stale, and `agent init` overwrites it.
+
 ### Agent mode (`--agent`)
 
 The global `--agent` flag (or the `LOOM_AGENT` environment variable, any value except `0`) makes every loom invocation end with exactly one JSON status as the **last line of stderr**; stdout stays reserved for command payload (status graph, `show`/`diff` output).

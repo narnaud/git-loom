@@ -230,6 +230,55 @@ so refreshing it after a loom upgrade is the desired behavior (re-run
 Default target: `<home>/.claude/skills/git-loom/SKILL.md`. With `--project`:
 `<worktree>/.claude/skills/git-loom/SKILL.md`.
 
+### The staleness check
+
+The skill is embedded in the binary, so loom can always tell whether what a
+user has installed is what it ships: the installed file either matches the
+embedded one byte for byte or it does not. That is the same comparison
+`agent init` uses to decide whether to rewrite — no version number is
+involved.
+
+In agent mode — and only there — every invocation ends by checking the
+installed skills, just before the JSON status is emitted:
+
+- The locations checked are the home install and, when run inside a work tree,
+  the in-repo one. A location where no skill file exists is skipped silently:
+  a user who never ran `agent init` is not nagged.
+- A file whose content differs from the embedded skill adds one entry to the
+  JSON `messages` array:
+
+```
+The Claude git-loom skill at `<path>` differs from the one this loom ships.
+Run `git-loom agent init` to refresh it (local edits are overwritten).
+Restart Claude Code to pick up the new skill.
+```
+
+  (one line in the JSON; wrapped here for reading). The command named is
+  `git-loom agent init --project` for an in-repo install.
+- Unlike every other message, the notice is **not** also printed as a human
+  `!` line. Its only reader is the agent, which parses the JSON, and agent
+  mode is the only mode that emits it — printing it too would just make the
+  agent read the same sentence twice.
+- The notice therefore rides on the `ok` and `paused` statuses only, since an
+  `error` response carries no `messages`. Nothing is lost: the check runs on
+  every agent-mode invocation, so a stale skill is reported again on the next
+  command that succeeds.
+
+The consequence of byte comparison is that the installed skill cannot be
+edited locally: any change reads as stale and is reported until `agent init`
+overwrites it. This follows from the file already being loom-owned — the same
+edit was being silently discarded by `agent init` before this check existed.
+
+The check is advisory and never rewrites anything: loom does not touch files
+outside the repository as a side effect of an unrelated command. The agent
+relays the warning, and either runs `agent init` itself (it touches no git
+state) or lets the user decide.
+
+The check cannot fail the command it rides along with: an unresolvable home
+directory, an unreadable file, or a missing repository simply produces no
+warning. It does not run in the sequence-editor subprocess, which has agent
+mode disabled outright.
+
 ## Target Resolution
 
 Not applicable — `agent init` takes no repository identifiers, and agent mode
@@ -324,6 +373,24 @@ $ git-loom agent init
 ```
 
 ## Design Decisions
+
+### Byte comparison, not a skill version number
+
+A version marker in the skill would let the warning name what is installed and
+what is available, and would leave a locally edited skill alone. It would also
+have to be bumped by hand on every skill edit — a step that, when forgotten,
+silently defeats the whole check, and that no test can truly enforce. Byte
+comparison cannot be forgotten and reuses the comparison `agent init` already
+makes. The cost, a skill that must not be edited in place, is one the file's
+loom-owned lifecycle already imposed.
+
+### The check warns, it never auto-installs
+
+Rewriting the skill automatically would be defensible (the file is loom-owned)
+but it would make `loom commit --agent` write to the user's home directory as
+a side effect of committing. A warning in `messages` reaches the agent, which
+can run `agent init` itself or ask the user — the same outcome, with the write
+staying an explicit act.
 
 ### JSON on stderr, not stdout
 
