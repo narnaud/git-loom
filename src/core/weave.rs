@@ -154,7 +154,12 @@ impl Weave {
     /// branch sections (from merge commits) and integration-line entries.
     pub fn from_repo_with_info(repo: &Repository, info: &repo::RepoInfo) -> Result<Self> {
         let head_oid = repo::head_oid(repo)?;
-        let merge_base_oid = info.upstream.merge_base_oid;
+        let merge_base_oid = integration_base(
+            repo,
+            head_oid,
+            info.upstream.tip_oid,
+            info.upstream.merge_base_oid,
+        )?;
 
         // Walk the first-parent line from HEAD to merge-base
         let first_parent_entries = walk_first_parent_line(repo, head_oid, merge_base_oid)?;
@@ -910,6 +915,35 @@ struct FirstParentEntry {
     is_merge: bool,
     /// For merge commits: the second parent (branch being merged).
     merge_parent: Option<Oid>,
+}
+
+/// Find where the integration line meets the upstream.
+///
+/// `git merge-base` returns the best common ancestor anywhere in the graph,
+/// which is not always on the integration line. When a woven branch lands
+/// upstream as a fast-forward, the upstream tip *is* that branch's tip — a
+/// second parent — and the merge-base lands on the branch side. Walking to
+/// that base would mistake the rest of the integration line for a branch and
+/// discard the whole weave.
+///
+/// Follow first parents instead and stop at the first commit the upstream
+/// already contains: that is the integration line's own base. Falls back to
+/// `merge_base` if the line reaches a root without ever meeting the upstream.
+fn integration_base(repo: &Repository, head: Oid, upstream: Oid, merge_base: Oid) -> Result<Oid> {
+    let mut current = head;
+    loop {
+        if current == merge_base || current == upstream {
+            return Ok(current);
+        }
+        if repo.graph_descendant_of(upstream, current).unwrap_or(false) {
+            return Ok(current);
+        }
+        let commit = repo.find_commit(current)?;
+        match commit.parent_id(0) {
+            Ok(parent) => current = parent,
+            Err(_) => return Ok(merge_base),
+        }
+    }
 }
 
 /// Walk the first-parent line from `head` to `stop` (exclusive).

@@ -460,6 +460,8 @@ pub fn cwd_relative_path(repo_path: &str, cwd_prefix: &str) -> String {
 pub struct UpstreamInfo {
     /// Full name of the upstream ref (e.g. "origin/main").
     pub label: String,
+    /// Full OID of the upstream tip.
+    pub tip_oid: git2::Oid,
     /// Full OID of the merge-base commit.
     pub merge_base_oid: git2::Oid,
     /// Short hash of the merge-base commit.
@@ -692,6 +694,7 @@ fn gather(repo: &Repository, opts: GatherOpts) -> Result<RepoInfo> {
         branch_name,
         upstream: UpstreamInfo {
             label: upstream_name,
+            tip_oid: upstream_oid,
             merge_base_oid,
             base_short_id,
             base_message,

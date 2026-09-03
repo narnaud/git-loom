@@ -490,4 +490,31 @@ assert_contains "$out" "Rebased onto upstream" "full_cherry_rebased"
 assert_log_contains "Full F1" "full_cherry_f1_in_log"
 assert_log_contains "Full F2" "full_cherry_f2_in_log"
 
+# ══════════════════════════════════════════════════════════════════════════════
+# WOVEN BRANCH LANDING UPSTREAM
+# ══════════════════════════════════════════════════════════════════════════════
+
+describe "branch fast-forwarded upstream leaves the rest of the weave intact"
+setup_repo_with_remote
+create_feature_branch "stays"
+switch_to stays
+commit_file "Stays F1" "stays1.txt"
+switch_to integration
+weave_branch "stays"
+
+create_feature_branch "lands"
+switch_to lands
+commit_file "Lands F1" "lands1.txt"
+switch_to integration
+weave_branch "lands"
+
+# `lands` is merged upstream as a fast-forward: origin/main becomes its tip
+base_branch=$(git -C "$WORK" rev-parse --abbrev-ref --symbolic-full-name @{u} | sed 's|^origin/||')
+git -C "$WORK" push -q origin "lands:$base_branch"
+
+out=$(gl update 2>&1)
+assert_exit_ok $? "lands_upstream_ok"
+assert_log_contains "Stays F1" "lands_upstream_other_branch_kept"
+assert_eq "$(git -C "$WORK" rev-parse HEAD^2)" "$(git -C "$WORK" rev-parse stays)" "lands_upstream_still_woven"
+
 pass

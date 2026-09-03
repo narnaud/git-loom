@@ -1046,3 +1046,83 @@ fn update_handles_inverted_parent_merge_on_integration() {
         "HEAD should be linear after update (redundant merge dropped)"
     );
 }
+
+/// When a woven branch lands upstream as a fast-forward, `origin/main` ends up
+/// pointing at that branch's own tip — a commit that is a *second* parent on
+/// the integration line, not part of the first-parent line. The weave must
+/// still find the real base and keep every other branch section.
+///
+/// Integration topology (before update):
+///
+/// ```text
+/// *   Merge branch 'feature-b'   <- HEAD
+/// |\
+/// | * B1                         <- feature-b, and now origin/main
+/// * |   Merge branch 'feature-a'
+/// |\ \
+/// | |/
+/// | * A2                         <- feature-a
+/// | * A1
+/// |/
+/// * Initial
+/// ```
+///
+/// feature-b is fully upstream and should be unwoven, but feature-a must stay
+/// woven with both of its commits.
+#[test]
+fn update_keeps_other_branches_when_one_lands_upstream() {
+    let test_repo = TestRepo::new_with_remote();
+
+    let base_oid = test_repo.head_oid();
+    test_repo.create_branch_at_commit("feature-a", base_oid);
+    test_repo.switch_branch("feature-a");
+    test_repo.commit("A1", "a1.txt");
+    test_repo.commit("A2", "a2.txt");
+
+    test_repo.create_branch_at_commit("feature-b", base_oid);
+    test_repo.switch_branch("feature-b");
+    test_repo.commit("B1", "b1.txt");
+
+    test_repo.switch_branch("integration");
+    test_repo.merge_no_ff("feature-a");
+    test_repo.merge_no_ff("feature-b");
+
+    // feature-b lands upstream unchanged: origin/main is now feature-b's tip.
+    test_repo.push_branch_to_remote_main("feature-b");
+
+    let result = test_repo.in_dir(|| super::run(true));
+    assert!(result.is_ok(), "update failed: {:?}", result.err());
+
+    let repo = &test_repo.repo;
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+
+    assert_eq!(
+        head.parent_count(),
+        2,
+        "HEAD should still be the merge of feature-a, got `{}`",
+        head.summary().unwrap_or("")
+    );
+
+    let feature_a = repo
+        .find_branch("feature-a", BranchType::Local)
+        .unwrap()
+        .get()
+        .target()
+        .unwrap();
+    assert_eq!(
+        head.parent_id(1).unwrap(),
+        feature_a,
+        "feature-a should still be woven into integration"
+    );
+
+    // Both feature-a commits survive, rebased onto the new upstream.
+    let a2 = repo.find_commit(feature_a).unwrap();
+    assert_eq!(a2.summary().unwrap(), "A2");
+    let a1 = a2.parent(0).unwrap();
+    assert_eq!(a1.summary().unwrap(), "A1");
+    assert_eq!(
+        a1.parent_id(0).unwrap(),
+        test_repo.find_remote_branch_target("origin/main"),
+        "feature-a should be rebased onto the new upstream tip"
+    );
+}

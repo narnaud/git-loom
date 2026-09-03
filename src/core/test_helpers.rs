@@ -605,6 +605,20 @@ impl TestRepo {
             .unwrap();
     }
 
+    /// Fast-forward the remote's `main` to a local branch tip.
+    ///
+    /// Simulates a feature branch landing upstream unchanged (a fast-forward
+    /// merge of a pull request): `origin/main` ends up at the exact same OID
+    /// as the local branch.
+    pub fn push_branch_to_remote_main(&self, branch: &str) {
+        crate::git::run_git(
+            self.workdir().as_path(),
+            &["push", "origin", &format!("{}:main", branch)],
+        )
+        .unwrap();
+        self.fetch_remote();
+    }
+
     /// Create a branch at a specific commit hash.
     pub fn create_branch_at(&self, name: &str, commit_hash: &str) {
         crate::git::branch_create(self.workdir().as_path(), name, commit_hash).unwrap();
