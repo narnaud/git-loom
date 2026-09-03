@@ -40,6 +40,10 @@ fine.
      `git loom trace` shows the underlying git commands.
    - Exit 2 with no JSON — the invocation itself was malformed (CLI usage
      error).
+5. If a `messages` entry says **this skill differs from the one loom ships**,
+   run the `git-loom agent init` command it names — the skill you loaded is
+   not the one this loom version expects, and may describe commands that have
+   since changed. Then tell the user to restart their session to pick it up.
 
 ## The workflow loop
 

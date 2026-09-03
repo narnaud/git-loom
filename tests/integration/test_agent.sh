@@ -39,6 +39,34 @@ gl_capture agent init --dir "$SKILLS_BASE"
 assert_exit_ok "$CODE" "agent_init_while_paused"
 rm -f "$WORK/.git/loom/state.json"
 
+describe "agent mode: warns when an installed skill is out of date"
+setup_repo_with_remote
+# Point the home install at an empty directory so a skill installed on the
+# developer's own machine cannot influence the assertions below.
+OLD_HOME="$HOME"; OLD_USERPROFILE="${USERPROFILE:-}"
+export HOME="$TMPROOT/fake-home" USERPROFILE="$TMPROOT/fake-home"
+mkdir -p "$HOME"
+PROJECT_SKILL="$WORK/.claude/skills/git-loom/SKILL.md"
+mkdir -p "$(dirname "$PROJECT_SKILL")"
+echo "skill from an older loom" > "$PROJECT_SKILL"
+
+gl_capture status --agent
+assert_exit_ok "$CODE" "skill_outdated_exit"
+assert_contains "$OUT" '"status":"ok"' "skill_outdated_still_ok"
+assert_contains "$OUT" "differs from the one this loom ships" "skill_outdated_warned"
+# The notice rides in the JSON only — no duplicate human line for the agent to read twice.
+assert_not_contains "$OUT" "! The Claude git-loom skill" "skill_outdated_not_printed"
+assert_contains "$OUT" "git-loom agent init --project" "skill_outdated_hint"
+# Advisory only: the stale file is never rewritten behind the user's back.
+grep -q "skill from an older loom" "$PROJECT_SKILL" || fail "skill_outdated_rewritten"
+
+gl agent init --project > /dev/null 2>&1
+gl_capture status --agent
+assert_exit_ok "$CODE" "skill_current_exit"
+assert_not_contains "$OUT" "differs from the one this loom ships" "skill_current_no_warning"
+rm -rf "$WORK/.claude"
+export HOME="$OLD_HOME"; export USERPROFILE="$OLD_USERPROFILE"
+
 # ══════════════════════════════════════════════════════════════════════════════
 # needs_input: commit without a branch
 # ══════════════════════════════════════════════════════════════════════════════

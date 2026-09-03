@@ -624,6 +624,10 @@ fn uses_patch_flag(command: &Option<Command>) -> bool {
 /// human error line because the JSON is the message.
 fn finish_and_exit(result: anyhow::Result<()>) -> ! {
     if agent_mode::enabled() {
+        // Advisory only, and before `finish` so the notice reaches the JSON
+        // `messages`: an agent that loaded a stale skill cannot notice a newer
+        // one by itself (spec 019).
+        agent::init::report_outdated_skills();
         if let Err(e) = &result
             && e.downcast_ref::<agent_mode::NeedsInput>().is_none()
         {

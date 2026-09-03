@@ -10,6 +10,9 @@ pub enum AgentKind {
 }
 
 impl AgentKind {
+    /// Every agent kind, for scanning existing installs.
+    pub const ALL: [AgentKind; 1] = [AgentKind::Claude];
+
     /// Human-readable name, used in messages.
     pub fn label(self) -> &'static str {
         match self {
