@@ -22,8 +22,21 @@ The Weave graph captures the integration branch topology as three components:
 
 ### Base
 
-The merge-base commit between HEAD and the upstream — the root of the
+The point where the integration line meets the upstream — the root of the
 integration range.
+
+This is not always `git merge-base HEAD <upstream>`, which returns the best
+common ancestor anywhere in the graph. When a woven branch lands upstream as a
+fast-forward, the upstream tip *is* that branch's tip: a second parent, off the
+integration line entirely, and the merge-base lands there. Walking to it would
+mistake the rest of the integration line for a branch and discard the whole
+weave.
+
+The base is therefore found by following first parents from HEAD and stopping at
+the first commit the upstream already contains. That is the same commit as the
+merge-base in the ordinary case, and the integration line's own base in this
+one. If the line reaches a root without ever meeting the upstream, the
+merge-base is used.
 
 ### Branch Sections
 
