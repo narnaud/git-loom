@@ -548,3 +548,31 @@ fn extract_azure_remote_unrecognized() {
         .unwrap();
     assert!(super::extract_azure_remote(&test_repo.repo, "origin").is_none());
 }
+
+// ── force tests ──────────────────────────────────────────────────────────
+
+#[test]
+fn force_pushes_when_the_lease_check_would_refuse() {
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    test_repo.create_branch("feature-a");
+    test_repo.switch_branch("feature-a");
+    let tip = test_repo.commit("feature commit", "a.txt");
+    crate::git::run_git(&workdir, &["push", "origin", "feature-a"]).unwrap();
+
+    // Someone else moved the remote branch, so our remote-tracking ref is stale
+    // and --force-with-lease refuses the push.
+    let remote = test_repo.remote_path().unwrap();
+    crate::git::run_git(
+        &remote,
+        &["update-ref", "refs/heads/feature-a", "refs/heads/main"],
+    )
+    .unwrap();
+
+    assert!(super::push_plain(&workdir, "origin", "feature-a", false).is_err());
+    assert!(super::push_plain(&workdir, "origin", "feature-a", true).is_ok());
+
+    let pushed =
+        crate::git::run_git_stdout(&remote, &["rev-parse", "refs/heads/feature-a"]).unwrap();
+    assert_eq!(pushed.trim(), tip.to_string());
+}

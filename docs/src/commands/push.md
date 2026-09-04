@@ -5,7 +5,7 @@ Push a feature branch to the remote. Automatically detects the remote type and u
 ## Usage
 
 ```
-git loom push [branch] [--no-pr]
+git loom push [branch] [--no-pr] [-f|--force]
 ```
 
 ### Arguments
@@ -19,6 +19,7 @@ git loom push [branch] [--no-pr]
 | Flag | Description |
 |------|-------------|
 | `--no-pr` | Push without creating a PR or Gerrit review (see below) |
+| `-f`, `--force` | Push with `--force` instead of `--force-with-lease --force-if-includes` |
 
 ## Remote Type Detection
 
@@ -57,6 +58,8 @@ git push --force-with-lease --force-if-includes -u <remote> <branch>
 ```
 
 Uses `--force-with-lease` because woven branches are frequently rebased. `--force-if-includes` adds extra safety.
+
+Pass `-f` / `--force` to push with plain `--force` instead, for when the lease check refuses a push you know is correct. It applies to every remote type except a Gerrit `refs/for/` review push, which never forces.
 
 Any `remote:` lines containing an `http(s)` URL are shown below the success message, so the MR/PR creation link that servers like GitLab print on push is visible even when the remote type was not detected.
 

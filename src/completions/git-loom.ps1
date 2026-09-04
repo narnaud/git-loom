@@ -117,7 +117,9 @@ $_gitLoomCompleter = {
         }
         'push' {
             $subFlags = @(
-                @{ Name = '--no-pr'; Description = 'Push without creating a PR or Gerrit review' }
+                @{ Name = '--no-pr'; Description = 'Push without creating a PR or Gerrit review' },
+                @{ Name = '-f'; Description = 'Push with --force instead of --force-with-lease' },
+                @{ Name = '--force'; Description = 'Push with --force instead of --force-with-lease' }
             )
         }
         'add' {
