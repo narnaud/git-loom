@@ -49,7 +49,20 @@ pub fn run(skip_confirm: bool) -> Result<()> {
         .context("Upstream branch name is not valid UTF-8")?
         .to_string();
 
+    let head_refname = head.name().context("HEAD ref name is not valid UTF-8")?;
+    let upstream_remote = repo
+        .branch_upstream_remote(head_refname)
+        .context("Failed to resolve the upstream remote")?;
+    let upstream_remote = upstream_remote
+        .as_str()
+        .context("Upstream remote name is not valid UTF-8")?
+        .to_string();
+
     // Fetch with tags, force-update, and prune deleted remote branches.
+    // The integration remote is named explicitly: `--tags` makes the tag
+    // refspec explicit, so `--prune` deletes any local tag missing from the
+    // fetched remote — with `fetch.all = true` a plain `git fetch` would also
+    // hit other (typically tagless) remotes and wipe every tag on each run.
     // The spinner reassures the user that work is happening (fetches can be slow);
     // afterwards we print git's own summary so they can tell whether anything was
     // actually pulled (e.g. `a309e49..7b3c4c1 main -> origin/main`). `--no-progress`
@@ -60,7 +73,14 @@ pub fn run(skip_confirm: bool) -> Result<()> {
 
     let result = git::run_git_combined(
         &workdir,
-        &["fetch", "--no-progress", "--tags", "--force", "--prune"],
+        &[
+            "fetch",
+            "--no-progress",
+            "--tags",
+            "--force",
+            "--prune",
+            &upstream_remote,
+        ],
     );
 
     match result {
@@ -157,7 +177,10 @@ pub fn run(skip_confirm: bool) -> Result<()> {
 /// forever and branches deleted on the fork would never show up as gone.
 ///
 /// Only branches are pruned here: tags come from the integration remote,
-/// whose tags are the authoritative ones.
+/// whose tags are the authoritative ones. `--no-prune-tags` makes that
+/// explicit — a user-level `fetch.pruneTags = true` would otherwise delete
+/// every tag missing from the fork, and the next update's `--tags` fetch
+/// would re-add them all, flooding the output on every run.
 fn fetch_push_remote(repo: &git2::Repository, workdir: &Path, upstream_name: &str) {
     let Some(remote) = crate::push::fork_push_remote(repo, workdir, upstream_name) else {
         return;
@@ -166,7 +189,16 @@ fn fetch_push_remote(repo: &git2::Repository, workdir: &Path, upstream_name: &st
     let spinner = msg::spinner();
     spinner.start(&format!("Fetching `{}`...", remote));
 
-    match git::run_git_combined(workdir, &["fetch", "--no-progress", "--prune", &remote]) {
+    match git::run_git_combined(
+        workdir,
+        &[
+            "fetch",
+            "--no-progress",
+            "--prune",
+            "--no-prune-tags",
+            &remote,
+        ],
+    ) {
         Ok(summary) => {
             spinner.stop(&format!("Fetched `{}`", remote));
             if !summary.is_empty() {
