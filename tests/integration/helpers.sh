@@ -3,6 +3,7 @@
 # Source this file at the top of each test_*.sh script.
 
 set -euo pipefail
+unset CDPATH  # keep cd from echoing the directory into $(...)
 
 # ── Binary detection ──────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,16 +29,46 @@ else
     RED=''; GREEN=''; YELLOW=''; NC=''
 fi
 
-# ── Global state (set by setup helpers, cleaned up by trap in test) ───────
+# ── Global state (set by setup helpers) ───────────────────────────────────
 TMPROOT=""
 WORK=""
+
+# ── Temp dir tracking ─────────────────────────────────────────────────────
+# A test creates one temp dir per scenario and reassigns TMPROOT each time, so
+# every created dir has to be remembered to be removed at exit.
+LOOM_TMPDIRS=()
+
+# Create a temp dir and store its path in the named variable.
+# Usage: new_tmpdir TMPROOT
+new_tmpdir() {
+    local dir
+    dir="$(mktemp -d "${TMPDIR:-/tmp}/git-loom-test.XXXXXXXXXX")"
+    LOOM_TMPDIRS+=("$dir")
+    printf -v "$1" '%s' "$dir"
+}
+
+# Remove every temp dir created by new_tmpdir.
+# Set LOOM_TEST_KEEP_TMP=1 to keep them for inspection after a failure.
+cleanup_tmpdirs() {
+    if [[ -n "${LOOM_TEST_KEEP_TMP:-}" ]]; then
+        return 0
+    fi
+    local dir
+    for dir in ${LOOM_TMPDIRS[@]+"${LOOM_TMPDIRS[@]}"}; do
+        if [[ -n "$dir" ]]; then
+            rm -rf "$dir"
+        fi
+    done
+    LOOM_TMPDIRS=()
+}
+trap cleanup_tmpdirs EXIT
 
 # ── Repo setup helpers ────────────────────────────────────────────────────
 
 # Create a repo with a bare remote.
 # Sets WORK (integration branch, tracking origin/<default-branch>).
 setup_repo_with_remote() {
-    TMPROOT="$(mktemp -d)"
+    new_tmpdir TMPROOT
 
     # Build a seed repo with an initial commit
     local seed="$TMPROOT/seed"

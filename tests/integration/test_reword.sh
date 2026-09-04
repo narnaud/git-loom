@@ -2,7 +2,6 @@
 # Integration tests for: gl reword
 set -euo pipefail
 source "$(dirname "$0")/helpers.sh"
-trap 'rm -rf "$TMPROOT"' EXIT
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PRECONDITIONS
@@ -52,7 +51,7 @@ assert_msg_at 1 "Renamed partial" "reword_partial_hash_msg"
 describe "reword root commit (no parent)"
 # Use a local-only repo (no upstream tracking) so the linear rebase fallback
 # is used — the Weave path cannot include the merge-base commit in its range.
-TMPROOT=$(mktemp -d)
+new_tmpdir TMPROOT
 WORK="$TMPROOT/work"
 git init -q "$WORK"
 git -C "$WORK" config user.email "test@test.com"
