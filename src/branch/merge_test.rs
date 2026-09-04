@@ -133,7 +133,7 @@ fn merge_then_unmerge_round_trip() {
     // The tip commit of feature-rt should have message "RT2"
     let tip = test_repo.get_branch_target("feature-rt");
     let tip_commit = test_repo.find_commit(tip);
-    assert_eq!(tip_commit.summary().unwrap_or(""), "RT2");
+    assert_eq!(tip_commit.summary().ok().flatten().unwrap_or(""), "RT2");
 }
 
 /// Merging a nonexistent branch should error.

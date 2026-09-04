@@ -694,7 +694,7 @@ impl TestRepo {
     pub fn branch_commit_summary(&self, name: &str) -> String {
         let oid = self.get_branch_target(name);
         let commit = self.find_commit(oid);
-        commit.summary().unwrap_or("").to_string()
+        commit.summary().ok().flatten().unwrap_or("").to_string()
     }
 
     /// Get the file paths changed in a commit.

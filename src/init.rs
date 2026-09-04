@@ -53,7 +53,7 @@ fn detect_upstream(repo: &Repository) -> Result<String> {
     // Try the current branch's upstream first
     if let Ok(head) = repo.head()
         && head.is_branch()
-        && let Some(branch_name) = head.shorthand()
+        && let Ok(branch_name) = head.shorthand()
         && let Ok(local_branch) = repo.find_branch(branch_name, BranchType::Local)
         && let Ok(upstream) = local_branch.upstream()
         && let Ok(Some(upstream_name)) = upstream.name()
@@ -88,10 +88,10 @@ fn detect_upstream(repo: &Repository) -> Result<String> {
 fn try_github_upstream(repo: &Repository) -> Option<String> {
     // Check if any remote URL points to GitHub
     let remotes = repo.remotes().ok()?;
-    let is_github = remotes.iter().flatten().any(|name| {
+    let is_github = remotes.iter().flatten().flatten().any(|name| {
         repo.find_remote(name)
             .ok()
-            .and_then(|r| r.url().map(|u| u.contains("github.com")))
+            .and_then(|r| r.url().ok().map(|u| u.contains("github.com")))
             .unwrap_or(false)
     });
     if !is_github {
@@ -105,7 +105,7 @@ fn try_github_upstream(repo: &Repository) -> Option<String> {
     let head_ref = "refs/remotes/upstream/HEAD";
     if let Ok(reference) = repo.find_reference(head_ref)
         && let Ok(resolved) = reference.resolve()
-        && let Some(name) = resolved.shorthand()
+        && let Ok(name) = resolved.shorthand()
     {
         return Some(name.to_string());
     }
@@ -131,7 +131,7 @@ fn gather_remote_candidates(repo: &Repository) -> Result<Vec<String>> {
 
     let remotes = repo.remotes()?;
     for remote_name in remotes.iter() {
-        let Some(remote_name) = remote_name else {
+        let Ok(Some(remote_name)) = remote_name else {
             continue;
         };
 
@@ -139,7 +139,7 @@ fn gather_remote_candidates(repo: &Repository) -> Result<Vec<String>> {
         let head_ref = format!("refs/remotes/{}/HEAD", remote_name);
         if let Ok(reference) = repo.find_reference(&head_ref)
             && let Ok(resolved) = reference.resolve()
-            && let Some(name) = resolved.shorthand()
+            && let Ok(name) = resolved.shorthand()
         {
             candidates.push(name.to_string());
             continue;
