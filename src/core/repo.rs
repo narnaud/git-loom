@@ -29,7 +29,7 @@ pub fn head_oid(repo: &Repository) -> Result<git2::Oid> {
 
 /// Return the subject line (first line) of a commit message.
 pub fn commit_subject(commit: &git2::Commit) -> String {
-    commit.summary().unwrap_or("").to_string()
+    commit.summary().ok().flatten().unwrap_or("").to_string()
 }
 
 /// Capture all local branch name→OID mappings for rollback.
@@ -65,7 +65,7 @@ pub fn restore_branch_refs(workdir: &Path, snapshot: &HashMap<String, git2::Oid>
     let head_branch = repo
         .head()
         .ok()
-        .and_then(|h| h.shorthand().map(|s| s.to_string()));
+        .and_then(|h| h.shorthand().ok().map(|s| s.to_string()));
 
     let mut failures: Vec<String> = Vec::new();
 
@@ -581,7 +581,7 @@ pub fn has_integration_context(repo: &Repository) -> bool {
     if !head.is_branch() {
         return false;
     }
-    let Some(name) = head.shorthand() else {
+    let Ok(name) = head.shorthand() else {
         return false;
     };
     repo.find_branch(name, BranchType::Local)
@@ -732,7 +732,7 @@ pub fn get_staged_files(repo: &Repository) -> Result<Vec<String>> {
             || status.is_index_deleted()
             || status.is_index_renamed()
             || status.is_index_typechange())
-            && let Some(path) = entry.path()
+            && let Ok(path) = entry.path()
         {
             paths.push(path.to_string());
         }
@@ -1014,8 +1014,8 @@ fn get_working_changes_opts(repo: &Repository, recurse_untracked: bool) -> Resul
 
     for entry in statuses.iter() {
         let path = match entry.path() {
-            Some(p) => p.to_string(),
-            None => {
+            Ok(p) => p.to_string(),
+            Err(_) => {
                 // Handle non-UTF-8 paths by using lossy conversion
                 String::from_utf8_lossy(entry.path_bytes()).into_owned()
             }

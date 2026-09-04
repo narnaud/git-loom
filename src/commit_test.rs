@@ -193,7 +193,7 @@ fn commit_to_new_branch_creates_and_weaves() {
 
     // The branch commit should be reachable as the second parent of the merge
     let second_parent = head.parent(1).unwrap();
-    assert_eq!(second_parent.summary().unwrap(), "Add file");
+    assert_eq!(second_parent.summary().unwrap().unwrap(), "Add file");
 }
 
 // ── Merge topology ──────────────────────────────────────────────────────
@@ -217,7 +217,7 @@ fn commit_to_empty_branch_creates_merge_topology() {
     // feature-a should have the commit
     let branch_oid = test_repo.get_branch_target("feature-a");
     let commit = test_repo.find_commit(branch_oid);
-    assert_eq!(commit.summary().unwrap(), "New commit");
+    assert_eq!(commit.summary().unwrap().unwrap(), "New commit");
 
     // Integration HEAD should be a merge commit (not the same as feature-a)
     let head = test_repo.head_commit();
@@ -278,7 +278,7 @@ fn commit_to_second_empty_branch_creates_parallel_topology() {
     // feature-b should have the commit
     let branch_b_oid = test_repo.get_branch_target("feature-b");
     let commit_b = test_repo.find_commit(branch_b_oid);
-    assert_eq!(commit_b.summary().unwrap(), "B1");
+    assert_eq!(commit_b.summary().unwrap().unwrap(), "B1");
 
     // feature-b's commit should have the merge-base as its parent,
     // NOT the merge commit of feature-a (parallel topology, not stacked)
@@ -327,11 +327,11 @@ fn commit_moves_to_correct_branch_in_topology() {
     // feature-a tip should be "New on A"
     let branch_oid = test_repo.get_branch_target("feature-a");
     let commit = test_repo.find_commit(branch_oid);
-    assert_eq!(commit.summary().unwrap(), "New on A");
+    assert_eq!(commit.summary().unwrap().unwrap(), "New on A");
 
     // Its parent should be A1
     let parent = commit.parent(0).unwrap();
-    assert_eq!(parent.summary().unwrap(), "A1");
+    assert_eq!(parent.summary().unwrap().unwrap(), "A1");
 
     // feature-b should still be intact
     assert_eq!(test_repo.branch_commit_summary("feature-b"), "B1");
@@ -455,7 +455,7 @@ fn commit_loose_when_no_branch_and_at_remote() {
     // HEAD should be a regular (non-merge) commit
     let head = test_repo.head_commit();
     assert_eq!(head.parent_count(), 1, "Loose commit should have 1 parent");
-    assert_eq!(head.summary().unwrap(), "Loose commit");
+    assert_eq!(head.summary().unwrap().unwrap(), "Loose commit");
 
     // Parent should be the merge-base (the remote tip)
     let parent = head.parent(0).unwrap();
@@ -497,10 +497,10 @@ fn commit_loose_works_with_existing_local_commits() {
     );
 
     let head = test_repo.head_commit();
-    assert_eq!(head.summary().unwrap(), "Second loose commit");
+    assert_eq!(head.summary().unwrap().unwrap(), "Second loose commit");
     assert_eq!(head.parent_count(), 1);
     assert_eq!(
-        head.parent(0).unwrap().summary().unwrap(),
+        head.parent(0).unwrap().summary().unwrap().unwrap(),
         "First loose commit"
     );
 }

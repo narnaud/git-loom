@@ -151,7 +151,7 @@ fn detect_remote_type(
 
     let remote_name = extract_remote_name(upstream_label);
     if let Ok(remote) = repo.find_remote(&remote_name)
-        && let Some(url) = remote.url()
+        && let Ok(url) = remote.url()
     {
         if url.contains("github.com") {
             return Ok(RemoteType::GitHub);
@@ -186,7 +186,7 @@ fn detect_remote_type(
 fn looks_like_gerrit(repo: &Repository, upstream_label: &str) -> bool {
     let remote_name = extract_remote_name(upstream_label);
     if let Ok(remote) = repo.find_remote(&remote_name)
-        && let Some(url) = remote.url()
+        && let Ok(url) = remote.url()
         && url.contains(":29418/")
     {
         return true;
@@ -206,7 +206,7 @@ fn recent_commits_have_change_id(repo: &Repository) -> bool {
     revwalk.take(20).flatten().any(|oid| {
         repo.find_commit(oid)
             .ok()
-            .and_then(|c| c.message().map(|m| m.contains("\nChange-Id: I")))
+            .and_then(|c| c.message().ok().map(|m| m.contains("\nChange-Id: I")))
             .unwrap_or(false)
     })
 }
@@ -251,7 +251,7 @@ fn extract_remote_name(upstream_label: &str) -> String {
 /// Returns `None` if the remote doesn't exist or the URL can't be parsed.
 fn extract_gh_repo(repo: &Repository, remote: &str) -> Option<String> {
     let remote = repo.find_remote(remote).ok()?;
-    let url = remote.url()?;
+    let url = remote.url().ok()?;
 
     // SCP-style SSH URLs: [git@]<hostname>:owner/repo[.git]
     // Covers git@github.com:owner/repo.git, git@github-alias:owner/repo.git,
@@ -443,7 +443,7 @@ fn gather_branch_commits(
             continue; // skip merge commits
         }
         let subject = repo::commit_subject(&commit);
-        let body = commit.body().unwrap_or("").to_string();
+        let body = commit.body().ok().flatten().unwrap_or("").to_string();
         commits.push((subject, body));
     }
 
@@ -712,7 +712,7 @@ struct AzureRemote {
 /// Returns `None` if the URL is unrecognised.
 fn extract_azure_remote(repo: &Repository, remote: &str) -> Option<AzureRemote> {
     let remote = repo.find_remote(remote).ok()?;
-    let url = remote.url()?;
+    let url = remote.url().ok()?;
 
     let opt = |s: &str| (!s.is_empty()).then(|| s.to_string());
 

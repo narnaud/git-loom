@@ -811,7 +811,7 @@ fn collect_changed_files(repo: &Repository) -> Result<Vec<String>> {
     let statuses = repo.statuses(Some(&mut opts))?;
     let mut paths = Vec::new();
     for entry in statuses.iter() {
-        if let Some(path) = entry.path() {
+        if let Ok(path) = entry.path() {
             paths.push(path.to_string());
         }
     }
@@ -869,7 +869,7 @@ fn fold_files_into_commit(
         // This avoids fragile file-restoration that can fail on Windows
         // (os error 5) when files are locked by editors or indexers.
         let target_commit = repo.find_commit(target_oid)?;
-        let subject = target_commit.summary().unwrap_or("fixup");
+        let subject = target_commit.summary().ok().flatten().unwrap_or("fixup");
         let message = format!("fixup! {}", subject);
 
         if !skip_staging {
@@ -1082,7 +1082,7 @@ pub fn move_commits_to_branch(
                 .get()
                 .peel_to_commit()
                 .map(|c| c.id())
-                .unwrap_or(git2::Oid::zero());
+                .unwrap_or(git2::Oid::ZERO_SHA1);
             if branch_oid != graph.base_oid {
                 bail!(
                     "Branch '{}' exists but is not part of the current integration scope.\n\

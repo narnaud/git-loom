@@ -484,7 +484,7 @@ fn update_does_not_put_upstream_commits_in_feature_branch() {
     let feature_oid = feature_branch.get().target().unwrap();
     let feature_commit = repo.find_commit(feature_oid).unwrap();
     assert_eq!(
-        feature_commit.summary().unwrap(),
+        feature_commit.summary().unwrap().unwrap(),
         "Feature A work",
         "feature-a should still point at its own commit"
     );
@@ -558,11 +558,11 @@ fn update_with_multiple_woven_branches() {
         .target()
         .unwrap();
     assert_eq!(
-        repo.find_commit(fa).unwrap().summary().unwrap(),
+        repo.find_commit(fa).unwrap().summary().unwrap().unwrap(),
         "Feature A work"
     );
     assert_eq!(
-        repo.find_commit(fb).unwrap().summary().unwrap(),
+        repo.find_commit(fb).unwrap().summary().unwrap().unwrap(),
         "Feature B work"
     );
 }
@@ -610,7 +610,10 @@ fn update_preserves_multi_commit_branch() {
         .get()
         .target()
         .unwrap();
-    assert_eq!(repo.find_commit(fa).unwrap().summary().unwrap(), "F3");
+    assert_eq!(
+        repo.find_commit(fa).unwrap().summary().unwrap().unwrap(),
+        "F3"
+    );
 
     // Count commits on the branch side: should be 3 (F1, F2, F3)
     let merge_second_parent = head.parent(1).unwrap();
@@ -682,7 +685,10 @@ fn update_with_partially_cherry_picked_branch() {
         .get()
         .target()
         .unwrap();
-    assert_eq!(repo.find_commit(fa).unwrap().summary().unwrap(), "F3");
+    assert_eq!(
+        repo.find_commit(fa).unwrap().summary().unwrap().unwrap(),
+        "F3"
+    );
 
     // Branch side should have only 1 commit (F3), F1/F2 were dropped
     let merge_second_parent = head.parent(1).unwrap();
@@ -775,7 +781,7 @@ fn update_handles_partial_cherry_pick_to_upstream() {
         .target()
         .unwrap();
     assert_eq!(
-        repo.find_commit(fa).unwrap().summary().unwrap(),
+        repo.find_commit(fa).unwrap().summary().unwrap().unwrap(),
         "F2",
         "feature-a should still have F2 after update"
     );
@@ -864,9 +870,11 @@ fn update_handles_fully_cherry_picked_branch() {
         // feature-a must NOT point at an upstream commit (the original bug).
         // It should point at a commit with one of its own messages, or at the
         // merge base if all its commits were dropped.
-        let summary = fa_commit.summary().unwrap_or("");
+        let summary = fa_commit.summary().ok().flatten().unwrap_or("");
         assert!(
-            summary == "F1" || summary == "F2" || summary == head.summary().unwrap_or(""),
+            summary == "F1"
+                || summary == "F2"
+                || summary == head.summary().ok().flatten().unwrap_or(""),
             "feature-a should not point at an unrelated upstream commit, \
              but points at: {}",
             summary
@@ -1100,7 +1108,7 @@ fn update_keeps_other_branches_when_one_lands_upstream() {
         head.parent_count(),
         2,
         "HEAD should still be the merge of feature-a, got `{}`",
-        head.summary().unwrap_or("")
+        head.summary().ok().flatten().unwrap_or("")
     );
 
     let feature_a = repo
@@ -1117,9 +1125,9 @@ fn update_keeps_other_branches_when_one_lands_upstream() {
 
     // Both feature-a commits survive, rebased onto the new upstream.
     let a2 = repo.find_commit(feature_a).unwrap();
-    assert_eq!(a2.summary().unwrap(), "A2");
+    assert_eq!(a2.summary().unwrap().unwrap(), "A2");
     let a1 = a2.parent(0).unwrap();
-    assert_eq!(a1.summary().unwrap(), "A1");
+    assert_eq!(a1.summary().unwrap().unwrap(), "A1");
     assert_eq!(
         a1.parent_id(0).unwrap(),
         test_repo.find_remote_branch_target("origin/main"),

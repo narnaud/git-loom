@@ -77,7 +77,7 @@ fn pick_branch(repo: &Repository) -> Result<(String, bool)> {
     let current = repo
         .head()
         .ok()
-        .and_then(|h| h.shorthand().map(|s| s.to_string()));
+        .and_then(|h| h.shorthand().ok().map(|s| s.to_string()));
 
     let mut items: Vec<(String, bool)> = Vec::new();
     let mut local_names: HashSet<String> = HashSet::new();

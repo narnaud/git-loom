@@ -621,7 +621,11 @@ fn fold_commit_to_colocated_branch_only_affects_target() {
     // The outermost merge commit (HEAD) should reference feat3, not feat2
     let head = test_repo.head_commit();
     assert!(
-        head.summary().unwrap_or("").contains("feat3"),
+        head.summary()
+            .ok()
+            .flatten()
+            .unwrap_or("")
+            .contains("feat3"),
         "HEAD merge message should reference 'feat3', got: {:?}",
         head.summary()
     );
@@ -1589,9 +1593,17 @@ fn fold_create_moves_multiple_commits_to_new_branch() {
     // new-branch should contain L1 then L2 (oldest-first), with L2 at the tip.
     let tip = test_repo.get_branch_target("new-branch");
     let tip_commit = test_repo.find_commit(tip);
-    assert_eq!(tip_commit.summary().unwrap(), "L2", "L2 should be at tip");
+    assert_eq!(
+        tip_commit.summary().unwrap().unwrap(),
+        "L2",
+        "L2 should be at tip"
+    );
     let parent = tip_commit.parent(0).unwrap();
-    assert_eq!(parent.summary().unwrap(), "L1", "L1 should be below L2");
+    assert_eq!(
+        parent.summary().unwrap().unwrap(),
+        "L1",
+        "L1 should be below L2"
+    );
     assert_eq!(
         parent.parent(0).unwrap().id(),
         base_oid,
