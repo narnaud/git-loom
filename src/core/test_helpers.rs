@@ -702,6 +702,15 @@ impl TestRepo {
         crate::core::repo::commit_file_paths(&self.repo, oid).unwrap()
     }
 
+    /// True if `path` exists in the tree of `oid`.
+    pub fn commit_has_file(&self, oid: git2::Oid, path: &str) -> bool {
+        self.find_commit(oid)
+            .tree()
+            .unwrap()
+            .get_path(Path::new(path))
+            .is_ok()
+    }
+
     /// Create a commit touching multiple files at once.
     ///
     /// Each entry is a `(filename, content)` pair.  Uses the git2 API

@@ -262,3 +262,18 @@ fn collect_entries_includes_empty_untracked_files() {
         paths
     );
 }
+
+/// A file whose deletion is already staged matches no pathspec, so `git add`
+/// would reject it. Staging it again must simply succeed.
+#[test]
+fn add_file_whose_deletion_is_already_staged() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("Add file", "gone.txt");
+    std::fs::remove_file(test_repo.workdir().join("gone.txt")).unwrap();
+    test_repo.stage_files(&["gone.txt"]);
+
+    let result = test_repo.in_dir(|| run_add(vec!["gone.txt".to_string()]));
+
+    assert!(result.is_ok(), "add failed: {:?}", result);
+    assert_eq!(test_repo.status_porcelain().trim(), "D  gone.txt");
+}

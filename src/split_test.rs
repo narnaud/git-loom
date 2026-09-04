@@ -248,3 +248,35 @@ fn split_with_woven_branches() {
         "HEAD should still be a merge commit"
     );
 }
+
+/// Splitting off the deletion half of a commit: the split stages a path that
+/// is gone from the working tree.
+#[test]
+fn split_head_commit_with_a_deletion() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("Add file1", "file1.txt");
+
+    // A commit that deletes file1.txt and adds file2.txt.
+    std::fs::remove_file(test_repo.workdir().join("file1.txt")).unwrap();
+    test_repo.write_file("file2.txt", "content b");
+    test_repo.stage_files(&["file1.txt", "file2.txt"]);
+    test_repo.commit_staged("Delete one, add another");
+
+    let target_oid = test_repo.head_oid();
+    let result = super::split_commit_with_selection(
+        &test_repo.repo,
+        &target_oid.to_string(),
+        vec!["file1.txt".to_string()],
+        "Delete file1".to_string(),
+    );
+
+    assert!(result.is_ok(), "split of a deletion failed: {:?}", result);
+    assert_eq!(test_repo.get_message(1), "Delete file1");
+    assert_eq!(test_repo.get_message(0), "Delete one, add another");
+    assert!(!test_repo.commit_has_file(test_repo.get_oid(1), "file1.txt"));
+    assert_eq!(
+        test_repo.commit_file_paths(test_repo.get_oid(0)),
+        vec!["file2.txt"]
+    );
+    test_repo.assert_working_tree_clean();
+}
