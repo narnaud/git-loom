@@ -121,6 +121,56 @@ fn update_fetches_tags_from_remote() {
 }
 
 #[test]
+fn update_keeps_tags_when_fetch_all_hits_a_tagless_remote() {
+    let test_repo = TestRepo::new_with_remote();
+
+    // Create a tag on the integration remote
+    let remote_path = test_repo.remote_path().unwrap();
+    let remote_repo = Repository::open_bare(&remote_path).unwrap();
+    let remote_head = remote_repo
+        .find_branch("main", BranchType::Local)
+        .unwrap()
+        .get()
+        .target()
+        .unwrap();
+    let remote_commit = remote_repo.find_commit(remote_head).unwrap();
+    let sig = Signature::now("Test", "test@test.com").unwrap();
+    remote_repo
+        .tag(
+            "v1.0.0",
+            remote_commit.as_object(),
+            &sig,
+            "Release 1.0",
+            false,
+        )
+        .unwrap();
+
+    // A second, tagless remote plus `fetch.all = true`: a plain `git fetch
+    // --tags --prune` fans out to it and prunes every local tag, since the
+    // explicit tag refspec makes tags subject to pruning per fetched remote.
+    let fork_path = remote_path.parent().unwrap().join("fork.git");
+    Repository::init_bare(&fork_path).unwrap();
+    test_repo
+        .repo
+        .remote("zfork", fork_path.to_str().unwrap())
+        .unwrap();
+    test_repo
+        .repo
+        .config()
+        .unwrap()
+        .set_bool("fetch.all", true)
+        .unwrap();
+
+    let result = test_repo.in_dir(|| super::run(false));
+    assert!(result.is_ok(), "update failed: {:?}", result.err());
+
+    assert!(
+        test_repo.repo.find_reference("refs/tags/v1.0.0").is_ok(),
+        "Tag should survive update despite fetch.all and a tagless remote"
+    );
+}
+
+#[test]
 fn update_prunes_deleted_remote_branches() {
     let test_repo = TestRepo::new_with_remote();
 
