@@ -4,17 +4,29 @@ use anyhow::Result;
 
 /// Amend the current commit, optionally replacing its message.
 ///
-/// Wraps `git commit --allow-empty --amend --only [-m msg]`.
-/// Uses `--only` so that staged changes are not accidentally included.
+/// Wraps `git commit --quiet --allow-empty --amend --only [-m msg]`.
+/// Uses `--only` so that staged changes are not accidentally included, and
+/// `--quiet` so the editor path doesn't print git's commit summary.
 /// When `message` is `None`, inherits stdio so git can open the user's editor.
 pub fn commit_amend(workdir: &Path, message: Option<&str>) -> Result<()> {
     if let Some(msg) = message {
         super::run_git(
             workdir,
-            &["commit", "--allow-empty", "--amend", "--only", "-m", msg],
+            &[
+                "commit",
+                "--quiet",
+                "--allow-empty",
+                "--amend",
+                "--only",
+                "-m",
+                msg,
+            ],
         )
     } else {
-        super::run_git_interactive(workdir, &["commit", "--allow-empty", "--amend", "--only"])
+        super::run_git_interactive(
+            workdir,
+            &["commit", "--quiet", "--allow-empty", "--amend", "--only"],
+        )
     }
 }
 
