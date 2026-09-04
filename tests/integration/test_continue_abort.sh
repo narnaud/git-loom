@@ -2,7 +2,6 @@
 # Integration tests for: loom continue / loom abort
 set -euo pipefail
 source "$(dirname "$0")/helpers.sh"
-trap 'rm -rf "$TMPROOT"' EXIT
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PRECONDITIONS — no operation in progress

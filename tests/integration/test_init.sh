@@ -2,12 +2,11 @@
 # Integration tests for: gl init
 set -euo pipefail
 source "$(dirname "$0")/helpers.sh"
-trap 'rm -rf "$TMPROOT"' EXIT
 
 # Helper: repo on the default branch (main/master) tracking origin.
 # No integration branch is pre-created, so gl init can run cleanly.
 setup_repo_for_init() {
-    TMPROOT="$(mktemp -d)"
+    new_tmpdir TMPROOT
 
     local seed="$TMPROOT/seed"
     git init -q "$seed"
@@ -76,7 +75,7 @@ assert_exit_fail "$CODE" "duplicate_branch"
 assert_contains "$OUT" "integration" "duplicate_branch_msg"
 
 describe "error when no remotes are configured"
-TMPROOT="$(mktemp -d)"
+new_tmpdir TMPROOT
 WORK="$TMPROOT/work"
 git init -q "$WORK"
 git -C "$WORK" config user.email "test@test.com"

@@ -6,6 +6,7 @@
 #   GL_BIN=target/release/git-loom ./tests/integration/run_all.sh
 
 set -uo pipefail
+unset CDPATH  # keep cd from echoing the directory into $(...)
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

@@ -2,14 +2,13 @@
 # Integration tests for: gl branch new / merge / unmerge
 set -euo pipefail
 source "$(dirname "$0")/helpers.sh"
-trap 'rm -rf "$TMPROOT"' EXIT
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PRECONDITIONS
 # ══════════════════════════════════════════════════════════════════════════════
 
 describe "precond: not in a git repository"
-TMP_NOGIT=$(mktemp -d)
+new_tmpdir TMP_NOGIT
 CODE=0
 (cd "$TMP_NOGIT" && NO_COLOR=1 GIT_TERMINAL_PROMPT=0 "$GL_BIN" branch new g-test >/dev/null 2>&1) || CODE=$?
 assert_exit_fail "$CODE" "precond_not_git_repo"

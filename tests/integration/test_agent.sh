@@ -2,7 +2,6 @@
 # Integration tests for: agent mode (--agent / LOOM_AGENT) and loom agent init
 set -euo pipefail
 source "$(dirname "$0")/helpers.sh"
-trap 'rm -rf "$TMPROOT"' EXIT
 
 # The JSON status is the last line of stderr; gl_capture merges stdout+stderr,
 # so assertions grep for the JSON fragments rather than compare whole output.

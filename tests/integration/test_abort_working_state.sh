@@ -12,7 +12,6 @@
 # a genuine absorb rebase conflict via shell is architecturally infeasible.
 set -euo pipefail
 source "$(dirname "$0")/helpers.sh"
-trap 'rm -rf "$TMPROOT"' EXIT
 
 # ── Assertion helper ──────────────────────────────────────────────────────────
 
