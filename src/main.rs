@@ -176,6 +176,9 @@ enum Command {
         /// Push branch without creating a PR or Gerrit review
         #[arg(long)]
         no_pr: bool,
+        /// Push with --force instead of --force-with-lease --force-if-includes
+        #[arg(short = 'f', long)]
+        force: bool,
     },
     /// Set up AI agent integration (unrelated to `init`)
     Agent(AgentCmd),
@@ -578,7 +581,11 @@ fn main() {
             patch,
             files,
         }) => split::run(target, message, patch, files, &theme),
-        Some(Command::Push { branch, no_pr }) => push::run(branch, no_pr),
+        Some(Command::Push {
+            branch,
+            no_pr,
+            force,
+        }) => push::run(branch, no_pr, force),
         Some(Command::Update { yes }) => update::run(yes),
         Some(Command::Fold {
             create,

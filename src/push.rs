@@ -30,7 +30,10 @@ enum RemoteType {
 ///
 /// When `no_pr` is true, skips PR/review creation for all remote types.
 /// For Gerrit, branches without a `wip/` prefix get a confirmation prompt.
-pub fn run(branch: Option<String>, no_pr: bool) -> Result<()> {
+///
+/// When `force` is true, pushes with `--force` instead of the default
+/// `--force-with-lease --force-if-includes`.
+pub fn run(branch: Option<String>, no_pr: bool, force: bool) -> Result<()> {
     let repo = repo::open_repo()?;
     let workdir = repo::require_workdir(&repo, "push")?.to_path_buf();
     let info = repo::gather_repo_info(&repo, false, 1)?;
@@ -54,15 +57,17 @@ pub fn run(branch: Option<String>, no_pr: bool) -> Result<()> {
 
     if no_pr {
         return match remote_type {
-            RemoteType::Gerrit { .. } => push_gerrit_no_pr(&workdir, &remote_name, &branch_name),
-            _ => push_plain(&workdir, &remote_name, &branch_name),
+            RemoteType::Gerrit { .. } => {
+                push_gerrit_no_pr(&workdir, &remote_name, &branch_name, force)
+            }
+            _ => push_plain(&workdir, &remote_name, &branch_name, force),
         };
     }
 
     let base_oid = info.upstream.merge_base_oid;
 
     match remote_type {
-        RemoteType::Plain => push_plain(&workdir, &remote_name, &branch_name),
+        RemoteType::Plain => push_plain(&workdir, &remote_name, &branch_name, force),
         RemoteType::GitHub => push_github(
             &repo,
             &workdir,
@@ -71,8 +76,11 @@ pub fn run(branch: Option<String>, no_pr: bool) -> Result<()> {
             &target_branch,
             base_oid,
             &info.upstream.label,
+            force,
         ),
-        RemoteType::GitLab => push_gitlab(&workdir, &remote_name, &branch_name, &target_branch),
+        RemoteType::GitLab => {
+            push_gitlab(&workdir, &remote_name, &branch_name, &target_branch, force)
+        }
         RemoteType::AzureDevOps => push_azure(
             &repo,
             &workdir,
@@ -80,6 +88,7 @@ pub fn run(branch: Option<String>, no_pr: bool) -> Result<()> {
             &branch_name,
             &target_branch,
             base_oid,
+            force,
         ),
         RemoteType::Gerrit { target_branch } => {
             push_gerrit(&workdir, &remote_name, &branch_name, &target_branch)
@@ -383,18 +392,23 @@ fn append_remote_urls(message: &mut String, stderr: &str) {
     }
 }
 
-fn git_push(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
-    let stderr = run_push_capture(
-        workdir,
-        &[
-            "push",
-            "--force-with-lease",
-            "--force-if-includes",
-            "-u",
-            remote,
-            branch,
-        ],
-    )?;
+/// Flags that let a push overwrite the remote branch.
+///
+/// `--force` is what the user asked for explicitly; otherwise use the safe
+/// pair that refuses to overwrite commits we haven't seen.
+fn force_args(force: bool) -> &'static [&'static str] {
+    if force {
+        &["--force"]
+    } else {
+        &["--force-with-lease", "--force-if-includes"]
+    }
+}
+
+fn git_push(workdir: &Path, remote: &str, branch: &str, force: bool) -> Result<()> {
+    let mut args = vec!["push"];
+    args.extend_from_slice(force_args(force));
+    args.extend_from_slice(&["-u", remote, branch]);
+    let stderr = run_push_capture(workdir, &args)?;
     let mut message = format!("Pushed `{}` to `{}`", branch, remote);
     append_remote_urls(&mut message, &stderr);
     msg::success(&message);
@@ -484,8 +498,8 @@ fn pr_title_and_description(
     Ok((title, description))
 }
 
-fn push_plain(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
-    git_push(workdir, remote, branch)
+fn push_plain(workdir: &Path, remote: &str, branch: &str, force: bool) -> Result<()> {
+    git_push(workdir, remote, branch, force)
 }
 
 /// Push to GitHub: push the branch, then open `gh pr create --web`.
@@ -501,6 +515,7 @@ fn push_plain(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
 ///
 /// If a PR already exists for the branch, prints the PR URL instead of
 /// opening the browser.
+#[allow(clippy::too_many_arguments)]
 fn push_github(
     repo: &Repository,
     workdir: &Path,
@@ -509,8 +524,9 @@ fn push_github(
     target_branch: &str,
     base_oid: git2::Oid,
     upstream_label: &str,
+    force: bool,
 ) -> Result<()> {
-    git_push(workdir, remote, branch)?;
+    git_push(workdir, remote, branch, force)?;
 
     // Skip PR creation when pushing the upstream target branch itself
     if branch == target_branch {
@@ -642,27 +658,30 @@ fn find_existing_github_pr(workdir: &Path, gh_repo: &str, head_arg: &str) -> Opt
 ///
 /// If the branch being pushed is the upstream target branch itself, skip the
 /// MR push options and fall back to a plain push.
-fn push_gitlab(workdir: &Path, remote: &str, branch: &str, target_branch: &str) -> Result<()> {
+fn push_gitlab(
+    workdir: &Path,
+    remote: &str,
+    branch: &str,
+    target_branch: &str,
+    force: bool,
+) -> Result<()> {
     if branch == target_branch {
-        return git_push(workdir, remote, branch);
+        return git_push(workdir, remote, branch, force);
     }
 
     let target_opt = format!("merge_request.target={}", target_branch);
-    let stderr = run_push_capture(
-        workdir,
-        &[
-            "push",
-            "--force-with-lease",
-            "--force-if-includes",
-            "-o",
-            "merge_request.create",
-            "-o",
-            &target_opt,
-            "-u",
-            remote,
-            branch,
-        ],
-    )?;
+    let mut args = vec!["push"];
+    args.extend_from_slice(force_args(force));
+    args.extend_from_slice(&[
+        "-o",
+        "merge_request.create",
+        "-o",
+        &target_opt,
+        "-u",
+        remote,
+        branch,
+    ]);
+    let stderr = run_push_capture(workdir, &args)?;
     let mut message = format!("Pushed `{}` to `{}`", branch, remote);
     append_remote_urls(&mut message, &stderr);
     msg::success(&message);
@@ -775,8 +794,9 @@ fn push_azure(
     branch: &str,
     target_branch: &str,
     base_oid: git2::Oid,
+    force: bool,
 ) -> Result<()> {
-    git_push(workdir, remote, branch)?;
+    git_push(workdir, remote, branch, force)?;
 
     let start = Instant::now();
     let az_check = az_command().arg("--version").output();
@@ -958,9 +978,9 @@ fn find_existing_azure_pr(
 ///   - Push as-is
 ///   - Push as `wip/<branch>` instead (no admin needed to delete)
 ///   - Cancel
-fn push_gerrit_no_pr(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
+fn push_gerrit_no_pr(workdir: &Path, remote: &str, branch: &str, force: bool) -> Result<()> {
     if branch.starts_with("wip/") {
-        return push_plain(workdir, remote, branch);
+        return push_plain(workdir, remote, branch, force);
     }
 
     let opt_as_is = format!("Push as `{}` (admin required to delete it later)", branch);
@@ -976,20 +996,14 @@ fn push_gerrit_no_pr(workdir: &Path, remote: &str, branch: &str) -> Result<()> {
     )?;
 
     if choice == opt_as_is {
-        push_plain(workdir, remote, branch)
+        push_plain(workdir, remote, branch, force)
     } else if choice == opt_wip {
         let wip_name = format!("wip/{}", branch);
         let refspec = format!("{}:{}", branch, wip_name);
-        git::run_git(
-            workdir,
-            &[
-                "push",
-                "--force-with-lease",
-                "--force-if-includes",
-                remote,
-                &refspec,
-            ],
-        )?;
+        let mut args = vec!["push"];
+        args.extend_from_slice(force_args(force));
+        args.extend_from_slice(&[remote, &refspec]);
+        git::run_git(workdir, &args)?;
         msg::success(&format!(
             "Pushed `{}` to `{}` as `{}`",
             branch, remote, wip_name

@@ -20,7 +20,7 @@ varies significantly depending on the hosting platform:
 ## CLI
 
 ```bash
-git-loom push [branch] [--no-pr]
+git-loom push [branch] [--no-pr] [-f|--force]
 ```
 
 **Arguments:**
@@ -33,6 +33,11 @@ git-loom push [branch] [--no-pr]
 - `--no-pr`: Push without creating a PR or Gerrit review. For GitHub and Azure
   DevOps, skips the `gh pr create` / `az repos pr create` step. For Gerrit,
   pushes directly to the branch ref instead of `refs/for/` (see below).
+- `-f`, `--force`: Push with `--force` instead of the default
+  `--force-with-lease --force-if-includes`. Needed when the lease check refuses
+  a push that is intentional, for example after the remote branch was updated
+  from elsewhere. Has no effect on a Gerrit `refs/for/` review push, which
+  never forces.
 
 **Behavior:**
 
