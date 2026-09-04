@@ -95,6 +95,23 @@ Branches outside this range are rejected with: `"Branch '<name>' is not woven
 into the integration branch"` and a hint to use `git branch -d <name>` to
 delete it directly.
 
+#### Inner (stacked) branch — refused
+
+A branch is "inner" when it is woven but another branch is stacked on top of
+it: its tip is a commit inside another branch's section rather than a merge
+parent (e.g. `feat1` when `feat2` builds on `feat1` and `feat2` was merged).
+
+Dropping an inner branch is refused, before any confirmation prompt, because
+removing its commits would rewrite the outer branch as a side effect:
+
+```
+Cannot drop branch: 'feat1' is stacked inside 'feat2'
+Drop individual commits with `loom drop <id>`, or delete just the ref with `git branch -D feat1`
+```
+
+Dropping the *outer* branch works and preserves the inner branch (see
+co-located and stacked handling below).
+
 #### Non-woven branch (on the first-parent line)
 
 A branch is "non-woven" when its tip IS on the first-parent line — meaning
