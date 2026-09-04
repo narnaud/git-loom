@@ -41,24 +41,56 @@ pub fn commit_amend_no_edit(workdir: &Path) -> Result<()> {
     )
 }
 
+/// True when `path` is gone from both the working tree and the index because
+/// its deletion is already staged.
+///
+/// Such a path matches nothing, so `git add` and `git rm` both fail with
+/// "pathspec did not match any files" even though it is correctly staged.
+fn deletion_already_staged(workdir: &Path, path: &str) -> Result<bool> {
+    // symlink_metadata, not exists(): a broken symlink resolves to nothing but
+    // is still a working tree entry that `git add` has to stage.
+    if workdir.join(path).symlink_metadata().is_ok() {
+        return Ok(false);
+    }
+    let out = super::run_git_stdout(
+        workdir,
+        &[
+            "diff",
+            "--cached",
+            "--name-only",
+            "--diff-filter=D",
+            "--",
+            path,
+        ],
+    )?;
+    Ok(!out.trim().is_empty())
+}
+
 /// Stage specific files.
 ///
-/// Wraps `git add <files>`.
+/// Wraps `git add <files>`. Files whose deletion is already staged are left
+/// alone, since there is nothing left for `git add` to match.
 pub fn stage_files(workdir: &Path, files: &[&str]) -> Result<()> {
+    let mut to_add: Vec<&str> = Vec::with_capacity(files.len());
+    for file in files {
+        if !deletion_already_staged(workdir, file)? {
+            to_add.push(file);
+        }
+    }
+    if to_add.is_empty() {
+        return Ok(());
+    }
     let mut args = vec!["add", "--"];
-    args.extend(files);
+    args.extend(&to_add);
     super::run_git(workdir, &args)
 }
 
 /// Stage all changes for a specific path, including deletions.
 ///
-/// Tries `git add` first; if the file has been deleted, falls back to
-/// `git rm -f` to stage the removal.
+/// Forwards to `stage_files`, so a path whose deletion is already staged is
+/// left alone.
 pub fn stage_path(workdir: &Path, path: &str) -> Result<()> {
-    if super::run_git(workdir, &["add", "--", path]).is_ok() {
-        return Ok(());
-    }
-    super::run_git(workdir, &["rm", "-f", "--", path])
+    stage_files(workdir, &[path])
 }
 
 /// Create a commit with a message.
@@ -98,3 +130,7 @@ pub fn stage_all(workdir: &Path) -> Result<()> {
 pub fn commit_with_editor(workdir: &Path) -> Result<()> {
     super::run_git_interactive(workdir, &["commit"])
 }
+
+#[cfg(test)]
+#[path = "git_commit_test.rs"]
+mod tests;

@@ -1801,3 +1801,86 @@ fn fold_abort_preserves_working_state() {
     );
     assert_eq!(test_repo.read_file("new-file.txt"), "new-content");
 }
+
+#[test]
+fn fold_unstaged_deletion_into_head() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("First commit", "file1.txt");
+    test_repo.commit("Second commit", "file2.txt");
+
+    std::fs::remove_file(test_repo.workdir().join("file1.txt")).unwrap();
+
+    let head_oid = test_repo.head_oid();
+    let result = super::fold_files_into_commit(
+        &test_repo.repo,
+        &["file1.txt".to_string()],
+        &head_oid.to_string(),
+        false,
+    );
+
+    assert!(result.is_ok(), "fold of a deletion failed: {:?}", result);
+    assert_eq!(test_repo.get_message(0), "Second commit");
+    assert!(!test_repo.commit_has_file(test_repo.head_oid(), "file1.txt"));
+    test_repo.assert_working_tree_clean();
+}
+
+#[test]
+fn fold_staged_deletion_into_head() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("First commit", "file1.txt");
+    test_repo.commit("Second commit", "file2.txt");
+
+    std::fs::remove_file(test_repo.workdir().join("file1.txt")).unwrap();
+    test_repo.stage_files(&["file1.txt"]);
+
+    let head_oid = test_repo.head_oid();
+    let result = super::fold_files_into_commit(
+        &test_repo.repo,
+        &["file1.txt".to_string()],
+        &head_oid.to_string(),
+        false,
+    );
+
+    assert!(
+        result.is_ok(),
+        "fold of a staged deletion failed: {:?}",
+        result
+    );
+    assert_eq!(test_repo.get_message(0), "Second commit");
+    assert!(!test_repo.commit_has_file(test_repo.head_oid(), "file1.txt"));
+    test_repo.assert_working_tree_clean();
+}
+
+#[test]
+fn fold_staged_deletion_into_non_head_commit() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("First commit", "file1.txt");
+    let c2_oid = test_repo.commit("Second commit", "file2.txt");
+    test_repo.commit("Third commit", "file3.txt");
+
+    std::fs::remove_file(test_repo.workdir().join("file1.txt")).unwrap();
+    test_repo.stage_files(&["file1.txt"]);
+
+    let result = super::fold_files_into_commit(
+        &test_repo.repo,
+        &["file1.txt".to_string()],
+        &c2_oid.to_string(),
+        false,
+    );
+
+    assert!(
+        result.is_ok(),
+        "fold of a staged deletion failed: {:?}",
+        result
+    );
+    assert_eq!(
+        test_repo.commit_messages()[..3],
+        [
+            "Third commit".to_string(),
+            "Second commit".to_string(),
+            "First commit".to_string()
+        ]
+    );
+    assert!(!test_repo.commit_has_file(test_repo.get_oid(1), "file1.txt"));
+    test_repo.assert_working_tree_clean();
+}
