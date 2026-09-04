@@ -278,6 +278,34 @@ fn drop_branch_with_info(
         return Ok(());
     }
 
+    // Check if another branch shares the same tip (co-located branches)
+    let colocated_branch = info
+        .branches
+        .iter()
+        .find(|b| b.name != branch_name && b.tip_oid == branch_info.tip_oid);
+
+    // Determine if the branch is woven (tip NOT on first-parent line)
+    let is_woven = branch_info.tip_oid != head_oid
+        && !is_on_first_parent_line(repo, head_oid, merge_base_oid, branch_info.tip_oid)?;
+
+    let mut graph = Weave::from_repo_with_info(repo, info)?;
+
+    // An inner (stacked) branch has no section of its own in the weave graph;
+    // dropping it would rewrite the branch stacked on top of it. Refuse
+    // before prompting.
+    if is_woven
+        && !graph.has_branch_section(branch_name)
+        && let Some(outer) = graph.inner_branch_section(branch_name)
+    {
+        bail!(
+            "Cannot drop branch: '{}' is stacked inside '{}'\n\
+             Drop individual commits with `loom drop <id>`, or delete just the ref with `git branch -D {}`",
+            branch_name,
+            outer,
+            branch_name
+        );
+    }
+
     // Count owned commits for the confirmation message and for the non-woven drop path
     let owned = find_owned_commits(
         repo,
@@ -296,18 +324,6 @@ fn drop_branch_with_info(
         )
     };
     confirm_or_bail(skip_confirm, &prompt)?;
-
-    // Check if another branch shares the same tip (co-located branches)
-    let colocated_branch = info
-        .branches
-        .iter()
-        .find(|b| b.name != branch_name && b.tip_oid == branch_info.tip_oid);
-
-    // Determine if the branch is woven (tip NOT on first-parent line)
-    let is_woven = branch_info.tip_oid != head_oid
-        && !is_on_first_parent_line(repo, head_oid, merge_base_oid, branch_info.tip_oid)?;
-
-    let mut graph = Weave::from_repo_with_info(repo, info)?;
 
     if is_woven {
         let removed = if let Some(keep) = colocated_branch {

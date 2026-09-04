@@ -429,6 +429,41 @@ fn drop_stacked_outer_branch_preserves_inner_branch() {
     );
 }
 
+#[test]
+fn drop_stacked_inner_branch_is_refused() {
+    // Same topology as above: feat2 is stacked on feat1.
+    // Dropping feat1 (the inner branch) is refused — it would rewrite feat2.
+    let test_repo = TestRepo::new_with_remote();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    test_repo.create_branch_at("feat1", &base_oid.to_string());
+    test_repo.switch_branch("feat1");
+    test_repo.commit("A1", "a1.txt");
+    let feat1_tip = test_repo.head_oid();
+
+    test_repo.create_branch_at("feat2", &feat1_tip.to_string());
+    test_repo.switch_branch("feat2");
+    test_repo.commit("A2", "a2.txt");
+    test_repo.switch_branch("integration");
+
+    test_repo.commit("Int", "int.txt");
+    test_repo.merge_no_ff("feat2");
+
+    let result = super::drop_branch(&test_repo.repo, "feat1", true);
+    let err = result.expect_err("dropping an inner branch should be refused");
+    assert!(
+        err.to_string().contains("stacked inside 'feat2'"),
+        "unexpected error: {err}"
+    );
+
+    // Nothing was changed
+    assert!(test_repo.branch_exists("feat1"), "feat1 should still exist");
+    assert!(test_repo.branch_exists("feat2"), "feat2 should still exist");
+    let messages = test_repo.commit_messages();
+    assert!(messages.contains(&"A1".to_string()));
+    assert!(messages.contains(&"A2".to_string()));
+}
+
 // ── Drop via run() (end-to-end) ─────────────────────────────────────────
 
 #[test]

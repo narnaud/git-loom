@@ -396,6 +396,26 @@ impl Weave {
         true
     }
 
+    /// Whether a branch owns a section (matches a section's branch names or label).
+    pub fn has_branch_section(&self, branch_name: &str) -> bool {
+        self.branch_sections
+            .iter()
+            .any(|s| s.branch_names.contains(&branch_name.to_string()) || s.label == branch_name)
+    }
+
+    /// Label of the section containing `branch_name` as an inner (stacked) ref,
+    /// i.e. a branch whose tip is a commit inside another branch's section.
+    pub fn inner_branch_section(&self, branch_name: &str) -> Option<&str> {
+        self.branch_sections
+            .iter()
+            .find(|s| {
+                s.commits
+                    .iter()
+                    .any(|c| c.update_refs.iter().any(|r| r == branch_name))
+            })
+            .map(|s| s.label.as_str())
+    }
+
     /// Remove an entire branch section and its merge entry.
     ///
     /// Returns false if no section matches the branch name.
