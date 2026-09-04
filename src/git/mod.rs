@@ -41,6 +41,15 @@ use anyhow::{Context, Result, bail};
 
 use crate::trace as loom_trace;
 
+/// Config forced on every git command loom runs itself.
+///
+/// With `commit.verbose` set, git appends the diff to `COMMIT_EDITMSG`. Where
+/// loom drives the commit no editor opens to strip it back out, so a
+/// `commit-msg` hook reads the whole diff as if it were the message. The
+/// display path (`run_git_interactive`) is deliberately left out: a real editor
+/// opens there, and the user keeps the diff they configured.
+pub const NO_VERBOSE_COMMIT: [&str; 2] = ["-c", "commit.verbose=false"];
+
 /// The usual reason an abort fails, wherever that is reported — rebase or merge.
 pub const ABORT_FAILED_CAUSE: &str =
     "a stale `.git/index.lock` or a concurrent git process is the usual cause";
@@ -64,6 +73,7 @@ fn run_git_captured(workdir: &Path, args: &[&str]) -> Result<std::process::Outpu
     let start = Instant::now();
     let output = Command::new("git")
         .current_dir(workdir)
+        .args(NO_VERBOSE_COMMIT)
         .args(args)
         .output()?;
 

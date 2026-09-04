@@ -1611,6 +1611,55 @@ fn fold_create_moves_multiple_commits_to_new_branch() {
     );
 }
 
+/// Install a `commit-msg` hook that fails on any message carrying a diff.
+fn write_hook_rejecting_diffs(test_repo: &TestRepo) {
+    let hook = test_repo.workdir().join(".git/hooks/commit-msg");
+    std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
+    std::fs::write(
+        &hook,
+        "#!/bin/sh\ngrep -q '^diff --git' \"$1\" && exit 1\nexit 0\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+}
+
+/// The merge commit `fold --create` weaves in is made with no editor to strip
+/// a `commit.verbose` diff back out of the message.
+#[test]
+fn fold_create_keeps_the_diff_out_of_the_merge_message() {
+    let test_repo = TestRepo::new_with_remote();
+
+    test_repo.set_config("commit.verbose", "true");
+    write_hook_rejecting_diffs(&test_repo);
+
+    let l1_oid = test_repo.commit("L1", "l1.txt");
+
+    let result = super::run_create(
+        &test_repo.repo,
+        &[l1_oid.to_string(), "new-branch".to_string()],
+    );
+    assert!(result.is_ok(), "fold --create failed: {:?}", result);
+
+    // The hook only proves nothing was rejected; check the message itself, so a
+    // merge that stops being created cannot pass this test by default.
+    let head = test_repo.head_commit();
+    assert_eq!(
+        head.parent_count(),
+        2,
+        "fold --create should have woven the branch in with a merge commit"
+    );
+    let message = head.message().unwrap();
+    assert!(
+        !message.contains("diff --git"),
+        "the merge message must not carry the diff: {:?}",
+        message
+    );
+}
+
 #[test]
 fn fold_create_warns_and_moves_to_existing_branch() {
     // When --create is used but the branch already exists, warn and move the commit.

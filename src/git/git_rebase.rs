@@ -21,9 +21,8 @@ pub enum RebaseOutcome {
 /// next `edit`/`break` step, or `Stopped` if it stopped again. Does NOT abort —
 /// the caller is responsible.
 ///
-/// Sets `GIT_EDITOR=true` to suppress the editor for commit messages
-/// during `--continue` (matching the suppression applied during the
-/// initial rebase in `weave::run_rebase`).
+/// Suppresses the editor with `GIT_EDITOR=true`, the same way the initial
+/// rebase in `weave::run_rebase` does.
 pub fn continue_rebase(workdir: &Path) -> Result<RebaseOutcome> {
     use std::process::Command;
     use std::time::Instant;
@@ -38,6 +37,7 @@ pub fn continue_rebase(workdir: &Path) -> Result<RebaseOutcome> {
     let start = Instant::now();
     let output = Command::new("git")
         .current_dir(workdir)
+        .args(super::NO_VERBOSE_COMMIT)
         .args(["rebase", "--continue"])
         .env("GIT_EDITOR", "true")
         .output()?;

@@ -1303,6 +1303,7 @@ pub fn run_rebase(
 
     let mut cmd = Command::new("git");
     cmd.current_dir(workdir)
+        .args(crate::git::NO_VERBOSE_COMMIT)
         .args([
             "rebase",
             "--interactive",
