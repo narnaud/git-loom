@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.22.0](https://github.com/narnaud/git-loom/compare/v0.21.0...v0.22.0) (2026-09-05)
+
+
+### Features ✨
+
+* **abort:** abort a rebase left behind with no loom state ([b4c590c](https://github.com/narnaud/git-loom/commit/b4c590cc08e08751e83f46f09922d7814ed3017c))
+* **agent:** Add completion for the agent command ([d8e9d4a](https://github.com/narnaud/git-loom/commit/d8e9d4a8c3d1eab34c5b23496f68b313eb15c95d))
+* **agent:** tell agents when their installed skill is stale ([cb1da4b](https://github.com/narnaud/git-loom/commit/cb1da4bd838dfd083c6bf4efb92d3a81e9d89097))
+* **push:** add --force to override the force-with-lease check ([c959cea](https://github.com/narnaud/git-loom/commit/c959ceaf2afe46545a45ba19237847074ab8e37e))
+* **reword:** pause on conflict instead of aborting ([350891e](https://github.com/narnaud/git-loom/commit/350891e70f3dbb8ee03236ff2685f3d683bff73b))
+* **worktree:** refuse to rewrite a branch checked out in another worktree ([f3a697a](https://github.com/narnaud/git-loom/commit/f3a697ad2f91286cb85adc3f25838169478748d6))
+
+
+### Bug Fixes 🐞
+
+* **abort:** don't roll back on top of a rebase that failed to abort ([5345bdf](https://github.com/narnaud/git-loom/commit/5345bdf4547cc866a75785ef590e1c489e085b1c))
+* **continue:** stop reporting a paused rebase as completed ([2ba54d3](https://github.com/narnaud/git-loom/commit/2ba54d3935453178ff2254e4c81121d4dda7f875))
+* **drop:** refuse to drop a branch stacked inside another ([8b23ec5](https://github.com/narnaud/git-loom/commit/8b23ec535df7bee795d8a0ffe9f02953570f51b6))
+* **fold:** accept a file whose deletion is already staged ([a4169f9](https://github.com/narnaud/git-loom/commit/a4169f9ec072b655d2072455de3c239af4dc623c))
+* **rebase:** report honestly when the automatic abort fails ([ae3a7c9](https://github.com/narnaud/git-loom/commit/ae3a7c9e283ea998dbe98f150e5dc24854c3fe18))
+* **rebase:** stop calling every stopped rebase a conflict ([d62be1a](https://github.com/narnaud/git-loom/commit/d62be1a75449f4701b7d2ff22356a0768a17aef7))
+* **reword:** silence git commit summary in the editor path ([45b8aea](https://github.com/narnaud/git-loom/commit/45b8aeaae8000651cdebbee744002699a2b86012))
+* **status:** report a paused rebase instead of a detached HEAD ([3df1abc](https://github.com/narnaud/git-loom/commit/3df1abcee2f90998737ea7b94933da2902c57aff))
+* **update:** don't prune tags when fetching the fork push remote ([747a6f8](https://github.com/narnaud/git-loom/commit/747a6f828eae20d05506f16d9a23396fe3257563))
+* **weave:** keep the weave when a branch lands upstream ([2be543c](https://github.com/narnaud/git-loom/commit/2be543cb8cb1566dd9e2e19042c6c937371364b6))
+
+
+### Documentation
+
+* **agent:** restrict zz to uncommitting in the skill ([11c7497](https://github.com/narnaud/git-loom/commit/11c7497b27a325eba6451ea1a0fced6114d13798))
+
+
+### Tests
+
+* **integration:** remove every scratch dir, not just the last one ([68b582d](https://github.com/narnaud/git-loom/commit/68b582d4755738f0cd0f3c73b45fdda6c0a78d4b))
+
+
+### Other
+
+* **deps:** update git2 to 0.21 ([848f268](https://github.com/narnaud/git-loom/commit/848f26878a0990bb3ac10e9699143293c3a3f192))
+
 ## [0.21.0](https://github.com/narnaud/git-loom/compare/v0.20.1...v0.21.0) (2026-08-30)
 
 
