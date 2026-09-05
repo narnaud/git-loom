@@ -85,8 +85,19 @@ While a loom operation is paused, most commands are blocked. The following are s
 ## Without a Saved State File
 
 If git has a rebase or merge in progress that no loom state file describes,
-`loom continue` finishes it (`git rebase --continue`) and reports the outcome —
-including a rebase that only reached the next `edit` step, below.
+`loom continue` drives it (`git rebase --continue`, or `git merge --continue`)
+and reports the outcome, including a rebase that only reached the next `edit`
+step.
+
+```bash
+git loom continue
+# ✓ Completed the rebase git had in progress (no loom state, so nothing else was done)
+```
+
+Only git's own step runs: with no state file there is no command to finish off,
+so no saved patch is re-staged, no temp branch removed, and no per-command
+success line such as `✓ Updated branch …` is printed — just the generic line
+above.
 
 ## Pausing at an `edit` Step
 
@@ -100,8 +111,9 @@ same from outside. Loom checks and says which one happened:
   `loom abort`      to cancel and restore original state
 ```
 
-With no state file there is no command to name, so the line opens with
-"The rebase is paused at an `edit` step" instead.
+With no state file there is no command to name, so the line opens with "The
+rebase is paused at an `edit` step", and `loom abort` is offered as "to cancel it
+(no loom state to roll back)" — there is nothing else to undo.
 
 ## Error: No Operation in Progress
 
