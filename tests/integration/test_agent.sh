@@ -156,6 +156,16 @@ assert_contains "$OUT" '"status":"error"' "patch_rejected_status"
 assert_contains "$OUT" "--patch is interactive" "patch_rejected_msg"
 
 # ══════════════════════════════════════════════════════════════════════════════
+# error: tui is rejected
+# ══════════════════════════════════════════════════════════════════════════════
+
+describe "agent mode: tui is rejected with a structured error"
+gl_capture tui --agent
+assert_eq "1" "$CODE" "tui_rejected_exit"
+assert_contains "$OUT" '"status":"error"' "tui_rejected_status"
+assert_contains "$OUT" "the TUI is interactive" "tui_rejected_msg"
+
+# ══════════════════════════════════════════════════════════════════════════════
 # error: normal failures still end with a JSON status
 # ══════════════════════════════════════════════════════════════════════════════
 

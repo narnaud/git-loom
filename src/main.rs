@@ -86,6 +86,7 @@ const GROUPED_COMMANDS: &str = "\
 
 {h}Inspection:{r}
   {l}status{r}            Show the branch-aware status ({p}default{r} command)
+  {l}tui{r}               Interactive status TUI (tree + diff, with actions)
   {l}show{r}, {l}sh{r}          Show commit details (like git show)
   {l}diff{r}, {l}di{r}          Show a diff using short IDs (like git diff)
   {l}trace{r}             Show the latest command trace
@@ -283,6 +284,8 @@ enum Command {
     },
 
     // -- Inspection --
+    /// Interactive status TUI: browse the tree, view diffs, and run actions
+    Tui,
     /// Show the branch-aware status
     Status {
         /// Show files changed in each commit (optionally filtered to specific commits)
@@ -486,13 +489,16 @@ fn main() {
     }
 
     // Initialize logger for commands that modify the repo (skip for
-    // InternalWriteTodo — it runs as a subprocess — and Status/Trace/Show which are read-only).
+    // InternalWriteTodo — it runs as a subprocess — and Status/Trace/Show which
+    // are read-only). Tui browsing is read-only too; it initializes the logger
+    // itself when an action runs.
     let should_log = !matches!(
         cli.command,
         Some(Command::InternalWriteTodo { .. })
             | Some(Command::Trace)
             | Some(Command::Show { .. })
             | Some(Command::Diff { .. })
+            | Some(Command::Tui)
     );
     if should_log && let Ok(repo) = repo::open_repo() {
         let git_dir = repo.path().to_path_buf();
@@ -545,6 +551,15 @@ fn main() {
         )));
     }
 
+    // The status TUI is a full-screen terminal UI — same rule as the hunk
+    // pickers (a guard in tui::app::run backstops future call paths).
+    if agent_mode::enabled() && matches!(cli.command, Some(Command::Tui)) {
+        finish_and_exit(Err(anyhow::anyhow!(
+            "the TUI is interactive and unavailable in agent mode\n\
+             Use `loom status` instead"
+        )));
+    }
+
     let theme = graph_theme(resolve_theme_mode(cli.theme));
 
     let result = match cli.command {
@@ -554,6 +569,7 @@ fn main() {
             context,
             all,
         }) => status::run(files, context, all, theme),
+        Some(Command::Tui) => tui::app::run(theme),
         Some(Command::Init { name }) => init::run(name),
         Some(Command::Add { files, patch }) => add::run(files, patch, &theme),
         Some(Command::Switch { branch }) => switch::run(branch),

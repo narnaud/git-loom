@@ -29,10 +29,10 @@ Staging:
   add               Stage files using short IDs or paths [-p for interactive hunks]
 
 Commits:
-  commit, ci        Create a commit on a feature branch
-  fold              Amend, fixup, or move commits [amend, am, fixup, mv, rub]
+  commit, ci        Create a commit on a feature branch [-p for interactive hunks]
+  fold              Amend, fixup, or move commits [-p for interactive hunks] [amend, am, fixup, mv, rub]
   absorb            Auto-distribute changes into originating commits
-  split             Split a commit into two
+  split             Split a commit into two [-p for interactive hunks]
   swap              Swap two commits
   reword, rw        Reword a commit message or rename a branch
   drop, rm          Drop a change, commit, or branch
@@ -43,6 +43,7 @@ Branches:
 
 Inspection:
   status            Show the branch-aware status (default command)
+  tui               Interactive status TUI (tree + diff, with actions)
   show, sh          Show commit details (like git show)
   diff, di          Show a diff using short IDs (like git diff)
   trace             Show the latest command trace

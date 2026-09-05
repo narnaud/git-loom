@@ -106,6 +106,7 @@ clink.argmatcher("git-loom")
         "switch"    .. plain_matcher,
         -- Inspection
         "status"    .. status_matcher,
+        "tui"       .. plain_matcher,
         "show"      .. show_matcher,
         "diff"      .. diff_matcher,
         "trace"     .. plain_matcher,

@@ -12,7 +12,7 @@ Sometimes you want to stage or commit only part of your changes — a few specif
 │   A  new.rs      ││ +new line                      │
 │ ?? README.md     ││                                │
 ╰──────────────────╯╰────────────────────────────────╯
- Navigate: ↑/↓ or j/k | Switch Pane: tab | Toggle: space | Confirm: c or Enter | Quit: q or Esc
+ Navigate: ↑/↓ | Switch Pane: tab | Toggle: space | Confirm: c or Enter | Quit: q or Esc
 ```
 
 The left pane lists files with `git status`–style codes (`M`, `MM`, `A`, `??`, `D`). The right pane shows diff hunks — check the ones you want, leave the rest unchecked, then confirm.
