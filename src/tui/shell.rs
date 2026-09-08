@@ -4,8 +4,9 @@
 //! An app implements [`ShellApp`] and provides pane content, key/mouse
 //! handling for what the shell doesn't consume, and status-bar hints; the
 //! shell owns everything the TUIs would otherwise duplicate. The shell
-//! consumes `q`/Ctrl-C (via [`ShellApp::quit_exit`]) and Tab/BackTab (focus),
-//! and moves focus to a pane on mouse-down inside it.
+//! consumes `q`/Ctrl-C (via [`ShellApp::quit_exit`]), Tab/BackTab (focus) and
+//! Ctrl-Left/Ctrl-Right (split width), and moves focus to a pane on
+//! mouse-down inside it.
 
 use std::borrow::Cow;
 
@@ -40,9 +41,15 @@ impl PaneId {
 
 /// Static layout configuration an app hands to the shell.
 pub(crate) struct ShellConfig {
-    /// Horizontal split percentages (left, right).
+    /// Initial horizontal split percentages (left, right). The user can
+    /// resize the split at runtime with Ctrl-Left/Ctrl-Right.
     pub split: (u16, u16),
 }
+
+/// Bounds and step for the user-resizable split, in percent of the width.
+const SPLIT_MIN: u16 = 10;
+const SPLIT_MAX: u16 = 90;
+const SPLIT_STEP: u16 = 2;
 
 /// What an app's key handler tells the shell.
 pub(crate) enum KeyResult<E> {
@@ -115,6 +122,9 @@ fn install_panic_hook() {
 pub(crate) struct Shell<A: ShellApp> {
     pub app: A,
     focus: PaneId,
+    /// Left pane width in percent; `None` until the first render seeds it
+    /// from [`ShellConfig::split`].
+    split: Option<u16>,
     /// Pane rects of the last render, for mouse routing.
     areas: [Rect; 2],
 }
@@ -124,6 +134,7 @@ impl<A: ShellApp> Shell<A> {
         Shell {
             app,
             focus: PaneId::Left,
+            split: None,
             areas: [Rect::default(); 2],
         }
     }
@@ -163,7 +174,14 @@ impl<A: ShellApp> Shell<A> {
     /// Draw both panes and the status bar. Public (crate) so tests can drive
     /// the real render path through a `TestBackend`.
     pub fn render(&mut self, frame: &mut Frame) {
-        let split = self.app.config().split;
+        let left = match self.split {
+            Some(left) => left,
+            None => {
+                let left = self.app.config().split.0.clamp(SPLIT_MIN, SPLIT_MAX);
+                self.split = Some(left);
+                left
+            }
+        };
 
         let outer = Layout::default()
             .direction(Direction::Vertical)
@@ -172,8 +190,8 @@ impl<A: ShellApp> Shell<A> {
         let panes = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Percentage(split.0),
-                Constraint::Percentage(split.1),
+                Constraint::Percentage(left),
+                Constraint::Percentage(100 - left),
             ])
             .split(outer[0]);
         self.areas = [panes[0], panes[1]];
@@ -214,6 +232,16 @@ impl<A: ShellApp> Shell<A> {
                 if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
                     return Some(self.app.quit_exit());
                 }
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && matches!(key.code, KeyCode::Left | KeyCode::Right)
+                {
+                    self.resize_split(if key.code == KeyCode::Left {
+                        -(SPLIT_STEP as i32)
+                    } else {
+                        SPLIT_STEP as i32
+                    });
+                    return None;
+                }
                 match key.code {
                     KeyCode::Char('q') => Some(self.app.quit_exit()),
                     KeyCode::Tab | KeyCode::BackTab => {
@@ -246,6 +274,21 @@ impl<A: ShellApp> Shell<A> {
             }
             _ => None,
         }
+    }
+
+    /// Widen (positive) or narrow (negative) the left pane, clamped so both
+    /// panes stay visible.
+    fn resize_split(&mut self, delta: i32) {
+        let current = self
+            .split
+            .unwrap_or_else(|| self.app.config().split.0.clamp(SPLIT_MIN, SPLIT_MAX));
+        let next = (current as i32 + delta).clamp(SPLIT_MIN as i32, SPLIT_MAX as i32);
+        self.split = Some(next as u16);
+    }
+
+    #[cfg(test)]
+    pub fn split(&self) -> Option<u16> {
+        self.split
     }
 
     #[cfg(test)]

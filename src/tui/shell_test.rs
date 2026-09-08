@@ -99,6 +99,10 @@ fn key(code: KeyCode) -> Event {
     Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
 }
 
+fn ctrl(code: KeyCode) -> Event {
+    Event::Key(KeyEvent::new(code, KeyModifiers::CONTROL))
+}
+
 fn render<A: ShellApp>(shell: &mut Shell<A>, width: u16, height: u16) -> ratatui::buffer::Buffer {
     let backend = ratatui::backend::TestBackend::new(width, height);
     let mut terminal = ratatui::Terminal::new(backend).unwrap();
@@ -124,6 +128,39 @@ fn tab_toggles_focus() {
     assert_eq!(shell.focus(), PaneId::Right);
     assert!(shell.handle_event(key(KeyCode::BackTab)).is_none());
     assert_eq!(shell.focus(), PaneId::Left);
+}
+
+#[test]
+fn ctrl_arrows_resize_the_split_without_reaching_the_app() {
+    let mut shell = Shell::new(StubApp::new());
+    render(&mut shell, 40, 10);
+    assert_eq!(shell.split(), Some(50));
+    assert_eq!(shell.areas()[0].width, 20);
+
+    assert!(shell.handle_event(ctrl(KeyCode::Right)).is_none());
+    assert!(shell.handle_event(ctrl(KeyCode::Right)).is_none());
+    render(&mut shell, 40, 10);
+    assert_eq!(shell.split(), Some(54));
+    assert_eq!(shell.areas()[0].width, 22);
+
+    assert!(shell.handle_event(ctrl(KeyCode::Left)).is_none());
+    render(&mut shell, 40, 10);
+    assert_eq!(shell.split(), Some(52));
+
+    assert!(shell.app.keys.is_empty());
+}
+
+#[test]
+fn split_resize_is_clamped_to_keep_both_panes_visible() {
+    let mut shell = Shell::new(StubApp::new());
+    for _ in 0..100 {
+        shell.handle_event(ctrl(KeyCode::Left));
+    }
+    assert_eq!(shell.split(), Some(10));
+    for _ in 0..100 {
+        shell.handle_event(ctrl(KeyCode::Right));
+    }
+    assert_eq!(shell.split(), Some(90));
 }
 
 #[test]

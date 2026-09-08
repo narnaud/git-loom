@@ -36,6 +36,7 @@ Short IDs are displayed like in `git loom status`, so the tree doubles as a chea
 | `→`/`l` / `←`/`h` | Unfold / fold the current row; `←` on a file row jumps to its parent |
 | `Enter` | Toggle fold (or confirm a fold target — see below) |
 | `Tab` | Switch focus between tree and diff pane |
+| `Ctrl-←` / `Ctrl-→` | Narrow / widen the left pane (2% per press, clamped to 10–90%) |
 | `PgUp`/`PgDn` | Scroll the diff by a page |
 | Mouse click / wheel | Focus, move, scroll |
 | `R` / `F5` | Reload the tree from the repo |
