@@ -1007,7 +1007,7 @@ fn remote_ahead_shows_up_arrow() {
     info.branches = vec![BranchInfo {
         name: "feature-a".to_string(),
         tip_oid: oid(2),
-        remote: Some(RemoteStatus::Ahead),
+        remote: Some(RemoteStatus::Different),
     }];
 
     let output = render_plain(info);
@@ -1054,4 +1054,116 @@ fn no_remote_shows_no_indicator() {
         "expected no indicator after ], got: {}",
         header_line
     );
+}
+
+// ── stack helpers ────────────────────────────────────────────────────────
+
+fn branch(name: &str, tip: u8, remote: Option<RemoteStatus>) -> BranchInfo {
+    BranchInfo {
+        name: name.to_string(),
+        tip_oid: oid(tip),
+        remote,
+    }
+}
+
+/// feature-c (C1) on feature-b (B2, B1) on feature-a (A2, A1), plus an
+/// independent feature-x (X1) forking from upstream.
+fn three_level_stack() -> RepoInfo {
+    let mut info = base_info();
+    info.commits = vec![
+        commit(0x10, "X1", None),
+        commit(5, "C1", Some(4)),
+        commit(4, "B2", Some(3)),
+        commit(3, "B1", Some(2)),
+        commit(2, "A2", Some(1)),
+        commit(1, "A1", None),
+    ];
+    info.branches = vec![
+        branch("feature-x", 0x10, None),
+        branch("feature-c", 5, None),
+        branch("feature-b", 4, None),
+        branch("feature-a", 2, None),
+    ];
+    info
+}
+
+#[test]
+fn stack_parent_follows_tip_adjacency() {
+    let info = three_level_stack();
+    assert_eq!(graph::stack_parent(&info, "feature-a"), None);
+    assert_eq!(
+        graph::stack_parent(&info, "feature-b"),
+        Some("feature-a".to_string())
+    );
+    assert_eq!(
+        graph::stack_parent(&info, "feature-c"),
+        Some("feature-b".to_string())
+    );
+    assert_eq!(graph::stack_parent(&info, "feature-x"), None);
+    assert_eq!(graph::stack_parent(&info, "unknown"), None);
+}
+
+#[test]
+fn stack_parent_is_none_above_a_loose_commit() {
+    let mut info = base_info();
+    // feature-a (A1) sits on top of a loose integration commit L1.
+    info.commits = vec![commit(2, "A1", Some(1)), commit(1, "L1", None)];
+    info.branches = vec![branch("feature-a", 2, None)];
+    assert_eq!(graph::stack_parent(&info, "feature-a"), None);
+    assert_eq!(graph::downstack(&info, "feature-a"), vec!["feature-a"]);
+}
+
+#[test]
+fn stack_parent_is_none_for_an_empty_branch() {
+    let mut info = base_info();
+    info.commits = vec![commit(1, "A1", None)];
+    info.branches = vec![branch("feature-a", 1, None), branch("empty", 0xAA, None)];
+    assert_eq!(graph::stack_parent(&info, "empty"), None);
+    assert_eq!(graph::downstack(&info, "empty"), vec!["empty"]);
+    assert!(graph::upstack(&info, "empty").is_empty());
+}
+
+#[test]
+fn downstack_runs_bottom_to_top() {
+    let info = three_level_stack();
+    assert_eq!(
+        graph::downstack(&info, "feature-c"),
+        vec!["feature-a", "feature-b", "feature-c"]
+    );
+    assert_eq!(
+        graph::downstack(&info, "feature-b"),
+        vec!["feature-a", "feature-b"]
+    );
+    assert_eq!(graph::downstack(&info, "feature-a"), vec!["feature-a"]);
+    assert_eq!(graph::downstack(&info, "feature-x"), vec!["feature-x"]);
+}
+
+#[test]
+fn upstack_lists_nearest_first() {
+    let info = three_level_stack();
+    assert_eq!(
+        graph::upstack(&info, "feature-a"),
+        vec!["feature-b", "feature-c"]
+    );
+    assert_eq!(graph::upstack(&info, "feature-b"), vec!["feature-c"]);
+    assert!(graph::upstack(&info, "feature-c").is_empty());
+    assert!(graph::upstack(&info, "feature-x").is_empty());
+}
+
+#[test]
+fn stack_helpers_use_canonical_name_for_colocated_tips() {
+    let mut info = base_info();
+    // feature-b (B1) on a tip shared by feature-a and alias-a (A1).
+    info.commits = vec![commit(2, "B1", Some(1)), commit(1, "A1", None)];
+    info.branches = vec![
+        branch("feature-b", 2, None),
+        branch("feature-a", 1, None),
+        branch("alias-a", 1, None),
+    ];
+    assert_eq!(
+        graph::stack_parent(&info, "feature-b"),
+        Some("feature-a".to_string())
+    );
+    assert_eq!(graph::upstack(&info, "alias-a"), vec!["feature-b"]);
+    assert_eq!(graph::upstack(&info, "feature-a"), vec!["feature-b"]);
 }

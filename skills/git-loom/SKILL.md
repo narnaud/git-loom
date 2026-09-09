@@ -86,7 +86,7 @@ branches.
 | creating a branch | usually just `git loom commit -b <new-name> ...`; empty branch: `git loom branch new <name>` |
 | merging a branch into integration | `git loom branch merge <branch>` / `git loom branch unmerge <branch>` |
 | `git pull --rebase` | `git loom update -y` |
-| `git push` (+ PR) | `git loom push <branch>` (`--no-pr` to skip PR/review creation) |
+| `git push` (+ PR) | `git loom push <branch>` (`--no-pr` to skip PR/review creation; a stacked branch is pushed with the branches below it; in same-repository stacks, PRs target the branch below, while GitHub fork PRs all target upstream) |
 | `git diff` / `git show` | `git loom diff` / `git loom show` (short IDs work; unknown options pass through) |
 | checking out a branch to test it | `git loom switch <branch>` |
 

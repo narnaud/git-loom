@@ -74,7 +74,7 @@ The graph is rendered top-to-bottom with these sections:
 | `⏫` | Upstream has new commits |
 | `·` | Context commit before the base (dimmed) |
 | `✓` | Branch remote is in sync (green) |
-| `↑` | Branch has unpushed commits (yellow) |
+| `↑` | Branch tip differs from its remote (yellow) |
 | `✗` | Branch remote is gone (red) |
 
 ### Short IDs

@@ -4,7 +4,7 @@
 
 | Setting | Values | Default | Description |
 |---------|--------|---------|-------------|
-| `loom.remote-type` | `github`, `azure`, `gerrit` | Auto-detected | Override the remote type for `git loom push` |
+| `loom.remote-type` | `github`, `gitlab`, `azure`, `gerrit`, `plain` | Auto-detected | Override the remote type for `git loom push` |
 | `loom.push-remote` | Any remote name | Auto-detected | Override which remote to push to (e.g., `personal` for fork workflows) |
 | `loom.hideBranchPattern` | Any prefix string | `local-` | Prefix for branches hidden from `loom status` by default |
 | `loom.pruneGoneBranches` | `true`, `false` | `false` | Let `git loom update` remove local branches whose remote branch is gone |
@@ -14,16 +14,19 @@
 By default, `git loom push` auto-detects the remote type:
 
 - **GitHub** — if the remote URL contains `github.com`
+- **GitLab** — if the remote URL contains `gitlab`
 - **Azure DevOps** — if the remote URL contains `dev.azure.com`
-- **Gerrit** — if `.git/hooks/commit-msg` contains "gerrit"
+- **Gerrit** — if `.git/hooks/commit-msg` contains "gerrit", or you confirm the prompt when the remote looks like Gerrit
 - **Plain Git** — otherwise
 
 You can override this with:
 
 ```bash
-git config loom.remote-type github   # Force GitHub push (push + open PR)
+git config loom.remote-type github   # Force GitHub push (push + PR, stacked PRs)
+git config loom.remote-type gitlab   # Force GitLab push (merge request push options)
 git config loom.remote-type azure    # Force Azure DevOps push (push + open PR)
 git config loom.remote-type gerrit   # Force Gerrit push (refs/for/<branch>)
+git config loom.remote-type plain    # Force a plain force-with-lease push
 ```
 
 ### `loom.push-remote`
@@ -53,7 +56,7 @@ git config loom.hideBranchPattern "secret-"  # hide secret-* branches instead
 git config loom.hideBranchPattern ""         # disable hiding entirely
 ```
 
-Hidden branches remain fully accessible to all other loom commands (`fold`, `drop`, `commit`, `push`, etc.).
+Hidden branches remain fully accessible to the other loom commands (`fold`, `drop`, `commit`, etc.), except `push`, which never publishes a hidden branch nor a branch stacked on one.
 
 When creating or renaming a branch to a name that matches this prefix, *git-loom* prints a warning.
 

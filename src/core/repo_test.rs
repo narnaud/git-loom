@@ -1,9 +1,102 @@
 use crate::core::repo::{
-    self, Target, TargetKind, gather_repo_info, get_working_changes, get_working_changes_recurse,
+    self, RemoteStatus, Target, TargetKind, gather_repo_info, get_working_changes,
+    get_working_changes_recurse,
 };
 use crate::core::test_helpers::TestRepo;
 
 // ── Tests ──────────────────────────────────────────────────────────────
+
+/// Point `refs/remotes/origin/<name>` at `oid` and make local `name` track it.
+fn publish_branch_at(test_repo: &TestRepo, name: &str, oid: git2::Oid) {
+    test_repo
+        .repo
+        .reference(&format!("refs/remotes/origin/{}", name), oid, true, "test")
+        .unwrap();
+    test_repo
+        .repo
+        .find_branch(name, git2::BranchType::Local)
+        .unwrap()
+        .set_upstream(Some(&format!("origin/{}", name)))
+        .unwrap();
+}
+
+fn remote_status_of(test_repo: &TestRepo, name: &str) -> Option<RemoteStatus> {
+    let branch = test_repo
+        .repo
+        .find_branch(name, git2::BranchType::Local)
+        .unwrap();
+    let tip = branch.get().target().unwrap();
+    repo::detect_remote_status(&test_repo.repo, &branch, name, tip)
+}
+
+#[test]
+fn remote_status_is_synced_when_the_tips_match() {
+    let test_repo = TestRepo::new_with_remote();
+    let tip = test_repo.commit("A1", "a.txt");
+    test_repo.create_branch("feat");
+    publish_branch_at(&test_repo, "feat", tip);
+    assert!(matches!(
+        remote_status_of(&test_repo, "feat"),
+        Some(RemoteStatus::Synced)
+    ));
+}
+
+#[test]
+fn remote_status_is_different_when_only_new_commits_were_added() {
+    let test_repo = TestRepo::new_with_remote();
+    let published = test_repo.commit("A1", "a.txt");
+    test_repo.commit("A2", "a2.txt");
+    test_repo.create_branch("feat");
+    // The published tip is still in the branch's history, and it still counts
+    // as different: the remote does not have what the branch has.
+    publish_branch_at(&test_repo, "feat", published);
+    assert!(matches!(
+        remote_status_of(&test_repo, "feat"),
+        Some(RemoteStatus::Different)
+    ));
+}
+
+#[test]
+fn remote_status_is_different_when_the_published_tip_was_rewritten() {
+    let test_repo = TestRepo::new_with_remote();
+    let rewritten = test_repo.commit("A1", "a.txt");
+    test_repo.reset_hard(test_repo.get_oid(1));
+    let local = test_repo.commit("A1 amended", "a.txt");
+    test_repo.create_branch("feat");
+    assert_ne!(local, rewritten);
+    // The published tip is not even an ancestor any more.
+    publish_branch_at(&test_repo, "feat", rewritten);
+    assert!(matches!(
+        remote_status_of(&test_repo, "feat"),
+        Some(RemoteStatus::Different)
+    ));
+}
+
+#[test]
+fn remote_status_is_gone_when_the_remote_ref_was_deleted() {
+    let test_repo = TestRepo::new_with_remote();
+    let tip = test_repo.commit("A1", "a.txt");
+    test_repo.create_branch("feat");
+    publish_branch_at(&test_repo, "feat", tip);
+    test_repo
+        .repo
+        .find_reference("refs/remotes/origin/feat")
+        .unwrap()
+        .delete()
+        .unwrap();
+    assert!(matches!(
+        remote_status_of(&test_repo, "feat"),
+        Some(RemoteStatus::Gone)
+    ));
+}
+
+#[test]
+fn remote_status_is_none_when_the_branch_was_never_pushed() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("A1", "a.txt");
+    test_repo.create_branch("feat");
+    assert!(remote_status_of(&test_repo, "feat").is_none());
+}
 
 #[test]
 fn no_commits_ahead_of_upstream() {

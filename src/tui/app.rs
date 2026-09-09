@@ -757,7 +757,7 @@ fn row_line(
             spans.push(Span::styled("]", dim));
             match remote {
                 Some(RemoteStatus::Synced) => spans.push(Span::styled(" ✓", theme.remote_synced)),
-                Some(RemoteStatus::Ahead) => spans.push(Span::styled(" ↑", theme.remote_ahead)),
+                Some(RemoteStatus::Different) => spans.push(Span::styled(" ↑", theme.remote_ahead)),
                 Some(RemoteStatus::Gone) => spans.push(Span::styled(" ✗", theme.remote_gone)),
                 None => {}
             }

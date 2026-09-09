@@ -253,6 +253,73 @@ pub fn commits_in_branch(info: &RepoInfo, branch: &str) -> Vec<git2::Oid> {
         .collect()
 }
 
+/// The name the stack helpers use for `branch`: the canonical name of its
+/// tip, so branch names co-located on one commit compare equal. Unknown
+/// names are returned unchanged.
+fn canonical_name<'a>(info: &'a RepoInfo, branch: &'a str) -> &'a str {
+    info.branches
+        .iter()
+        .find(|b| b.name == branch)
+        .map(|b| canonical_branch_name(info, b.tip_oid))
+        .unwrap_or(branch)
+}
+
+/// The feature branch `branch` is stacked on: the one whose tip is the parent
+/// of the oldest commit `branch` owns. `None` when that parent is a loose
+/// commit or the upstream base, or when `branch` owns no commits.
+///
+/// Co-located tips resolve to their canonical name, like the status graph.
+pub fn stack_parent(info: &RepoInfo, branch: &str) -> Option<String> {
+    let oldest = *commits_in_branch(info, branch).last()?;
+    let parent = info.commits.iter().find(|c| c.oid == oldest)?.parent_oid?;
+    info.branches
+        .iter()
+        .any(|b| b.tip_oid == parent)
+        .then(|| canonical_branch_name(info, parent).to_string())
+}
+
+/// The branches `branch` depends on, bottom first, ending with `branch`
+/// itself. A branch that is not stacked yields just `[branch]`.
+pub fn downstack(info: &RepoInfo, branch: &str) -> Vec<String> {
+    let mut chain = vec![branch.to_string()];
+    while let Some(parent) = stack_parent(info, chain.last().unwrap()) {
+        if chain.contains(&parent) {
+            break;
+        }
+        chain.push(parent);
+    }
+    chain.reverse();
+    chain
+}
+
+/// The branch stacked directly on `branch`, if any.
+///
+/// A stack is linear: the weave replays the feature branches one after
+/// another, so a branch built on another branch's tip either continues that
+/// stack or is rebased off it. Nothing ever sits beside a layer.
+fn stack_child(info: &RepoInfo, branch: &str) -> Option<String> {
+    let canonical = canonical_name(info, branch);
+    info.branches
+        .iter()
+        .find(|b| stack_parent(info, &b.name).as_deref() == Some(canonical))
+        .map(|b| canonical_branch_name(info, b.tip_oid).to_string())
+}
+
+/// The branches stacked on top of `branch`, nearest first. Co-located names
+/// are represented once, by their canonical name.
+pub fn upstack(info: &RepoInfo, branch: &str) -> Vec<String> {
+    let mut above: Vec<String> = Vec::new();
+    let mut current = branch.to_string();
+    while let Some(child) = stack_child(info, &current) {
+        if above.contains(&child) {
+            break;
+        }
+        above.push(child.clone());
+        current = child;
+    }
+    above
+}
+
 /// Group commits into sections: working changes, feature branches, loose
 /// commits, and the upstream marker.
 pub(crate) fn build_sections(info: RepoInfo) -> Vec<Section> {
@@ -617,7 +684,7 @@ fn render_branch(
         };
         let remote_indicator = match remote {
             Some(RemoteStatus::Synced) => format!(" {}", "✓".color(theme.remote_synced)),
-            Some(RemoteStatus::Ahead) => format!(" {}", "↑".color(theme.remote_ahead)),
+            Some(RemoteStatus::Different) => format!(" {}", "↑".color(theme.remote_ahead)),
             Some(RemoteStatus::Gone) => format!(" {}", "✗".color(theme.remote_gone)),
             None => String::new(),
         };

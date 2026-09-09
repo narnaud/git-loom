@@ -569,10 +569,567 @@ fn force_pushes_when_the_lease_check_would_refuse() {
     )
     .unwrap();
 
-    assert!(super::push_plain(&workdir, "origin", "feature-a", false).is_err());
-    assert!(super::push_plain(&workdir, "origin", "feature-a", true).is_ok());
+    let plan = super::PushPlan::single("feature-a");
+    assert!(super::push_plain(&workdir, "origin", &plan, false).is_err());
+    assert!(super::push_plain(&workdir, "origin", &plan, true).is_ok());
 
     let pushed =
         crate::git::run_git_stdout(&remote, &["rev-parse", "refs/heads/feature-a"]).unwrap();
     assert_eq!(pushed.trim(), tip.to_string());
+}
+
+// ── stacked branches ─────────────────────────────────────────────────────
+
+use crate::core::repo::{BranchInfo, CommitInfo, RemoteStatus, RepoInfo, UpstreamInfo};
+
+fn oid(byte: u8) -> git2::Oid {
+    let mut bytes = [0u8; 20];
+    bytes[0] = byte;
+    git2::Oid::from_bytes(&bytes).unwrap()
+}
+
+fn commit(byte: u8, message: &str, parent: Option<u8>) -> CommitInfo {
+    CommitInfo {
+        oid: oid(byte),
+        short_id: format!("{:07x}", byte),
+        message: message.to_string(),
+        parent_oid: parent.map(oid),
+        files: vec![],
+    }
+}
+
+fn branch(name: &str, tip: u8, remote: Option<RemoteStatus>) -> BranchInfo {
+    BranchInfo {
+        name: name.to_string(),
+        tip_oid: oid(tip),
+        remote,
+    }
+}
+
+/// d (D1) on c (C1) on b (B1) on a (A1); x (X1) forks from upstream.
+fn stack_info(
+    b_remote: Option<RemoteStatus>,
+    c_remote: Option<RemoteStatus>,
+    d_remote: Option<RemoteStatus>,
+) -> RepoInfo {
+    RepoInfo {
+        branch_name: "integration".to_string(),
+        upstream: UpstreamInfo {
+            label: "origin/main".to_string(),
+            tip_oid: oid(0xAA),
+            merge_base_oid: oid(0xAA),
+            base_short_id: "aaa0000".to_string(),
+            base_message: "Initial".to_string(),
+            base_date: "2026-01-01".to_string(),
+            commits_ahead: 0,
+        },
+        commits: vec![
+            commit(0x10, "X1", None),
+            commit(4, "D1", Some(3)),
+            commit(3, "C1", Some(2)),
+            commit(2, "B1", Some(1)),
+            commit(1, "A1", None),
+        ],
+        branches: vec![
+            branch("x", 0x10, None),
+            branch("d", 4, d_remote),
+            branch("c", 3, c_remote),
+            branch("b", 2, b_remote),
+            branch("a", 1, Some(RemoteStatus::Synced)),
+        ],
+        working_changes: vec![],
+        context_commits: vec![],
+    }
+}
+
+/// Override one branch's remote status in a `stack_info` graph.
+fn with_remote(mut info: RepoInfo, name: &str, remote: Option<RemoteStatus>) -> RepoInfo {
+    let branch = info
+        .branches
+        .iter_mut()
+        .find(|b| b.name == name)
+        .expect("branch is in the graph");
+    branch.remote = remote;
+    info
+}
+
+fn layer(branch: &str, base: &str) -> super::Layer {
+    super::Layer {
+        branch: branch.to_string(),
+        base: base.to_string(),
+    }
+}
+
+#[test]
+fn plan_push_of_a_lone_branch_targets_upstream() {
+    let info = stack_info(None, None, None);
+    let plan = super::plan_push(&info, "x", "main");
+    assert_eq!(plan.layers, vec![layer("x", "main")]);
+    assert!(plan.republish.is_empty());
+    assert!(plan.not_pushed.is_empty());
+    assert!(!plan.is_stacked());
+    assert_eq!(plan.branches(), vec!["x"]);
+}
+
+#[test]
+fn plan_push_chains_bases_bottom_up() {
+    let info = stack_info(None, None, None);
+    let plan = super::plan_push(&info, "c", "main");
+    assert_eq!(
+        plan.layers,
+        vec![layer("a", "main"), layer("b", "a"), layer("c", "b")]
+    );
+    assert_eq!(plan.requested(), "c");
+    assert!(plan.is_stacked());
+}
+
+#[test]
+fn plan_push_republishes_stale_upstack_and_hints_the_rest() {
+    // c was pushed and has changed since, d was never pushed.
+    let info = stack_info(None, Some(RemoteStatus::Different), None);
+    let plan = super::plan_push(&info, "b", "main");
+    assert_eq!(plan.layers, vec![layer("a", "main"), layer("b", "a")]);
+    assert_eq!(plan.republish, vec![layer("c", "b")]);
+    assert_eq!(plan.not_pushed, vec!["d"]);
+    assert_eq!(plan.branches(), vec!["a", "b", "c"]);
+    let flags: Vec<bool> = plan.pr_layers().map(|(_, republish)| republish).collect();
+    assert_eq!(flags, vec![false, false, true]);
+}
+
+#[test]
+fn hidden_downstack_reports_hidden_layers_bottom_first() {
+    let info = stack_info(None, None, None);
+    // The prefix `a` hides only branch `a`.
+    assert_eq!(super::hidden_downstack(&info, "c", "a"), vec!["a"]);
+    assert_eq!(super::hidden_downstack(&info, "a", "a"), vec!["a"]);
+    assert!(super::hidden_downstack(&info, "x", "a").is_empty());
+    assert!(super::hidden_downstack(&info, "c", "").is_empty());
+}
+
+#[test]
+fn refuse_hidden_names_the_hidden_layer() {
+    let info = stack_info(None, None, None);
+    let err = super::refuse_hidden(&info, "c", "a")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("`c` is stacked on hidden branch `a`"), "{err}");
+    let err = super::refuse_hidden(&info, "a", "a")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("`a` is hidden"), "{err}");
+    assert!(super::refuse_hidden(&info, "x", "a").is_ok());
+}
+
+#[test]
+fn plan_push_skips_synced_and_gone_upstack() {
+    let info = stack_info(None, Some(RemoteStatus::Synced), Some(RemoteStatus::Gone));
+    let plan = super::plan_push(&info, "b", "main");
+    assert!(plan.republish.is_empty());
+    assert!(plan.not_pushed.is_empty());
+}
+
+#[test]
+fn plan_push_drops_a_gone_bottom_layer() {
+    // a's PR merged and the remote branch was deleted: b becomes the bottom.
+    let info = with_remote(stack_info(None, None, None), "a", Some(RemoteStatus::Gone));
+    let plan = super::plan_push(&info, "c", "main");
+    assert_eq!(plan.layers, vec![layer("b", "main"), layer("c", "b")]);
+    assert_eq!(plan.requested(), "c");
+    assert_eq!(plan.branches(), vec!["b", "c"]);
+}
+
+#[test]
+fn plan_push_drops_a_gone_middle_layer() {
+    let info = stack_info(Some(RemoteStatus::Gone), None, None);
+    let plan = super::plan_push(&info, "c", "main");
+    assert_eq!(plan.layers, vec![layer("a", "main"), layer("c", "a")]);
+}
+
+#[test]
+fn plan_push_keeps_the_requested_branch_when_it_is_gone() {
+    // Every layer is gone, the requested one included: it is still pushed,
+    // alone, targeting upstream.
+    let info = with_remote(
+        stack_info(Some(RemoteStatus::Gone), None, None),
+        "a",
+        Some(RemoteStatus::Gone),
+    );
+    let plan = super::plan_push(&info, "b", "main");
+    assert_eq!(plan.layers, vec![layer("b", "main")]);
+    assert_eq!(plan.requested(), "b");
+    assert!(!plan.is_stacked());
+}
+
+#[test]
+fn plan_push_rebases_a_republished_layer_over_a_gone_one() {
+    // c was merged and its remote branch deleted, d was rewritten above it:
+    // d's PR must target b, not the branch that is no longer on the remote.
+    let info = stack_info(
+        None,
+        Some(RemoteStatus::Gone),
+        Some(RemoteStatus::Different),
+    );
+    let plan = super::plan_push(&info, "b", "main");
+    assert_eq!(plan.layers, vec![layer("a", "main"), layer("b", "a")]);
+    assert_eq!(plan.republish, vec![layer("d", "b")]);
+    assert!(plan.not_pushed.is_empty());
+}
+
+#[test]
+fn plan_push_republishes_over_a_never_pushed_layer() {
+    // c exists only locally, so it is no PR target: d is still re-published,
+    // over the nearest branch the push leaves on the remote.
+    let info = stack_info(None, None, Some(RemoteStatus::Different));
+    let plan = super::plan_push(&info, "b", "main");
+    assert_eq!(plan.republish, vec![layer("d", "b")]);
+    assert_eq!(plan.not_pushed, vec!["c"]);
+}
+
+#[test]
+fn plan_push_republishes_a_layer_that_only_added_commits() {
+    // c has local commits on top of what is published. It is out of step with
+    // the remote like any other, so it goes out with the push.
+    let info = stack_info(None, Some(RemoteStatus::Different), None);
+    let plan = super::plan_push(&info, "b", "main");
+    assert_eq!(plan.republish, vec![layer("c", "b")]);
+    assert_eq!(plan.not_pushed, vec!["d"]);
+}
+
+#[test]
+fn plan_push_keeps_a_synced_layer_as_a_republished_base() {
+    // A synced c is still on the remote, so d keeps targeting it (spec 011:
+    // the skipped layer ends the stack run, it does not change the bases).
+    let info = stack_info(
+        None,
+        Some(RemoteStatus::Synced),
+        Some(RemoteStatus::Different),
+    );
+    let plan = super::plan_push(&info, "b", "main");
+    assert_eq!(plan.republish, vec![layer("d", "c")]);
+    assert!(plan.not_pushed.is_empty());
+}
+
+#[test]
+fn plan_push_falls_back_to_upstream_when_everything_below_is_gone() {
+    // Only the requested branch survives the filter, and it is what the
+    // layer above targets.
+    let info = with_remote(
+        stack_info(
+            None,
+            Some(RemoteStatus::Gone),
+            Some(RemoteStatus::Different),
+        ),
+        "a",
+        Some(RemoteStatus::Gone),
+    );
+    let plan = super::plan_push(&info, "b", "main");
+    assert_eq!(plan.layers, vec![layer("b", "main")]);
+    assert_eq!(plan.republish, vec![layer("d", "b")]);
+}
+
+#[test]
+fn plan_push_keeps_gone_out_of_the_message_but_still_hints_upstack() {
+    let info = with_remote(
+        stack_info(None, Some(RemoteStatus::Different), None),
+        "a",
+        Some(RemoteStatus::Gone),
+    );
+    let plan = super::plan_push(&info, "b", "main");
+    assert_eq!(
+        super::pushed_message("origin", &plan),
+        "Pushed `b` to `origin`
+Re-pushed above `b`: `c`"
+    );
+    assert_eq!(plan.not_pushed, vec!["d"]);
+}
+
+#[test]
+fn is_chain_counts_republished_layers_too() {
+    // A branch of its own, with nothing above it: one PR, no chain.
+    let info = stack_info(None, None, None);
+    let lone = super::plan_push(&info, "x", "main");
+    assert!(!lone.is_stacked());
+    assert!(!lone.is_chain());
+
+    // Not stacked on anything, but a re-published branch above it makes the
+    // two PRs a chain: b's PR targets a.
+    let info = with_remote(
+        stack_info(Some(RemoteStatus::Different), None, None),
+        "a",
+        None,
+    );
+    let bottom = super::plan_push(&info, "a", "main");
+    assert_eq!(bottom.layers, vec![layer("a", "main")]);
+    assert_eq!(bottom.republish, vec![layer("b", "a")]);
+    assert!(!bottom.is_stacked(), "a has nothing below it");
+    assert!(bottom.is_chain(), "a and b form a PR chain");
+
+    // A stacked branch is a chain on its downstack alone.
+    let stacked = super::plan_push(&info, "b", "main");
+    assert!(stacked.is_chain());
+
+    // The Gerrit/no-PR plan is a single branch.
+    assert!(!super::PushPlan::single("x").is_chain());
+}
+
+#[test]
+fn azure_refuses_a_stacked_branch() {
+    let info = stack_info(None, None, None);
+    let stacked = super::plan_push(&info, "b", "main");
+    let err = super::refuse_stacked_azure(&super::RemoteType::AzureDevOps, &stacked)
+        .unwrap_err()
+        .to_string();
+    // The whole message: a continuation line must not carry the source indent.
+    assert_eq!(
+        err,
+        "`b` is stacked on `a` — Azure DevOps has no stacked pull requests\n\
+         Land the branches below it first, or push without a PR (`--no-pr`)"
+    );
+
+    // A branch of its own is fine, and every other remote stacks freely.
+    let lone = super::plan_push(&info, "x", "main");
+    assert!(super::refuse_stacked_azure(&super::RemoteType::AzureDevOps, &lone).is_ok());
+    assert!(super::refuse_stacked_azure(&super::RemoteType::GitHub, &stacked).is_ok());
+}
+
+#[test]
+fn pushed_message_lists_layers_and_republished() {
+    let info = stack_info(None, Some(RemoteStatus::Different), None);
+    let plan = super::plan_push(&info, "b", "main");
+    assert_eq!(
+        super::pushed_message("origin", &plan),
+        "Pushed `a`, `b` to `origin`\nRe-pushed above `b`: `c`"
+    );
+    let lone = super::PushPlan::single("x");
+    assert_eq!(
+        super::pushed_message("origin", &lone),
+        "Pushed `x` to `origin`"
+    );
+}
+
+#[test]
+fn gather_branch_commits_yields_only_the_branch_own_commits() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("A1", "a1.txt");
+    test_repo.commit("A2", "a2.txt");
+    test_repo.create_branch("feature-a");
+    test_repo.commit("B1", "b1.txt");
+    test_repo.create_branch("feature-b");
+    let info = crate::core::repo::gather_repo_info(&test_repo.repo, false, 1).unwrap();
+
+    let subjects = |branch: &str, base: &str| {
+        super::gather_branch_commits(&test_repo.repo, &info, branch, base)
+            .unwrap()
+            .iter()
+            .map(|(s, _)| s.clone())
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(subjects("feature-a", "main"), vec!["A1", "A2"]);
+    // Stacked on feature-a: the PR's diff is B1 alone, and so is its body.
+    assert_eq!(subjects("feature-b", "feature-a"), vec!["B1"]);
+}
+
+#[test]
+fn gather_branch_commits_spans_the_stack_when_the_pr_targets_the_trunk() {
+    // A fork's PRs target the trunk, and so does a layer whose base was
+    // dropped: GitHub's diff then covers the branches below too, so the
+    // description has to cover them as well.
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("A1", "a1.txt");
+    test_repo.create_branch("feature-a");
+    test_repo.commit("B1", "b1.txt");
+    test_repo.create_branch("feature-b");
+    let info = crate::core::repo::gather_repo_info(&test_repo.repo, false, 1).unwrap();
+
+    let commits =
+        super::gather_branch_commits(&test_repo.repo, &info, "feature-b", "main").unwrap();
+    assert_eq!(
+        commits.iter().map(|(s, _)| s.as_str()).collect::<Vec<_>>(),
+        vec!["A1", "B1"]
+    );
+}
+
+#[test]
+fn push_args_make_a_stack_atomic() {
+    // Spec 011 sells the stack push as all-or-nothing: a lease refused on any
+    // branch must leave every branch untouched. `--atomic` is what buys that.
+    let stack = super::push_args("origin", &["a", "b"], false);
+    assert_eq!(
+        stack,
+        vec![
+            "push",
+            "--force-with-lease",
+            "--force-if-includes",
+            "--atomic",
+            "-u",
+            "origin",
+            "a",
+            "b"
+        ]
+    );
+    // Nothing to be atomic about with one ref.
+    let lone = super::push_args("origin", &["a"], false);
+    assert!(!lone.contains(&"--atomic"));
+    // `-f` replaces the lease pair, and keeps the guarantee.
+    let forced = super::push_args("origin", &["a", "b"], true);
+    assert_eq!(
+        forced,
+        vec!["push", "--force", "--atomic", "-u", "origin", "a", "b"]
+    );
+}
+
+#[test]
+fn push_plain_sends_the_whole_chain_in_one_push() {
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    let a_tip = test_repo.commit("A1", "a1.txt");
+    test_repo.create_branch("feature-a");
+    let b_tip = test_repo.commit("B1", "b1.txt");
+    test_repo.create_branch("feature-b");
+    let info = crate::core::repo::gather_repo_info(&test_repo.repo, false, 1).unwrap();
+    let plan = super::plan_push(&info, "feature-b", "main");
+    assert_eq!(plan.branches(), vec!["feature-a", "feature-b"]);
+
+    super::push_plain(&workdir, "origin", &plan, false).unwrap();
+
+    let remote = test_repo.remote_path().unwrap();
+    let rev = |r: &str| {
+        crate::git::run_git_stdout(&remote, &["rev-parse", r])
+            .unwrap()
+            .trim()
+            .to_string()
+    };
+    assert_eq!(rev("refs/heads/feature-a"), a_tip.to_string());
+    assert_eq!(rev("refs/heads/feature-b"), b_tip.to_string());
+}
+
+// ── gh parsing ───────────────────────────────────────────────────────────
+
+#[test]
+fn parse_gh_pr_list_reads_number_url_and_base() {
+    let json =
+        r#"[{"baseRefName":"feature-a","number":42,"url":"https://github.com/o/r/pull/42"}]"#;
+    assert_eq!(
+        super::parse_gh_pr_list(json, None),
+        Some(super::GhPr {
+            number: 42,
+            url: "https://github.com/o/r/pull/42".to_string(),
+            base: "feature-a".to_string(),
+        })
+    );
+    assert_eq!(super::parse_gh_pr_list("[]", None), None);
+    assert_eq!(super::parse_gh_pr_list("not json", None), None);
+}
+
+#[test]
+fn parse_gh_pr_list_picks_the_pr_from_our_repository() {
+    // `--head b` also matches a stranger's fork branch named `b`.
+    let json = r#"[
+        {"baseRefName":"main","number":9,"url":"https://github.com/o/r/pull/9",
+         "headRepositoryOwner":{"login":"stranger"}},
+        {"baseRefName":"a","number":12,"url":"https://github.com/o/r/pull/12",
+         "headRepositoryOwner":{"login":"Forker"}}
+    ]"#;
+    assert_eq!(
+        super::parse_gh_pr_list(json, Some("forker")).map(|pr| pr.number),
+        Some(12)
+    );
+    assert_eq!(super::parse_gh_pr_list(json, Some("nobody")), None);
+    assert_eq!(
+        super::parse_gh_pr_list(json, None).map(|pr| pr.number),
+        Some(9)
+    );
+}
+
+#[test]
+fn stack_pr_numbers_stops_at_a_missing_pr_or_a_gap() {
+    let chain = |specs: &[(&str, &str, Option<u64>)]| -> Vec<(super::Layer, Option<u64>)> {
+        specs
+            .iter()
+            .map(|(b, base, n)| (layer(b, base), *n))
+            .collect()
+    };
+    // Complete chain.
+    assert_eq!(
+        super::stack_pr_numbers(&chain(&[("a", "main", Some(1)), ("b", "a", Some(2))])),
+        vec![1, 2]
+    );
+    // A layer without a PR ends the run.
+    assert_eq!(
+        super::stack_pr_numbers(&chain(&[
+            ("a", "main", Some(1)),
+            ("b", "a", None),
+            ("c", "b", Some(3)),
+        ])),
+        vec![1]
+    );
+    // c was in sync and skipped: d targets c, not b, so d cannot join.
+    assert_eq!(
+        super::stack_pr_numbers(&chain(&[
+            ("a", "main", Some(1)),
+            ("b", "a", Some(2)),
+            ("d", "c", Some(4)),
+        ])),
+        vec![1, 2]
+    );
+    assert!(super::stack_pr_numbers(&chain(&[("a", "main", None)])).is_empty());
+}
+
+#[test]
+fn pr_number_from_url_takes_the_last_segment() {
+    assert_eq!(
+        super::pr_number_from_url("https://github.com/o/r/pull/7\n"),
+        Some(7)
+    );
+    assert_eq!(
+        super::pr_number_from_url("https://github.com/o/r/pulls"),
+        None
+    );
+}
+
+#[test]
+fn parse_stack_number_handles_null_and_objects() {
+    assert_eq!(super::parse_stack_number("null\n"), None);
+    assert_eq!(
+        super::parse_stack_number(r#"{"id":9,"number":3,"size":2,"position":1}"#),
+        Some(3)
+    );
+}
+
+#[test]
+fn stack_request_body_orders_bottom_to_top() {
+    assert_eq!(
+        super::stack_request_body(&[10, 11, 12]),
+        r#"{"pull_requests":[10,11,12]}"#
+    );
+}
+
+#[test]
+fn plan_stack_registration_covers_every_shape() {
+    use super::StackAction;
+    assert_eq!(
+        super::plan_stack_registration(&[None, None]),
+        StackAction::Create
+    );
+    assert_eq!(
+        super::plan_stack_registration(&[Some(3), Some(3)]),
+        StackAction::Complete { stack: 3 }
+    );
+    assert_eq!(
+        super::plan_stack_registration(&[Some(3), Some(3), None, None]),
+        StackAction::Extend { stack: 3, from: 2 }
+    );
+    assert_eq!(
+        super::plan_stack_registration(&[Some(3), Some(4)]),
+        StackAction::Conflict
+    );
+    assert_eq!(
+        super::plan_stack_registration(&[Some(3), None, Some(3)]),
+        StackAction::Conflict
+    );
+    assert_eq!(
+        super::plan_stack_registration(&[None, Some(3)]),
+        StackAction::Conflict
+    );
 }

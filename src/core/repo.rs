@@ -544,8 +544,11 @@ pub struct CommitInfo {
 pub enum RemoteStatus {
     /// Remote tracking ref exists and local tip matches it.
     Synced,
-    /// Remote tracking ref exists but local is ahead.
-    Ahead,
+    /// Remote tracking ref exists but its tip is not the local one: the
+    /// branch has commits the remote does not, was rewritten since it was
+    /// published, or both. A push sends it either way, so nothing downstream
+    /// needs the three cases told apart.
+    Different,
     /// Upstream was configured but the remote ref no longer exists.
     Gone,
 }
@@ -976,7 +979,7 @@ fn detect_remote_status(
     if let Ok(upstream) = branch.upstream() {
         return Some(match upstream.get().target() {
             Some(upstream_oid) if upstream_oid == tip_oid => RemoteStatus::Synced,
-            _ => RemoteStatus::Ahead,
+            _ => RemoteStatus::Different,
         });
     }
 

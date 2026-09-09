@@ -15,6 +15,8 @@ git-loom detects your remote type automatically and runs the appropriate command
 
 If `gh` or `az` are not installed, the push still succeeds — you just won't get the automatic PR creation.
 
+If `feature-auth` is stacked on another branch in the same repository, the lower branch is pushed with it and each PR targets the branch below. GitHub links the PRs into a [stack](https://docs.github.com/en/pull-requests/get-started/about-stacked-prs). Fork PRs instead target upstream and are not linked; see [Stacked Branches](../commands/push.md#stacked-branches).
+
 If you just want to push without creating a PR (e.g. to back up your work):
 
 ```bash

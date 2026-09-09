@@ -1,6 +1,6 @@
 # push
 
-Push a feature branch to the remote. Automatically detects the remote type and uses the appropriate push strategy.
+Push a feature branch to the remote, together with the branches it is stacked on. Automatically detects the remote type and uses the appropriate push strategy.
 
 ## Usage
 
@@ -20,6 +20,60 @@ git loom push [branch] [--no-pr] [-f|--force]
 |------|-------------|
 | `--no-pr` | Push without creating a PR or Gerrit review (see below) |
 | `-f`, `--force` | Push with `--force` instead of `--force-with-lease --force-if-includes` |
+
+## Stacked Branches
+
+A branch is *stacked* on another when it is built on top of it — its oldest commit's parent is the other branch's tip. That is exactly what `git loom status` draws with `│├─` between two branches. Stacks can be several branches deep.
+
+Pushing a stacked branch pushes what its review depends on. With `d` on `c` on `b` on `a`:
+
+```bash
+git loom push b
+# ✓ Pushed `a`, `b` to `origin`
+#   Re-pushed above `b`: `c`
+# ! Not pushed above `b`: `d`
+#   Run `loom push d` to publish them
+```
+
+- **`a`, `b`** — the branch and everything below it, always.
+- **`c`** — a branch above `b` whose remote is no longer at its tip, whether the rebase that rewrote `b` rewrote it too or it carries commits of its own. Either way the server no longer matches the stack, so it is re-pushed. No PR is created for it.
+- **`d`** — a branch above `b` that was never pushed is only mentioned. It has no remote ref to keep in step, and creating one is your call.
+
+Everything goes out in one atomic `git push` (one lease check, and a refused branch leaves the others untouched). Branches hidden by `loom.hideBranchPattern` are never pushed: pushing one, or a branch stacked on one, is refused. Gerrit needs none of this: `refs/for/` already uploads the whole chain of changes.
+
+### Pull requests per layer
+
+Each pushed branch gets a PR that targets the branch below it; the bottom one targets your upstream branch (`main`):
+
+| Remote | What loom does |
+|--------|----------------|
+| GitHub | Creates missing PRs with `--base <branch below>`, retargets an existing PR whose base is wrong (`PR retargeted to 'a': …`), then links the PRs into a [GitHub stack](https://docs.github.com/en/pull-requests/get-started/about-stacked-prs) |
+| GitLab | Pushes each branch with `merge_request.target=<branch below>`; GitLab shows the dependency and retargets on merge. A re-pushed upper branch keeps its existing MR and gets no new one |
+| Azure DevOps | Not supported — pushing a stacked branch is refused (see [Azure DevOps](#azure-devops)) |
+| Gerrit | Unchanged |
+
+On GitHub the stack shows a stack map on every PR, reviewers see one layer at a time, and when the bottom PR merges GitHub rebases and retargets the ones above by itself. Nothing is stored locally: loom reads each PR's stack membership back through `gh api` on every push and creates or extends the stack as needed. In a stack, new PRs are created directly and their URLs printed instead of opening the browser, because the stack can only be linked once every PR exists.
+
+```bash
+git loom push b
+# ✓ Pushed `a`, `b` to `origin`
+# ✓ PR created: https://github.com/owner/repo/pull/41
+# ✓ PR created: https://github.com/owner/repo/pull/42
+# ✓ Stack #7 registered with 2 PRs
+```
+
+GitHub does not support stacks across forks: in a fork workflow every layer still gets its PR, but they all target the upstream branch and a warning says so. If the stack API is unavailable on your host, or a PR's stack membership cannot be read, the PR bases are still set and loom points you at the `gh-stack` extension.
+
+### Creating a stack
+
+A stack is just a shape of your branches:
+
+- `git loom branch part-1 -t <commit inside feature>` splits a branch into two stacked layers.
+- `git loom branch b -t a` followed by `git loom commit -b b` puts b's first commit on top of a.
+
+Amending any layer (`fold`, `absorb`, `reword`) rewrites the layers above it as well; the next `push` of any layer re-publishes them. Adding a commit to a *lower* layer with `commit -b` or `fold <commit> <branch>` is not supported yet — commit to the top layer or fold into an existing commit instead.
+
+When the bottom PR merges, `git loom update` rebases your integration branch and the stack shrinks from the bottom.
 
 ## Remote Type Detection
 
@@ -59,7 +113,7 @@ git push --force-with-lease --force-if-includes -u <remote> <branch>
 
 Uses `--force-with-lease` because woven branches are frequently rebased. `--force-if-includes` adds extra safety.
 
-Pass `-f` / `--force` to push with plain `--force` instead, for when the lease check refuses a push you know is correct. It applies to every remote type except a Gerrit `refs/for/` review push, which never forces.
+Pass `-f` / `--force` to push with plain `--force` instead, for when the lease check refuses a push you know is correct. It applies to every remote type except a Gerrit `refs/for/` review push, which never forces. It also applies to every branch the push contains, not only the one named: a stack goes out in a single `git push`, so forcing it overwrites the downstack and re-published upstack branches too.
 
 Any `remote:` lines containing an `http(s)` URL are shown below the success message, so the MR/PR creation link that servers like GitLab print on push is visible even when the remote type was not detected.
 
@@ -70,7 +124,7 @@ Pushes the branch with `--force-with-lease`, then checks whether a PR already ex
 - **PR exists** — prints the PR URL (`PR updated: https://github.com/owner/repo/pull/42`) without opening the browser
 - **No PR** — creates the PR via `gh pr create` with an auto-generated title and description (see [PR Title and Description](#pr-title-and-description) below)
 
-If `gh` is not installed, the push succeeds with a message suggesting to install it.
+For a stacked branch, see [Stacked Branches](#stacked-branches). If `gh` is not installed, the push succeeds with a message suggesting to install it.
 
 In a **fork workflow** (tracking `upstream/main`), pushes go to `origin` (your fork) and the PR targets the upstream repository automatically.
 
@@ -87,12 +141,21 @@ Uses GitLab [push options](https://docs.gitlab.com/ee/user/project/push_options.
 
 ### Azure DevOps
 
-Pushes the branch with `--force-with-lease`, then checks whether a PR already exists for the branch:
+Azure has no stacked pull requests, and `az repos pr update` cannot retarget an existing one either, so a stack would land as PRs whose base says nothing a reviewer can rely on. Pushing a stacked branch is refused before anything reaches the remote:
+
+```
+✗ `b` is stacked on `a` — Azure DevOps has no stacked pull requests
+  Land the branches below it first, or push without a PR (`--no-pr`)
+```
+
+`--no-pr` still pushes the whole stack; it is the pull requests Azure cannot express.
+
+For a branch of its own, loom pushes it with `--force-with-lease`, then checks whether a PR already exists:
 
 - **PR exists** — prints the PR URL (`PR updated: https://dev.azure.com/...`) without opening the browser
 - **No PR** — creates the PR via `az repos pr create` with an auto-generated title and description (see [PR Title and Description](#pr-title-and-description) below)
 
-`--detect` auto-detects the organization and project from the remote URL. If `az` is not installed, the push succeeds with a message suggesting to install it.
+The organization, project and repository are read from the remote URL and passed explicitly; `--detect` is only used when the URL cannot be parsed. If `az` is not installed, the push succeeds with a message suggesting to install it.
 
 ### Gerrit
 
@@ -104,10 +167,10 @@ Uses the `refs/for/` refspec. No topic is set. After pushing, any review URLs re
 
 ## PR Title and Description
 
-When creating a new PR (GitHub or Azure DevOps), *git-loom* auto-generates the title and description from the branch's commits:
+When creating a new PR (GitHub or Azure DevOps), *git-loom* auto-generates the title and description from the commits the PR contains — those between its base and the branch tip. A stacked PR includes only its branch's own commits. When a PR targets the trunk instead (in a fork, or because its lower layer was dropped as merged), it also includes commits from the lower layers, so the description always matches the diff a reviewer sees:
 
 - **Single commit** — the commit subject becomes the PR title and the commit body becomes the description.
-- **Multiple commits** — you are prompted for a PR title. The description is built by concatenating all commit messages (oldest to newest), separated by `---` dividers.
+- **Multiple commits** — you are prompted for a PR title (the prompt names the branch). The description is built by concatenating all commit messages (oldest to newest), separated by `---` dividers.
 - **Empty branch** — the branch name is used as the title with an empty description.
 
 ## Pushing Without a PR or Review
@@ -162,6 +225,16 @@ git loom push feature-a
 git loom push feature-a
 # Pushed 'feature-a' to origin
 # PR updated: https://github.com/owner/repo/pull/42
+```
+
+### Push a stacked branch to GitHub
+
+```bash
+git loom push feature-b        # feature-b is stacked on feature-a
+# Pushed `feature-a`, `feature-b` to `origin`
+# PR updated: https://github.com/owner/repo/pull/41
+# PR created: https://github.com/owner/repo/pull/42
+# Stack #7 registered with 2 PRs
 ```
 
 ### Push to Azure DevOps (new PR)
