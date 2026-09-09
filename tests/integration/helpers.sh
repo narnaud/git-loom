@@ -84,8 +84,10 @@ setup_repo_with_remote() {
     touch "$seed/.gitkeep"
     git -C "$seed" add .
     git -C "$seed" commit -q -m "Initial"
+    # Exported as BASE_BRANCH: git's default branch name differs per machine.
     local base_branch
     base_branch="$(git -C "$seed" rev-parse --abbrev-ref HEAD)"
+    BASE_BRANCH="$base_branch"
 
     # Clone it as the bare remote
     git clone -q --bare "$seed" "$TMPROOT/remote.git"
@@ -308,6 +310,12 @@ describe() { printf " ${YELLOW}=>${NC} %s\n" "$*"; }
 pass() {
     printf "${GREEN}[OK]${NC}  %s\n" "$(basename "$0" .sh)"
     exit 0
+}
+
+# Report scenarios the current platform cannot run, without claiming they
+# passed. The scenarios that did run still decide the script's exit status.
+skipped() {
+    printf "${YELLOW}[SKIP]${NC} %s: %s\n" "$(basename "$0" .sh)" "$*"
 }
 
 fail() {

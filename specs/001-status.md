@@ -151,7 +151,9 @@ not actionable). The default is 1 (no extra context).
    A remote tracking indicator is shown after the closing `]` when an
    upstream has been configured for the branch:
    - `✓` (green) — remote tracking ref exists and local tip matches it
-   - `↑` (yellow) — remote tracking ref exists but local has unpushed commits
+   - `↑` (yellow) — remote tracking ref exists but is not at the local tip:
+     the branch has commits the remote does not, was rewritten since it was
+     published, or both
    - `✗` (red) — upstream was configured but the remote ref no longer exists
      (e.g. after the remote branch was deleted and `git fetch --prune` ran)
 
@@ -187,7 +189,7 @@ not actionable). The default is 1 (no extra context).
 | `⏫`  | Upstream has new commits ahead of the common base |
 | `·`    | Context commit before the base (dimmed, display-only) |
 | `✓`    | Branch remote tracking ref exists and is in sync (green) |
-| `↑`    | Branch has unpushed commits ahead of its remote (yellow) |
+| `↑`    | Branch tip differs from its remote (yellow) |
 | `✗`    | Branch remote tracking ref is gone (red) |
 
 ### Commit line format
@@ -279,8 +281,13 @@ working directory, matching `git status` behavior. When run from
 
 ## Branch Topology
 
-Feature branches are expected to be stacked linearly on top of each other.
-Given feature-a (A1→A2) and feature-b (B1→B2), the commit history is:
+Feature branches are normally **parallel**: each forks from the upstream base
+and is woven into the integration branch by its own merge commit (spec 004,
+spec 006). Commit ownership is assigned by walking parent links from each
+branch tip and stopping at another branch's tip or at the base.
+
+Branches can also be **stacked**. Given feature-a (A1→A2) and feature-b (B1→B2)
+built on it, the commit history is:
 
 ```
 B2 → B1 → A2 → A1 → upstream
@@ -290,5 +297,7 @@ B2 → B1 → A2 → A1 → upstream
 feature-b
 ```
 
-The topological walk naturally groups commits by branch in this model.
-Parallel branches forking from the same point are not a supported topology.
+feature-b owns B1 and B2 only; the walk stops at feature-a's tip. Two adjacent
+branch sections are drawn as stacked (`│├─`, `││`) when the last commit of one
+has the first commit of the next as its parent. `loom push` relies on the same
+adjacency to push a stacked branch with the branches below it (spec 011).

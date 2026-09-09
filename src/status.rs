@@ -47,11 +47,21 @@ pub fn run(
 /// as `loom status` does: both the branches and the commits they own are
 /// removed, so neither shows up anywhere in the graph.
 pub fn apply_hidden_branches(repo: &git2::Repository, info: &mut repo::RepoInfo) {
-    let pattern =
-        repo::hide_branch_pattern(repo).unwrap_or_else(|| repo::DEFAULT_HIDE_PATTERN.to_string());
+    let pattern = hide_pattern(repo);
     if !pattern.is_empty() {
         hide_branches(info, &pattern);
     }
+}
+
+/// The branch-name prefix `loom.hideBranchPattern` hides, defaulting to
+/// `local-`; empty when hiding is disabled.
+pub fn hide_pattern(repo: &git2::Repository) -> String {
+    repo::hide_branch_pattern(repo).unwrap_or_else(|| repo::DEFAULT_HIDE_PATTERN.to_string())
+}
+
+/// True when `name` matches the hidden-branch prefix `pattern`.
+pub fn is_hidden(name: &str, pattern: &str) -> bool {
+    !pattern.is_empty() && name.starts_with(pattern)
 }
 
 /// OIDs of the commits on the integration line of `loom status`, newest first:
