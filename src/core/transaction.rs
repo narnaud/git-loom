@@ -142,6 +142,20 @@ pub fn delete(git_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Turn a failed rebase start into an error that leaves no state behind.
+///
+/// Aborts a rebase that did start, then removes the state file. `run_rebase`
+/// also fails before starting one at all (a branch checked out in another
+/// worktree): left behind, the state reports a paused operation to every
+/// later loom command.
+pub fn discard_state_after(workdir: &Path, git_dir: &Path, cause: anyhow::Error) -> anyhow::Error {
+    git::rebase_abort_then_cleanup(workdir, cause, || {
+        if let Err(e) = delete(git_dir) {
+            crate::core::msg::warn(&format!("could not remove the loom state file: {e}"));
+        }
+    })
+}
+
 /// Why a rebase or merge stopped, as far as git's leftover state can tell.
 #[derive(Debug, PartialEq, Eq)]
 enum PauseReason {
@@ -482,7 +496,7 @@ fn dispatch_after_continue(workdir: &Path, state: &LoomState) -> Result<()> {
         "update" => crate::update::after_continue(workdir, &state.context),
         "commit" => crate::commit::after_continue(workdir, &state.rollback, &state.context),
         "absorb" => crate::absorb::after_continue(workdir, &state.rollback, &state.context),
-        "drop" => crate::drop::after_continue(workdir, &state.context),
+        "drop" => crate::drop::after_continue(&state.context),
         "fold" => crate::fold::after_continue(workdir, &state.context),
         "reword" => crate::reword::after_continue(workdir, &state.context),
         "swap" => crate::swap::after_continue(workdir, &state.context),

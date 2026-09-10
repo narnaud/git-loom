@@ -941,12 +941,11 @@ fn fold_commit_to_unstaged_rollback_keeps_uncommitted_changes() {
     assert_eq!(test_repo.status_porcelain(), " M other.txt\n");
 }
 
-/// Uncommitting the only commit of a woven branch would leave its ref on a
-/// commit outside the integration history. Refused for an inner (stacked)
-/// branch and for a branch with its own section alike; several branches at
-/// that commit are all named.
+/// Uncommitting the only commit of a woven branch keeps the branch, parked
+/// at its base, so the reworked change can be committed to it again. Same
+/// for an inner (stacked) branch and for a branch with its own section.
 #[test]
-fn fold_commit_to_unstaged_refuses_sole_commit_of_branch() {
+fn fold_commit_to_unstaged_parks_sole_branch_at_base() {
     let test_repo = TestRepo::new_with_remote();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
@@ -966,25 +965,120 @@ fn fold_commit_to_unstaged_refuses_sole_commit_of_branch() {
     test_repo.switch_branch("integration");
     test_repo.merge_no_ff("outer");
     test_repo.merge_no_ff("solo");
-    let head_before = test_repo.head_oid();
 
-    for (oid, expected) in [
-        (i1_oid, "only commit of branches `inner`, `inner-too`"),
-        (s1_oid, "only commit of branch `solo`"),
-    ] {
-        let err = super::fold_commit_to_unstaged(&test_repo.repo, &oid.to_string())
-            .expect_err("uncommitting the only commit of a branch must be refused");
-        let msg = err.to_string();
-        assert!(msg.contains(expected), "unexpected error: {msg}");
-        assert_eq!(
-            test_repo.head_oid(),
-            head_before,
-            "history must be untouched"
-        );
+    // Inner branches: parked at the base of outer's section
+    super::fold_commit_to_unstaged(&test_repo.repo, &i1_oid.to_string())
+        .expect("uncommitting the sole commit of two inner branches");
+    for name in ["inner", "inner-too"] {
+        assert_eq!(test_repo.get_branch_target(name), base_oid, "{name}");
     }
-    for (branch, oid) in [("inner", i1_oid), ("inner-too", i1_oid), ("solo", s1_oid)] {
-        assert_eq!(test_repo.get_branch_target(branch), oid);
-    }
+    let outer = test_repo.get_branch_target("outer");
+    let o1 = test_repo.repo.find_commit(outer).unwrap();
+    assert_eq!(o1.summary().unwrap().unwrap(), "O1");
+    assert_eq!(o1.parent_id(0).unwrap(), base_oid, "I1 is gone from outer");
+    assert!(test_repo.status_porcelain().contains("i1.txt"));
+
+    // Section branch: its merge goes, the branch stays at the base
+    let head_before = test_repo.head_oid();
+    super::fold_commit_to_unstaged(&test_repo.repo, &s1_oid.to_string())
+        .expect("uncommitting the sole commit of a woven branch");
+    assert_eq!(test_repo.get_branch_target("solo"), base_oid);
+    assert_ne!(test_repo.head_oid(), head_before);
+    let head = test_repo.repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(head.parent_count(), 2, "only the merge of outer remains");
+    assert_eq!(
+        head.parent_id(1).unwrap(),
+        test_repo.get_branch_target("outer")
+    );
+    assert!(test_repo.status_porcelain().contains("s1.txt"));
+}
+
+/// Moving the only commit of an inner branch to another branch leaves the
+/// inner branch behind, parked at its base, rather than dragging it into
+/// the target branch.
+#[test]
+fn fold_commit_to_branch_leaves_inner_branch_behind() {
+    let test_repo = TestRepo::new_with_remote();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    test_repo.create_branch_at("inner", &base_oid.to_string());
+    test_repo.switch_branch("inner");
+    let i1_oid = test_repo.commit("I1", "i1.txt");
+
+    test_repo.create_branch_at("outer", &i1_oid.to_string());
+    test_repo.switch_branch("outer");
+    test_repo.commit("O1", "o1.txt");
+
+    test_repo.create_branch_at("other", &base_oid.to_string());
+    test_repo.switch_branch("other");
+    test_repo.commit("X1", "x1.txt");
+
+    test_repo.switch_branch("integration");
+    test_repo.merge_no_ff("outer");
+    test_repo.merge_no_ff("other");
+
+    let (_, parked) =
+        super::move_commits_to_branch(&test_repo.repo, &[i1_oid.to_string()], "other")
+            .expect("moving the sole commit of an inner branch");
+
+    assert_eq!(parked, vec!["inner".to_string()]);
+    assert_eq!(test_repo.get_branch_target("inner"), base_oid);
+    let repo = &test_repo.repo;
+    let other = repo
+        .find_commit(test_repo.get_branch_target("other"))
+        .unwrap();
+    assert_eq!(other.summary().unwrap().unwrap(), "I1");
+    assert_eq!(
+        repo.find_commit(other.parent_id(0).unwrap())
+            .unwrap()
+            .summary()
+            .unwrap()
+            .unwrap(),
+        "X1"
+    );
+    let outer = repo
+        .find_commit(test_repo.get_branch_target("outer"))
+        .unwrap();
+    assert_eq!(outer.summary().unwrap().unwrap(), "O1");
+    assert_eq!(outer.parent_id(0).unwrap(), base_oid);
+}
+
+/// Moving a commit that is not the inner branch's only one leaves that branch
+/// at the commit before, rather than parking it at the base.
+#[test]
+fn fold_commit_to_branch_leaves_inner_branch_at_the_commit_before() {
+    let test_repo = TestRepo::new_with_remote();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    test_repo.create_branch_at("inner", &base_oid.to_string());
+    test_repo.switch_branch("inner");
+    let i1_oid = test_repo.commit("I1", "i1.txt");
+    let i2_oid = test_repo.commit("I2", "i2.txt");
+
+    test_repo.create_branch_at("outer", &i2_oid.to_string());
+    test_repo.switch_branch("outer");
+    test_repo.commit("O1", "o1.txt");
+
+    test_repo.create_branch_at("other", &base_oid.to_string());
+    test_repo.switch_branch("other");
+    test_repo.commit("X1", "x1.txt");
+
+    test_repo.switch_branch("integration");
+    test_repo.merge_no_ff("outer");
+    test_repo.merge_no_ff("other");
+
+    let (_, parked) =
+        super::move_commits_to_branch(&test_repo.repo, &[i2_oid.to_string()], "other")
+            .expect("moving a commit out of an inner branch");
+
+    assert!(parked.is_empty(), "inner still has a commit: {parked:?}");
+    assert_eq!(
+        test_repo.branch_commit_summary("inner"),
+        "I1",
+        "inner must end at the commit before I2"
+    );
+    assert_eq!(test_repo.get_branch_target("inner"), i1_oid);
+    assert_eq!(test_repo.branch_commit_summary("other"), "I2");
 }
 
 #[test]

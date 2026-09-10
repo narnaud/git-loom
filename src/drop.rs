@@ -1,6 +1,3 @@
-use std::collections::{HashMap, HashSet};
-use std::path::Path;
-
 use anyhow::{Context, Result, bail};
 use git2::Repository;
 use serde::{Deserialize, Serialize};
@@ -9,7 +6,7 @@ use crate::branch::is_on_first_parent_line;
 use crate::core::msg;
 use crate::core::repo::{self, Target, TargetKind};
 use crate::core::transaction::{self, LoomState, Rollback};
-use crate::core::weave::{self, RebaseOutcome, Weave};
+use crate::core::weave::{self, EmptiedRefs, RebaseOutcome, Weave};
 use crate::git;
 
 fn confirm_or_bail(skip: bool, prompt: &str) -> Result<()> {
@@ -22,6 +19,9 @@ fn confirm_or_bail(skip: bool, prompt: &str) -> Result<()> {
 #[derive(Serialize, Deserialize)]
 struct DropContext {
     commit_hash: String,
+    /// Branches the commit was the only commit of, now parked at their base.
+    #[serde(default)]
+    emptied_branches: Vec<String>,
 }
 
 /// Drop a commit, branch, or file from history or the working tree.
@@ -131,8 +131,8 @@ fn drop_all(repo: &Repository, skip_confirm: bool) -> Result<()> {
 
 /// Drop a single commit from history via interactive rebase.
 ///
-/// If the commit is the only commit on a branch, delegates to `drop_branch`
-/// to properly remove the entire branch section and merge topology.
+/// A branch the commit was the only commit of survives, empty, parked at the
+/// base it built on. Deleting it is `loom drop <branch>`.
 fn drop_commit(repo: &Repository, commit_hash: &str, skip_confirm: bool) -> Result<()> {
     let workdir = repo::require_workdir(repo, "drop")?;
     let git_dir = repo.path().to_path_buf();
@@ -166,55 +166,32 @@ fn drop_commit(repo: &Repository, commit_hash: &str, skip_confirm: bool) -> Resu
         );
     }
 
-    // Check if this commit is the only commit on a branch.
-    // If so, delegate to drop_branch for clean section removal.
-    let merge_base_oid = info.upstream.merge_base_oid;
-
-    if let Some(branch_name) = find_branch_owning_commit_from_info(&info, commit_oid)
-        && let Some(branch_info) = info.branches.iter().find(|b| b.name == branch_name)
-    {
-        let owned = find_owned_commits(
-            repo,
-            branch_info.tip_oid,
-            merge_base_oid,
-            &info.branches,
-            &branch_name,
-        )?;
-        if owned.len() == 1 {
-            // This is the only commit on the branch — drop the whole branch
-            return drop_branch_with_info(repo, &info, &branch_name, skip_confirm);
-        }
-    }
-
     let short_hash = git::short_hash(commit_hash);
     let mut graph = Weave::from_repo_with_info(repo, &info)?;
-    let Some(emptied) = graph.drop_commit(commit_oid) else {
+    // A branch this is the only commit of survives, parked at the base it
+    // built on, ready for `loom commit -b`. Dropping the branch itself is
+    // `loom drop <branch>`.
+    let Some(emptied) = graph.drop_commit(commit_oid, EmptiedRefs::Park) else {
         bail!(
             "Cannot drop commit: {} not found in weave graph",
             short_hash
         );
     };
-    // Several branches at the same sole commit own nothing, so none of them
-    // was routed to drop_branch_with_info above. Their refs would be left
-    // outside the integration history.
-    if !emptied.is_empty() {
-        bail!(
-            "Cannot drop commit `{}`: it is the only commit of {}\n\
-             Run `git branch -D {}` first, then drop again",
-            short_hash,
-            weave::describe_branches(&emptied),
-            emptied.join(" ")
-        );
-    }
 
     let summary = repo::commit_subject(&repo.find_commit(commit_oid)?);
-    confirm_or_bail(
-        skip_confirm,
-        &format!("Drop commit `{}` {}?", short_hash, summary),
-    )?;
+    let mut prompt = format!("Drop commit `{}` {}", short_hash, summary);
+    if !emptied.is_empty() {
+        prompt.push_str(&format!(
+            ", leaving {} empty",
+            weave::describe_branches(&emptied)
+        ));
+    }
+    prompt.push('?');
+    confirm_or_bail(skip_confirm, &prompt)?;
 
     let ctx = DropContext {
         commit_hash: commit_hash.to_string(),
+        emptied_branches: emptied,
     };
     let state = LoomState {
         command: "drop".to_string(),
@@ -224,10 +201,12 @@ fn drop_commit(repo: &Repository, commit_hash: &str, skip_confirm: bool) -> Resu
     transaction::save(&git_dir, &state)?;
 
     let todo = graph.to_todo();
-    match weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)? {
+    let outcome = weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)
+        .map_err(|e| transaction::discard_state_after(workdir, &git_dir, e))?;
+    match outcome {
         RebaseOutcome::Completed => {
             transaction::delete(&git_dir)?;
-            msg::success(&format!("Dropped commit `{}`", short_hash));
+            report_dropped(&ctx);
         }
         RebaseOutcome::Stopped => {
             transaction::warn_paused(workdir, "drop");
@@ -241,30 +220,29 @@ fn drop_commit(repo: &Repository, commit_hash: &str, skip_confirm: bool) -> Resu
 }
 
 /// Resume a `drop commit` operation after a conflict has been resolved.
-pub fn after_continue(_workdir: &Path, context: &serde_json::Value) -> Result<()> {
+pub fn after_continue(context: &serde_json::Value) -> Result<()> {
     let ctx: DropContext =
         serde_json::from_value(context.clone()).context("Failed to parse drop resume context")?;
-    msg::success(&format!(
-        "Dropped commit `{}`",
-        git::short_hash(&ctx.commit_hash)
-    ));
+    report_dropped(&ctx);
     Ok(())
+}
+
+/// Report the drop, naming the branches it left empty.
+fn report_dropped(ctx: &DropContext) {
+    let mut message = format!("Dropped commit `{}`", git::short_hash(&ctx.commit_hash));
+    if !ctx.emptied_branches.is_empty() {
+        message.push_str(&format!(
+            "\n{} now empty, at the base",
+            weave::describe_branches(&ctx.emptied_branches)
+        ));
+    }
+    msg::success(&message);
 }
 
 /// Drop a branch: remove all its commits, unweave merge topology, delete the ref.
 fn drop_branch(repo: &Repository, branch_name: &str, skip_confirm: bool) -> Result<()> {
-    let info = repo::gather_repo_info(repo, false, 1)?;
-    drop_branch_with_info(repo, &info, branch_name, skip_confirm)
-}
-
-/// Drop a branch using pre-gathered `RepoInfo`.
-fn drop_branch_with_info(
-    repo: &Repository,
-    info: &repo::RepoInfo,
-    branch_name: &str,
-    skip_confirm: bool,
-) -> Result<()> {
     let workdir = repo::require_workdir(repo, "drop")?;
+    let info = &repo::gather_repo_info(repo, false, 1)?;
 
     // Verify the branch is in the integration range
     let branch_info = info
@@ -360,7 +338,7 @@ fn drop_branch_with_info(
     } else {
         // Non-woven branch: drop each uniquely owned commit individually
         for oid in &owned {
-            if graph.drop_commit(*oid).is_none() {
+            if graph.drop_commit(*oid, EmptiedRefs::Detach).is_none() {
                 bail!(
                     "Cannot drop branch: commit {} not found in weave graph",
                     oid
@@ -382,40 +360,6 @@ fn drop_branch_with_info(
 
     msg::success(&format!("Dropped branch `{}`", branch_name));
     Ok(())
-}
-
-/// Determine which branch owns the given commit using pre-gathered repo info.
-///
-/// Walks from each branch tip along parent links, stopping at another branch's
-/// tip or the edge of the commit range. Returns the branch name if found.
-fn find_branch_owning_commit_from_info(
-    info: &repo::RepoInfo,
-    target_oid: git2::Oid,
-) -> Option<String> {
-    let parent_map: HashMap<git2::Oid, Option<git2::Oid>> =
-        info.commits.iter().map(|c| (c.oid, c.parent_oid)).collect();
-
-    let branch_tip_set: HashSet<git2::Oid> = info.branches.iter().map(|b| b.tip_oid).collect();
-
-    for branch in &info.branches {
-        let mut current = Some(branch.tip_oid);
-        let mut is_tip = true;
-        while let Some(oid) = current {
-            if !parent_map.contains_key(&oid) {
-                break;
-            }
-            if !is_tip && branch_tip_set.contains(&oid) {
-                break;
-            }
-            is_tip = false;
-            if oid == target_oid {
-                return Some(branch.name.clone());
-            }
-            current = parent_map.get(&oid).and_then(|p| *p);
-        }
-    }
-
-    None
 }
 
 /// Find all commits owned by a branch (from tip to next boundary or merge-base).

@@ -113,11 +113,12 @@ assert_log_contains "SID keep above"   "drop_commit_sid_sibling_remains"
 assert_log_not_contains "SID drop target" "drop_commit_sid_target_gone"
 
 # ══════════════════════════════════════════════════════════════════════════════
-# DROP LAST COMMIT ON BRANCH (AUTO-DELETES BRANCH)
+# DROP LAST COMMIT ON BRANCH (BRANCH SURVIVES, EMPTY)
 # ══════════════════════════════════════════════════════════════════════════════
 
-describe "drop last commit on woven branch auto-deletes the branch"
+describe "drop last commit on woven branch leaves the branch empty at the base"
 setup_repo_with_remote
+base_hash=$(git -C "$WORK" rev-parse @{u})
 create_feature_branch "g-solo-commit"
 switch_to g-solo-commit
 commit_file "Solo commit" "solo.txt"
@@ -126,10 +127,13 @@ switch_to integration
 weave_branch "g-solo-commit"
 out=$(gl drop "$solo_hash" --yes)
 assert_exit_ok $? "drop_solo_ok"
-assert_commit_not_in_log "$solo_hash"    "drop_solo_commit_gone"
-assert_branch_not_exists "g-solo-commit" "drop_solo_branch_deleted"
+assert_contains "$out" "branch g-solo-commit now empty" "drop_solo_msg"
+assert_commit_not_in_log "$solo_hash" "drop_solo_commit_gone"
+assert_branch_exists "g-solo-commit" "drop_solo_branch_kept"
+assert_eq "$(git -C "$WORK" rev-parse g-solo-commit)" "$base_hash" "drop_solo_branch_parked"
+assert_eq "$(head_hash)" "$base_hash" "drop_solo_merge_gone"
 
-describe "drop last commit by short ID auto-deletes the branch"
+describe "drop last commit by short ID leaves the branch empty"
 setup_repo_with_remote
 create_feature_branch "g-solo-sid"
 switch_to g-solo-sid
@@ -140,8 +144,8 @@ commit_sid=$(commit_sid_from_status 'Solo SID commit')
 full_hash=$(git -C "$WORK" log --pretty=%H --all -- solo-sid.txt | head -1)
 out=$(gl drop "$commit_sid" --yes)
 assert_exit_ok $? "drop_solo_sid_ok"
-assert_commit_not_in_log "$full_hash"  "drop_solo_sid_commit_gone"
-assert_branch_not_exists "g-solo-sid" "drop_solo_sid_branch_deleted"
+assert_commit_not_in_log "$full_hash" "drop_solo_sid_commit_gone"
+assert_branch_exists "g-solo-sid" "drop_solo_sid_branch_kept"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # DROP WOVEN BRANCH — BY FULL NAME
@@ -394,6 +398,57 @@ out=$(gl drop g-wt-branch --yes)
 assert_exit_ok $? "drop_branch_wt_ok"
 git -C "$WORK" diff --cached --name-only | grep -qF "wt-staged-branch.txt" \
     || fail "[drop_branch_wt_restored] staged file not in index after branch drop"
+
+describe "drop the only commit of two stacked branches leaves them empty"
+setup_repo_with_remote
+base_hash=$(git -C "$WORK" rev-parse @{u})
+create_feature_branch "inner"
+switch_to inner
+commit_file "Inner I1" "inner1.txt"
+i1_hash=$(head_hash)
+git -C "$WORK" branch inner-too inner
+git -C "$WORK" branch outer inner
+switch_to outer
+commit_file "Outer O1" "outer1.txt"
+switch_to integration
+weave_branch "outer"
+out=$(gl drop "$i1_hash" --yes)
+assert_exit_ok $? "drop_inner_ok"
+assert_contains "$out" "branches inner, inner-too now empty" "drop_inner_msg"
+assert_eq "$(git -C "$WORK" rev-parse inner)" "$base_hash" "drop_inner_parked"
+assert_eq "$(git -C "$WORK" rev-parse inner-too)" "$base_hash" "drop_inner_too_parked"
+assert_eq "$(git -C "$WORK" log --format=%s -1 outer)" "Outer O1" "drop_inner_outer_kept"
+assert_eq "$(git -C "$WORK" rev-parse outer^)" "$base_hash" "drop_inner_gone_from_outer"
+
+describe "drop the only commit of a lone stacked branch leaves it empty"
+setup_repo_with_remote
+base_hash=$(git -C "$WORK" rev-parse @{u})
+create_feature_branch "inner"
+switch_to inner
+commit_file "Inner I1" "inner1.txt"
+i1_hash=$(head_hash)
+git -C "$WORK" branch outer inner
+switch_to outer
+commit_file "Outer O1" "outer1.txt"
+switch_to integration
+weave_branch "outer"
+out=$(gl drop "$i1_hash" --yes)
+assert_exit_ok $? "drop_lone_inner_ok"
+assert_contains "$out" "branch inner now empty" "drop_lone_inner_msg"
+assert_branch_exists "inner" "drop_lone_inner_kept"
+assert_eq "$(git -C "$WORK" rev-parse inner)" "$base_hash" "drop_lone_inner_parked"
+assert_eq "$(git -C "$WORK" rev-parse outer^)" "$base_hash" "drop_lone_inner_gone_from_outer"
+
+describe "dropping the branch itself takes the commit with it"
+setup_repo_with_remote
+create_feature_branch "solo"
+switch_to solo
+commit_file "Solo S1" "solo1.txt"
+switch_to integration
+weave_branch "solo"
+out=$(gl drop solo --yes)
+assert_exit_ok $? "drop_solo_branch_ok"
+assert_branch_not_exists "solo" "drop_solo_branch_gone"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CONTINUE / ABORT

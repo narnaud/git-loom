@@ -73,6 +73,20 @@ pub struct Weave {
     pub branch_sections: Vec<BranchSection>,
     /// The integration (first-parent) line entries.
     pub integration_line: Vec<IntegrationEntry>,
+    /// Branches parked at the base: `update-ref` lines right after
+    /// `reset onto`, for branches left without a commit (see `EmptiedRefs`).
+    pub base_refs: Vec<String>,
+}
+
+/// What becomes of a branch ref left without a commit when its last commit
+/// is removed from the graph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmptiedRefs {
+    /// `update-ref` it right after the reset it built on, so the branch
+    /// survives as an empty branch at its base.
+    Park,
+    /// Leave it out of the todo, so the rebase does not touch it.
+    Detach,
 }
 
 impl Weave {
@@ -98,6 +112,7 @@ impl Weave {
         // Integration line
         out.push('\n');
         out.push_str("reset onto\n");
+        flush_refs(&mut out, &self.base_refs);
         let mut pending_refs: Vec<String> = Vec::new();
         for entry in &self.integration_line {
             match entry {
@@ -280,6 +295,7 @@ impl Weave {
             base_oid: merge_base_oid,
             branch_sections,
             integration_line,
+            base_refs: Vec::new(),
         })
     }
 
@@ -333,7 +349,7 @@ impl Weave {
         let mut emptied = Vec::new();
         for oid in to_drop {
             emptied.extend(
-                self.drop_commit(oid)
+                self.drop_commit(oid, EmptiedRefs::Detach)
                     .expect("the oid comes from the sections themselves"),
             );
         }
@@ -345,17 +361,58 @@ impl Weave {
     /// If the commit is in a branch section and is the last commit, the section
     /// and its merge entry are also removed.
     ///
-    /// An inner branch ending at the removed commit now ends at the commit
-    /// before it. When the removed commit was the first of its section, the
-    /// inner branch has no commits left: its ref is dropped from the todo, so
-    /// the rebase leaves it untouched. Moving it onto the next commit would
-    /// give the branch a commit it never contained. The same goes for a loose
-    /// branch at a removed integration-line commit.
-    ///
-    /// Returns the branches left without a commit (the section's own when
-    /// the section is removed), or `None` if the commit is not in the graph.
+    /// Returns the branches left without a commit, handled per `emptied` (the
+    /// section's own when the section is removed), or `None` if the commit is
+    /// not in the graph.
     #[must_use]
-    pub fn drop_commit(&mut self, oid: Oid) -> Option<Vec<String>> {
+    pub fn drop_commit(&mut self, oid: Oid, emptied: EmptiedRefs) -> Option<Vec<String>> {
+        let (_, mut names, section) = self.remove_commit(oid, emptied)?;
+
+        // A section left empty goes, with its merge
+        if let Some(i) = section
+            && self.branch_sections[i].commits.is_empty()
+        {
+            names.extend(self.remove_empty_section(i, emptied));
+        }
+        Some(names)
+    }
+
+    /// Remove a section left without commits, along with its merge entry.
+    /// Sections stacked on it move down to what it was built on.
+    ///
+    /// Returns its branch names, handled per `emptied`.
+    fn remove_empty_section(&mut self, idx: usize, emptied: EmptiedRefs) -> Vec<String> {
+        let section = self.branch_sections.remove(idx);
+        for s in &mut self.branch_sections {
+            if s.reset_target == section.label {
+                s.reset_target = section.reset_target.clone();
+            }
+        }
+        self.integration_line.retain(
+            |e| !matches!(e, IntegrationEntry::Merge { label: l, .. } if *l == section.label),
+        );
+        if emptied == EmptiedRefs::Park {
+            self.park_refs(&section.reset_target, section.branch_names.clone());
+        }
+        section.branch_names
+    }
+
+    /// Take a commit out of the graph, leaving its section in place even when
+    /// empty.
+    ///
+    /// An inner branch ending at the removed commit now ends at the commit
+    /// before it. When the removed commit was the first of its section (or a
+    /// loose branch sat at the first integration-line commit), the branch has
+    /// no commits left and is handled per `emptied`. Moving it onto the next
+    /// commit would give the branch a commit it never contained.
+    ///
+    /// Returns the commit, its `update_refs` cleared, the branches left
+    /// without a commit, and the index of the section it came from.
+    fn remove_commit(
+        &mut self,
+        oid: Oid,
+        emptied: EmptiedRefs,
+    ) -> Option<(CommitEntry, Vec<String>, Option<usize>)> {
         // Check branch sections first
         for i in 0..self.branch_sections.len() {
             if let Some(pos) = self.branch_sections[i]
@@ -363,26 +420,19 @@ impl Weave {
                 .iter()
                 .position(|c| c.oid == oid)
             {
-                let removed = self.branch_sections[i].commits.remove(pos);
-
-                let mut emptied = if pos > 0 {
+                let mut removed = self.branch_sections[i].commits.remove(pos);
+                let refs = std::mem::take(&mut removed.update_refs);
+                if pos > 0 {
                     self.branch_sections[i].commits[pos - 1]
                         .update_refs
-                        .extend(removed.update_refs);
-                    Vec::new()
-                } else {
-                    removed.update_refs
-                };
-
-                // If section is now empty, remove it and its merge
-                if self.branch_sections[i].commits.is_empty() {
-                    let section = self.branch_sections.remove(i);
-                    self.integration_line.retain(
-                        |e| !matches!(e, IntegrationEntry::Merge { label: l, .. } if *l == section.label),
-                    );
-                    emptied.extend(section.branch_names);
+                        .extend(refs);
+                    return Some((removed, Vec::new(), Some(i)));
                 }
-                return Some(emptied);
+                if emptied == EmptiedRefs::Park {
+                    let target = self.branch_sections[i].reset_target.clone();
+                    self.park_refs(&target, refs.clone());
+                }
+                return Some((removed, refs, Some(i)));
             }
         }
 
@@ -391,22 +441,50 @@ impl Weave {
             .integration_line
             .iter()
             .position(|e| matches!(e, IntegrationEntry::Pick(c) if c.oid == oid))?;
-        let mut emptied = Vec::new();
-        if let IntegrationEntry::Pick(removed) = self.integration_line.remove(pos)
-            && !removed.update_refs.is_empty()
-        {
-            // Move the refs back to the nearest earlier Pick
-            let target =
-                (0..pos).rfind(|&j| matches!(self.integration_line[j], IntegrationEntry::Pick(_)));
-            if let Some(j) = target
-                && let IntegrationEntry::Pick(ref mut c) = self.integration_line[j]
-            {
-                c.update_refs.extend(removed.update_refs);
-            } else {
-                emptied = removed.update_refs;
-            }
+        let IntegrationEntry::Pick(mut removed) = self.integration_line.remove(pos) else {
+            unreachable!("position matched a Pick");
+        };
+        let refs = std::mem::take(&mut removed.update_refs);
+        if refs.is_empty() {
+            return Some((removed, Vec::new(), None));
         }
-        Some(emptied)
+        // Move the refs back to the nearest earlier Pick
+        let target =
+            (0..pos).rfind(|&j| matches!(self.integration_line[j], IntegrationEntry::Pick(_)));
+        if let Some(j) = target
+            && let IntegrationEntry::Pick(ref mut c) = self.integration_line[j]
+        {
+            c.update_refs.extend(refs);
+            return Some((removed, Vec::new(), None));
+        }
+        if emptied == EmptiedRefs::Park {
+            self.base_refs.extend(refs.clone());
+        }
+        Some((removed, refs, None))
+    }
+
+    /// Park branch refs at what `reset_target` resolves to: the base for
+    /// `onto`, otherwise the tip of the section carrying that label (an empty
+    /// section defers to its own reset target).
+    fn park_refs(&mut self, reset_target: &str, names: Vec<String>) {
+        let mut target = reset_target.to_string();
+        let mut seen = HashSet::new();
+        loop {
+            // "onto", an unknown label, or a cycle: park at the base.
+            if target == "onto" || !seen.insert(target.clone()) {
+                self.base_refs.extend(names);
+                return;
+            }
+            let Some(section) = self.branch_sections.iter_mut().find(|s| s.label == target) else {
+                self.base_refs.extend(names);
+                return;
+            };
+            if let Some(last) = section.commits.last_mut() {
+                last.update_refs.extend(names);
+                return;
+            }
+            target = section.reset_target.clone();
+        }
     }
 
     /// Whether a branch owns a section (matches a section's branch names or label).
@@ -498,7 +576,10 @@ impl Weave {
     /// names in the same section), the section is split: original commits stay
     /// with the remaining branches, and a new stacked section is created for the
     /// target branch containing the moved commit.
-    pub fn move_commit(&mut self, oid: Oid, to_branch: &str) -> anyhow::Result<()> {
+    ///
+    /// Returns the branches the commit left without one, parked at the base
+    /// they built on.
+    pub fn move_commit(&mut self, oid: Oid, to_branch: &str) -> anyhow::Result<Vec<String>> {
         // Validate target section exists BEFORE removing the source
         let section_idx = self
             .branch_sections
@@ -511,9 +592,11 @@ impl Weave {
             );
         };
 
-        // Find and remove the commit from its current location
-        let commit = self.remove_commit(oid);
-        let Some(mut commit) = commit else {
+        // Find and remove the commit from its current location. Inner
+        // branches at it stay behind: they end at the commit before, or are
+        // parked at the section's base.
+        let Some((mut commit, mut parked, source_idx)) = self.remove_commit(oid, EmptiedRefs::Park)
+        else {
             anyhow::bail!(
                 "Cannot move commit: source commit {} not found in weave graph",
                 oid
@@ -522,6 +605,19 @@ impl Weave {
 
         // Ensure command is Pick (not Fixup etc.)
         commit.command = Command::Pick;
+
+        // The source section left empty goes, with its merge — unless it is
+        // the target, which is about to get the commit back.
+        let mut section_idx = section_idx;
+        if let Some(i) = source_idx
+            && i != section_idx
+            && self.branch_sections[i].commits.is_empty()
+        {
+            parked.extend(self.remove_empty_section(i, EmptiedRefs::Park));
+            if i < section_idx {
+                section_idx -= 1;
+            }
+        }
 
         // If the target branch is co-located with others, split the section
         if self.branch_sections[section_idx].branch_names.len() > 1
@@ -569,11 +665,16 @@ impl Weave {
                     *original_oid = None;
                 }
             }
+
+            // The commit was all the remaining branches had: park them
+            if self.branch_sections[section_idx].commits.is_empty() {
+                parked.extend(self.remove_empty_section(section_idx, EmptiedRefs::Park));
+            }
         } else {
             // Simple case: only one branch in the section, just append
             self.branch_sections[section_idx].commits.push(commit);
         }
-        Ok(())
+        Ok(parked)
     }
 
     /// Whether the weave holds `oid` as a commit it can rewrite.
@@ -608,8 +709,9 @@ impl Weave {
         // Validate target exists BEFORE removing the source
         self.require_commit(target_oid)?;
 
-        let commit = self.remove_commit(source_oid);
-        let Some(mut commit) = commit else {
+        // Refs at the source travel with it: a branch ending there ends at
+        // the squashed target afterwards.
+        let Some(mut commit) = self.take_commit(source_oid) else {
             anyhow::bail!(
                 "Cannot fixup commit: source commit {} not found in weave graph",
                 source_oid
@@ -856,27 +958,21 @@ impl Weave {
 
     // ── Private helpers ──────────────────────────────────────────────────
 
-    /// Remove a commit from wherever it is in the graph, returning it.
-    fn remove_commit(&mut self, oid: Oid) -> Option<CommitEntry> {
-        // Check branch sections
+    /// Take a commit out of the graph as is, `update_refs` included.
+    fn take_commit(&mut self, oid: Oid) -> Option<CommitEntry> {
         for section in &mut self.branch_sections {
             if let Some(pos) = section.commits.iter().position(|c| c.oid == oid) {
                 return Some(section.commits.remove(pos));
             }
         }
-
-        // Check integration line
-        let idx = self
+        let i = self
             .integration_line
             .iter()
-            .position(|e| matches!(e, IntegrationEntry::Pick(c) if c.oid == oid));
-        if let Some(i) = idx
-            && let IntegrationEntry::Pick(commit) = self.integration_line.remove(i)
-        {
-            return Some(commit);
+            .position(|e| matches!(e, IntegrationEntry::Pick(c) if c.oid == oid))?;
+        match self.integration_line.remove(i) {
+            IntegrationEntry::Pick(commit) => Some(commit),
+            _ => unreachable!("position matched a Pick"),
         }
-
-        None
     }
 
     /// Add a branch name to a commit's `update_refs` so that `--update-refs`

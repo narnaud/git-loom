@@ -190,6 +190,14 @@ operation.
   entry are created automatically before moving the commit.
 - If the target branch shares its tip with other co-located branches, only
   the target branch advances; co-located branches remain unaffected.
+- A branch ending at the moved commit (an inner, stacked branch) stays
+  behind: it ends at the commit before, or, when the moved commit was its
+  only one, is parked at the base it built on (the upstream, or the tip of
+  the branch it was stacked on). It never follows the commit into the target
+  branch, which would give it commits it never contained.
+- A source section left without commits goes, along with its merge entry.
+- Branches parked this way are named in the success message:
+  `"branch `<name>` now empty, at the base"`.
 - Uncommitted changes are preserved automatically.
 
 **Conflict handling:**
@@ -229,13 +237,13 @@ working directory as unstaged modifications. The target is specified using
   but there is nothing left to roll back to: if it cannot be applied, the
   commit stays dropped and the diff is saved under `<git dir>/loom/` as
   `unapplied-<n>.patch` instead.
-- **Only commit of a branch** (non-HEAD): refused, for an inner (stacked)
-  branch and for a branch with its own section alike. The branch ref would
-  otherwise be left on a commit outside the integration history, where loom
-  no longer sees it.
-  Error: `"Cannot uncommit `<id>`: it is the only commit of branch `<name>`"`,
-  with a hint to run `git branch -D <name>` first and uncommit again. Several branches
-  at that commit are all named.
+- **Only commit of a branch** (non-HEAD): the branch survives, empty, parked
+  at the base it built on — the upstream for a branch with its own section
+  (whose merge disappears) or a stacked branch's first commit, the parent's
+  tip for a branch stacked on another. The reworked change can then be
+  committed to it again with `loom commit -b <branch>`. Several branches at that
+  commit are all parked. The success message names them:
+  `"branch `<name>` now empty, at the base"`.
 
 **What changes:**
 

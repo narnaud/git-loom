@@ -62,6 +62,7 @@ fn serialize_single_branch_section() {
                 label: "feature-a".to_string(),
             },
         ],
+        base_refs: vec![],
     };
 
     let todo = graph.to_todo();
@@ -110,6 +111,7 @@ fn serialize_two_branch_sections() {
                 label: "feature-b".to_string(),
             },
         ],
+        base_refs: vec![],
     };
 
     let todo = graph.to_todo();
@@ -134,6 +136,7 @@ fn serialize_new_merge_without_oid() {
             original_oid: None,
             label: "feature-a".to_string(),
         }],
+        base_refs: vec![],
     };
 
     let todo = graph.to_todo();
@@ -155,6 +158,7 @@ fn serialize_colocated_branches() {
             original_oid: Some(oid(OID_MERGE1)),
             label: "feature-a".to_string(),
         }],
+        base_refs: vec![],
     };
 
     let todo = graph.to_todo();
@@ -173,6 +177,7 @@ fn serialize_update_refs_on_integration_line() {
             "C1",
             vec!["non-woven"],
         ))],
+        base_refs: vec![],
     };
 
     let todo = graph.to_todo();
@@ -187,6 +192,7 @@ fn serialize_empty_graph() {
 
         branch_sections: vec![],
         integration_line: vec![],
+        base_refs: vec![],
     };
 
     let todo = graph.to_todo();
@@ -210,9 +216,10 @@ fn drop_commit_from_branch_section() {
             original_oid: Some(oid(OID_MERGE1)),
             label: "feature-a".to_string(),
         }],
+        base_refs: vec![],
     };
 
-    assert!(graph.drop_commit(oid(OID_A1)).is_some());
+    assert!(graph.drop_commit(oid(OID_A1), EmptiedRefs::Park).is_some());
 
     assert_eq!(graph.branch_sections.len(), 1);
     assert_eq!(graph.branch_sections[0].commits.len(), 1);
@@ -237,12 +244,88 @@ fn drop_last_commit_removes_section_and_merge() {
                 label: "feature-a".to_string(),
             },
         ],
+        base_refs: vec![],
     };
 
-    assert!(graph.drop_commit(oid(OID_A1)).is_some());
+    assert_eq!(
+        graph.drop_commit(oid(OID_A1), EmptiedRefs::Park),
+        Some(vec!["feature-a".to_string()])
+    );
 
     assert!(graph.branch_sections.is_empty());
     assert_eq!(graph.integration_line.len(), 1); // Only "Int" pick remains
+    // The branch survives, parked at the base
+    assert_eq!(graph.base_refs, vec!["feature-a".to_string()]);
+    let todo = graph.to_todo();
+    assert!(
+        todo.contains("reset onto\nupdate-ref refs/heads/feature-a\n"),
+        "parked ref must follow `reset onto`: {todo}"
+    );
+}
+
+#[test]
+fn drop_last_commit_detached_leaves_section_refs_out() {
+    let mut graph = Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![BranchSection {
+            reset_target: "onto".to_string(),
+            commits: vec![make_commit(OID_A1, "A1")],
+            label: "feature-a".to_string(),
+            branch_names: vec!["feature-a".to_string(), "twin".to_string()],
+        }],
+        integration_line: vec![IntegrationEntry::Merge {
+            original_oid: Some(oid(OID_MERGE1)),
+            label: "feature-a".to_string(),
+        }],
+        base_refs: vec![],
+    };
+
+    assert_eq!(
+        graph.drop_commit(oid(OID_A1), EmptiedRefs::Detach),
+        Some(vec!["feature-a".to_string(), "twin".to_string()])
+    );
+    assert!(graph.base_refs.is_empty());
+    assert!(!graph.to_todo().contains("update-ref"));
+}
+
+/// A section stacked on another loses its only commit: its branches end up
+/// at the parent's tip, as inner refs of the parent section.
+#[test]
+fn drop_last_commit_of_stacked_section_parks_at_parent_tip() {
+    let mut graph = Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![
+            BranchSection {
+                reset_target: "onto".to_string(),
+                commits: vec![make_commit(OID_A1, "A1")],
+                label: "feature-a".to_string(),
+                branch_names: vec!["feature-a".to_string()],
+            },
+            BranchSection {
+                reset_target: "feature-a".to_string(),
+                commits: vec![make_commit(OID_B1, "B1")],
+                label: "feature-b".to_string(),
+                branch_names: vec!["feature-b".to_string()],
+            },
+        ],
+        integration_line: vec![IntegrationEntry::Merge {
+            original_oid: Some(oid(OID_MERGE1)),
+            label: "feature-b".to_string(),
+        }],
+        base_refs: vec![],
+    };
+
+    assert_eq!(
+        graph.drop_commit(oid(OID_B1), EmptiedRefs::Park),
+        Some(vec!["feature-b".to_string()])
+    );
+    assert_eq!(graph.branch_sections.len(), 1);
+    assert_eq!(
+        graph.branch_sections[0].commits[0].update_refs,
+        vec!["feature-b".to_string()]
+    );
+    assert!(graph.base_refs.is_empty());
+    assert!(graph.integration_line.is_empty());
 }
 
 #[test]
@@ -255,9 +338,10 @@ fn drop_commit_from_integration_line() {
             IntegrationEntry::Pick(make_commit(OID_C1, "C1")),
             IntegrationEntry::Pick(make_commit(OID_C2, "C2")),
         ],
+        base_refs: vec![],
     };
 
-    assert!(graph.drop_commit(oid(OID_C1)).is_some());
+    assert!(graph.drop_commit(oid(OID_C1), EmptiedRefs::Park).is_some());
 
     assert_eq!(graph.integration_line.len(), 1);
 }
@@ -274,9 +358,10 @@ fn drop_unknown_commit_or_branch_is_refused() {
             branch_names: vec!["feature-a".to_string()],
         }],
         integration_line: vec![IntegrationEntry::Pick(make_commit(OID_C1, "C1"))],
+        base_refs: vec![],
     };
 
-    assert!(graph.drop_commit(oid("dead")).is_none());
+    assert!(graph.drop_commit(oid("dead"), EmptiedRefs::Park).is_none());
     assert!(!graph.drop_branch("no-such-branch"));
     assert!(!graph.reassign_branch("no-such-branch", "feature-a"));
 
@@ -314,6 +399,7 @@ fn drop_branch_removes_section_and_merge() {
                 label: "feature-b".to_string(),
             },
         ],
+        base_refs: vec![],
     };
 
     assert!(graph.drop_branch("feature-a"));
@@ -341,6 +427,7 @@ fn move_commit_to_branch() {
                 label: "feature-a".to_string(),
             },
         ],
+        base_refs: vec![],
     };
 
     graph.move_commit(oid(OID_C1), "feature-a").unwrap();
@@ -350,6 +437,67 @@ fn move_commit_to_branch() {
     assert_eq!(graph.branch_sections[0].commits[1].message, "C1");
     // C1 should be gone from integration line
     assert_eq!(graph.integration_line.len(), 1);
+}
+
+/// A branch ending at the moved commit does not follow it into the target
+/// branch: it ends at the commit before, or is parked at the base.
+#[test]
+fn move_commit_leaves_inner_refs_behind() {
+    let mut graph = Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![
+            BranchSection {
+                reset_target: "onto".to_string(),
+                commits: vec![
+                    make_commit_with_refs(OID_A1, "A1", vec!["inner"]),
+                    make_commit(OID_A2, "A2"),
+                ],
+                label: "feature-a".to_string(),
+                branch_names: vec!["feature-a".to_string()],
+            },
+            BranchSection {
+                reset_target: "onto".to_string(),
+                commits: vec![make_commit(OID_B1, "B1")],
+                label: "feature-b".to_string(),
+                branch_names: vec!["feature-b".to_string()],
+            },
+        ],
+        integration_line: vec![
+            IntegrationEntry::Merge {
+                original_oid: Some(oid(OID_MERGE1)),
+                label: "feature-a".to_string(),
+            },
+            IntegrationEntry::Merge {
+                original_oid: Some(oid(OID_MERGE2)),
+                label: "feature-b".to_string(),
+            },
+        ],
+        base_refs: vec![],
+    };
+
+    let parked = graph.move_commit(oid(OID_A1), "feature-b").unwrap();
+    assert_eq!(parked, vec!["inner".to_string()]);
+
+    let moved = &graph.branch_sections[1].commits[1];
+    assert_eq!(moved.message, "A1");
+    assert!(moved.update_refs.is_empty(), "inner must not follow A1");
+    assert_eq!(graph.base_refs, vec!["inner".to_string()]);
+
+    // Moving the last commit empties the section: it goes with its merge, and
+    // feature-a is parked at the base too
+    let parked = graph.move_commit(oid(OID_A2), "feature-b").unwrap();
+    assert_eq!(parked, vec!["feature-a".to_string()]);
+    assert_eq!(graph.branch_sections.len(), 1);
+    assert_eq!(graph.branch_sections[0].label, "feature-b");
+    assert_eq!(
+        graph.base_refs,
+        vec!["inner".to_string(), "feature-a".to_string()]
+    );
+    assert_eq!(graph.integration_line.len(), 1);
+    assert!(matches!(
+        &graph.integration_line[0],
+        IntegrationEntry::Merge { label, .. } if label == "feature-b"
+    ));
 }
 
 #[test]
@@ -384,6 +532,7 @@ fn move_commit_to_colocated_branch_splits_section() {
                 label: "feature-c".to_string(),
             },
         ],
+        base_refs: vec![],
     };
 
     graph.move_commit(oid(OID_C1), "feature-b").unwrap();
@@ -449,6 +598,7 @@ fn move_commit_to_colocated_branch_when_target_is_label() {
                 label: "feature-a".to_string(),
             },
         ],
+        base_refs: vec![],
     };
 
     graph.move_commit(oid(OID_C1), "feature-a").unwrap();
@@ -491,6 +641,7 @@ fn fixup_commit_moves_and_changes_command() {
             IntegrationEntry::Pick(make_commit(OID_C2, "C2")),
             IntegrationEntry::Pick(make_commit(OID_FIX, "Fixup for C1")),
         ],
+        base_refs: vec![],
     };
 
     graph.fixup_commit(oid(OID_FIX), oid(OID_C1)).unwrap();
@@ -516,6 +667,7 @@ fn move_commit_to_missing_section_errors() {
         base_oid: oid(BASE),
         branch_sections: vec![],
         integration_line: vec![IntegrationEntry::Pick(make_commit(OID_C1, "C1"))],
+        base_refs: vec![],
     };
 
     let result = graph.move_commit(oid(OID_C1), "nonexistent-branch");
@@ -538,6 +690,7 @@ fn fixup_commit_to_missing_target_errors() {
             IntegrationEntry::Pick(make_commit(OID_C1, "C1")),
             IntegrationEntry::Pick(make_commit(OID_FIX, "Fixup")),
         ],
+        base_refs: vec![],
     };
 
     // Try to fixup to a non-existent target
@@ -562,6 +715,7 @@ fn edit_commit_changes_command() {
 
         branch_sections: vec![],
         integration_line: vec![IntegrationEntry::Pick(make_commit(OID_C1, "C1"))],
+        base_refs: vec![],
     };
 
     graph.edit_commit(oid(OID_C1));
@@ -578,6 +732,7 @@ fn add_branch_section_and_merge() {
 
         branch_sections: vec![],
         integration_line: vec![IntegrationEntry::Pick(make_commit(OID_C1, "C1"))],
+        base_refs: vec![],
     };
 
     graph.add_branch_section(
@@ -609,6 +764,7 @@ fn reassign_branch_renames_section() {
             original_oid: Some(oid(OID_MERGE1)),
             label: "feature-a".to_string(),
         }],
+        base_refs: vec![],
     };
 
     assert!(graph.reassign_branch("feature-a", "feature-b"));
@@ -798,9 +954,10 @@ fn drop_commit_transfers_update_refs_to_adjacent() {
             label: "feature-a".to_string(),
             original_oid: None,
         }],
+        base_refs: vec![],
     };
 
-    assert!(graph.drop_commit(oid("222")).is_some());
+    assert!(graph.drop_commit(oid("222"), EmptiedRefs::Park).is_some());
 
     // update_refs should transfer to adjacent commit (C1, preceding)
     assert_eq!(graph.branch_sections[0].commits.len(), 2);
@@ -829,20 +986,92 @@ fn drop_commit_drops_update_refs_when_first() {
             label: "feature-a".to_string(),
             original_oid: None,
         }],
+        base_refs: vec![],
     };
 
     assert_eq!(
-        graph.drop_commit(oid("111")),
+        graph.drop_commit(oid("111"), EmptiedRefs::Park),
         Some(vec!["non-woven-branch".to_string()])
     );
 
     // The inner branch has no commits left: moving its ref onto C2 would
-    // give it a commit it never contained.
+    // give it a commit it never contained. It is parked at the section's base.
     assert_eq!(graph.branch_sections[0].commits.len(), 1);
     assert!(
         graph.branch_sections[0].commits[0].update_refs.is_empty(),
         "update_refs must not transfer to the next commit"
     );
+    assert_eq!(graph.base_refs, vec!["non-woven-branch".to_string()]);
+}
+
+#[test]
+fn drop_commit_detaches_update_refs_when_first() {
+    let mut graph = Weave {
+        base_oid: oid("aaa"),
+        branch_sections: vec![BranchSection {
+            reset_target: "onto".to_string(),
+            label: "feature-a".to_string(),
+            branch_names: vec!["feature-a".to_string()],
+            commits: vec![
+                make_commit_with_refs("111", "C1", vec!["non-woven-branch"]),
+                make_commit("222", "C2"),
+            ],
+        }],
+        integration_line: vec![IntegrationEntry::Merge {
+            label: "feature-a".to_string(),
+            original_oid: None,
+        }],
+        base_refs: vec![],
+    };
+
+    assert_eq!(
+        graph.drop_commit(oid("111"), EmptiedRefs::Detach),
+        Some(vec!["non-woven-branch".to_string()])
+    );
+    assert!(graph.branch_sections[0].commits[0].update_refs.is_empty());
+    assert!(graph.base_refs.is_empty());
+}
+
+/// An inner branch at the first commit of a stacked section is parked at the
+/// parent section's tip.
+#[test]
+fn drop_commit_parks_inner_ref_at_parent_tip() {
+    let mut graph = Weave {
+        base_oid: oid("aaa"),
+        branch_sections: vec![
+            BranchSection {
+                reset_target: "onto".to_string(),
+                label: "parent".to_string(),
+                branch_names: vec!["parent".to_string()],
+                commits: vec![make_commit("111", "P1")],
+            },
+            BranchSection {
+                reset_target: "parent".to_string(),
+                label: "child".to_string(),
+                branch_names: vec!["child".to_string()],
+                commits: vec![
+                    make_commit_with_refs("222", "C1", vec!["inner"]),
+                    make_commit("333", "C2"),
+                ],
+            },
+        ],
+        integration_line: vec![IntegrationEntry::Merge {
+            label: "child".to_string(),
+            original_oid: None,
+        }],
+        base_refs: vec![],
+    };
+
+    assert_eq!(
+        graph.drop_commit(oid("222"), EmptiedRefs::Park),
+        Some(vec!["inner".to_string()])
+    );
+    assert_eq!(
+        graph.branch_sections[0].commits[0].update_refs,
+        vec!["inner".to_string()]
+    );
+    assert!(graph.branch_sections[1].commits[0].update_refs.is_empty());
+    assert!(graph.base_refs.is_empty());
 }
 
 #[test]
@@ -855,9 +1084,13 @@ fn drop_commit_on_integration_line_transfers_update_refs() {
             IntegrationEntry::Pick(make_commit_with_refs("222", "C2", vec!["loose-branch"])),
             IntegrationEntry::Pick(make_commit("333", "C3")),
         ],
+        base_refs: vec![],
     };
 
-    assert_eq!(graph.drop_commit(oid("222")), Some(vec![]));
+    assert_eq!(
+        graph.drop_commit(oid("222"), EmptiedRefs::Park),
+        Some(vec![])
+    );
 
     // The ref moves back to C1, never forward to C3
     let picks: Vec<&CommitEntry> = graph
@@ -885,10 +1118,11 @@ fn drop_commit_on_integration_line_drops_update_refs_when_first() {
             IntegrationEntry::Pick(make_commit_with_refs("111", "C1", vec!["loose-branch"])),
             IntegrationEntry::Pick(make_commit("222", "C2")),
         ],
+        base_refs: vec![],
     };
 
     assert_eq!(
-        graph.drop_commit(oid("111")),
+        graph.drop_commit(oid("111"), EmptiedRefs::Park),
         Some(vec!["loose-branch".to_string()])
     );
 
@@ -897,6 +1131,7 @@ fn drop_commit_on_integration_line_drops_update_refs_when_first() {
         matches!(&graph.integration_line[0], IntegrationEntry::Pick(c) if c.update_refs.is_empty()),
         "update_refs must not transfer to the next commit"
     );
+    assert_eq!(graph.base_refs, vec!["loose-branch".to_string()]);
 }
 
 // ── drop_branch update_refs preservation tests ──────────────────────────
@@ -918,6 +1153,7 @@ fn drop_branch_preserves_colocated_update_refs_at_boundary() {
             label: "feat3".to_string(),
             original_oid: None,
         }],
+        base_refs: vec![],
     };
 
     assert!(graph.drop_branch("feat3"));
@@ -945,6 +1181,7 @@ fn weave_branch_moves_picks_into_section() {
             IntegrationEntry::Pick(make_commit_with_refs("222", "C2", vec!["feature-x"])),
             IntegrationEntry::Pick(make_commit("333", "C3")),
         ],
+        base_refs: vec![],
     };
 
     graph.weave_branch("feature-x");
@@ -978,6 +1215,7 @@ fn swap_commits_on_integration_line() {
             IntegrationEntry::Pick(make_commit(OID_C1, "C1")),
             IntegrationEntry::Pick(make_commit(OID_C2, "C2")),
         ],
+        base_refs: vec![],
     };
 
     graph.swap_commits(oid(OID_C1), oid(OID_C2)).unwrap();
@@ -1008,6 +1246,7 @@ fn swap_commits_in_branch_section() {
             original_oid: Some(oid(OID_MERGE1)),
             label: "feature-a".to_string(),
         }],
+        base_refs: vec![],
     };
 
     graph.swap_commits(oid(OID_A1), oid(OID_A2)).unwrap();
@@ -1044,6 +1283,7 @@ fn swap_commits_across_sections_errors() {
                 label: "feature-b".to_string(),
             },
         ],
+        base_refs: vec![],
     };
 
     let result = graph.swap_commits(oid(OID_A1), oid(OID_B1));
@@ -1068,6 +1308,7 @@ fn swap_commits_across_section_and_integration_errors() {
                 label: "feature-a".to_string(),
             },
         ],
+        base_refs: vec![],
     };
 
     let result = graph.swap_commits(oid(OID_A1), oid(OID_C1));
@@ -1081,6 +1322,7 @@ fn swap_commits_with_itself_errors() {
         base_oid: oid(BASE),
         branch_sections: vec![],
         integration_line: vec![IntegrationEntry::Pick(make_commit(OID_C1, "C1"))],
+        base_refs: vec![],
     };
 
     let result = graph.swap_commits(oid(OID_C1), oid(OID_C1));
@@ -1093,6 +1335,7 @@ fn swap_commits_not_found_errors() {
         base_oid: oid(BASE),
         branch_sections: vec![],
         integration_line: vec![IntegrationEntry::Pick(make_commit(OID_C1, "C1"))],
+        base_refs: vec![],
     };
 
     let result = graph.swap_commits(oid(OID_C1), oid(OID_C2));
@@ -1120,6 +1363,7 @@ fn swap_commits_on_integration_line_with_interleaved_merge() {
             },
             IntegrationEntry::Pick(make_commit(OID_C2, "C2")),
         ],
+        base_refs: vec![],
     };
 
     graph.swap_commits(oid(OID_C1), oid(OID_C2)).unwrap();
@@ -1173,4 +1417,89 @@ fn run_rebase_or_abort_rejects_a_paused_rebase() {
     );
     assert!(crate::git::rebase_is_in_progress(&git_dir));
     crate::git::rebase_abort(&workdir).unwrap();
+}
+
+/// Moving every commit of a co-located section to one of its branches: the
+/// source section goes, the stacked target is rebuilt on what the source
+/// was built on, and the other branch is parked at the base.
+#[test]
+fn move_all_colocated_commits_keeps_reset_targets_valid() {
+    let mut graph = Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![BranchSection {
+            reset_target: "onto".to_string(),
+            commits: vec![make_commit(OID_A1, "A1"), make_commit(OID_A2, "A2")],
+            label: "feature-a".to_string(),
+            branch_names: vec!["feature-a".to_string(), "feature-b".to_string()],
+        }],
+        integration_line: vec![IntegrationEntry::Merge {
+            original_oid: Some(oid(OID_MERGE1)),
+            label: "feature-a".to_string(),
+        }],
+        base_refs: vec![],
+    };
+
+    assert!(
+        graph
+            .move_commit(oid(OID_A1), "feature-b")
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        graph.move_commit(oid(OID_A2), "feature-b").unwrap(),
+        vec!["feature-a".to_string()]
+    );
+
+    assert_eq!(graph.branch_sections.len(), 1);
+    assert_eq!(graph.branch_sections[0].label, "feature-b");
+    assert_eq!(graph.branch_sections[0].reset_target, "onto");
+    assert_eq!(graph.branch_sections[0].commits.len(), 2);
+    assert_eq!(graph.base_refs, vec!["feature-a".to_string()]);
+
+    let todo = graph.to_todo();
+    let labels: Vec<&str> = todo
+        .lines()
+        .filter_map(|l| l.strip_prefix("label "))
+        .collect();
+    for target in todo.lines().filter_map(|l| l.strip_prefix("reset ")) {
+        assert!(
+            labels.contains(&target),
+            "reset {target} has no label:\n{todo}"
+        );
+    }
+}
+
+/// Moving the only commit of a co-located section to one of its branches
+/// leaves the other branch empty: it is parked at the base and named.
+#[test]
+fn move_sole_colocated_commit_parks_the_other_branch() {
+    let mut graph = Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![BranchSection {
+            reset_target: "onto".to_string(),
+            commits: vec![make_commit(OID_A1, "A1")],
+            label: "feature-a".to_string(),
+            branch_names: vec!["feature-a".to_string(), "feature-b".to_string()],
+        }],
+        integration_line: vec![IntegrationEntry::Merge {
+            original_oid: Some(oid(OID_MERGE1)),
+            label: "feature-a".to_string(),
+        }],
+        base_refs: vec![],
+    };
+
+    assert_eq!(
+        graph.move_commit(oid(OID_A1), "feature-b").unwrap(),
+        vec!["feature-a".to_string()]
+    );
+
+    assert_eq!(graph.branch_sections.len(), 1);
+    assert_eq!(graph.branch_sections[0].label, "feature-b");
+    assert_eq!(graph.branch_sections[0].reset_target, "onto");
+    assert_eq!(graph.base_refs, vec!["feature-a".to_string()]);
+    assert_eq!(graph.integration_line.len(), 1);
+    assert!(matches!(
+        &graph.integration_line[0],
+        IntegrationEntry::Merge { label, .. } if label == "feature-b"
+    ));
 }

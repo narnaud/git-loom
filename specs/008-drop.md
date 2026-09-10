@@ -50,16 +50,24 @@ git-loom drop <target>
 The commit is removed from history via interactive rebase. All descendant
 commits are replayed to maintain a consistent history.
 
-**Special case — last commit on a branch:** If the commit is the only commit
-owned by a branch, the operation automatically drops the entire branch instead.
-This ensures the merge topology is properly cleaned up and the branch ref is
-deleted, rather than leaving an empty branch section.
+**Special case — last commit on a branch:** dropping a commit never deletes a
+branch. A branch left without a commit survives, empty, parked at the base it
+built on — the same as `fold <commit> zz` (spec 007). Its section and merge
+entry go, so the branch is no longer woven, and `loom commit -b <branch>` can
+fill it again. Deleting the branch is `loom drop <branch>`, which takes its
+commits with it in one command.
 
-Several branches at the same sole commit own nothing, so this does not apply
-to them: dropping the commit is refused, since their refs would be left on a
-commit outside the integration history. Error: `"Cannot drop commit `<id>`: it
-is the only commit of branches `<a>`, `<b>`"`, with a hint to run
-`git branch -D <a> <b>` first and drop again.
+This covers a branch that owns the commit outright, several branches at the
+same sole commit, and an inner (stacked) branch whose only commit it is. The
+prompt names them — `"Drop commit `<id>` <subject>, leaving branches `<a>`,
+`<b>` empty?"` — and the parking happens through `update-ref` lines in the
+rebase todo, so `loom abort` restores them to their original tips. Success:
+`"Dropped commit `<id>`"` followed by
+`"branches `<a>`, `<b>` now empty, at the base"`.
+
+Because the refs move with the rebase, a branch about to be emptied that is
+checked out in another worktree refuses the drop up front (spec 004), before
+any history is rewritten.
 
 **What changes:**
 
@@ -318,7 +326,7 @@ git-loom drop zz
 # Discarded all local changes
 ```
 
-### Drop the last commit on a branch (auto-deletes branch)
+### Drop the last commit on a branch (branch survives, empty)
 
 ```bash
 git-loom status
@@ -328,22 +336,26 @@ git-loom status
 # │╰─── merge
 
 git-loom drop a1
-# Detects this is the only commit on feature-a
-# Drops the branch (commits + merge + ref) automatically
+# ✓ Dropped commit a1
+#   › branch feature-a now empty, at the base
+# feature-a is no longer woven; `loom drop feature-a` removes it entirely
 ```
 
 ## Design Decisions
 
-### Automatic Branch Cleanup
+### Dropping a Commit Never Deletes a Branch
 
-When dropping a commit that is the sole commit on a branch, the command
-automatically removes the entire branch rather than leaving an empty branch
-section. This was chosen because:
+`drop <commit>` acts on the commit only; the branch is left empty at its base.
+This was chosen because:
 
-- An empty branch section with just a merge commit is useless
-- The user's intent when dropping the last commit is clearly to remove the
-  branch entirely
-- Manual cleanup would require a separate `git branch -D` step
+- It matches `fold <commit> zz`, which parks the branch the same way. Two
+  commands that remove a commit from a branch should leave the same topology
+- Deleting a ref is not recoverable from the command that asked to drop a
+  commit, and the branch may still be pushed, reviewed, or referenced
+- The empty branch is immediately reusable: rework the change and run
+  `loom commit -b <branch>`
+- Removing the branch and its commits together is already one command,
+  `loom drop <branch>`
 
 ### Woven vs Non-Woven Strategy
 
