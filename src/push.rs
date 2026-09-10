@@ -1,6 +1,7 @@
 use std::io::Write as _;
 use std::path::Path;
 use std::process::Command;
+use std::sync::OnceLock;
 use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
@@ -1374,16 +1375,34 @@ fn extract_azure_remote(repo: &Repository, remote: &str) -> Option<AzureRemote> 
 
 /// Build a `Command` for the Azure CLI.
 ///
-/// On Windows `az` is a `.cmd` batch script which `CreateProcess` cannot
-/// resolve directly, so we run it through `cmd /C`.
+/// On Windows `az` is normally a batch script, which `CreateProcess` cannot
+/// start directly: the MSI installer ships `az.cmd` and `pip install
+/// azure-cli` ships `az.bat`. Naming the script explicitly makes the standard
+/// library run it through `cmd.exe` with every argument escaped for cmd, where
+/// a hand-rolled `cmd /C az` would let cmd expand `%VAR%` and reparse quotes
+/// inside PR titles. Installs that ship an `az.exe` are found by the plain
+/// name.
 fn az_command() -> Command {
-    if cfg!(windows) {
-        let mut cmd = Command::new("cmd");
-        cmd.args(["/C", "az"]);
-        cmd
-    } else {
-        Command::new("az")
-    }
+    Command::new(az_program())
+}
+
+fn az_program() -> &'static str {
+    static PROGRAM: OnceLock<&'static str> = OnceLock::new();
+    PROGRAM.get_or_init(|| {
+        if !cfg!(windows) {
+            return "az";
+        }
+        ["az.cmd", "az.bat"]
+            .into_iter()
+            .find(|name| on_path(name))
+            .unwrap_or("az")
+    })
+}
+
+/// True when some `PATH` directory holds `file`.
+fn on_path(file: &str) -> bool {
+    std::env::var_os("PATH")
+        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(file).is_file()))
 }
 
 /// Push to Azure DevOps: push the plan's branches, then look after their PRs.
@@ -1459,10 +1478,9 @@ fn create_azure_pr(
     description: &str,
     azure: Option<&AzureRemote>,
 ) -> Result<()> {
-    // Write description to a temp file and pass `--description @<path>` to az.
-    // This avoids any argument-parsing issues with lines that start with `-`
-    // (e.g., `---` separators) when the command is invoked through `cmd /C az`
-    // on Windows.
+    // Write description to a temp file and pass `--description @<path>` to az,
+    // so lines that start with `-` (e.g. `---` separators) are never taken
+    // for options.
     let mut desc_file = tempfile::Builder::new()
         .suffix(".txt")
         .tempfile()
