@@ -12,5 +12,32 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: googleapis/release-please-action@v5
+        id: release
         with:
           token: ${{ secrets.RELEASE_TOKEN }}
+      - name: Append contributors to the release notes
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+        run: |
+          previous=$(gh api "repos/$REPO/releases?per_page=10" \
+            --jq 'map(select(.draft | not)) | map(select(.tag_name != env.TAG)) | .[0].tag_name // empty')
+          if [ -z "$previous" ]; then
+            echo "No previous release to compare against, skipping."
+            exit 0
+          fi
+          contributors=$(gh api --paginate "repos/$REPO/compare/$previous...$TAG" \
+            --jq '.commits[]
+                  | select((.author.type // "") != "Bot")
+                  | if .author.login then "@" + .author.login else .commit.author.name end' \
+            | sort -u | awk 'NR>1{printf ", "}{printf "%s", $0} END{if (NR) print ""}')
+          if [ -z "$contributors" ]; then
+            echo "No contributors found, skipping."
+            exit 0
+          fi
+          gh release view "$TAG" --repo "$REPO" --json body --jq .body > notes.md
+          grep -q '^### Contributors' notes.md || printf '\n### Contributors\n\n%s\n' "$contributors" >> notes.md
+          gh release edit "$TAG" --repo "$REPO" --notes-file notes.md

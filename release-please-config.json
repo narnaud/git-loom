@@ -1,6 +1,7 @@
 {
   "include-component-in-tag": false,
   "bump-minor-pre-major": true,
+  "include-commit-authors": true,
   "changelog-sections": [
     {
       "type": "feat",
