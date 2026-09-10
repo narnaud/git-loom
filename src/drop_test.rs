@@ -73,18 +73,80 @@ fn drop_commit_dirty_tree_autostashed() {
     assert_eq!(test_repo.read_file("base.txt"), "dirty");
 }
 
+/// Dropping the only commit of a branch leaves the branch behind, empty, at
+/// the base it built on. Removing it too is `loom drop feature-a`.
 #[test]
-fn drop_last_commit_on_branch_auto_deletes_branch() {
+fn drop_last_commit_on_branch_leaves_it_empty() {
     let test_repo = setup_woven_branch(1);
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
     let branch_oid = test_repo.get_branch_target("feature-a");
 
-    let result = super::drop_commit(&test_repo.repo, &branch_oid.to_string(), true);
-    assert!(result.is_ok(), "drop_commit failed: {:?}", result);
+    super::drop_commit(&test_repo.repo, &branch_oid.to_string(), true)
+        .expect("dropping the only commit of a branch");
 
-    // feature-a should have been auto-deleted
     assert!(
-        !test_repo.branch_exists("feature-a"),
-        "feature-a should have been auto-deleted"
+        test_repo.branch_exists("feature-a"),
+        "feature-a should survive its commit"
+    );
+    assert_eq!(test_repo.get_branch_target("feature-a"), base_oid);
+    assert!(!test_repo.commit_messages().contains(&"A1".to_string()));
+    // The merge went with the emptied section
+    assert_eq!(test_repo.head_commit().parent_count(), 1);
+}
+
+/// A stacked branch owns no section of its own, so it takes the plain commit
+/// path — and survives its only commit the same way.
+#[test]
+fn drop_sole_commit_of_a_stacked_branch_leaves_it_empty() {
+    let test_repo = TestRepo::new_with_remote();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    test_repo.create_branch_at("inner", &base_oid.to_string());
+    test_repo.switch_branch("inner");
+    let i1_oid = test_repo.commit("I1", "i1.txt");
+
+    test_repo.create_branch_at("outer", &i1_oid.to_string());
+    test_repo.switch_branch("outer");
+    test_repo.commit("O1", "o1.txt");
+
+    test_repo.switch_branch("integration");
+    test_repo.merge_no_ff("outer");
+
+    super::drop_commit(&test_repo.repo, &i1_oid.to_string(), true)
+        .expect("dropping the sole commit of a stacked branch");
+
+    assert!(test_repo.branch_exists("inner"), "inner should survive");
+    assert_eq!(test_repo.get_branch_target("inner"), base_oid);
+    let outer = test_repo.get_branch_target("outer");
+    let o1 = test_repo.find_commit(outer);
+    assert_eq!(o1.summary().unwrap().unwrap(), "O1");
+    assert_eq!(o1.parent_id(0).unwrap(), base_oid, "I1 is gone");
+}
+
+/// The rebase moves an emptied branch's ref like any other, so a checkout of
+/// it elsewhere refuses the drop before any history is rewritten.
+#[test]
+fn drop_refuses_when_an_emptied_branch_is_checked_out_elsewhere() {
+    let test_repo = setup_woven_branch(1);
+    let a1_oid = test_repo.get_branch_target("feature-a");
+    let old_head = test_repo.head_oid();
+
+    let wt = test_repo.workdir().parent().unwrap().join("wt-feature-a");
+    crate::git::run_git(
+        &test_repo.workdir(),
+        &["worktree", "add", wt.to_str().unwrap(), "feature-a"],
+    )
+    .unwrap();
+
+    let err = super::drop_commit(&test_repo.repo, &a1_oid.to_string(), true)
+        .expect_err("feature-a is checked out elsewhere");
+    assert!(err.to_string().contains("feature-a"), "{err}");
+
+    assert_eq!(test_repo.head_oid(), old_head, "history must be untouched");
+    assert_eq!(test_repo.get_branch_target("feature-a"), a1_oid);
+    assert!(
+        !crate::core::transaction::state_path(test_repo.repo.path()).exists(),
+        "no rebase ever started, so the state file must not be left behind"
     );
 }
 
@@ -429,11 +491,10 @@ fn drop_stacked_outer_branch_preserves_inner_branch() {
     );
 }
 
-/// Two branches at the same sole commit inside an outer branch own nothing,
-/// so `drop <commit>` is not routed to drop_branch. It must still refuse:
-/// the refs would be left outside the integration history.
+/// Two branches at the same sole commit inside an outer branch both survive,
+/// parked at the base that commit built on.
 #[test]
-fn drop_sole_commit_shared_by_two_branches_is_refused() {
+fn drop_sole_commit_shared_by_two_branches_leaves_them_empty() {
     let test_repo = TestRepo::new_with_remote();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
@@ -448,23 +509,22 @@ fn drop_sole_commit_shared_by_two_branches_is_refused() {
 
     test_repo.switch_branch("integration");
     test_repo.merge_no_ff("outer");
-    let head_before = test_repo.head_oid();
 
-    let err = super::drop_commit(&test_repo.repo, &i1_oid.to_string(), true)
-        .expect_err("dropping the sole commit of two branches must be refused");
-    assert!(
-        err.to_string()
-            .contains("only commit of branches `inner`, `inner-too`"),
-        "unexpected error: {err}"
-    );
-    assert_eq!(
-        test_repo.head_oid(),
-        head_before,
-        "history must be untouched"
-    );
+    super::drop_commit(&test_repo.repo, &i1_oid.to_string(), true)
+        .expect("dropping the sole commit of two inner branches");
+
     for name in ["inner", "inner-too"] {
-        assert_eq!(test_repo.get_branch_target(name), i1_oid);
+        assert!(test_repo.branch_exists(name), "{name} should survive");
+        assert_eq!(test_repo.get_branch_target(name), base_oid);
     }
+    let repo = &test_repo.repo;
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(head.parent_count(), 2, "HEAD should still merge outer");
+    let outer = test_repo.get_branch_target("outer");
+    assert_eq!(head.parent_id(1).unwrap(), outer);
+    let o1 = repo.find_commit(outer).unwrap();
+    assert_eq!(o1.summary().unwrap().unwrap(), "O1");
+    assert_eq!(o1.parent_id(0).unwrap(), base_oid, "I1 is gone");
 }
 
 #[test]
@@ -500,6 +560,48 @@ fn drop_stacked_inner_branch_is_refused() {
     let messages = test_repo.commit_messages();
     assert!(messages.contains(&"A1".to_string()));
     assert!(messages.contains(&"A2".to_string()));
+}
+
+/// Aborting a drop that conflicted puts the branch it would have emptied back
+/// at its original tip, not at the base it was parked on.
+#[test]
+fn drop_abort_restores_an_emptied_branch() {
+    let test_repo = TestRepo::new_with_remote();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    // feature-a's only commit creates shared.txt
+    test_repo.create_branch_at("feature-a", &base_oid.to_string());
+    test_repo.switch_branch("feature-a");
+    let a1_oid = test_repo.commit("version-a", "shared.txt");
+
+    test_repo.switch_branch("integration");
+    test_repo.commit("Int", "int.txt");
+    test_repo.merge_no_ff("feature-a");
+
+    // An integration commit modifies shared.txt, so replaying it without A1
+    // conflicts and the drop pauses.
+    test_repo.write_file("shared.txt", "version-b");
+    test_repo.stage_files(&["shared.txt"]);
+    test_repo.commit_staged("Commit B");
+    let old_head = test_repo.head_oid();
+
+    super::drop_commit(&test_repo.repo, &a1_oid.to_string(), true)
+        .expect("drop_commit should pause on conflict");
+    let git_dir = test_repo.repo.path().to_path_buf();
+    assert!(
+        crate::core::transaction::state_path(&git_dir).exists(),
+        "loom state must exist while the drop is paused"
+    );
+
+    crate::core::transaction::abort_cmd(&test_repo.workdir(), &git_dir).unwrap();
+
+    assert_eq!(test_repo.head_oid(), old_head, "HEAD must be restored");
+    assert!(test_repo.branch_exists("feature-a"));
+    assert_eq!(
+        test_repo.get_branch_target("feature-a"),
+        a1_oid,
+        "feature-a must be back at its own commit, not parked at the base"
+    );
 }
 
 // ── Drop via run() (end-to-end) ─────────────────────────────────────────

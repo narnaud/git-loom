@@ -581,6 +581,69 @@ assert_branch_exists "h-from-hash" "create_full_hash_branch_exists"
 assert_contains "$(git -C "$WORK" log h-from-hash --oneline)" "Create from hash" "create_full_hash_on_branch"
 
 # ══════════════════════════════════════════════════════════════════════════════
+# EMPTIED BRANCHES
+# ══════════════════════════════════════════════════════════════════════════════
+
+describe "uncommit the only commit of a stacked branch: branch parked at the base"
+setup_repo_with_remote
+base_hash=$(git -C "$WORK" rev-parse @{u})
+create_feature_branch "inner"
+switch_to inner
+commit_file "Inner I1" "inner1.txt"
+i1_hash=$(head_hash)
+git -C "$WORK" branch outer inner
+switch_to outer
+commit_file "Outer O1" "outer1.txt"
+switch_to integration
+weave_branch "outer"
+out=$(gl fold "$i1_hash" zz)
+assert_exit_ok $? "uncommit_inner_ok"
+assert_contains "$out" "branch inner now empty" "uncommit_inner_msg"
+assert_eq "$(git -C "$WORK" rev-parse inner)" "$base_hash" "uncommit_inner_parked"
+assert_eq "$(git -C "$WORK" log --format=%s -1 outer)" "Outer O1" "uncommit_inner_outer_kept"
+assert_eq "$(git -C "$WORK" rev-parse outer^)" "$base_hash" "uncommit_inner_gone_from_outer"
+assert_file_content "inner1.txt" "Inner I1" "uncommit_inner_file_in_worktree"
+
+describe "uncommit the only commit of a woven branch: merge gone, branch at the base"
+setup_repo_with_remote
+base_hash=$(git -C "$WORK" rev-parse @{u})
+create_feature_branch "solo"
+switch_to solo
+commit_file "Solo S1" "solo1.txt"
+s1_hash=$(head_hash)
+switch_to integration
+weave_branch "solo"
+out=$(gl fold "$s1_hash" zz)
+assert_exit_ok $? "uncommit_solo_ok"
+assert_eq "$(git -C "$WORK" rev-parse solo)" "$base_hash" "uncommit_solo_parked"
+assert_eq "$(head_hash)" "$base_hash" "uncommit_solo_merge_gone"
+assert_branch_exists "solo" "uncommit_solo_branch_kept"
+
+describe "move the only commit of a stacked branch: inner branch stays behind"
+setup_repo_with_remote
+base_hash=$(git -C "$WORK" rev-parse @{u})
+create_feature_branch "inner"
+switch_to inner
+commit_file "Inner I1" "inner1.txt"
+i1_hash=$(head_hash)
+git -C "$WORK" branch outer inner
+switch_to outer
+commit_file "Outer O1" "outer1.txt"
+switch_to integration
+create_feature_branch "other"
+switch_to other
+commit_file "Other X1" "other1.txt"
+switch_to integration
+weave_branch "outer"
+weave_branch "other"
+out=$(gl fold "$i1_hash" other)
+assert_exit_ok $? "move_inner_ok"
+assert_contains "$out" "branch inner now empty" "move_inner_msg"
+assert_eq "$(git -C "$WORK" rev-parse inner)" "$base_hash" "move_inner_parked"
+assert_eq "$(git -C "$WORK" log --format=%s -1 other)" "Inner I1" "move_inner_on_other"
+assert_eq "$(git -C "$WORK" log --format=%s -1 outer)" "Outer O1" "move_inner_outer_kept"
+
+# ══════════════════════════════════════════════════════════════════════════════
 # CONTINUE / ABORT
 # ══════════════════════════════════════════════════════════════════════════════
 # Shared conflict setup: C1 changes A→B, C2 changes B→C.

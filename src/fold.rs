@@ -10,7 +10,7 @@ use crate::core::msg;
 use crate::core::repo::{self, Target, TargetKind};
 use crate::core::staging;
 use crate::core::transaction::{self, LoomState, Rollback};
-use crate::core::weave::{self, RebaseOutcome, Weave};
+use crate::core::weave::{self, EmptiedRefs, RebaseOutcome, Weave};
 use crate::git;
 use crate::tui::hunk_selector::FileEntry;
 
@@ -29,10 +29,16 @@ enum FoldVariant {
     CommitToBranch {
         commit_hash: String,
         branch_name: String,
+        /// Branches the commit was the only commit of, now parked at their base.
+        #[serde(default)]
+        parked: Vec<String>,
     },
     CommitToUnstaged {
         commit_hash: String,
         diff: String,
+        /// Branches the commit was the only commit of, now parked at their base.
+        #[serde(default)]
+        emptied: Vec<String>,
     },
 }
 
@@ -251,9 +257,9 @@ fn move_commits_and_report(
         git::branch_create(workdir, branch_name, base)?;
     }
 
-    match move_commits_to_branch(repo, commit_hashes, branch_name) {
-        Ok(RebaseOutcome::Completed) => {}
-        Ok(RebaseOutcome::Stopped | RebaseOutcome::Paused) => {
+    let parked = match move_commits_to_branch(repo, commit_hashes, branch_name) {
+        Ok((RebaseOutcome::Completed, parked)) => parked,
+        Ok((RebaseOutcome::Stopped | RebaseOutcome::Paused, _)) => {
             let err = git::abort_after_failure(workdir);
             // Only remove the branch once the rebase is really gone — while it
             // is still in progress the branch may be the checked-out ref.
@@ -268,24 +274,31 @@ fn move_commits_and_report(
             }
             return Err(e);
         }
-    }
+    };
 
     let new_hash = git::rev_parse(workdir, branch_name)?;
-    if created {
-        msg::success(&format!(
+    let mut message = if created {
+        format!(
             "Created branch `{}` and moved {} commit(s) to it (now `{}`)",
             branch_name,
             commit_hashes.len(),
             git::short_hash(&new_hash)
-        ));
+        )
     } else {
-        msg::success(&format!(
+        format!(
             "Moved {} commit(s) to branch `{}` (now `{}`)",
             commit_hashes.len(),
             branch_name,
             git::short_hash(&new_hash)
+        )
+    };
+    if !parked.is_empty() {
+        message.push_str(&format!(
+            "\n{} now empty, at the base",
+            weave::describe_branches(&parked)
         ));
     }
+    msg::success(&message);
 
     Ok(())
 }
@@ -1097,9 +1110,18 @@ fn fold_commit_to_branch(repo: &Repository, commit_hash: &str, branch_name: &str
     let workdir = repo::require_workdir(repo, COMMAND)?;
     let git_dir = repo.path().to_path_buf();
 
+    // Plan before saving the state, so the parked branches reach it and
+    // `loom continue` can name them too.
+    let (graph, parked) = plan_move(
+        repo,
+        std::slice::from_ref(&commit_hash.to_string()),
+        branch_name,
+    )?;
+
     let ctx = serde_json::to_value(FoldVariant::CommitToBranch {
         commit_hash: commit_hash.to_string(),
         branch_name: branch_name.to_string(),
+        parked: parked.clone(),
     })?;
     let state = LoomState {
         command: COMMAND.to_string(),
@@ -1108,16 +1130,14 @@ fn fold_commit_to_branch(repo: &Repository, commit_hash: &str, branch_name: &str
     };
     transaction::save(&git_dir, &state)?;
 
-    match move_commit_to_branch(repo, commit_hash, branch_name)? {
+    let todo = graph.to_todo();
+    let outcome = weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)
+        .map_err(|e| transaction::discard_state_after(workdir, &git_dir, e))?;
+    match outcome {
         RebaseOutcome::Completed => {
             transaction::delete(&git_dir)?;
             let new_hash = git::rev_parse(workdir, branch_name)?;
-            msg::success(&format!(
-                "Moved `{}` to branch `{}` (now `{}`)",
-                git::short_hash(commit_hash),
-                branch_name,
-                git::short_hash(&new_hash)
-            ));
+            report_moved(commit_hash, branch_name, &new_hash, &parked);
         }
         RebaseOutcome::Paused => {
             transaction::warn_paused_at_edit(Some(COMMAND));
@@ -1130,34 +1150,50 @@ fn fold_commit_to_branch(repo: &Repository, commit_hash: &str, branch_name: &str
     Ok(())
 }
 
-/// Move a commit to the tip of a branch using Weave.
-///
-/// Returns `RebaseOutcome` — callers are responsible for building and saving
-/// their own `LoomState` before calling this function.
-pub fn move_commit_to_branch(
-    repo: &Repository,
-    commit_hash: &str,
-    branch_name: &str,
-) -> Result<RebaseOutcome> {
-    move_commits_to_branch(
-        repo,
-        std::slice::from_ref(&commit_hash.to_string()),
+/// Success message for a move, naming the branches it left empty.
+fn report_moved(commit_hash: &str, branch_name: &str, new_hash: &str, parked: &[String]) {
+    let mut message = format!(
+        "Moved `{}` to branch `{}` (now `{}`)",
+        git::short_hash(commit_hash),
         branch_name,
-    )
+        git::short_hash(new_hash)
+    );
+    if !parked.is_empty() {
+        message.push_str(&format!(
+            "\n{} now empty, at the base",
+            weave::describe_branches(parked)
+        ));
+    }
+    msg::success(&message);
 }
 
 /// Move one or more commits to the tip of a branch using Weave.
 ///
 /// Commits are appended in the order given, so callers that care about the
-/// resulting history order should pass them oldest-first. Returns
-/// `RebaseOutcome` — callers build and save their own `LoomState`.
+/// resulting history order should pass them oldest-first. Returns the rebase
+/// outcome and the branches the move left empty — callers build and save
+/// their own `LoomState`.
 pub fn move_commits_to_branch(
     repo: &Repository,
     commit_hashes: &[String],
     branch_name: &str,
-) -> Result<RebaseOutcome> {
+) -> Result<(RebaseOutcome, Vec<String>)> {
     let workdir = repo::require_workdir(repo, COMMAND)?;
+    let (graph, parked) = plan_move(repo, commit_hashes, branch_name)?;
+    let todo = graph.to_todo();
+    let outcome = weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)?;
+    Ok((outcome, parked))
+}
 
+/// Build the weave with `commit_hashes` moved to the tip of `branch_name`.
+///
+/// Returns the graph and the branches the moved commits were the only commit
+/// of, now parked at the base they built on.
+fn plan_move(
+    repo: &Repository,
+    commit_hashes: &[String],
+    branch_name: &str,
+) -> Result<(Weave, Vec<String>)> {
     let mut graph = Weave::from_repo(repo)?;
 
     // If the target branch has no section in the Weave graph, create one.
@@ -1197,13 +1233,15 @@ pub fn move_commits_to_branch(
         graph.add_merge(branch_name.to_string(), None, None);
     }
 
+    let mut parked = Vec::new();
     for commit_hash in commit_hashes {
         let commit_oid = git2::Oid::from_str(commit_hash)?;
-        graph.move_commit(commit_oid, branch_name)?;
+        parked.extend(graph.move_commit(commit_oid, branch_name)?);
     }
+    // The target branch is not "left empty" — it just got the commit.
+    parked.retain(|name| name != branch_name);
 
-    let todo = graph.to_todo();
-    weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)
+    Ok((graph, parked))
 }
 
 /// What the user had uncommitted before an operation started, as the two
@@ -1595,24 +1633,15 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
     } else {
         // Non-HEAD: drop the commit from the weave, then apply its diff
         let mut graph = Weave::from_repo(repo)?;
-        let Some(emptied) = graph.drop_commit(target_oid) else {
+        // A branch whose only commit this is survives, parked at its base,
+        // ready for the reworked change to be committed to it again.
+        let Some(emptied) = graph.drop_commit(target_oid, EmptiedRefs::Park) else {
             bail!(
                 "Commit `{}` is not in the local commits (upstream..HEAD)\n\
                  If history was rewritten, the SHA may be stale — run `loom` to see the current commits",
                 git::short_hash(commit_hash)
             );
         };
-        // A branch whose only commit is removed would be left pointing at a
-        // commit outside the integration history, invisible to loom.
-        if !emptied.is_empty() {
-            bail!(
-                "Cannot uncommit `{}`: it is the only commit of {}\n\
-                 Run `git branch -D {}` first, then uncommit again",
-                git::short_hash(commit_hash),
-                weave::describe_branches(&emptied),
-                emptied.join(" ")
-            );
-        }
 
         let diff = git::diff_commit(workdir, commit_hash)?;
         let saved_head = head_oid.to_string();
@@ -1624,6 +1653,7 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
         let fold_ctx = serde_json::to_value(FoldVariant::CommitToUnstaged {
             commit_hash: commit_hash.to_string(),
             diff: diff.clone(),
+            emptied: emptied.clone(),
         })?;
         let loom_state = LoomState {
             command: COMMAND.to_string(),
@@ -1633,7 +1663,9 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
         transaction::save(&git_dir, &loom_state)?;
 
         let todo = graph.to_todo();
-        match weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)? {
+        let outcome = weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)
+            .map_err(|e| transaction::discard_state_after(workdir, &git_dir, e))?;
+        match outcome {
             RebaseOutcome::Completed => {
                 transaction::delete(&git_dir)?;
                 if !diff.is_empty()
@@ -1654,14 +1686,27 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
                 return Ok(());
             }
         }
+        report_uncommitted(commit_hash, &emptied);
+        return Ok(());
     }
 
-    msg::success(&format!(
+    report_uncommitted(commit_hash, &[]);
+    Ok(())
+}
+
+/// Success message for an uncommit, noting the branches it left empty.
+fn report_uncommitted(commit_hash: &str, emptied: &[String]) {
+    let mut message = format!(
         "Uncommitted `{}` to working directory",
         git::short_hash(commit_hash)
-    ));
-
-    Ok(())
+    );
+    if !emptied.is_empty() {
+        message.push_str(&format!(
+            "\n{} now empty, at the base",
+            weave::describe_branches(emptied)
+        ));
+    }
+    msg::success(&message);
 }
 
 /// Resume a `fold` operation after a conflict has been resolved.
@@ -1701,16 +1746,16 @@ pub fn after_continue(workdir: &Path, context: &serde_json::Value) -> Result<()>
         FoldVariant::CommitToBranch {
             commit_hash,
             branch_name,
+            parked,
         } => {
             let new_hash = git::rev_parse(workdir, &branch_name)?;
-            msg::success(&format!(
-                "Moved `{}` to branch `{}` (now `{}`)",
-                git::short_hash(&commit_hash),
-                branch_name,
-                git::short_hash(&new_hash)
-            ));
+            report_moved(&commit_hash, &branch_name, &new_hash, &parked);
         }
-        FoldVariant::CommitToUnstaged { commit_hash, diff } => {
+        FoldVariant::CommitToUnstaged {
+            commit_hash,
+            diff,
+            emptied,
+        } => {
             if !diff.is_empty()
                 && let Err(e) = git::apply_patch_to_worktree(workdir, &diff)
             {
@@ -1731,10 +1776,7 @@ pub fn after_continue(workdir: &Path, context: &serde_json::Value) -> Result<()>
                 }
                 msg::warn(&warning);
             }
-            msg::success(&format!(
-                "Uncommitted `{}` to working directory",
-                git::short_hash(&commit_hash)
-            ));
+            report_uncommitted(&commit_hash, &emptied);
         }
     }
 

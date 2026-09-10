@@ -136,6 +136,14 @@ git loom fold d0 feature-b
 # Commit d0 moves to feature-b, removed from its original branch
 ```
 
+A branch that ended at `d0` (a stacked branch) stays behind: it ends at the commit before, or at the base if `d0` was its only commit. It never follows the commit into `feature-b`. A branch left empty this way is named in the result:
+
+```bash
+git loom fold d0 feature-b
+# ✓ Moved d0 to branch feature-b (now e1f2a3b)
+#   › branch feature-x now empty, at the base
+```
+
 ### Create a new branch and move a commit into it
 
 Use `--create` (`-c`) to create a new branch and move the commit in one step. Works whether the commit is a loose commit on the integration line or already on an existing branch.
@@ -174,6 +182,14 @@ exception — they carry no blob ids to merge through). It still fails when they
 overlap for real, or when you have uncommitted changes in one of the same
 files. Either way nothing is left half-done: history and your uncommitted
 changes both go back to where they were.
+
+If `ab` was the only commit of a branch, the branch survives, empty, at the base it built on — ready for `git loom commit -b <branch>` once the change is reworked:
+
+```bash
+git loom fold ab zz
+# ✓ Uncommitted ab to working directory
+#   › branch feature-x now empty, at the base
+```
 
 ### Uncommit a single file
 

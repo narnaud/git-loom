@@ -53,7 +53,9 @@ fn swap_two_commits(repo: &Repository, hash_a: String, hash_b: String) -> Result
     transaction::save(&git_dir, &state)?;
 
     let todo = graph.to_todo();
-    match weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)? {
+    let outcome = weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)
+        .map_err(|e| transaction::discard_state_after(workdir, &git_dir, e))?;
+    match outcome {
         RebaseOutcome::Completed => {
             transaction::delete(&git_dir)?;
             msg::success(&format!(

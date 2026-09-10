@@ -26,7 +26,20 @@ git loom drop [-y] <target>
 
 Removes the commit from history. All descendant commits are replayed to maintain a consistent history.
 
-If the commit is the **only** commit on a branch, the entire branch is dropped automatically (commits removed, merge topology unwoven, branch ref deleted).
+Dropping a commit never deletes a branch. If the commit was the **only** commit of a branch, that branch survives, empty, at the base it built on — unwoven, and ready for `git loom commit -b <branch>` once the change is reworked. This holds for a branch that owns the commit, several branches at the same sole commit, and a stacked branch whose only commit it is; the prompt and the result name them.
+
+```bash
+git loom drop a1
+# Drop commit `a1` Add login form, leaving branch `feature-a` empty? (y/n)
+# ✓ Dropped commit a1
+#   › branch feature-a now empty, at the base
+```
+
+To remove the branch as well, drop the branch itself — that takes its commits with it in one command:
+
+```bash
+git loom drop feature-a
+```
 
 ### When Target is a Branch
 
