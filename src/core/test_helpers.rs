@@ -150,6 +150,13 @@ impl TestRepo {
         // environment overrides this; the default lives in repo config because
         // the process env is shared by every test running in parallel.
         config.set_str("core.editor", "false").unwrap();
+        // Tests write their fixtures with LF and compare the bytes back. A
+        // stock Windows install sets `core.autocrlf=true`, which rewrites every
+        // file git itself puts in the working tree — a checkout, a reset, a
+        // three-way apply — as CRLF, and then reports those files as modified
+        // against an index that holds LF. Pin it so a fixture means the same
+        // thing on every platform.
+        config.set_str("core.autocrlf", "false").unwrap();
     }
 
     /// Get the signature used for commits.

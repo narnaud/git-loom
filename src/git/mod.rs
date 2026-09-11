@@ -8,7 +8,7 @@ pub mod git_worktree;
 
 pub use git_apply::{
     apply_cached_patch, apply_cached_patch_reverse, apply_patch, apply_patch_reverse,
-    restore_staged_patch,
+    apply_patch_to_worktree, restore_staged_patch,
 };
 pub use git_branch::{
     branch_create, branch_delete, branch_force_create, branch_rename, branch_switch,
@@ -19,10 +19,11 @@ pub use git_commit::{
     reset_soft, stage_all, stage_files, stage_path,
 };
 pub use git_diff::{
-    diff_cached_file, diff_cached_file_is_binary, diff_cached_files, diff_commit, diff_commit_file,
-    diff_commit_file_is_binary, diff_commit_name_status, diff_file, diff_file_is_binary, diff_head,
-    diff_head_display, diff_head_file, diff_head_file_display, diff_head_file_is_binary,
-    diff_head_files, diff_head_name_only, diff_range, show_commit_file, show_commit_patch,
+    diff_cached, diff_cached_file, diff_cached_file_is_binary, diff_cached_files, diff_commit,
+    diff_commit_file, diff_commit_file_is_binary, diff_commit_name_status, diff_file,
+    diff_file_is_binary, diff_head, diff_head_display, diff_head_file, diff_head_file_display,
+    diff_head_file_is_binary, diff_head_files, diff_head_name_only, diff_range, show_commit_file,
+    show_commit_patch,
 };
 pub use git_merge::{MergeOutcome, continue_merge, merge_abort, merge_is_in_progress, merge_no_ff};
 #[cfg(test)]
@@ -238,6 +239,83 @@ pub fn restore_files_to_head(workdir: &Path, files: &[&str]) -> Result<()> {
     let mut args = vec!["checkout", "HEAD", "--"];
     args.extend(files);
     run_git(workdir, &args)
+}
+
+/// Restore tracked files in the working tree to their index state.
+///
+/// Wraps `git checkout-index -f --`.
+pub fn checkout_index_force(workdir: &Path, files: &[&str]) -> Result<()> {
+    let mut args = vec!["checkout-index", "-f", "--"];
+    args.extend(files);
+    run_git(workdir, &args)
+}
+
+/// The subset of `files` that the index knows about; empty for an empty list.
+///
+/// Wraps `git ls-files -z -- <files>`. The paths go in as `:(literal)`
+/// pathspecs: a real file named `a[12].txt` would otherwise match `a1.txt` as
+/// a glob, and the caller would act on a file it never asked about. `-z`
+/// because the default `core.quotePath` would otherwise escape and quote a
+/// non-ASCII path into something no other git command takes.
+pub fn ls_files(workdir: &Path, files: &[&str]) -> Result<Vec<String>> {
+    // No pathspec means "every path in the index" to git, which is never what a
+    // caller asking about a list of files wants when that list came up empty.
+    if files.is_empty() {
+        return Ok(Vec::new());
+    }
+    let literal: Vec<String> = files.iter().map(|f| format!(":(literal){f}")).collect();
+    let mut args = vec!["ls-files", "-z", "--"];
+    args.extend(literal.iter().map(|f| f.as_str()));
+    Ok(run_git_stdout(workdir, &args)?
+        .split('\0')
+        .filter(|p| !p.is_empty())
+        .map(|p| p.to_string())
+        .collect())
+}
+
+/// Every path whose working-tree content differs from the index, untracked
+/// files included — but not ignored ones.
+///
+/// Wraps `git status --porcelain -z -uall`, keeping the entries whose
+/// worktree column is set. A file that is only *staged* is deliberately left
+/// out: its working-tree content still matches the index, so a caller
+/// comparing two of these sets sees it the moment something writes to it.
+/// `-uall` lists the files inside an untracked directory instead of collapsing
+/// them into the directory itself, and `-z` stops the default `core.quotePath`
+/// from escaping and quoting a non-ASCII path.
+pub fn worktree_dirty_paths(workdir: &Path) -> Result<std::collections::HashSet<String>> {
+    let out = run_git_stdout(workdir, &["status", "--porcelain", "-z", "-uall"])?;
+    let mut paths = std::collections::HashSet::new();
+    // A rename entry is `XY <new>\0<original>\0`: the second path stands alone,
+    // and names a file the rename left behind, so it is never worktree-dirty.
+    let mut rename_source_next = false;
+    for entry in out.split('\0').filter(|e| !e.is_empty()) {
+        if rename_source_next {
+            rename_source_next = false;
+            continue;
+        }
+        let Some((status, path)) = entry.split_at_checked(3) else {
+            continue;
+        };
+        // Columns are `<index><worktree> `; a rename is recorded in either, and
+        // its second path follows whether or not this entry is one we keep.
+        rename_source_next = status.starts_with(['R', 'C']) || status[1..].starts_with(['R', 'C']);
+        if !status[1..].starts_with(' ') {
+            paths.insert(path.to_string());
+        }
+    }
+    Ok(paths)
+}
+
+/// Resolve a path inside the git dir, e.g. `index`.
+///
+/// Wraps `git rev-parse --git-path <name>`, which knows where a linked
+/// worktree's own git dir is and, for `index`, honors `GIT_INDEX_FILE`.
+pub fn git_path(workdir: &Path, name: &str) -> Result<PathBuf> {
+    let out = run_git_stdout(workdir, &["rev-parse", "--git-path", name])?;
+    // Only the trailing newline: a git dir path may legitimately begin or end
+    // with a space, and git never pads its own output.
+    Ok(workdir.join(out.trim_end_matches('\n')))
 }
 
 /// The branch HEAD points at, without the `refs/heads/` prefix.

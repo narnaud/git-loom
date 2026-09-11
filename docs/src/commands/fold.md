@@ -168,6 +168,13 @@ git loom fold ab zz
 # Removes commit ab, its changes appear as unstaged modifications
 ```
 
+The changes are merged back into the working tree three-way, so a later commit
+that edited nearby lines does not break the apply (`-p` hunk selections are the
+exception — they carry no blob ids to merge through). It still fails when they
+overlap for real, or when you have uncommitted changes in one of the same
+files. Either way nothing is left half-done: history and your uncommitted
+changes both go back to where they were.
+
 ### Uncommit a single file
 
 Removes one file's changes from a commit, preserving the rest of the commit.

@@ -16,17 +16,31 @@ const DISPLAY: &[&str] = &["--no-color", "--no-ext-diff"];
 /// A textconv filter rewrites a binary file's patch into text `git apply`
 /// cannot apply, `diff.context=0` produces hunks it refuses without
 /// `--unidiff-zero`, and `diff.submodule=diff` inlines a submodule's patch.
+/// `--full-index` spells out the blob ids a three-way apply needs to look up.
 const REPLAY: &[&str] = &[
     "--no-color",
     "--no-ext-diff",
     "--no-textconv",
     "--unified=3",
     "--submodule=short",
+    "--full-index",
 ];
 
 /// Run `git diff` with the flags that keep its output replayable, and return it.
 fn diff_stdout(workdir: &Path, args: &[&str]) -> Result<String> {
     patch_stdout(workdir, "diff", REPLAY, args)
+}
+
+/// Run `git diff` the way [`diff_stdout`] does, plus `--binary`, and return it.
+///
+/// A diff saved only to be restored later needs it: without `--binary` a
+/// changed binary file prints as `Binary files a/x and b/x differ`, which
+/// `git apply` refuses — and since it applies a patch all-or-nothing, one such
+/// file would sink the whole restore.
+fn restore_stdout(workdir: &Path, args: &[&str]) -> Result<String> {
+    let mut full = vec!["--binary"];
+    full.extend(args);
+    patch_stdout(workdir, "diff", REPLAY, &full)
 }
 
 fn patch_stdout(workdir: &Path, command: &str, flags: &[&str], args: &[&str]) -> Result<String> {
@@ -50,14 +64,24 @@ pub fn diff_commit_file(workdir: &Path, oid: &str, path: &str) -> Result<String>
     diff_stdout(workdir, &[&format!("{}^..{}", oid, oid), "--", path])
 }
 
-/// Get the staged (cached) diff for specific files.
+/// Get the whole staged diff (HEAD → index).
 ///
-/// Wraps `git diff --cached -- <files>`. Returns an empty string if the
-/// files have no staged changes.
+/// Wraps `git diff --binary --cached`; saved to be restored, like
+/// [`diff_head`].
+pub fn diff_cached(workdir: &Path) -> Result<String> {
+    diff_cached_files(workdir, &[])
+}
+
+/// Get the staged (cached) diff, for the listed files or for all of them.
+///
+/// Wraps `git diff --binary --cached -- <files>`. Returns an empty string if
+/// the files have no staged changes. Every caller saves this to re-stage it
+/// later, so it carries binary files like [`diff_head`] does — inline, which a
+/// caller that parks it in `LoomState` pays for on disk.
 pub fn diff_cached_files(workdir: &Path, files: &[&str]) -> Result<String> {
     let mut args = vec!["--cached", "--"];
     args.extend(files);
-    diff_stdout(workdir, &args)
+    restore_stdout(workdir, &args)
 }
 
 /// Get the diff of all tracked files against HEAD (name-only).
@@ -156,18 +180,20 @@ pub fn diff_commit_name_status(workdir: &Path, oid: &str) -> Result<Vec<(char, S
 
 /// Get the full unified diff of all working-tree changes against HEAD.
 ///
-/// Wraps `git diff HEAD`.
+/// Wraps `git diff --binary HEAD`. This is the snapshot a rollback restores
+/// the user's uncommitted changes from, so it carries binary files too.
 pub fn diff_head(workdir: &Path) -> Result<String> {
-    diff_stdout(workdir, &["HEAD"])
+    restore_stdout(workdir, &["HEAD"])
 }
 
 /// Get the unified diff for specific files against HEAD.
 ///
-/// Wraps `git diff HEAD -- <files>`.
+/// Wraps `git diff --binary HEAD -- <files>`; saved to be restored, like
+/// [`diff_head`].
 pub fn diff_head_files(workdir: &Path, files: &[&str]) -> Result<String> {
     let mut args = vec!["HEAD", "--"];
     args.extend(files);
-    diff_stdout(workdir, &args)
+    restore_stdout(workdir, &args)
 }
 
 /// Get the working-tree diff against HEAD, for display.

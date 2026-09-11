@@ -217,7 +217,18 @@ working directory as unstaged modifications. The target is specified using
   modifications.
 - **Non-HEAD commit**: Captures the commit's diff, drops the commit from
   history via Weave rebase, then applies the diff to the working directory.
-- Uncommitted changes in other files are preserved automatically.
+  The diff was taken against the commit's own parent but lands on a history
+  where every later commit is still present, so it is replayed with a
+  three-way merge: a later commit that changed lines near a hunk still merges.
+  It fails on a real overlap, and on a file the user has already changed in
+  the working tree — a three-way apply refuses a patch that touches one.
+- Uncommitted changes in other files are preserved automatically. If the diff
+  cannot be applied, the whole operation is rolled back — history returns to
+  where it was, and so do those uncommitted changes.
+- After a conflicted rebase, `loom continue` re-applies the diff the same way,
+  but there is nothing left to roll back to: if it cannot be applied, the
+  commit stays dropped and the diff is saved under `<git dir>/loom/` as
+  `unapplied-<n>.patch` instead.
 - **Only commit of a branch** (non-HEAD): refused, for an inner (stacked)
   branch and for a branch with its own section alike. The branch ref would
   otherwise be left on a commit outside the integration history, where loom
@@ -254,6 +265,7 @@ file's changes. The source uses the `commit_sid:index` format shown by
 - **Non-HEAD commit**: Reverse-applies the file's diff, creates a temp commit,
   fixups the temp into the target via Weave rebase, then re-applies the diff
   to the working directory.
+- The diff is re-applied and rolled back exactly as in case 4.
 - Uncommitted changes in other files are preserved automatically.
 
 **What changes:**
@@ -283,7 +295,9 @@ rebase operation. The source uses the `commit_sid:index` format.
   Error if not: `"File '<path>' has no changes in commit <short_hash>"`
 - Creates two temp commits (one reverse, one forward) and fixups both into
   their respective targets via a single Weave rebase.
-- Uncommitted changes are preserved automatically.
+- Uncommitted changes are preserved automatically. If the second half fails —
+  the file's diff no longer applying where it now lands — the whole move is
+  rolled back, uncommitted changes included, as in case 4.
 
 **What changes:**
 
@@ -368,7 +382,10 @@ Detected when the target is `zz`. Opens the commit-diff hunk picker for
 working directory as unstaged modifications. The commit itself remains in
 history, minus the selected hunks.
 
-**Constraints:** same as Form 2 (no binary/deleted files).
+**Constraints:** same as Form 2 (no binary/deleted files). A hunk selection
+carries no blob ids, so the three-way replay of case 4 does not apply here: the
+re-apply hard-fails as soon as a selected hunk's own lines or the context around
+them no longer match, and the whole operation is rolled back.
 
 **What changes:**
 
@@ -386,8 +403,8 @@ history, minus the selected hunks.
 
 All `-p` forms use **hard-fail** conflict handling: if a conflict occurs during
 the internal rebase, the operation is aborted automatically and the repository
-is returned to its original state. `loom continue` / `loom abort` are not
-supported for `-p` forms.
+is returned to its original state — history, staged changes and working-tree
+changes alike. `loom continue` / `loom abort` are not supported for `-p` forms.
 
 Pre-existing staged changes are always saved aside and restored regardless of
 outcome.
@@ -432,7 +449,8 @@ When `loom continue` is called after conflict resolution, `after_continue`
 reads the saved context, cleans up the tracking branch (`_loom-track`), and
 prints the success message. If the `CommitToUnstaged` diff cannot be
 re-applied (because conflict resolution changed the surrounding context), the
-diff is saved to `.git/loom/unapplied.patch` for manual recovery.
+diff is saved under `<git dir>/loom/` as `unapplied-<n>.patch` for manual
+recovery, never overwriting an earlier one.
 
 All `-p` (patch mode) operations use **hard-fail**: no `LoomState` is saved and
 `loom continue` / `loom abort` are not available. An auto-abort restores the

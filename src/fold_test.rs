@@ -884,6 +884,63 @@ fn fold_commit_to_unstaged_dirty_autostashed() {
     assert_eq!(test_repo.read_file("file2.txt"), "Second commit");
 }
 
+/// A commit's diff is taken against its own parent but applied on top of the
+/// later commits, so a neighbor's edit inside a hunk's context defeats a plain
+/// `git apply`. The three-way fallback merges it anyway.
+#[test]
+fn fold_commit_to_unstaged_when_a_later_commit_edited_nearby_lines() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit_multi(&[("f.txt", "1\n2\n3\n4\n5\n6\n7\n")], "Base");
+    let target = test_repo.commit_multi(&[("f.txt", "1\n2\n3\nFOUR\n5\n6\n7\n")], "Change 4");
+    test_repo.commit_multi(&[("f.txt", "1\n2\n3\nFOUR\n5\nSIX\n7\n")], "Change 6");
+
+    let result = super::fold_commit_to_unstaged(&test_repo.repo, &target.to_string());
+
+    assert!(
+        result.is_ok(),
+        "fold_commit_to_unstaged failed: {:?}",
+        result
+    );
+    assert_eq!(test_repo.get_message(0), "Change 6");
+    assert_eq!(test_repo.read_file("f.txt"), "1\n2\n3\nFOUR\n5\nSIX\n7\n");
+    // Porcelain, not `diff HEAD`: the index column is what says the merged
+    // change came back unstaged, which is the whole point of `zz`.
+    assert_eq!(test_repo.status_porcelain(), " M f.txt\n");
+}
+
+/// When the uncommitted diff cannot be merged back, the rollback restores the
+/// history — and the uncommitted changes the rebase's autostash had put back.
+#[test]
+fn fold_commit_to_unstaged_rollback_keeps_uncommitted_changes() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit_multi(&[("f.txt", "1\n2\n3\n4\n5\n6\n7\n")], "Base");
+    let target = test_repo.commit_multi(&[("f.txt", "1\n2\n3\nFOUR\n5\n6\n7\n")], "Change 4");
+    test_repo.commit("Other", "other.txt");
+    // The rename replays fine without "Change 4", but leaves its diff with
+    // nowhere to apply.
+    crate::git::run_git(&test_repo.workdir(), &["mv", "f.txt", "g.txt"]).unwrap();
+    test_repo.commit_staged("Rename");
+
+    let head_before = test_repo.head_oid();
+    test_repo.write_file("other.txt", "uncommitted work");
+
+    let err = super::fold_commit_to_unstaged(&test_repo.repo, &target.to_string())
+        .expect_err("the diff must not merge back");
+    assert!(
+        err.to_string().contains("rolled back"),
+        "unexpected error: {err}"
+    );
+
+    assert_eq!(
+        test_repo.head_oid(),
+        head_before,
+        "history must be restored"
+    );
+    assert_eq!(test_repo.read_file("other.txt"), "uncommitted work");
+    assert_eq!(test_repo.read_file("g.txt"), "1\n2\n3\nFOUR\n5\n6\n7\n");
+    assert_eq!(test_repo.status_porcelain(), " M other.txt\n");
+}
+
 /// Uncommitting the only commit of a woven branch would leave its ref on a
 /// commit outside the integration history. Refused for an inner (stacked)
 /// branch and for a branch with its own section alike; several branches at
@@ -1076,6 +1133,134 @@ fn fold_commit_file_to_unstaged_non_head() {
     assert_eq!(test_repo.read_file("file2.txt"), "content2");
 }
 
+/// A change that is staged and then undone in the working tree is in
+/// `git diff --cached` and nowhere else, so the rollback has to carry the index
+/// separately from the files.
+#[test]
+fn fold_commit_to_unstaged_rollback_keeps_a_staged_only_change() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit_multi(&[("f.txt", "1\n2\n3\n4\n5\n6\n7\n")], "Base");
+    let target = test_repo.commit_multi(&[("f.txt", "1\n2\n3\nFOUR\n5\n6\n7\n")], "Change 4");
+    test_repo.commit("Other", "other.txt");
+    crate::git::run_git(&test_repo.workdir(), &["mv", "f.txt", "g.txt"]).unwrap();
+    test_repo.commit_staged("Rename");
+
+    let head_before = test_repo.head_oid();
+    // Stage a change, then put the working tree back: only the index knows.
+    test_repo.write_file("other.txt", "staged only");
+    test_repo.stage_files(&["other.txt"]);
+    test_repo.write_file("other.txt", "Other");
+
+    super::fold_commit_to_unstaged(&test_repo.repo, &target.to_string())
+        .expect_err("the diff must not merge back");
+
+    assert_eq!(
+        test_repo.head_oid(),
+        head_before,
+        "history must be restored"
+    );
+    // `MM`: the index carries the change, the working tree is back at HEAD —
+    // exactly how it stood before the fold.
+    assert_eq!(test_repo.status_porcelain(), "MM other.txt\n");
+    assert_eq!(test_repo.read_file("other.txt"), "Other");
+    assert!(
+        crate::git::diff_cached(&test_repo.workdir())
+            .unwrap()
+            .contains("staged only"),
+        "the staged content must be the one that was staged"
+    );
+}
+
+/// A changed binary file has no text diff to replay, so the snapshot the
+/// rollback restores from has to carry the file's bytes — `git apply` is
+/// all-or-nothing, and one unreplayable file would sink the text changes with it.
+#[test]
+fn fold_commit_to_unstaged_rollback_keeps_binary_changes() {
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    test_repo.commit_multi(&[("f.txt", "1\n2\n3\n4\n5\n6\n7\n")], "Base");
+    let target = test_repo.commit_multi(&[("f.txt", "1\n2\n3\nFOUR\n5\n6\n7\n")], "Change 4");
+    std::fs::write(workdir.join("logo.bin"), [0u8, 1, 2, 3]).unwrap();
+    test_repo.stage_files(&["logo.bin"]);
+    test_repo.commit_staged("Binary");
+    crate::git::run_git(&workdir, &["mv", "f.txt", "g.txt"]).unwrap();
+    test_repo.commit_staged("Rename");
+
+    let head_before = test_repo.head_oid();
+    std::fs::write(workdir.join("logo.bin"), [9u8, 9, 9, 9, 9]).unwrap();
+    test_repo.stage_files(&["logo.bin"]);
+    test_repo.write_file("text.txt", "untracked-but-tracked-later");
+
+    super::fold_commit_to_unstaged(&test_repo.repo, &target.to_string())
+        .expect_err("the diff must not merge back");
+
+    assert_eq!(
+        test_repo.head_oid(),
+        head_before,
+        "history must be restored"
+    );
+    assert_eq!(
+        std::fs::read(workdir.join("logo.bin")).unwrap(),
+        [9u8, 9, 9, 9, 9],
+        "the binary change must survive the rollback"
+    );
+    assert_eq!(
+        test_repo.read_file("text.txt"),
+        "untracked-but-tracked-later",
+        "the text change must survive it too"
+    );
+    assert_eq!(
+        test_repo.status_porcelain(),
+        "M  logo.bin\n?? text.txt\n",
+        "and the staged binary change must still be staged"
+    );
+}
+
+/// Same rollback as [`fold_commit_to_unstaged_rollback_keeps_uncommitted_changes`],
+/// for the single-file form.
+#[test]
+fn fold_commit_file_to_unstaged_rollback_keeps_uncommitted_changes() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.write_file("file1.txt", "v1");
+    test_repo.stage_files(&["file1.txt"]);
+    test_repo.commit_staged("Base");
+
+    test_repo.write_file("file1.txt", "content1");
+    test_repo.write_file("file2.txt", "content2");
+    test_repo.stage_files(&["file1.txt", "file2.txt"]);
+    test_repo.commit_staged("Two files");
+    let c1_oid = test_repo.head_oid();
+
+    test_repo.write_file("other.txt", "other");
+    test_repo.stage_files(&["other.txt"]);
+    test_repo.commit_staged("Other");
+
+    // The rename replays fine without file1.txt's changes, but leaves their
+    // diff with nowhere to apply.
+    crate::git::run_git(&test_repo.workdir(), &["mv", "file1.txt", "renamed.txt"]).unwrap();
+    test_repo.commit_staged("Rename");
+
+    let head_before = test_repo.head_oid();
+    test_repo.write_file("other.txt", "uncommitted work");
+
+    let err =
+        super::fold_commit_file_to_unstaged(&test_repo.repo, &c1_oid.to_string(), "file1.txt")
+            .expect_err("the diff must not merge back");
+    assert!(
+        err.to_string().contains("rolled back"),
+        "unexpected error: {err}"
+    );
+
+    assert_eq!(
+        test_repo.head_oid(),
+        head_before,
+        "history must be restored"
+    );
+    assert_eq!(test_repo.read_file("other.txt"), "uncommitted work");
+    assert_eq!(test_repo.read_file("renamed.txt"), "content1");
+    assert_eq!(test_repo.status_porcelain(), " M other.txt\n");
+}
+
 #[test]
 fn fold_commit_file_to_unstaged_no_changes_fails() {
     let test_repo = TestRepo::new();
@@ -1133,6 +1318,96 @@ fn fold_commit_file_to_commit() {
     assert_eq!(test_repo.read_file("file1.txt"), "content1");
     // file2.txt should still be in the source commit
     assert_eq!(test_repo.read_file("file2.txt"), "content2");
+}
+
+/// Moving a file backwards onto an older commit replays its diff where the
+/// commits in between have not happened yet; when that does not apply, phase 2
+/// rolls back over a working tree phase 1's rebase has already restored.
+#[test]
+fn fold_commit_file_to_commit_rollback_keeps_uncommitted_changes() {
+    let test_repo = TestRepo::new_with_remote();
+    let body = "1\n2\n3\n4\n5\n6\n7\n";
+    test_repo.commit_multi(&[("f.txt", body)], "Base");
+
+    let target = test_repo.commit_multi(
+        &[("f.txt", body.replace("6\n", "SIX\n").as_str())],
+        "Target",
+    );
+    // Between the two: its edit is context for the source's diff, and is not
+    // there yet when that diff is replayed onto the target.
+    let middle = body.replace("6\n", "SIX\n").replace("2\n", "TWO\n");
+    test_repo.commit_multi(&[("f.txt", &middle)], "Middle");
+    let source = test_repo.commit_multi(
+        &[
+            ("f.txt", middle.replace("4\n", "FOUR\n").as_str()),
+            ("other.txt", "other"),
+        ],
+        "Source",
+    );
+
+    let head_before = test_repo.head_oid();
+    test_repo.write_file("other.txt", "uncommitted work");
+
+    super::fold_commit_file_to_commit(
+        &test_repo.repo,
+        &source.to_string(),
+        "f.txt",
+        &target.to_string(),
+    )
+    .expect_err("the file's diff must not apply onto the target");
+
+    assert_eq!(
+        test_repo.head_oid(),
+        head_before,
+        "history must be restored"
+    );
+    assert_eq!(test_repo.read_file("other.txt"), "uncommitted work");
+    assert_eq!(test_repo.status_porcelain(), " M other.txt\n");
+}
+
+/// Same rollback for the other direction, where a single rebase stops twice and
+/// the second stop is the one that fails.
+#[test]
+fn fold_commit_file_to_commit_forward_rollback_keeps_uncommitted_changes() {
+    let test_repo = TestRepo::new_with_remote();
+    let body = "1\n2\n3\n4\n5\n6\n7\n";
+    test_repo.commit_multi(&[("f.txt", body), ("other.txt", "other")], "Base");
+
+    let source = test_repo.commit_multi(
+        &[("f.txt", body.replace("4\n", "FOUR\n").as_str())],
+        "Source",
+    );
+    // Between the two: once the source no longer carries f.txt, this edit is
+    // what the file's diff no longer fits around at the target.
+    test_repo.commit_multi(
+        &[(
+            "f.txt",
+            body.replace("4\n", "FOUR\n")
+                .replace("2\n", "TWO\n")
+                .as_str(),
+        )],
+        "Middle",
+    );
+    let target = test_repo.commit_multi(&[("g.txt", "unrelated")], "Target");
+
+    let head_before = test_repo.head_oid();
+    test_repo.write_file("other.txt", "uncommitted work");
+
+    super::fold_commit_file_to_commit(
+        &test_repo.repo,
+        &source.to_string(),
+        "f.txt",
+        &target.to_string(),
+    )
+    .expect_err("the file's diff must not apply onto the target");
+
+    assert_eq!(
+        test_repo.head_oid(),
+        head_before,
+        "history must be restored"
+    );
+    assert_eq!(test_repo.read_file("other.txt"), "uncommitted work");
+    assert_eq!(test_repo.status_porcelain(), " M other.txt\n");
 }
 
 #[test]
@@ -2109,4 +2384,68 @@ fn fold_staged_deletion_into_non_head_commit() {
     );
     assert!(!test_repo.commit_has_file(test_repo.get_oid(1), "file1.txt"));
     test_repo.assert_working_tree_clean();
+}
+
+/// The saved patch is what is left of the user's work when a rollback cannot
+/// replay it, so two failures in a row must not land on the same file.
+#[test]
+fn save_patch_aside_never_writes_over_an_earlier_save() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("A commit", "file1.txt");
+    let workdir = test_repo.workdir();
+
+    let first = super::save_patch_aside(&workdir, "unrestored", "first patch").unwrap();
+    let second = super::save_patch_aside(&workdir, "unrestored", "second patch").unwrap();
+
+    assert_eq!(first.file_name().unwrap(), "unrestored-0.patch");
+    assert_eq!(second.file_name().unwrap(), "unrestored-1.patch");
+    assert_eq!(std::fs::read_to_string(&first).unwrap(), "first patch");
+    assert_eq!(std::fs::read_to_string(&second).unwrap(), "second patch");
+    assert!(
+        first.starts_with(test_repo.repo.path()),
+        "saved under the git dir, not next to the user's files: {}",
+        first.display()
+    );
+}
+
+/// When even the reset fails there is nothing safe to replay onto, so both
+/// halves of the snapshot are parked on disk instead of applied blind.
+#[test]
+fn rollback_fold_parks_both_patches_when_the_reset_fails() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("A commit", "file1.txt");
+    let workdir = test_repo.workdir();
+    let snapshot = super::WorktreeSnapshot {
+        worktree: "worktree half".to_string(),
+        staged: "staged half".to_string(),
+    };
+
+    super::rollback_fold(
+        &workdir,
+        "0123456789abcdef0123456789abcdef01234567",
+        None,
+        &snapshot,
+    );
+
+    let loom_dir = crate::git::git_path(&workdir, "loom").unwrap();
+    let saved: Vec<String> = std::fs::read_dir(&loom_dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+        .collect();
+    assert!(
+        saved.contains(&"unrestored-0.patch".to_string()),
+        "{saved:?}"
+    );
+    assert!(
+        saved.contains(&"unrestored-staged-0.patch".to_string()),
+        "{saved:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(loom_dir.join("unrestored-0.patch")).unwrap(),
+        "worktree half"
+    );
+    assert_eq!(
+        std::fs::read_to_string(loom_dir.join("unrestored-staged-0.patch")).unwrap(),
+        "staged half"
+    );
 }
