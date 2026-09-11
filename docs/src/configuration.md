@@ -7,6 +7,7 @@
 | `loom.remote-type` | `github`, `azure`, `gerrit` | Auto-detected | Override the remote type for `git loom push` |
 | `loom.push-remote` | Any remote name | Auto-detected | Override which remote to push to (e.g., `personal` for fork workflows) |
 | `loom.hideBranchPattern` | Any prefix string | `local-` | Prefix for branches hidden from `loom status` by default |
+| `loom.pruneGoneBranches` | `true`, `false` | `false` | Let `git loom update` remove local branches whose remote branch is gone |
 
 ### `loom.remote-type`
 
