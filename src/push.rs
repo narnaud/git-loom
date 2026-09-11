@@ -1373,6 +1373,23 @@ fn extract_azure_remote(repo: &Repository, remote: &str) -> Option<AzureRemote> 
     None
 }
 
+/// `az` arguments locating the repository: `--org` (plus `--project` and
+/// `--repository`, which az stops auto-detecting once the org is explicit)
+/// when the remote URL could be parsed, `--detect` otherwise.
+fn azure_location_args(azure: Option<&AzureRemote>) -> Vec<&str> {
+    let Some(azure) = azure else {
+        return vec!["--detect"];
+    };
+    let mut args = vec!["--org", azure.org_url.as_str()];
+    if let Some(project) = &azure.project {
+        args.extend(["--project", project.as_str()]);
+    }
+    if let Some(repository) = &azure.repository {
+        args.extend(["--repository", repository.as_str()]);
+    }
+    args
+}
+
 /// Build a `Command` for the Azure CLI.
 ///
 /// On Windows `az` is normally a batch script, which `CreateProcess` cannot
@@ -1503,19 +1520,7 @@ fn create_azure_pr(
         title,
     ];
 
-    if let Some(azure) = azure {
-        args.extend(["--org", azure.org_url.as_str()]);
-        // With an explicit --org, az no longer auto-detects the project or the
-        // repository, so pass whatever we could read from the remote URL.
-        if let Some(project) = &azure.project {
-            args.extend(["--project", project.as_str()]);
-        }
-        if let Some(repository) = &azure.repository {
-            args.extend(["--repository", repository.as_str()]);
-        }
-    } else {
-        args.push("--detect");
-    }
+    args.extend(azure_location_args(azure));
 
     if !description.is_empty() {
         args.push("--description");
@@ -1579,19 +1584,7 @@ fn find_existing_azure_pr(
         "--output",
         "json",
     ]);
-    if let Some(azure) = azure {
-        cmd.args(["--org", azure.org_url.as_str()]);
-        // With an explicit --org, az no longer auto-detects the project or the
-        // repository, so pass whatever we could read from the remote URL.
-        if let Some(project) = &azure.project {
-            cmd.args(["--project", project.as_str()]);
-        }
-        if let Some(repository) = &azure.repository {
-            cmd.args(["--repository", repository.as_str()]);
-        }
-    } else {
-        cmd.arg("--detect");
-    }
+    cmd.args(azure_location_args(azure));
     let output = cmd.output().ok()?;
 
     if !output.status.success() {
