@@ -371,6 +371,30 @@ out=$(gl fold "$move_csid" "$dst_bsid")
 assert_exit_ok $? "move_short_id_ok"
 assert_contains "$(git -C "$WORK" log h-sid-dst --oneline)" "Move by sid" "move_short_id_on_dst"
 
+describe "move: target is a branch stacked inside another"
+setup_repo_with_remote
+create_feature_branch "k-move-outer"
+switch_to k-move-outer
+commit_file "Inner one" "inner-one.txt"
+git -C "$WORK" branch k-move-inner
+commit_file "Outer one" "outer-one.txt"
+switch_to integration
+weave_branch "k-move-outer"
+create_feature_branch "l-move-src"
+switch_to l-move-src
+commit_file "Move to inner" "move-to-inner.txt"
+switch_to integration
+weave_branch "l-move-src"
+move_sid=$(commit_sid_from_status "Move to inner")
+out=$(gl fold "$move_sid" k-move-inner)
+assert_exit_ok $? "move_inner_ok"
+assert_contains "$out" "branch l-move-src now empty, at the base" "move_inner_src_parked"
+assert_eq "$(git -C "$WORK" log -1 --format=%s k-move-inner)" "Move to inner" "move_inner_tip"
+assert_eq "$(git -C "$WORK" log -1 --format=%s k-move-inner~1)" "Inner one" "move_inner_after_old_tip"
+assert_eq "$(git -C "$WORK" log -1 --format=%s k-move-outer)" "Outer one" "move_inner_outer_tip"
+assert_eq "$(git -C "$WORK" rev-parse k-move-outer~1)" "$(git -C "$WORK" rev-parse k-move-inner)" "move_inner_outer_on_top"
+assert_eq "$(git -C "$WORK" rev-parse l-move-src)" "$(upstream_oid)" "move_inner_src_at_base"
+
 describe "move: co-located target branches — only the target advances"
 setup_repo_with_remote
 # g-move-to-coloc is the commit source

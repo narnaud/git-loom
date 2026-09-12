@@ -500,6 +500,166 @@ fn move_commit_leaves_inner_refs_behind() {
     ));
 }
 
+/// Moving the inner branch's own tip onto it changes nothing. This is also
+/// what keeps the ref inside the section for the insert below.
+#[test]
+fn move_commit_already_the_inner_tip_is_a_no_op() {
+    let mut graph = Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![BranchSection {
+            reset_target: "onto".to_string(),
+            commits: vec![
+                make_commit_with_refs(OID_A1, "A1", vec!["inner"]),
+                make_commit(OID_A2, "A2"),
+            ],
+            label: "outer".to_string(),
+            branch_names: vec!["outer".to_string()],
+        }],
+        integration_line: vec![IntegrationEntry::Merge {
+            original_oid: Some(oid(OID_MERGE1)),
+            label: "outer".to_string(),
+        }],
+        base_refs: vec![],
+    };
+
+    let before = graph.to_todo();
+    assert!(graph.move_commit(oid(OID_A1), "inner").unwrap().is_empty());
+    assert_eq!(graph.to_todo(), before, "the graph must be untouched");
+    assert!(graph.base_refs.is_empty(), "inner must not be parked");
+}
+
+/// Moving several commits onto an inner branch keeps their order: each one
+/// lands after the previous, and the ref ends on the last.
+#[test]
+fn move_commits_to_inner_branch_keeps_their_order() {
+    let mut graph = Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![BranchSection {
+            reset_target: "onto".to_string(),
+            commits: vec![
+                make_commit_with_refs(OID_A1, "A1", vec!["inner"]),
+                make_commit(OID_A2, "A2"),
+            ],
+            label: "outer".to_string(),
+            branch_names: vec!["outer".to_string()],
+        }],
+        integration_line: vec![
+            IntegrationEntry::Pick(make_commit(OID_C1, "C1")),
+            IntegrationEntry::Pick(make_commit(OID_C2, "C2")),
+            IntegrationEntry::Merge {
+                original_oid: Some(oid(OID_MERGE1)),
+                label: "outer".to_string(),
+            },
+        ],
+        base_refs: vec![],
+    };
+
+    for hex in [OID_C1, OID_C2] {
+        assert!(graph.move_commit(oid(hex), "inner").unwrap().is_empty());
+    }
+
+    let commits = &graph.branch_sections[0].commits;
+    let messages: Vec<&str> = commits.iter().map(|c| c.message.as_str()).collect();
+    assert_eq!(messages, vec!["A1", "C1", "C2", "A2"]);
+    // The ref advanced onto the last moved commit, and only it
+    assert!(commits[0].update_refs.is_empty());
+    assert!(commits[1].update_refs.is_empty());
+    assert_eq!(commits[2].update_refs, vec!["inner".to_string()]);
+    assert!(commits[3].update_refs.is_empty());
+    assert_eq!(graph.integration_line.len(), 1);
+}
+
+/// The target is an inner (stacked) branch: the commit lands right after its
+/// tip and takes the ref, and the commits above are replayed on top.
+#[test]
+fn move_commit_to_inner_branch_inserts_after_its_tip() {
+    let mut graph = Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![
+            BranchSection {
+                reset_target: "onto".to_string(),
+                commits: vec![
+                    make_commit_with_refs(OID_A1, "A1", vec!["inner", "twin"]),
+                    make_commit(OID_A2, "A2"),
+                ],
+                label: "outer".to_string(),
+                branch_names: vec!["outer".to_string()],
+            },
+            BranchSection {
+                reset_target: "onto".to_string(),
+                commits: vec![make_commit(OID_B1, "B1")],
+                label: "other".to_string(),
+                branch_names: vec!["other".to_string()],
+            },
+        ],
+        integration_line: vec![
+            IntegrationEntry::Merge {
+                original_oid: Some(oid(OID_MERGE1)),
+                label: "outer".to_string(),
+            },
+            IntegrationEntry::Merge {
+                original_oid: Some(oid(OID_MERGE2)),
+                label: "other".to_string(),
+            },
+        ],
+        base_refs: vec![],
+    };
+
+    let parked = graph.move_commit(oid(OID_B1), "inner").unwrap();
+
+    // other lost its only commit: its section goes and it is parked
+    assert_eq!(parked, vec!["other".to_string()]);
+    assert_eq!(graph.base_refs, vec!["other".to_string()]);
+    assert_eq!(graph.branch_sections.len(), 1);
+    assert_eq!(graph.integration_line.len(), 1);
+
+    let commits = &graph.branch_sections[0].commits;
+    let messages: Vec<&str> = commits.iter().map(|c| c.message.as_str()).collect();
+    assert_eq!(messages, vec!["A1", "B1", "A2"]);
+    // inner advances to B1; the co-located twin stays at A1
+    assert_eq!(commits[0].update_refs, vec!["twin".to_string()]);
+    assert_eq!(commits[1].update_refs, vec!["inner".to_string()]);
+    assert!(commits[2].update_refs.is_empty());
+    assert_eq!(graph.branch_sections[0].label, "outer");
+}
+
+/// Moving a commit from above an inner branch onto it reorders within the
+/// section; moving its own tip onto it changes nothing.
+#[test]
+fn move_commit_to_inner_branch_from_the_same_section() {
+    let mut graph = Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![BranchSection {
+            reset_target: "onto".to_string(),
+            commits: vec![
+                make_commit_with_refs(OID_A1, "A1", vec!["inner"]),
+                make_commit(OID_A2, "A2"),
+                make_commit(OID_B1, "B1"),
+            ],
+            label: "outer".to_string(),
+            branch_names: vec!["outer".to_string()],
+        }],
+        integration_line: vec![IntegrationEntry::Merge {
+            original_oid: Some(oid(OID_MERGE1)),
+            label: "outer".to_string(),
+        }],
+        base_refs: vec![],
+    };
+
+    let parked = graph.move_commit(oid(OID_B1), "inner").unwrap();
+    assert!(parked.is_empty());
+    let commits = &graph.branch_sections[0].commits;
+    let messages: Vec<&str> = commits.iter().map(|c| c.message.as_str()).collect();
+    assert_eq!(messages, vec!["A1", "B1", "A2"]);
+    assert!(commits[0].update_refs.is_empty());
+    assert_eq!(commits[1].update_refs, vec!["inner".to_string()]);
+
+    let before = graph.to_todo();
+    let parked = graph.move_commit(oid(OID_B1), "inner").unwrap();
+    assert!(parked.is_empty());
+    assert_eq!(graph.to_todo(), before);
+}
+
 #[test]
 fn move_commit_to_colocated_branch_splits_section() {
     // Setup: feature-a and feature-b are co-located (same section).

@@ -349,6 +349,40 @@ fn commit_moves_to_correct_branch_in_topology() {
     assert_eq!(test_repo.branch_commit_summary("feature-b"), "B1");
 }
 
+/// The target is a branch stacked inside another: the commit becomes its tip
+/// and the outer branch is replayed on top of it.
+#[test]
+fn commit_to_inner_branch_lands_at_its_tip() {
+    let test_repo = TestRepo::new_with_remote();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    test_repo.create_branch_at("inner", &base_oid.to_string());
+    test_repo.switch_branch("inner");
+    let i1_oid = test_repo.commit("I1", "i1.txt");
+    test_repo.create_branch_at("outer", &i1_oid.to_string());
+    test_repo.switch_branch("outer");
+    test_repo.commit("O1", "o1.txt");
+    test_repo.switch_branch("integration");
+    test_repo.merge_no_ff("outer");
+
+    test_repo.write_file("new.txt", "content");
+    let result = test_repo.in_dir(|| {
+        run(
+            Some("inner".to_string()),
+            Some("New on inner".to_string()),
+            vec!["new.txt".to_string()],
+        )
+    });
+    assert!(result.is_ok(), "commit failed: {:?}", result);
+
+    let inner = test_repo.find_commit(test_repo.get_branch_target("inner"));
+    assert_eq!(inner.summary().unwrap().unwrap(), "New on inner");
+    assert_eq!(inner.parent_id(0).unwrap(), i1_oid);
+    let outer = test_repo.find_commit(test_repo.get_branch_target("outer"));
+    assert_eq!(outer.summary().unwrap().unwrap(), "O1");
+    assert_eq!(outer.parent_id(0).unwrap(), inner.id());
+}
+
 /// Bug: committing to a new branch when the file conflicts with an existing
 /// woven branch would lose working-tree changes. Now that conflicts pause the
 /// operation instead of aborting, the operation is kept alive for `loom continue`

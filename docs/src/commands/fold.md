@@ -144,6 +144,14 @@ git loom fold d0 feature-b
 #   › branch feature-x now empty, at the base
 ```
 
+The target can be a branch stacked inside another one: the commit lands right after that branch's tip, and the branch stacked on top is replayed over it.
+
+```bash
+git loom fold d0 feature-a
+# feature-c is stacked on feature-a: d0 becomes feature-a's tip,
+# feature-c's commits now build on d0
+```
+
 ### Create a new branch and move a commit into it
 
 Use `--create` (`-c`) to create a new branch and move the commit in one step. Works whether the commit is a loose commit on the integration line or already on an existing branch.
