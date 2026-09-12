@@ -32,11 +32,11 @@ The action depends on the types of the arguments, detected automatically:
 | File(s) | Commit | **Amend**: stage files into the commit |
 | `zz` | Commit | **Amend all**: stage all changed files into the commit |
 | Commit | Commit | **Fixup**: absorb source commit into target |
-| Commit | Branch | **Move**: relocate commit to the branch |
+| Commit | Branch | **Move**: relocate commit(s) to the branch |
 | Commit | `zz` | **Uncommit**: remove commit, put changes in working directory |
 | CommitFile | `zz` | **Uncommit file**: remove one file from a commit to working directory |
 | CommitFile | Commit | **Move file**: move one file's changes between commits |
-| Commit | New branch (`-c`) | **Create**: make a new branch and move the commit into it |
+| Commit | New branch (`-c`) | **Create**: make a new branch and move the commit(s) into it |
 
 CommitFile sources use the `commit_sid:index` format shown by `git loom status -f` (e.g. `fa:0` for the first file in commit `fa`).
 
@@ -136,6 +136,15 @@ git loom fold d0 feature-b
 # Commit d0 moves to feature-b, removed from its original branch
 ```
 
+Several commits can go in one move. They are ordered oldest-first whatever order you list them in — ancestors before their descendants, and commits from unrelated branches by commit date — so they travel in a single rebase and land in history order.
+
+```bash
+git loom fold d0 d1 d2 feature-b
+# d0, d1 and d2 all move to feature-b
+```
+
+A single commit can be resumed with `git loom continue` if it conflicts. A move of several rolls back instead, leaving history as it was.
+
 A branch that ended at `d0` (a stacked branch) stays behind: it ends at the commit before, or at the base if `d0` was its only commit. It never follows the commit into `feature-b`. A branch left empty this way is named in the result:
 
 ```bash
@@ -168,11 +177,14 @@ git loom fold -c d0 d1 d2 new-feature
 # Creates new-feature and moves d0, d1, d2 into it
 ```
 
-If the branch already exists, a warning is printed and the commit(s) are moved there anyway — same as a normal `fold <commit> <branch>`.
+Like any move of several commits, `-c` is not resumable: a conflict rolls it back rather than pausing for `git loom continue`.
+
+`-c` creates, so a name that is already taken is refused. Moving onto a branch that exists is a plain fold, and accepting the name here would let a typo drop your commits into another branch.
 
 ```bash
 git loom fold -c d0 existing-branch
-# ! Branch `existing-branch` already exists — moving commit to it
+# ✗ Branch `existing-branch` already exists
+#   Use `loom fold <commit>... existing-branch` to move commits onto it
 ```
 
 ### Uncommit to the working directory

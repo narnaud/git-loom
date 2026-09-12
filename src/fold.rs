@@ -51,9 +51,10 @@ const COMMAND: &str = "fold";
 /// Dispatches to the appropriate operation based on argument types:
 /// - File(s) + Commit → amend files into the commit
 /// - Commit + Commit  → fixup source into target (source disappears)
-/// - Commit + Branch   → move commit to the branch
+/// - Commit(s) + Branch → move the commit(s) to the branch, oldest-first
 ///
-/// With `--create` (`-c`): create a new branch and move the source commit into it.
+/// With `--create` (`-c`): create a new branch and move the source commit(s)
+/// into it. The name must not be taken.
 pub fn run(create: bool, patch: bool, args: Vec<String>, theme: &graph::Theme) -> Result<()> {
     if args.is_empty() {
         bail!(
@@ -128,7 +129,19 @@ pub fn run(create: bool, patch: bool, args: Vec<String>, theme: &graph::Theme) -
         FoldOp::CommitIntoCommit { source, target } => {
             fold_commit_into_commit(&repo, &source, &target)
         }
-        FoldOp::CommitToBranch { commit, branch } => fold_commit_to_branch(&repo, &commit, &branch),
+        FoldOp::CommitsToBranch { commits, branch } => {
+            // Order and de-duplicate first: the same commit named twice is one
+            // commit, and it should keep the resumable single-commit path
+            // rather than be treated as a stack because of a repeated argument.
+            let info = repo::gather_commit_graph(&repo)?;
+            let commits = commits_to_move(&repo, commits, weave::base_oid(&repo, &info)?)?;
+            if commits.len() == 1 {
+                fold_commit_to_branch(&repo, &commits[0], &branch)
+            } else {
+                let workdir = repo::require_workdir(&repo, COMMAND)?;
+                move_commits_and_report(workdir, &repo, &commits, &branch, None)
+            }
+        }
         FoldOp::CommitToUnstaged { commit } => fold_commit_to_unstaged(&repo, &commit),
         FoldOp::CommitFileToUnstaged { commit, path } => {
             fold_commit_file_to_unstaged(&repo, &commit, &path)
@@ -144,9 +157,10 @@ pub fn run(create: bool, patch: bool, args: Vec<String>, theme: &graph::Theme) -
 /// Create a new branch and move the source commit(s) into it.
 ///
 /// `args` must be `[<commit>..., <new-branch-name>]` — one or more commits
-/// followed by the new branch name. The branch is created at the merge-base,
+/// followed by the new branch name. The branch is created at the weave base,
 /// then the commits are moved to it using the same Weave machinery as the
-/// normal commit-to-branch fold.
+/// normal commit-to-branch fold. The name must be free: moving onto a branch
+/// that already exists is `loom fold <commit>... <branch>`.
 fn run_create(repo: &Repository, args: &[String]) -> Result<()> {
     if args.len() < 2 {
         bail!(
@@ -169,44 +183,55 @@ fn run_create(repo: &Repository, args: &[String]) -> Result<()> {
         }
     }
 
-    // Order oldest-first so the commits land on the branch in history order.
-    let commit_hashes = sort_commits_oldest_first(repo, commit_hashes)?;
-
     git::branch_validate_name(workdir, branch_name)?;
 
-    // If the branch already exists, warn and fall through to a normal move.
-    let branch_exists = repo
+    // `-c` creates: moving onto a branch that is already there is what a
+    // plain fold does, and silently accepting it here turns a mistyped name
+    // into commits landing in somebody else's branch.
+    if repo
         .find_branch(branch_name, git2::BranchType::Local)
-        .is_ok();
-    if branch_exists {
-        msg::warn(&format!(
-            "Branch `{}` already exists — moving commit(s) to it",
+        .is_ok()
+    {
+        bail!(
+            "Branch `{}` already exists\n\
+             Use `loom fold <commit>... {}` to move commits onto it",
+            branch_name,
             branch_name
-        ));
-        // A single commit keeps the resumable commit-to-branch path.
-        if commit_hashes.len() == 1 {
-            return fold_commit_to_branch(repo, &commit_hashes[0], branch_name);
-        }
-        return move_commits_and_report(workdir, repo, &commit_hashes, branch_name, None);
+        );
     }
 
-    // Create the branch at the merge-base so it has no commits of its own yet;
-    // move_commits_to_branch will add a section for it in the Weave graph.
-    let info = repo::gather_repo_info(repo, false, 1).ok();
-    let base_hash = match &info {
-        Some(info) => info.upstream.merge_base_oid.to_string(),
-        None => bail!(
-            "Cannot create branch: no upstream tracking branch configured\n\
-             Use 'loom branch <name> -t <commit>' instead"
-        ),
-    };
+    // The branch is created at the weave base so it has no commits of its own
+    // yet; move_commits_to_branch adds a section for it in the Weave graph.
+    // One gather serves both that and the ordering below.
+    // Let the real reason through: loom prints only the outermost message, so
+    // wrapping this would hide whether it was a detached HEAD or no upstream.
+    let info = repo::gather_commit_graph(repo)?;
+    // The weave base, which the merge-base only sometimes is. Both the branch
+    // and the move scope have to use it: plan_move measures a section-less
+    // branch against the weave base, and refuses the one it was just handed if
+    // it was created anywhere else.
+    let base_oid = weave::base_oid(repo, &info)?;
 
-    move_commits_and_report(workdir, repo, &commit_hashes, branch_name, Some(&base_hash))
+    // Ordering walks the graph, so it comes after the checks a ref lookup
+    // settles. Oldest-first, so the commits land in history order.
+    let commit_hashes = commits_to_move(repo, commit_hashes, base_oid)?;
+
+    move_commits_and_report(
+        workdir,
+        repo,
+        &commit_hashes,
+        branch_name,
+        Some(&base_oid.to_string()),
+    )
 }
 
-/// Sort commit hashes oldest-first (ancestors before descendants), removing
-/// duplicates. Unrelated commits are ordered by committer time.
-fn sort_commits_oldest_first(repo: &Repository, hashes: Vec<String>) -> Result<Vec<String>> {
+/// The commits a move should relocate: de-duplicated, refused if they sit at
+/// or below `base`, and ordered oldest-first.
+///
+/// Ancestors come before their descendants, and commits on unrelated lines
+/// come in committer order. One topological walk, because pairwise ancestry
+/// with a time tiebreak is not a total order and sorts descendants first.
+fn commits_to_move(repo: &Repository, hashes: Vec<String>, base: git2::Oid) -> Result<Vec<String>> {
     let mut oids: Vec<git2::Oid> = Vec::new();
     for h in &hashes {
         let oid = git2::Oid::from_str(h)?;
@@ -215,29 +240,82 @@ fn sort_commits_oldest_first(repo: &Repository, hashes: Vec<String>) -> Result<V
         }
     }
 
-    oids.sort_by(|a, b| {
-        if a == b {
-            return std::cmp::Ordering::Equal;
-        }
-        if repo.graph_descendant_of(*a, *b).unwrap_or(false) {
-            std::cmp::Ordering::Greater // a is newer → later
-        } else if repo.graph_descendant_of(*b, *a).unwrap_or(false) {
-            std::cmp::Ordering::Less // a is older → earlier
-        } else {
-            // Unrelated commits: fall back to committer time.
-            let ta = repo
-                .find_commit(*a)
-                .map(|c| c.time().seconds())
-                .unwrap_or(0);
-            let tb = repo
-                .find_commit(*b)
-                .map(|c| c.time().seconds())
-                .unwrap_or(0);
-            ta.cmp(&tb)
-        }
-    });
+    // The base bounds the walk as well as the scope. A sorted walk
+    // materializes everything reachable before it yields its first commit, so
+    // an unbounded one would cost the whole repository to order a few oids.
+    let ordered = ordered_topologically(repo, &oids, base)?;
+    if let Some(missing) = oids.iter().find(|o| !ordered.contains(o)) {
+        // The base is all that hides a commit pushed onto the walk, so this
+        // one sits at or below it.
+        bail!(
+            "Commit `{}` is not in the integration scope\n\
+             Only commits above the integration base can be moved",
+            git::short_hash(&missing.to_string())
+        );
+    }
 
-    Ok(oids.iter().map(|o| o.to_string()).collect())
+    Ok(ordered.iter().map(|o| o.to_string()).collect())
+}
+
+/// Order `oids` oldest-first by one topological walk, stopping at `boundary`.
+///
+/// Any oid the boundary hid is missing from the result.
+fn ordered_topologically(
+    repo: &Repository,
+    oids: &[git2::Oid],
+    boundary: git2::Oid,
+) -> Result<Vec<git2::Oid>> {
+    // TIME puts unrelated commits in committer order within the topological
+    // constraint. Commits sharing a second are left to push order, so push in
+    // a canonical one.
+    let mut by_time: Vec<(i64, git2::Oid)> = oids
+        .iter()
+        .map(|oid| Ok((repo.find_commit(*oid)?.time().seconds(), *oid)))
+        .collect::<Result<Vec<_>>>()?;
+    by_time.sort_unstable();
+
+    let mut walk = repo.revwalk()?;
+    walk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)?;
+    for (_, oid) in &by_time {
+        walk.push(*oid)?;
+    }
+    walk.hide(boundary)?;
+
+    // The walk yields descendants before ancestors, so collect and reverse.
+    let mut wanted: Vec<git2::Oid> = oids.to_vec();
+    let mut newest_first = Vec::with_capacity(oids.len());
+    for step in walk {
+        let oid = step?;
+        if let Some(i) = wanted.iter().position(|w| *w == oid) {
+            wanted.swap_remove(i);
+            newest_first.push(oid);
+            if wanted.is_empty() {
+                break;
+            }
+        }
+    }
+
+    newest_first.reverse();
+    Ok(newest_first)
+}
+
+/// Re-stage what the abort brought back as unstaged.
+///
+/// `git rebase --abort` replays its autostash into the working tree, so the
+/// content returns but the staging mostly does not. The snapshot is a
+/// HEAD-to-index diff, so the index has to be back at HEAD for it to apply —
+/// whatever the autostash restored of it. The working tree is untouched by
+/// that reset, and a patch that still will not apply is saved aside.
+fn restage_after_abort(workdir: &Path, staged: &str) {
+    if staged.is_empty() {
+        return;
+    }
+    let restored =
+        git::reset_mixed(workdir, "HEAD").and_then(|()| git::apply_cached_patch(workdir, staged));
+    if let Err(e) = restored {
+        msg::warn(&format!("could not re-stage your staged changes: {e}"));
+        save_or_warn(workdir, "unrestored-staged", staged, true);
+    }
 }
 
 /// Move `commit_hashes` to `branch_name` and report the result.
@@ -257,14 +335,26 @@ fn move_commits_and_report(
         git::branch_create(workdir, branch_name, base)?;
     }
 
+    // The rebase autostashes, and the abort below replays that into the
+    // working tree only — staged changes would come back unstaged.
+    let saved_staged = git::diff_cached(workdir)?;
+
     let parked = match move_commits_to_branch(repo, commit_hashes, branch_name) {
         Ok((RebaseOutcome::Completed, parked)) => parked,
         Ok((RebaseOutcome::Stopped | RebaseOutcome::Paused, _)) => {
             let err = git::abort_after_failure(workdir);
-            // Only remove the branch once the rebase is really gone — while it
-            // is still in progress the branch may be the checked-out ref.
-            if created && !git::rebase_is_in_progress(repo.path()) {
-                let _ = git::branch_delete(workdir, branch_name);
+            // Only once the rebase is really gone: while it is still on disk
+            // HEAD sits detached mid-pick, so resetting the index there would
+            // clobber it, and the branch may be the checked-out ref.
+            if git::rebase_is_in_progress(repo.path()) {
+                // The abort failed too, so the index is not ours to touch.
+                // Park the staging rather than let it go with the error.
+                save_or_warn(workdir, "unrestored-staged", &saved_staged, true);
+            } else {
+                restage_after_abort(workdir, &saved_staged);
+                if created {
+                    let _ = git::branch_delete(workdir, branch_name);
+                }
             }
             return Err(err);
         }
@@ -689,8 +779,8 @@ enum FoldOp {
         source: String,
         target: String,
     },
-    CommitToBranch {
-        commit: String,
+    CommitsToBranch {
+        commits: Vec<String>,
         branch: String,
     },
     CommitToUnstaged {
@@ -810,22 +900,28 @@ fn classify(sources: &[Target], target: &Target) -> Result<FoldOp> {
         }
     } else {
         // Commit(s) + target
-        if sources.len() > 1 {
-            bail!("Only one commit source is allowed");
-        }
-
-        let source_hash = match &sources[0] {
-            Target::Commit(hash) => hash.clone(),
-            _ => unreachable!(),
-        };
+        let hashes: Vec<String> = sources
+            .iter()
+            .map(|s| match s {
+                Target::Commit(hash) => hash.clone(),
+                _ => unreachable!(),
+            })
+            .collect();
 
         match target {
-            Target::Commit(hash) => Ok(FoldOp::CommitIntoCommit {
-                source: source_hash,
-                target: hash.clone(),
-            }),
-            Target::Branch(name) => Ok(FoldOp::CommitToBranch {
-                commit: source_hash,
+            Target::Commit(hash) => {
+                // A fixup absorbs one commit into another; several sources
+                // have no single meaning here.
+                if hashes.len() > 1 {
+                    bail!("Only one commit source is allowed");
+                }
+                Ok(FoldOp::CommitIntoCommit {
+                    source: hashes[0].clone(),
+                    target: hash.clone(),
+                })
+            }
+            Target::Branch(name) => Ok(FoldOp::CommitsToBranch {
+                commits: hashes,
                 branch: name.clone(),
             }),
             Target::File(_) => bail!("Target must be a commit or branch, not a file"),
@@ -1125,7 +1221,13 @@ fn fold_commit_to_branch(repo: &Repository, commit_hash: &str, branch_name: &str
     })?;
     let state = LoomState {
         command: COMMAND.to_string(),
-        rollback: Rollback::default(),
+        rollback: Rollback {
+            // `git rebase --abort` replays its autostash into the working tree
+            // only, so without this an abort hands the staged half back
+            // unstaged while reporting the original state restored.
+            saved_staged_patch: git::diff_cached(workdir)?,
+            ..Default::default()
+        },
         context: ctx,
     };
     transaction::save(&git_dir, &state)?;

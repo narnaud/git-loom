@@ -755,6 +755,22 @@ fn classify_commit_into_branch() {
 }
 
 #[test]
+fn classify_several_commits_into_branch() {
+    let sources = vec![
+        repo::Target::Commit("abc123".into()),
+        repo::Target::Commit("def456".into()),
+    ];
+    let target = repo::Target::Branch("feature-a".into());
+    match super::classify(&sources, &target) {
+        Ok(super::FoldOp::CommitsToBranch { commits, branch }) => {
+            assert_eq!(commits.len(), 2);
+            assert_eq!(branch, "feature-a");
+        }
+        other => panic!("expected CommitsToBranch, got {other:?}"),
+    }
+}
+
+#[test]
 fn classify_branch_source_rejected() {
     let sources = vec![repo::Target::Branch("feature-a".into())];
     let target = repo::Target::Commit("abc123".into());
@@ -2127,6 +2143,58 @@ fn fold_create_keeps_the_diff_out_of_the_merge_message() {
     );
 }
 
+/// Once a woven branch lands upstream as a fast-forward, the merge-base is
+/// that branch's own tip — still inside the weave — and the weave base is
+/// somewhere else entirely. `-c` has to create the branch at the weave base:
+/// anywhere else and `plan_move` refuses the branch `-c` just handed it.
+#[test]
+fn fold_create_uses_the_weave_base_when_a_branch_landed_upstream() {
+    let test_repo = TestRepo::new_with_remote();
+
+    let weave_base = test_repo.head_oid();
+    test_repo.create_branch_at_commit("feature-a", weave_base);
+    test_repo.switch_branch("feature-a");
+    test_repo.commit("A1", "a1.txt");
+
+    test_repo.switch_branch("integration");
+    test_repo.merge_no_ff("feature-a");
+    // Staged through git, not git2: the merge ran in a subprocess, so the
+    // cached index a git2 commit would write back is stale.
+    test_repo.write_file("l1.txt", "l1");
+    test_repo.stage_files(&["l1.txt"]);
+    test_repo.commit_staged("L1");
+    let l1_oid = test_repo.head_oid();
+
+    // feature-a lands upstream as a fast-forward: origin/main is now its tip,
+    // so the merge-base sits on the branch side of the merge.
+    test_repo.push_branch_to_remote_main("feature-a");
+    let info = repo::gather_commit_graph(&test_repo.repo).unwrap();
+    assert_ne!(
+        info.upstream.merge_base_oid, weave_base,
+        "setup should have left the merge-base off the weave base"
+    );
+
+    let result = super::run_create(
+        &test_repo.repo,
+        &[l1_oid.to_string(), "new-branch".to_string()],
+    );
+    assert!(result.is_ok(), "fold --create failed: {:?}", result);
+
+    let tip = test_repo
+        .repo
+        .find_branch("new-branch", git2::BranchType::Local)
+        .unwrap()
+        .get()
+        .peel_to_commit()
+        .unwrap();
+    assert_eq!(repo::commit_subject(&tip), "L1");
+    assert_eq!(
+        tip.parent(0).unwrap().id(),
+        weave_base,
+        "the new branch should be built on the weave base"
+    );
+}
+
 /// A rebase that refuses to start — a branch it would move is checked out in
 /// another worktree — must leave nothing of the fold behind: no `fixup!`
 /// commit, no staging loom did itself, no temp branch, no state file.
@@ -2244,33 +2312,269 @@ fn fold_into_an_out_of_scope_commit_leaves_the_repo_alone() {
     );
 }
 
+/// `-c` creates. A name that is taken is refused, and the existing branch is
+/// left exactly where it was.
 #[test]
-fn fold_create_warns_and_moves_to_existing_branch() {
-    // When --create is used but the branch already exists, warn and move the commit.
-    // Uses a non-woven feature-a at base and a loose commit on integration.
+fn fold_create_rejects_an_existing_branch() {
     let test_repo = TestRepo::new_with_remote();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
-    // feature-a exists at base (not woven, no section in the graph)
     test_repo.create_branch_at("feature-a", &base_oid.to_string());
-
-    // Add a loose commit on integration
     let loose_oid = test_repo.commit("Loose", "loose.txt");
 
-    // feature-a already exists — should warn and move the commit anyway
     let result = super::run_create(
         &test_repo.repo,
         &[loose_oid.to_string(), "feature-a".to_string()],
     );
-    assert!(
-        result.is_ok(),
-        "fold --create with existing branch should succeed: {:?}",
-        result
-    );
+
+    // Line by line: the hint carries no leading whitespace of its own, which
+    // is what a dropped `\n\` continuation would bake into the literal.
+    let err = result.unwrap_err().to_string();
+    let mut lines = err.lines();
+    assert_eq!(lines.next(), Some("Branch `feature-a` already exists"));
     assert_eq!(
-        test_repo.branch_commit_summary("feature-a"),
-        "Loose",
-        "Loose commit should have moved to feature-a"
+        lines.next(),
+        Some("Use `loom fold <commit>... feature-a` to move commits onto it")
+    );
+    assert_eq!(lines.next(), None, "no extra lines: {err}");
+    assert_eq!(
+        test_repo.get_branch_target("feature-a"),
+        base_oid,
+        "feature-a must be untouched"
+    );
+}
+
+/// Ancestry orders only some pairs, so a committer-time tiebreak laid over it
+/// is not transitive: two related commits that each tie with an unrelated
+/// third are never compared with each other. Every permutation must still put
+/// the ancestor first, and give the same answer.
+#[test]
+fn sort_commits_puts_an_ancestor_first_whatever_the_input_order() {
+    let test_repo = TestRepo::new_with_remote();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    // One fixed second for all three: the tie is what defeats a committer-time
+    // tiebreak, and hoping the machine ran fast enough is not a test.
+    const TIED: i64 = 1_700_000_000;
+    test_repo.create_branch_at("b1", &base_oid.to_string());
+    test_repo.switch_branch("b1");
+    let x = test_repo.commit_at("X", "x.txt", TIED);
+    let z = test_repo.commit_at("Z", "z.txt", TIED);
+
+    // Y forks from the base, so it is unrelated to both X and Z.
+    test_repo.create_branch_at("b2", &base_oid.to_string());
+    test_repo.switch_branch("b2");
+    let y = test_repo.commit_at("Y", "y.txt", TIED);
+
+    let repo = &test_repo.repo;
+    let secs = |o: git2::Oid| repo.find_commit(o).unwrap().time().seconds();
+    assert_eq!(secs(x), secs(y));
+    assert_eq!(secs(y), secs(z));
+
+    let mut outputs = Vec::new();
+    for input in [
+        [x, y, z],
+        [x, z, y],
+        [y, x, z],
+        [y, z, x],
+        [z, x, y],
+        [z, y, x],
+    ] {
+        let hashes: Vec<String> = input.iter().map(|o| o.to_string()).collect();
+        let sorted = super::commits_to_move(repo, hashes, base_oid).unwrap();
+        assert_eq!(sorted.len(), 3, "no commit may be dropped: {sorted:?}");
+        let at = |o: git2::Oid| sorted.iter().position(|h| *h == o.to_string()).unwrap();
+        assert!(
+            at(x) < at(z),
+            "X is Z's ancestor and must come first, got {sorted:?} from {input:?}"
+        );
+        outputs.push(sorted);
+    }
+
+    // History puts no order on unrelated commits, so the answer must not
+    // depend on the order they were listed in.
+    assert!(
+        outputs.windows(2).all(|w| w[0] == w[1]),
+        "every permutation must agree: {outputs:?}"
+    );
+}
+
+/// The walk is bounded to what loom can rewrite, so a commit from below that
+/// boundary never turns up in it. It is upstream history that no move could
+/// rewrite anyway, so say so by name instead of walking the whole repository
+/// to order something that is going to be refused.
+#[test]
+fn sort_commits_rejects_a_commit_from_below_the_boundary() {
+    let test_repo = TestRepo::new_with_remote();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+    let local = test_repo.commit("L1", "l1.txt");
+
+    let err = super::commits_to_move(
+        &test_repo.repo,
+        vec![local.to_string(), base_oid.to_string()],
+        base_oid,
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(
+        err.contains("not in the integration scope"),
+        "should name the out-of-scope commit: {err}"
+    );
+    assert!(
+        err.contains(&base_oid.to_string()[..7]),
+        "should name which commit: {err}"
+    );
+}
+
+/// Commits from unrelated branches land in committer order, not grouped by
+/// the branch they came from: the order the docs promise.
+#[test]
+fn sort_commits_orders_unrelated_branches_by_time() {
+    let test_repo = TestRepo::new_with_remote();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    test_repo.create_branch_at("b1", &base_oid.to_string());
+    test_repo.switch_branch("b1");
+    let a1 = test_repo.commit_at("A1", "a1.txt", 1_700_000_023);
+    let a2 = test_repo.commit_at("A2", "a2.txt", 1_700_000_026);
+
+    test_repo.create_branch_at("b2", &base_oid.to_string());
+    test_repo.switch_branch("b2");
+    let b1 = test_repo.commit_at("B1", "b1.txt", 1_700_000_021);
+    let b2 = test_repo.commit_at("B2", "b2.txt", 1_700_000_028);
+
+    let repo = &test_repo.repo;
+    let sorted = super::commits_to_move(
+        repo,
+        vec![
+            a1.to_string(),
+            a2.to_string(),
+            b1.to_string(),
+            b2.to_string(),
+        ],
+        base_oid,
+    )
+    .unwrap();
+
+    let names: Vec<String> = sorted
+        .iter()
+        .map(|h| {
+            let oid = git2::Oid::from_str(h).unwrap();
+            repo.find_commit(oid)
+                .unwrap()
+                .summary()
+                .unwrap()
+                .unwrap()
+                .to_string()
+        })
+        .collect();
+
+    // B1 is the oldest of the four and must lead, even though it is on the
+    // branch that was written second.
+    assert_eq!(names, vec!["B1", "A1", "A2", "B2"]);
+}
+
+/// A commit dated older than its parent — normal after a rebase — still comes
+/// after it. Ancestry outranks the date.
+#[test]
+fn sort_commits_keeps_ancestry_over_a_skewed_date() {
+    let test_repo = TestRepo::new_with_remote();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+    test_repo.create_branch_at("b1", &base_oid.to_string());
+    test_repo.switch_branch("b1");
+    let x = test_repo.commit_at("X", "x.txt", 1_700_000_100);
+    let z = test_repo.commit_at("Z", "z.txt", 1_700_000_050);
+
+    let sorted = super::commits_to_move(
+        &test_repo.repo,
+        vec![z.to_string(), x.to_string()],
+        base_oid,
+    )
+    .unwrap();
+
+    assert_eq!(sorted, vec![x.to_string(), z.to_string()]);
+}
+
+/// One commit gets the same answer as several: the guard is not conditional
+/// on how many arguments were typed.
+#[test]
+fn sort_commits_rejects_a_single_out_of_scope_commit() {
+    let test_repo = TestRepo::new_with_remote();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+    test_repo.commit("L1", "l1.txt");
+
+    let err = super::commits_to_move(&test_repo.repo, vec![base_oid.to_string()], base_oid)
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        err.contains("not in the integration scope"),
+        "one commit must get the same message as several: {err}"
+    );
+}
+
+/// The same commit named twice is one commit, so the move keeps the resumable
+/// single-commit path instead of being treated as a stack.
+#[test]
+fn sort_commits_drops_duplicates() {
+    let test_repo = TestRepo::new_with_remote();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+    let x = test_repo.commit("X", "x.txt");
+
+    let sorted = super::commits_to_move(
+        &test_repo.repo,
+        vec![x.to_string(), x.to_string()],
+        base_oid,
+    )
+    .unwrap();
+
+    assert_eq!(sorted, vec![x.to_string()]);
+}
+
+/// Several commits go onto an existing branch in one rebase, oldest-first
+/// whatever order they were given in.
+#[test]
+fn fold_moves_several_commits_to_a_branch() {
+    let test_repo = TestRepo::new_with_remote();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    // feature-a gets A1; B1 stays on the integration line below the merge.
+    test_repo.commit("A1", "a1.txt");
+    let a1_oid = test_repo.head_oid();
+    test_repo.create_branch_at("feature-a", &a1_oid.to_string());
+    test_repo.commit("B1", "b1.txt");
+    test_repo.rebase_onto(&base_oid.to_string(), &a1_oid.to_string());
+    test_repo.merge_no_ff("feature-a");
+
+    let m1 = test_repo.commit("M1", "m1.txt");
+    let m2 = test_repo.commit("M2", "m2.txt");
+
+    // Newest first on the command line: the move still lands them in order.
+    let result = test_repo.in_dir(|| {
+        super::run(
+            false,
+            false,
+            vec![m2.to_string(), m1.to_string(), "feature-a".to_string()],
+            &crate::core::graph::Theme::dark(),
+        )
+    });
+    assert!(result.is_ok(), "multi-commit move failed: {:?}", result);
+
+    let repo = &test_repo.repo;
+    let tip = repo
+        .find_commit(test_repo.get_branch_target("feature-a"))
+        .unwrap();
+    assert_eq!(tip.summary().unwrap().unwrap(), "M2");
+    let mid = repo.find_commit(tip.parent_id(0).unwrap()).unwrap();
+    assert_eq!(mid.summary().unwrap().unwrap(), "M1");
+    assert_eq!(
+        repo.find_commit(mid.parent_id(0).unwrap())
+            .unwrap()
+            .summary()
+            .unwrap()
+            .unwrap(),
+        "A1"
     );
 }
 

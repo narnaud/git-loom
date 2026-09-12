@@ -169,12 +169,7 @@ impl Weave {
     /// branch sections (from merge commits) and integration-line entries.
     pub fn from_repo_with_info(repo: &Repository, info: &repo::RepoInfo) -> Result<Self> {
         let head_oid = repo::head_oid(repo)?;
-        let merge_base_oid = integration_base(
-            repo,
-            head_oid,
-            info.upstream.tip_oid,
-            info.upstream.merge_base_oid,
-        )?;
+        let merge_base_oid = base_oid(repo, info)?;
 
         // Walk the first-parent line from HEAD to merge-base
         let first_parent_entries = walk_first_parent_line(repo, head_oid, merge_base_oid)?;
@@ -1137,6 +1132,19 @@ fn integration_base(repo: &Repository, head: Oid, upstream: Oid, merge_base: Oid
             Err(_) => return Ok(merge_base),
         }
     }
+}
+
+/// The base a weave built from `info` would rewrite from.
+///
+/// Not always the merge-base: once a woven branch lands upstream, the
+/// merge-base is that branch's own tip, which is still inside the weave.
+pub fn base_oid(repo: &Repository, info: &repo::RepoInfo) -> Result<Oid> {
+    integration_base(
+        repo,
+        repo::head_oid(repo)?,
+        info.upstream.tip_oid,
+        info.upstream.merge_base_oid,
+    )
 }
 
 /// Walk the first-parent line from `head` to `stop` (exclusive).

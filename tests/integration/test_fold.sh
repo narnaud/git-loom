@@ -371,6 +371,170 @@ out=$(gl fold "$move_csid" "$dst_bsid")
 assert_exit_ok $? "move_short_id_ok"
 assert_contains "$(git -C "$WORK" log h-sid-dst --oneline)" "Move by sid" "move_short_id_on_dst"
 
+describe "move: several commits go to an existing branch in history order"
+setup_repo_with_remote
+create_feature_branch "m-multi-dst"
+switch_to m-multi-dst
+commit_file "Dst base" "dst-base.txt"
+switch_to integration
+weave_branch "m-multi-dst"
+commit_file "First loose" "first-loose.txt"
+commit_file "Second loose" "second-loose.txt"
+first_sid=$(commit_sid_from_status "First loose")
+second_sid=$(commit_sid_from_status "Second loose")
+out=$(gl fold "$second_sid" "$first_sid" m-multi-dst)
+assert_exit_ok $? "move_multi_ok"
+assert_eq "$(git -C "$WORK" log -1 --format=%s m-multi-dst)" "Second loose" "move_multi_tip"
+assert_eq "$(git -C "$WORK" log -1 --format=%s m-multi-dst~1)" "First loose" "move_multi_mid"
+assert_eq "$(git -C "$WORK" log -1 --format=%s m-multi-dst~2)" "Dst base" "move_multi_base"
+
+describe "move: one commit, conflict → abort keeps staged changes"
+setup_repo_with_remote
+create_feature_branch "s-abort-dst"
+switch_to s-abort-dst
+commit_file "Dst base" "s-dst.txt"
+switch_to integration
+weave_branch "s-abort-dst"
+create_feature_branch "s-abort-other"
+switch_to s-abort-other
+commit_file "Other one" "s-other.txt"
+switch_to integration
+weave_branch "s-abort-other"
+commit_file "Conflicting" "s-other.txt"
+write_file ".gitkeep" "staged work"
+git -C "$WORK" add .gitkeep
+write_file "s-added.txt" "brand new"
+git -C "$WORK" add s-added.txt
+porcelain_before="$(git -C "$WORK" status --porcelain | sort)"
+assert_contains "$porcelain_before" "M  .gitkeep" "single_abort_is_staged"
+# A staged new file needs the index back at HEAD before the patch applies.
+assert_contains "$porcelain_before" "A  s-added.txt" "single_abort_has_added"
+conflicting=$(commit_sid_from_status "Conflicting")
+gl_capture fold "$conflicting" s-abort-dst
+assert_state_file "single_abort_state"
+gl_capture abort
+assert_exit_ok "$CODE" "single_abort_ok"
+# The abort says it restored the original state, so the index has to match.
+assert_eq "$(git -C "$WORK" status --porcelain | sort)" "$porcelain_before" "single_abort_index"
+
+describe "move: several commits that conflict — rolled back, working tree kept"
+setup_repo_with_remote
+create_feature_branch "n-roll-dst"
+switch_to n-roll-dst
+commit_file "Dst base" "dst-roll.txt"
+switch_to integration
+weave_branch "n-roll-dst"
+create_feature_branch "n-roll-other"
+switch_to n-roll-other
+commit_file "Other one" "other-roll.txt"
+switch_to integration
+weave_branch "n-roll-other"
+# Both loose commits need other-roll.txt, which n-roll-dst's section has not
+# got, so replaying them there fails.
+commit_file "First loose" "other-roll.txt"
+commit_file "Second loose" "second-roll.txt"
+# A tracked file, staged: the rebase has to autostash it to start at all, and
+# its abort replays the autostash into the working tree only. An untracked or
+# unstaged file would come back looking right without the index being restored.
+write_file ".gitkeep" "staged work"
+git -C "$WORK" add .gitkeep
+write_file "added-roll.txt" "brand new"
+git -C "$WORK" add added-roll.txt
+echo "and more on top" >> "$WORK/.gitkeep"
+porcelain_before="$(git -C "$WORK" status --porcelain | sort)"
+# Staged-and-modified-again, and newly added: the two shapes the autostash
+# restores differently from a plain staged edit.
+assert_contains "$porcelain_before" "MM .gitkeep" "move_rollback_is_staged"
+assert_contains "$porcelain_before" "A  added-roll.txt" "move_rollback_has_added"
+head_before="$(head_hash)"
+dst_before="$(git -C "$WORK" rev-parse n-roll-dst)"
+first_sid=$(commit_sid_from_status "First loose")
+second_sid=$(commit_sid_from_status "Second loose")
+gl_capture fold "$first_sid" "$second_sid" n-roll-dst
+assert_exit_fail "$CODE" "move_rollback_fails"
+# It must fail on the replay, not for some setup reason that would leave the
+# refs untouched anyway and pass the checks below for free.
+assert_contains "$OUT" "conflicts" "move_rollback_reason"
+assert_eq "$(head_hash)" "$head_before" "move_rollback_head"
+assert_eq "$(git -C "$WORK" rev-parse n-roll-dst)" "$dst_before" "move_rollback_dst"
+# Content alone is half a check: the staging has to come back too.
+assert_eq "$(git -C "$WORK" status --porcelain | sort)" "$porcelain_before" "move_rollback_index"
+assert_no_state_file "move_rollback_no_state"
+
+describe "move: a branch that landed upstream leaves its commit movable"
+setup_repo_with_remote
+create_feature_branch "q-landed"
+switch_to q-landed
+commit_file "Landed one" "landed.txt"
+switch_to integration
+weave_branch "q-landed"
+create_feature_branch "q-other"
+switch_to q-other
+commit_file "Other one" "q-other.txt"
+switch_to integration
+weave_branch "q-other"
+# q-landed lands upstream as a fast-forward, so the merge-base becomes its own
+# tip — a commit that is still inside the weave. The scope check has to use the
+# weave's base, not the merge-base, or it refuses a commit loom can move.
+git -C "$WORK" push -q origin q-landed:"$BASE_BRANCH"
+git -C "$WORK" fetch -q origin
+landed=$(git -C "$WORK" rev-parse q-landed)
+assert_eq "$(git -C "$WORK" merge-base HEAD "origin/$BASE_BRANCH")" "$landed" "move_landed_precond"
+gl_capture fold "$landed" q-other
+assert_exit_ok "$CODE" "move_landed_ok"
+assert_eq "$(git -C "$WORK" log -1 --format=%s q-other)" "Landed one" "move_landed_on_target"
+
+describe "create: a branch that landed upstream leaves -c working"
+setup_repo_with_remote
+create_feature_branch "r-landed"
+switch_to r-landed
+commit_file "Landed one" "r-landed.txt"
+switch_to integration
+weave_branch "r-landed"
+create_feature_branch "r-other"
+switch_to r-other
+commit_file "Other one" "r-other.txt"
+switch_to integration
+weave_branch "r-other"
+# The merge-base becomes r-landed's own tip, a commit still inside the weave.
+# Creating there would root the new branch on the landed commit and dissolve
+# r-landed's merge along with it, so `-c` creates at the weave's base instead —
+# the same base the scope check uses.
+weave_base=$(git -C "$WORK" rev-parse "origin/$BASE_BRANCH")
+git -C "$WORK" push -q origin r-landed:"$BASE_BRANCH"
+git -C "$WORK" fetch -q origin
+other_tip=$(git -C "$WORK" rev-parse r-other)
+gl_capture fold -c "$other_tip" r-created
+assert_exit_ok "$CODE" "create_landed_ok"
+assert_branch_exists "r-created" "create_landed_branch"
+assert_eq "$(git -C "$WORK" log -1 --format=%s r-created)" "Other one" "create_landed_commit"
+# Its own section at the weave base: the commit that landed is not its parent,
+# and r-landed keeps the merge it was woven in by.
+assert_eq "$(git -C "$WORK" rev-parse r-created^)" "$weave_base" "create_landed_parent"
+assert_log_contains "Merge r-landed" "create_landed_keeps_merge"
+
+describe "move: the same commit named twice stays resumable"
+setup_repo_with_remote
+create_feature_branch "p-dup-dst"
+switch_to p-dup-dst
+commit_file "Dst base" "dst-dup.txt"
+switch_to integration
+weave_branch "p-dup-dst"
+create_feature_branch "p-dup-other"
+switch_to p-dup-other
+commit_file "Other one" "other-dup.txt"
+switch_to integration
+weave_branch "p-dup-other"
+commit_file "Dup loose" "other-dup.txt"
+dup_sid=$(commit_sid_from_status "Dup loose")
+# Named twice is still one commit, so this keeps the resumable single-commit
+# path: it pauses with a state file rather than rolling back like a stack.
+gl_capture fold "$dup_sid" "$dup_sid" p-dup-dst
+assert_state_file "move_dup_state"
+gl_capture abort
+assert_exit_ok "$CODE" "move_dup_abort_ok"
+assert_no_state_file "move_dup_state_removed"
+
 describe "move: target is a branch stacked inside another"
 setup_repo_with_remote
 create_feature_branch "k-move-outer"
@@ -585,15 +749,16 @@ assert_branch_exists "g-new-branch" "create_branch_exists"
 # The commit should be on the new branch
 assert_contains "$(git -C "$WORK" log g-new-branch --oneline)" "Loose commit" "create_commit_on_branch"
 
-describe "create: target branch already exists — warns and still moves the commit"
+describe "create: target branch already exists — refused"
 setup_repo_with_remote
 commit_file "Existing branch commit" "existing.txt"
 loose_sid=$(commit_sid_from_status "Existing branch commit")
 create_feature_branch "g-already-exists"
-out=$(gl fold --create "$loose_sid" g-already-exists)
-assert_exit_ok $? "create_branch_exists_ok"
-assert_contains "$out" "already exists" "create_branch_exists_warn"
-assert_contains "$(git -C "$WORK" log g-already-exists --oneline)" "Existing branch commit" "create_branch_exists_moved"
+gl_capture fold --create "$loose_sid" g-already-exists
+assert_exit_fail "$CODE" "create_branch_exists_refused"
+assert_contains "$OUT" "already exists" "create_branch_exists_msg"
+assert_contains "$OUT" "loom fold" "create_branch_exists_hint"
+assert_not_contains "$(git -C "$WORK" log g-already-exists --oneline)" "Existing branch commit" "create_branch_exists_untouched"
 
 describe "create: using full hash as source"
 setup_repo_with_remote

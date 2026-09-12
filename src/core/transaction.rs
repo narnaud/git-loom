@@ -60,6 +60,16 @@ impl Rollback {
         for branch in &self.delete_branches {
             let _ = git::branch_delete(workdir, branch);
         }
+        // The saved patch is a HEAD-to-index diff, so it only applies to an
+        // index that matches HEAD. A reset above has already put it there;
+        // with neither, the index is wherever the rebase's autostash left it,
+        // which is a partial restore a staged new file will not apply over.
+        if self.reset_mixed_to.is_empty()
+            && self.reset_hard_to.is_empty()
+            && !self.saved_staged_patch.is_empty()
+        {
+            git::reset_mixed(workdir, "HEAD")?;
+        }
         git::restore_staged_patch(workdir, &self.saved_staged_patch)?;
         if !self.saved_worktree_patch.is_empty()
             && let Err(e) = git::apply_patch(workdir, &self.saved_worktree_patch)
