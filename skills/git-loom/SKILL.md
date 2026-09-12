@@ -76,7 +76,7 @@ branches.
 | `git commit` | `git loom commit -b <branch> -m "<msg>" <files...>` — commits onto a feature branch without leaving integration; a new branch name creates the branch. Use `-i` instead of `-b` to commit to the integration branch itself. Always name the files to commit (or omit them to commit exactly what you staged with `git loom add`); never `zz` |
 | `git commit --amend` (files into HEAD or any commit) | `git loom fold <files...> <commit>` (staged changes: `git loom fold <commit>`) |
 | `git rebase -i` + fixup | `git loom fold <commit> <commit>` or `git loom absorb` (auto-distributes working-tree changes into the commits that introduced those lines; `-n` for a dry run) |
-| moving a commit to another branch | `git loom fold <commit> <branch>` (`-c` creates a new branch from it) |
+| moving a commit to another branch | `git loom fold <commit>... <branch>` (several commits move in one rebase; `-c` creates a new branch from them, and refuses a name that already exists) |
 | uncommitting | `git loom fold <commit> zz` |
 | splitting a commit | `git loom split <commit> -m "<msg>" <files...>` |
 | `git commit --amend -m` / editing any message | `git loom reword <commit> -m "<msg>"` |

@@ -173,6 +173,21 @@ impl TestRepo {
     /// # Returns
     /// The OID of the created commit
     pub fn commit(&self, message: &str, filename: &str) -> git2::Oid {
+        self.commit_with_sig(message, filename, &Self::sig())
+    }
+
+    /// Like [`Self::commit`], but with a fixed committer time.
+    ///
+    /// Lets a test build the committer-time ties it means to test instead of
+    /// depending on how fast the machine ran.
+    pub fn commit_at(&self, message: &str, filename: &str, seconds: i64) -> git2::Oid {
+        let time = git2::Time::new(seconds, 0);
+        let sig = Signature::new("Test", "test@test.com", &time).unwrap();
+        self.commit_with_sig(message, filename, &sig)
+    }
+
+    /// Write `filename`, stage it, and commit it onto HEAD with `sig`.
+    fn commit_with_sig(&self, message: &str, filename: &str, sig: &Signature) -> git2::Oid {
         let path = self.repo.workdir().unwrap().join(filename);
         fs::write(&path, message).unwrap();
 
@@ -182,17 +197,18 @@ impl TestRepo {
 
         let tree_id = index.write_tree().unwrap();
         let tree = self.repo.find_tree(tree_id).unwrap();
-        let sig = Self::sig();
 
-        if let Ok(head) = self.repo.head() {
-            let parent = self.repo.find_commit(head.target().unwrap()).unwrap();
-            self.repo
-                .commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])
-                .unwrap()
-        } else {
-            self.repo
-                .commit(Some("HEAD"), &sig, &sig, message, &tree, &[])
-                .unwrap()
+        match self.repo.head() {
+            Ok(head) => {
+                let parent = self.repo.find_commit(head.target().unwrap()).unwrap();
+                self.repo
+                    .commit(Some("HEAD"), sig, sig, message, &tree, &[&parent])
+                    .unwrap()
+            }
+            Err(_) => self
+                .repo
+                .commit(Some("HEAD"), sig, sig, message, &tree, &[])
+                .unwrap(),
         }
     }
 

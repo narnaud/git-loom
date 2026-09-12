@@ -51,12 +51,13 @@ all preceding arguments are sources.
 
 - `--create` / `-c`: Create a new branch from the source commit(s) and move
   them there. The target must be a branch name that does not yet exist.
-  Accepts one or more commit sources. The branch is created at the upstream
-  merge-base and the commits are moved into it — whether they were loose
+  Accepts one or more commit sources. The branch is created at the resolved
+  weave base and the commits are moved into it — whether they were loose
   commits on the integration line or already on an existing branch. Multiple
   commits are ordered oldest-first so the new branch preserves their history
-  order. If the named branch already exists, the commits are moved onto it
-  with a warning.
+  order. A name that is already taken is refused: moving onto a branch that
+  exists is a plain `fold <commit>... <branch>`, and accepting it here would
+  turn a mistyped name into commits landing in another branch.
 - `-p` / `--patch`: Hunk-level fold mode. Opens an interactive hunk picker
   instead of operating at the file level. Has three forms (see Patch Mode
   below).
@@ -72,7 +73,7 @@ combination:
 | File(s) | Commit | Amend: stage files into the commit | Yes |
 | Unstaged (`zz`) | Commit | Amend all: stage all changed files into the commit | No |
 | Commit | Commit | Fixup: absorb source into target | No |
-| Commit | Branch | Move: relocate commit to the branch | No |
+| Commit | Branch | Move: relocate commit(s) to the branch | Yes |
 | Commit | Unstaged (`zz`) | Uncommit: remove commit, put changes in working directory | No |
 | CommitFile | Unstaged (`zz`) | Uncommit file: remove one file from a commit to working directory | No |
 | CommitFile | Commit | Move file: move one file's changes from one commit to another | No |
@@ -90,7 +91,9 @@ CommitFile sources use the `commit_sid:index` format shown by `git loom status -
 - Unstaged (`zz`) + non-Commit target: `"Cannot fold files into unstaged — files are already in the working directory."` / `"Cannot fold files into a branch. Target a specific commit."`
 - Unstaged (`zz`) with clean working tree: `"No changes to fold — working tree is clean"`
 - Mixed files and commits as sources: `"Cannot mix file and commit sources."`
-- Multiple commit sources: `"Only one commit source is allowed."`
+- A source commit at or below the integration base: ``"Commit `<hash>` is not in the integration scope"``, whatever the number of sources
+- `-c` with a branch name that already exists: ``"Branch `<name>` already exists"``, pointing at `loom fold <commit>... <name>`
+- Multiple commit sources with a Commit or `zz` target: `"Only one commit source is allowed."` (a Branch target accepts several)
 - CommitFile + Branch: `"Cannot fold a commit file into a branch. Target a specific commit or use 'zz' to uncommit."`
 
 ## What Happens
@@ -184,6 +187,12 @@ operation.
 
 - The commit is removed from its source branch and appended to the target
   branch's tip in a single atomic operation.
+- Several commits may be given. They are ordered oldest-first, whatever order
+  they were listed in: ancestors before their descendants, and commits on
+  unrelated lines by committer date. They move in one rebase, so the target
+  branch keeps their history order. A single commit keeps the resumable path, so a
+  conflict can be settled with `loom continue`; a move of several is rolled
+  back instead.
 - Both source and target branch refs are updated automatically.
 - If the target branch has no section in the Weave graph (e.g. it sits at
   the merge-base with no commits of its own), a branch section and merge
@@ -208,8 +217,11 @@ operation.
 
 **Conflict handling:**
 
-- If the operation encounters conflicts, it stops and lets the user resolve
-  them with standard git tools.
+- A single commit stops on conflict and lets the user resolve it with standard
+  git tools, then finish with `loom continue`.
+- A move of several commits, and any `-c` move, rolls the whole operation back
+  instead: the rebase is aborted, a branch `-c` created is deleted, and staged
+  changes are put back staged.
 
 **What changes:**
 
@@ -456,8 +468,11 @@ continue` / `loom abort`):
 |-----------|---------------------|
 | Files into commit | `op: "FilesIntoCommit"` — original commit hash, file count, saved staged patch |
 | Commit into commit (fixup) | `op: "CommitIntoCommit"` — source and target hashes |
-| Commit to branch (move) | `op: "CommitToBranch"` — commit hash, branch name |
+| Commit to branch (move), single commit only | `op: "CommitToBranch"` — commit hash, branch name |
 | Commit to unstaged (uncommit) | `op: "CommitToUnstaged"` — commit hash, captured diff |
+
+A multi-commit move and every `-c` move are outside this list: they save no
+`LoomState` and roll back on conflict, like the `-p` operations below.
 
 When `loom continue` is called after conflict resolution, `after_continue`
 reads the saved context, cleans up the tracking branch (`_loom-track`), and
