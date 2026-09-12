@@ -5,7 +5,7 @@ Create a commit on a feature branch without leaving the integration branch.
 ## Usage
 
 ```
-git loom commit [-b <branch> | -i] [-m <message>] [-p] [files...]
+git loom commit [-b <branch> | -i] [-m <message>] [-p] [files...] [-- <git args>...]
 ```
 
 Alias: `ci`
@@ -28,6 +28,18 @@ Alias: `ci`
 | *short IDs / filenames* | Stages only those specific files |
 
 When `zz` appears alongside other file arguments, `zz` wins and stages everything.
+
+### Git Options
+
+Everything after a `--` separator goes to `git commit` untouched — see [Passing Options to Git](README.md#passing-options-to-git):
+
+```bash
+git loom commit -m "wip" -- --no-verify
+git loom commit -m "fix" -- --signoff
+git loom commit -m "port" -- "--author=Someone <someone@example.com>"
+```
+
+They shape the commit loom creates, not the rebase that relocates it onto the feature branch.
 
 ## What It Does
 

@@ -5,10 +5,10 @@ Stage files into the git index using short IDs, paths, or `zz` for all — with 
 ## Usage
 
 ```
-git-loom add [-p] [<files...>]
+git-loom add [-p] [<files...>] [-- <git args>...]
 ```
 
-Without `-p`, at least one file argument is required. With `-p`, files are optional (omitting them shows all changed files).
+File arguments are optional: with none, `add` opens the same interactive hunk selector as `-p`, showing all changed files.
 
 ### Arguments
 
@@ -22,6 +22,19 @@ Without `-p`, at least one file argument is required. With `-p`, files are optio
 |--------|-------------|
 | `-p, --patch` | Open the interactive hunk selector TUI |
 
+### Git Options
+
+Everything after a `--` separator goes to `git add` untouched, ahead of the pathspec loom builds — see [Passing Options to Git](README.md#passing-options-to-git):
+
+```bash
+git loom add zz -- -f            # stage an ignored file too
+git loom add src/main.rs -- -N   # record the path, not the content
+```
+
+Forwarded arguments run uncaptured, so git's own output (a `--dry-run` listing, `-v`) reaches you, and loom drops its own "Staged N file(s)" line — what was staged is the option's business, not loom's to claim.
+
+Interactive staging (`-p`, or no file arguments) applies a patch rather than running `git add`, so it takes no forwarded arguments.
+
 ## What It Does
 
 ### Plain Staging
@@ -30,7 +43,7 @@ Resolves each argument to a file path (via short ID or filename) and stages it. 
 
 Prints `"Staged N file(s)"` on success, or `"Staged all changes"` when `zz` is used.
 
-If no arguments are provided and `-p` is not set, the command exits with an error.
+With no file arguments, `add` opens the hunk selector below instead of staging whole files.
 
 ### Interactive Hunk Staging (`-p`)
 

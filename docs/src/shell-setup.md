@@ -2,7 +2,7 @@
 
 *git-loom* provides shell completions for tab-completion of commands and options.
 
-Every subcommand and its aliases are completed, along with each command's own flags. `show` and `diff` forward unknown options to git, and those are not completed — git's option surface is not mirrored here.
+Every subcommand and its aliases are completed, along with each command's own flags. Git options passed after a `--` are not completed — git's option surface is not mirrored here.
 
 ## PowerShell
 

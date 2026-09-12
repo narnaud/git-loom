@@ -182,7 +182,7 @@ $_gitLoomCompleter = {
             )
         }
         'diff' {
-            # Any other option is forwarded to `git diff`, so only loom's own are listed.
+            # Git's own options go after a `--`, so only loom's are listed.
             $subFlags = @(
                 @{ Name = '--staged'; Description = 'Show staged changes (index vs HEAD)' },
                 @{ Name = '--cached'; Description = 'Alias of --staged' },

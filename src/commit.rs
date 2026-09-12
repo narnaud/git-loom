@@ -24,12 +24,17 @@ struct CommitContext {
 /// loose commit: `-i`, or a branch name matching its upstream), or commits at
 /// HEAD and uses Weave to relocate it to the target feature branch (creating
 /// merge topology if needed).
+///
+/// `git_args` is whatever followed a `--`, passed to `git commit` (see spec
+/// 021). It applies to the commit loom creates, not to the rebase that
+/// relocates it.
 pub fn run(
     branch: Option<String>,
     integration: bool,
     message: Option<String>,
     patch: bool,
     files: Vec<String>,
+    git_args: Vec<String>,
     theme: &graph::Theme,
 ) -> Result<()> {
     // Without -m the commit would open $GIT_EDITOR, which hangs a headless agent.
@@ -68,13 +73,8 @@ pub fn run(
         return Err(e);
     }
 
-    let do_commit = || {
-        if let Some(msg) = &message {
-            git::commit(&workdir, msg)
-        } else {
-            git::commit_with_editor(&workdir)
-        }
-    };
+    let git_opts: Vec<&str> = git_args.iter().map(String::as_str).collect();
+    let do_commit = || git::commit_opts(&workdir, message.as_deref(), &git_opts);
 
     // Loose commit: commit directly on the integration branch without
     // targeting a feature branch. Happens with -i, or when no -b flag is

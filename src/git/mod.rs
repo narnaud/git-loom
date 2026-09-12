@@ -15,8 +15,8 @@ pub use git_branch::{
     branch_switch_create_tracking, branch_switch_detach, branch_validate_name,
 };
 pub use git_commit::{
-    commit, commit_amend, commit_amend_no_edit, commit_with_editor, reset_hard, reset_mixed,
-    reset_soft, stage_all, stage_files, stage_path,
+    commit, commit_amend, commit_amend_no_edit, commit_opts, commit_with_editor, reset_hard,
+    reset_mixed, reset_soft, stage_all, stage_all_opts, stage_files, stage_files_opts, stage_path,
 };
 pub use git_diff::{
     diff_cached, diff_cached_file, diff_cached_file_is_binary, diff_cached_files, diff_commit,

@@ -276,4 +276,42 @@ assert_no_state_file   "commit_abort_state_removed"
 assert_eq "$old_head" "$(head_hash)" "commit_abort_head_restored"
 assert_log_not_contains "Feature v2" "commit_abort_new_commit_gone"
 
+# ══════════════════════════════════════════════════════════════════════════════
+# GIT ARGUMENT FORWARDING
+# ══════════════════════════════════════════════════════════════════════════════
+
+describe "an option after -- is passed to git commit"
+setup_repo_with_remote
+create_feature_branch "g-forward"
+switch_to integration
+weave_branch "g-forward"
+echo "forwarded" > "$WORK/forwarded.txt"
+gl_capture commit -b g-forward -m "Forwarded commit" forwarded.txt -- "--author=Someone Else <someone@example.com>"
+assert_exit_ok "$CODE" "commit_forward_ok"
+assert_eq "Someone Else" "$(git -C "$WORK" log -1 --format=%an g-forward)" "commit_forward_author"
+
+describe "a pre-commit hook is skipped with -- --no-verify"
+setup_repo_with_remote
+mkdir -p "$WORK/.git/hooks"
+# The global config may point core.hooksPath elsewhere; aim it back at the repo.
+git -C "$WORK" config core.hooksPath "$WORK/.git/hooks"
+printf '#!/bin/sh
+exit 1
+' > "$WORK/.git/hooks/pre-commit"
+chmod +x "$WORK/.git/hooks/pre-commit"
+echo "hooked" > "$WORK/hooked.txt"
+gl_capture commit -i -m "Hooked commit" hooked.txt
+assert_exit_fail "$CODE" "commit_hook_blocks"
+gl_capture commit -i -m "Hooked commit" hooked.txt -- --no-verify
+assert_exit_ok "$CODE" "commit_no_verify_ok"
+assert_head_msg "Hooked commit" "commit_no_verify_msg"
+
+describe "an option before -- is rejected with a hint"
+setup_repo_with_remote
+echo "strict" > "$WORK/strict.txt"
+gl_capture commit -i -m "Strict commit" strict.txt --no-verify
+assert_exit_fail "$CODE" "commit_strict_parse_fails"
+assert_contains "$OUT" "unexpected argument" "commit_strict_parse_msg"
+assert_contains "$OUT" "-- --no-verify"      "commit_strict_parse_hint"
+
 pass

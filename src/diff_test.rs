@@ -11,7 +11,7 @@ fn diff_no_args() {
     let test_repo = TestRepo::new();
     test_repo.commit("Initial commit", "file.txt");
 
-    let result = test_repo.in_dir(|| super::run(vec![], false, false));
+    let result = test_repo.in_dir(|| super::run(vec![], false, false, vec![]));
     assert!(result.is_ok(), "diff with no args should succeed");
 }
 
@@ -21,7 +21,7 @@ fn diff_staged() {
     let test_repo = TestRepo::new();
     test_repo.commit("Initial commit", "file.txt");
 
-    let result = test_repo.in_dir(|| super::run(vec![], true, false));
+    let result = test_repo.in_dir(|| super::run(vec![], true, false, vec![]));
     assert!(result.is_ok(), "diff --staged should succeed");
 }
 
@@ -31,7 +31,7 @@ fn diff_all() {
     let test_repo = TestRepo::new();
     test_repo.commit("Initial commit", "file.txt");
 
-    let result = test_repo.in_dir(|| super::run(vec![], false, true));
+    let result = test_repo.in_dir(|| super::run(vec![], false, true, vec![]));
     assert!(result.is_ok(), "diff --all should succeed");
 }
 
@@ -41,7 +41,7 @@ fn diff_commit_by_hash() {
     let test_repo = TestRepo::new();
     let oid = test_repo.commit("Test commit", "file.txt");
 
-    let result = test_repo.in_dir(|| super::run(vec![oid.to_string()], false, false));
+    let result = test_repo.in_dir(|| super::run(vec![oid.to_string()], false, false, vec![]));
     assert!(result.is_ok(), "diff with commit hash should succeed");
 }
 
@@ -53,7 +53,7 @@ fn diff_commit_range() {
     let oid2 = test_repo.commit("Second commit", "file2.txt");
 
     let range = format!("{}..{}", oid1, oid2);
-    let result = test_repo.in_dir(|| super::run(vec![range], false, false));
+    let result = test_repo.in_dir(|| super::run(vec![range], false, false, vec![]));
     assert!(result.is_ok(), "diff with commit range should succeed");
 }
 
@@ -61,46 +61,49 @@ fn diff_commit_range() {
 fn diff_invalid_target_fails() {
     let test_repo = TestRepo::new();
 
-    let result = test_repo.in_dir(|| super::run(vec!["nonexistent_xyz".to_string()], false, false));
+    let result =
+        test_repo.in_dir(|| super::run(vec!["nonexistent_xyz".to_string()], false, false, vec![]));
     assert!(result.is_err(), "diff with invalid target should fail");
 }
 
 #[test]
-fn diff_forwards_unknown_option() {
+fn diff_forwards_an_option_after_the_separator() {
     no_pager();
     let test_repo = TestRepo::new();
     test_repo.commit("Initial commit", "file.txt");
 
-    let result = test_repo.in_dir(|| super::run(vec!["-w".to_string()], false, false));
+    let result = test_repo.in_dir(|| super::run(vec![], false, false, vec!["-w".to_string()]));
     assert!(result.is_ok(), "diff should forward -w to git diff");
 }
 
 #[test]
-fn diff_recaptures_staged_after_a_positional() {
+fn diff_forwards_a_detached_option_value() {
     no_pager();
-    let test_repo = TestRepo::new();
-    let oid = test_repo.commit("Test commit", "file.txt");
-
-    // clap hands `--staged` over inside `args` once a positional was seen.
-    let result = test_repo
-        .in_dir(|| super::run(vec![oid.to_string(), "--staged".to_string()], false, false));
-    assert!(
-        result.is_ok(),
-        "a late --staged should still be loom's flag"
-    );
-}
-
-#[test]
-fn diff_rejects_staged_with_all_when_recaptured() {
     let test_repo = TestRepo::new();
     test_repo.commit("Initial commit", "file.txt");
 
-    let result = test_repo.in_dir(|| super::run(vec!["--staged".to_string()], false, true));
-    let err = result.unwrap_err().to_string();
-    assert!(
-        err.contains("mutually exclusive"),
-        "unexpected error: {err}"
-    );
+    // `-S <string>` takes its value as a separate token. The sniffer this
+    // replaced would have resolved that token as a target.
+    let result = test_repo.in_dir(|| {
+        super::run(
+            vec![],
+            false,
+            false,
+            vec!["-S".to_string(), "x".to_string()],
+        )
+    });
+    assert!(result.is_ok(), "a detached option value belongs to git");
+}
+
+#[test]
+fn diff_forwards_a_short_flag_loom_also_defines() {
+    no_pager();
+    let test_repo = TestRepo::new();
+    test_repo.commit("Initial commit", "file.txt");
+
+    // Loom's own `-a` is `--all`; after the separator it is git's `--text`.
+    let result = test_repo.in_dir(|| super::run(vec![], false, false, vec!["-a".to_string()]));
+    assert!(result.is_ok(), "-a after the separator is git's --text");
 }
 
 #[test]
@@ -109,7 +112,52 @@ fn diff_forwards_a_pathspec_after_the_separator() {
     let test_repo = TestRepo::new();
     test_repo.commit("Initial commit", "file.txt");
 
-    let result = test_repo
-        .in_dir(|| super::run(vec!["--".to_string(), "file.txt".to_string()], false, false));
+    let result = test_repo.in_dir(|| {
+        super::run(
+            vec![],
+            false,
+            false,
+            vec!["--".to_string(), "file.txt".to_string()],
+        )
+    });
     assert!(result.is_ok(), "diff should forward the pathspec to git");
+}
+
+#[test]
+fn forwarded_option_precedes_the_pathspec_loom_builds() {
+    no_pager();
+    let test_repo = TestRepo::new();
+    test_repo.commit("Initial commit", "file.txt");
+
+    // Appended after loom's own `--`, `--stat` would be a pathspec and git
+    // would reject it as matching nothing.
+    let result = test_repo.in_dir(|| {
+        super::run(
+            vec!["file.txt".to_string()],
+            false,
+            false,
+            vec!["--stat".to_string()],
+        )
+    });
+    assert!(result.is_ok(), "--stat must stay ahead of loom's `--`");
+}
+
+#[test]
+fn diff_unknown_option_reaches_git() {
+    no_pager();
+    let test_repo = TestRepo::new();
+    test_repo.commit("Initial commit", "file.txt");
+
+    let result = test_repo.in_dir(|| {
+        super::run(
+            vec![],
+            false,
+            false,
+            vec!["--definitely-not-a-git-option".to_string()],
+        )
+    });
+    assert!(
+        result.is_err(),
+        "git should reject an option loom passed through"
+    );
 }

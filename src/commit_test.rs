@@ -3,7 +3,15 @@ use crate::core::test_helpers::TestRepo;
 
 /// Wrapper so existing tests don't need to pass integration/patch/theme.
 fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) -> anyhow::Result<()> {
-    super::run(branch, false, message, false, files, &graph::Theme::dark())
+    super::run(
+        branch,
+        false,
+        message,
+        false,
+        files,
+        vec![],
+        &graph::Theme::dark(),
+    )
 }
 
 /// Wrapper for `-i`: commit to the integration branch.
@@ -14,6 +22,7 @@ fn run_integration(message: &str, files: Vec<String>) -> anyhow::Result<()> {
         Some(message.to_string()),
         false,
         files,
+        vec![],
         &graph::Theme::dark(),
     )
 }
@@ -792,4 +801,50 @@ fn commit_abort_preserves_working_state() {
         "new untracked file must survive abort"
     );
     assert_eq!(test_repo.read_file("new-file.txt"), "new-content");
+}
+
+// -- Git argument forwarding (spec 021) --
+
+#[test]
+fn commit_forwards_an_option_after_the_separator() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.write_file("forwarded.txt", "content");
+
+    let result = test_repo.in_dir(|| {
+        super::run(
+            None,
+            true,
+            Some("Forwarded commit".to_string()),
+            false,
+            vec!["forwarded.txt".to_string()],
+            vec!["--author=Someone Else <someone@example.com>".to_string()],
+            &graph::Theme::dark(),
+        )
+    });
+    assert!(result.is_ok(), "commit should forward --author: {result:?}");
+
+    let head = test_repo.repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(head.author().name().unwrap(), "Someone Else");
+}
+
+#[test]
+fn commit_unknown_option_reaches_git() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.write_file("bogus.txt", "content");
+
+    let result = test_repo.in_dir(|| {
+        super::run(
+            None,
+            true,
+            Some("Bogus commit".to_string()),
+            false,
+            vec!["bogus.txt".to_string()],
+            vec!["--definitely-not-a-git-option".to_string()],
+            &graph::Theme::dark(),
+        )
+    });
+    assert!(
+        result.is_err(),
+        "git should reject an option loom passed through"
+    );
 }

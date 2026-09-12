@@ -152,48 +152,58 @@ assert_contains "$out_sid" "equiv-show.txt"    "show_equiv_sid_file"
 # GIT OPTION PASSTHROUGH
 # ══════════════════════════════════════════════════════════════════════════════
 
-describe "unknown option before the target is passed to git show"
+describe "an option after -- is passed to git show"
 setup_repo_with_remote
-commit_file "Stat before commit" "stat-before.txt"
+commit_file "Stat commit" "stat.txt"
 hash="$(head_hash)"
-out=$(gl show --stat "$hash")
-assert_exit_ok $? "show_stat_before_ok"
-assert_contains     "$out" "1 file changed" "show_stat_before_diffstat"
-assert_not_contains "$out" "diff --git"     "show_stat_before_no_patch"
+out=$(gl show "$hash" -- --stat)
+assert_exit_ok $? "show_stat_ok"
+assert_contains     "$out" "1 file changed" "show_stat_diffstat"
+assert_not_contains "$out" "diff --git"     "show_stat_no_patch"
 
-describe "unknown option after the target is passed to git show"
+describe "an option after -- works without a target"
 setup_repo_with_remote
-commit_file "Stat after commit" "stat-after.txt"
-hash="$(head_hash)"
-out=$(gl show "$hash" --stat)
-assert_exit_ok $? "show_stat_after_ok"
-assert_contains     "$out" "1 file changed" "show_stat_after_diffstat"
-assert_not_contains "$out" "diff --git"     "show_stat_after_no_patch"
+commit_file "Stat no target" "stat-no-target.txt"
+out=$(gl show -- --stat)
+assert_exit_ok $? "show_stat_no_target_ok"
+assert_contains "$out" "1 file changed" "show_stat_no_target_diffstat"
 
-describe "a pathspec after -- is passed to git show"
+describe "a pathspec after a forwarded -- is passed to git show"
 setup_repo_with_remote
 commit_file "Pathspec keep" "keep.txt"
 echo "other" > "$WORK/other.txt"
 git -C "$WORK" add other.txt
 git -C "$WORK" commit -q --amend --no-edit
 hash="$(head_hash)"
-out=$(gl show "$hash" -- keep.txt)
+out=$(gl show "$hash" -- -- keep.txt)
 assert_exit_ok $? "show_pathspec_ok"
 assert_contains     "$out" "keep.txt"  "show_pathspec_kept"
 assert_not_contains "$out" "b/other.txt" "show_pathspec_filtered"
 
-describe "a detached option value is rejected with a hint"
+describe "a detached option value reaches git untouched"
 setup_repo_with_remote
 commit_file "Detached value commit" "detached.txt"
 hash="$(head_hash)"
-gl_capture show -U 5 "$hash"
-assert_exit_fail "$CODE" "show_detached_value_fails"
-assert_contains "$OUT" "single target" "show_detached_value_msg"
+# `-S <string>` takes its value as a separate token, and suppresses the diff
+# when nothing matches — so the two runs below differ only if git saw the value.
+out=$(gl show "$hash" -- -S Detached)
+assert_exit_ok $? "show_detached_value_ok"
+assert_contains "$out" "diff --git" "show_detached_value_match"
+out=$(gl show "$hash" -- -S nomatchxyz)
+assert_not_contains "$out" "diff --git" "show_detached_value_no_match"
+
+describe "an option before -- is rejected with a hint"
+setup_repo_with_remote
+commit_file "Strict parse commit" "strict.txt"
+gl_capture show --stat
+assert_exit_fail "$CODE" "show_strict_parse_fails"
+assert_contains "$OUT" "unexpected argument" "show_strict_parse_msg"
+assert_contains "$OUT" "-- --stat"           "show_strict_parse_hint"
 
 describe "an option git rejects surfaces git's own error"
 setup_repo_with_remote
 commit_file "Bogus option commit" "bogus.txt"
-gl_capture show --definitely-not-a-git-option
+gl_capture show -- --definitely-not-a-git-option
 assert_exit_fail "$CODE" "show_bogus_option_fails"
 
 # ══════════════════════════════════════════════════════════════════════════════

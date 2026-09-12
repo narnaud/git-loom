@@ -193,6 +193,9 @@ enum Command {
         /// Interactively select hunks to stage
         #[arg(short = 'p', long = "patch")]
         patch: bool,
+        /// Arguments forwarded verbatim to `git add` (everything after `--`)
+        #[arg(last = true, num_args = 0.., allow_hyphen_values = true, value_name = "GIT_ARG")]
+        git_args: Vec<String>,
     },
 
     // -- Commits --
@@ -213,6 +216,9 @@ enum Command {
         patch: bool,
         /// Files to stage (short IDs, filenames, or 'zz' for all), none for all tracked changes
         files: Vec<String>,
+        /// Arguments forwarded verbatim to `git commit` (everything after `--`)
+        #[arg(last = true, num_args = 0.., allow_hyphen_values = true, value_name = "GIT_ARG")]
+        git_args: Vec<String>,
     },
     /// Fold source(s) into a target (amend files, fixup commits, move commits, move files between commits)
     #[command(visible_aliases = ["amend", "am", "fixup", "mv", "rub"])]
@@ -304,17 +310,17 @@ enum Command {
     /// Show the diff and metadata for a commit (like `git show`)
     #[command(visible_alias = "sh")]
     Show {
-        /// Commit hash, branch name, or short ID (defaults to the last commit on the current
-        /// branch). Options loom doesn't know are passed to `git show`
-        #[arg(num_args = 0.., allow_hyphen_values = true)]
-        args: Vec<String>,
+        /// Commit hash, branch name, or short ID (defaults to the last commit on the current branch)
+        target: Option<String>,
+        /// Arguments forwarded verbatim to `git show` (everything after `--`)
+        #[arg(last = true, num_args = 0.., allow_hyphen_values = true, value_name = "GIT_ARG")]
+        git_args: Vec<String>,
     },
     /// Show a diff using short IDs (like `git diff`)
     #[command(visible_alias = "di")]
     Diff {
-        /// Files, commits, or commit ranges (short IDs supported, e.g. `ma`, `d0`, `d0..3a`).
-        /// Options loom doesn't know are passed to `git diff`
-        #[arg(num_args = 0.., allow_hyphen_values = true)]
+        /// Files, commits, or commit ranges (short IDs supported, e.g. `ma`, `d0`, `d0..3a`)
+        #[arg(num_args = 0..)]
         args: Vec<String>,
         /// Show staged changes (index vs HEAD)
         #[arg(long = "staged", visible_alias = "cached", conflicts_with = "all")]
@@ -322,6 +328,9 @@ enum Command {
         /// Show all changes, both staged and unstaged (working tree vs HEAD)
         #[arg(short = 'a', long = "all")]
         all: bool,
+        /// Arguments forwarded verbatim to `git diff` (everything after `--`)
+        #[arg(last = true, num_args = 0.., allow_hyphen_values = true, value_name = "GIT_ARG")]
+        git_args: Vec<String>,
     },
     /// Show the latest command trace
     Trace,
@@ -574,7 +583,11 @@ fn main() {
         }) => status::run(files, context, all, theme),
         Some(Command::Tui) => tui::app::run(theme),
         Some(Command::Init { name }) => init::run(name),
-        Some(Command::Add { files, patch }) => add::run(files, patch, &theme),
+        Some(Command::Add {
+            files,
+            patch,
+            git_args,
+        }) => add::run(files, patch, git_args, &theme),
         Some(Command::Switch { branch }) => switch::run(branch),
         Some(Command::Branch(cmd)) => match cmd.action {
             Some(BranchAction::New(args)) => branch::new::run(args.name, args.target),
@@ -589,12 +602,18 @@ fn main() {
             message,
             patch,
             files,
-        }) => commit::run(branch, integration, message, patch, files, &theme),
+            git_args,
+        }) => commit::run(branch, integration, message, patch, files, git_args, &theme),
         Some(Command::Swap { a, b }) => swap::run(a, b),
         Some(Command::Drop { target, yes }) => drop::run(target, yes),
         Some(Command::Absorb { dry_run, files }) => absorb::run(dry_run, files),
-        Some(Command::Show { args }) => show::run(args),
-        Some(Command::Diff { args, staged, all }) => diff::run(args, staged, all),
+        Some(Command::Show { target, git_args }) => show::run(target, git_args),
+        Some(Command::Diff {
+            args,
+            staged,
+            all,
+            git_args,
+        }) => diff::run(args, staged, all, git_args),
         Some(Command::Split {
             target,
             message,

@@ -71,6 +71,15 @@ fn deletion_already_staged(workdir: &Path, path: &str) -> Result<bool> {
 /// Wraps `git add <files>`. Files whose deletion is already staged are left
 /// alone, since there is nothing left for `git add` to match.
 pub fn stage_files(workdir: &Path, files: &[&str]) -> Result<()> {
+    stage_files_opts(workdir, files, &[])
+}
+
+/// Stage specific files, with extra `git add` options from the user.
+///
+/// `opts` is what followed a `--` on the loom command line; it precedes the
+/// pathspec so an option is still read as an option. Forwarded options run
+/// uncaptured, since stdout is the whole output of `--dry-run` and `-v`.
+pub fn stage_files_opts(workdir: &Path, files: &[&str], opts: &[&str]) -> Result<()> {
     let mut to_add: Vec<&str> = Vec::with_capacity(files.len());
     for file in files {
         if !deletion_already_staged(workdir, file)? {
@@ -80,9 +89,11 @@ pub fn stage_files(workdir: &Path, files: &[&str]) -> Result<()> {
     if to_add.is_empty() {
         return Ok(());
     }
-    let mut args = vec!["add", "--"];
+    let mut args = vec!["add"];
+    args.extend(opts);
+    args.push("--");
     args.extend(&to_add);
-    super::run_git(workdir, &args)
+    run_add(workdir, &args, opts)
 }
 
 /// Stage all changes for a specific path, including deletions.
@@ -97,7 +108,39 @@ pub fn stage_path(workdir: &Path, path: &str) -> Result<()> {
 ///
 /// Wraps `git commit -m <message>`.
 pub fn commit(workdir: &Path, message: &str) -> Result<()> {
-    super::run_git(workdir, &["commit", "-m", message])
+    commit_opts(workdir, Some(message), &[])
+}
+
+/// Create a commit, with extra `git commit` options from the user.
+///
+/// `opts` is what followed a `--` on the loom command line. Only the plain
+/// `-m` case is captured: a captured command forces `GIT_EDITOR=true` and
+/// swallows stdout, which would defeat a forwarded `-e` or `--interactive` and
+/// hide the report a `--dry-run` exists to print. Without a message git opens
+/// the user's editor for the same reason.
+pub fn commit_opts(workdir: &Path, message: Option<&str>, opts: &[&str]) -> Result<()> {
+    let mut args = vec!["commit"];
+    args.extend(opts);
+    if let Some(message) = message {
+        args.extend(["-m", message]);
+    }
+    if message.is_none() || runs_uncaptured(opts) {
+        super::run_git_interactive(workdir, &args)
+    } else {
+        super::run_git(workdir, &args)
+    }
+}
+
+/// Whether a git command carrying `opts` the user forwarded should run
+/// uncaptured.
+///
+/// A forwarded option may exist purely to print (`--dry-run`, `-v`) or to open
+/// something (`-e`, `--interactive`), and a captured command sends the report
+/// to the trace log and answers the editor with `true`. Agent mode is the
+/// exception: there is nobody to close an editor there, and hanging on one is
+/// the failure `commit`'s own agent-mode guard exists to prevent.
+fn runs_uncaptured(opts: &[&str]) -> bool {
+    !opts.is_empty() && !crate::core::agent_mode::enabled()
 }
 
 /// Mixed reset to a target ref (uncommit and unstage).
@@ -128,7 +171,27 @@ pub fn reset_hard(workdir: &Path, target: &str) -> Result<()> {
 ///
 /// Wraps `git add -A`.
 pub fn stage_all(workdir: &Path) -> Result<()> {
-    super::run_git(workdir, &["add", "-A"])
+    stage_all_opts(workdir, &[])
+}
+
+/// Stage all changes, with extra `git add` options from the user.
+///
+/// `opts` is what followed a `--` on the loom command line.
+pub fn stage_all_opts(workdir: &Path, opts: &[&str]) -> Result<()> {
+    let mut args = vec!["add"];
+    args.extend(opts);
+    args.push("-A");
+    run_add(workdir, &args, opts)
+}
+
+/// Run a `git add` loom assembled, capturing it unless the user's own `opts`
+/// need to reach the terminal. See [`runs_uncaptured`].
+fn run_add(workdir: &Path, args: &[&str], opts: &[&str]) -> Result<()> {
+    if runs_uncaptured(opts) {
+        super::run_git_interactive(workdir, args)
+    } else {
+        super::run_git(workdir, args)
+    }
 }
 
 /// Create a commit by opening the user's editor for the message.
@@ -136,7 +199,7 @@ pub fn stage_all(workdir: &Path) -> Result<()> {
 /// Wraps `git commit` (no -m flag). Inherits stdin/stdout so the editor
 /// can interact with the terminal.
 pub fn commit_with_editor(workdir: &Path) -> Result<()> {
-    super::run_git_interactive(workdir, &["commit"])
+    commit_opts(workdir, None, &[])
 }
 
 #[cfg(test)]

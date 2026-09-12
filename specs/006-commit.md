@@ -30,7 +30,7 @@ Creating a commit on a feature branch within an integration workflow has frictio
 ## CLI
 
 ```bash
-git-loom commit [-b <branch> | -i] [-m <message>] [-p] [files...]
+git-loom commit [-b <branch> | -i] [-m <message>] [-p] [files...] [-- <git args>...]
 ```
 
 **Arguments:**
@@ -44,6 +44,13 @@ git-loom commit [-b <branch> | -i] [-m <message>] [-p] [files...]
   spec 007 for the hunk picker).
 - `[files...]`: Files to stage before committing. Accepts short IDs, filenames,
   or the reserved token `zz`.
+
+**Git arguments:**
+
+Everything after a `--` separator goes to `git commit` untouched, so
+`--no-verify`, `--signoff`, `-S`, `--author=...` and the rest of the `git
+commit` surface all work. They shape the commit loom creates, not the rebase
+that relocates it onto the feature branch. See spec 021 for the convention.
 
 **Staging behavior:**
 

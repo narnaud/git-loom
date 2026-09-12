@@ -37,7 +37,7 @@ fn is_staged(porcelain: &str, filename: &str) -> bool {
 /// Shorthand: call `run()` in non-patch mode with the default dark theme.
 fn run_add(files: Vec<String>) -> anyhow::Result<()> {
     let theme = Theme::dark();
-    super::run(files, false, &theme)
+    super::run(files, false, vec![], &theme)
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────
@@ -178,7 +178,7 @@ fn add_patch_flag_placeholder() {
     let test_repo = TestRepo::new();
     let theme = Theme::dark();
 
-    let result = test_repo.in_dir(|| super::run(vec![], true, &theme));
+    let result = test_repo.in_dir(|| super::run(vec![], true, vec![], &theme));
 
     // In a headless environment the picker auto-cancels, so we expect either
     // Ok(()) or the "Cancelled" error — not a panic or unexpected error.
@@ -276,4 +276,109 @@ fn add_file_whose_deletion_is_already_staged() {
 
     assert!(result.is_ok(), "add failed: {:?}", result);
     assert_eq!(test_repo.status_porcelain().trim(), "D  gone.txt");
+}
+
+// -- Git argument forwarding (spec 021) --
+
+#[test]
+fn add_forwards_an_option_after_the_separator() {
+    let test_repo = setup_with_woven_branch();
+    test_repo.write_file(
+        ".gitignore",
+        "ignored.txt
+",
+    );
+    test_repo.write_file("ignored.txt", "content");
+
+    let theme = Theme::dark();
+    let result = test_repo.in_dir(|| {
+        super::run(
+            vec!["ignored.txt".to_string()],
+            false,
+            vec!["-f".to_string()],
+            &theme,
+        )
+    });
+    assert!(
+        result.is_ok(),
+        "add should forward -f to git add: {result:?}"
+    );
+    assert!(
+        is_staged(&test_repo.status_porcelain(), "ignored.txt"),
+        "-f must reach git add, which is the only way an ignored file stages"
+    );
+}
+
+#[test]
+fn add_unknown_option_reaches_git() {
+    let test_repo = setup_with_woven_branch();
+    test_repo.write_file("feature.txt", "changed");
+
+    let theme = Theme::dark();
+    let result = test_repo.in_dir(|| {
+        super::run(
+            vec!["feature.txt".to_string()],
+            false,
+            vec!["--definitely-not-a-git-option".to_string()],
+            &theme,
+        )
+    });
+    assert!(
+        result.is_err(),
+        "git should reject an option loom passed through"
+    );
+}
+
+#[test]
+fn add_patch_rejects_forwarded_arguments() {
+    let test_repo = setup_with_woven_branch();
+
+    let theme = Theme::dark();
+    let result = test_repo.in_dir(|| super::run(vec![], true, vec!["-f".to_string()], &theme));
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("takes no `git add` arguments"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn add_does_not_claim_success_for_a_forwarded_dry_run() {
+    let test_repo = setup_with_woven_branch();
+    test_repo.write_file("feature.txt", "changed");
+
+    let theme = Theme::dark();
+    let result = test_repo.in_dir(|| {
+        super::run(
+            vec!["feature.txt".to_string()],
+            false,
+            vec!["--dry-run".to_string()],
+            &theme,
+        )
+    });
+    assert!(
+        result.is_ok(),
+        "--dry-run is a valid git add option: {result:?}"
+    );
+    assert!(
+        !is_staged(&test_repo.status_porcelain(), "feature.txt"),
+        "--dry-run stages nothing, so loom must not have staged it either"
+    );
+}
+
+#[test]
+fn add_without_files_rejects_forwarded_arguments_without_blaming_patch() {
+    let test_repo = setup_with_woven_branch();
+
+    let theme = Theme::dark();
+    let result = test_repo.in_dir(|| super::run(vec![], false, vec!["-f".to_string()], &theme));
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("staging hunks interactively"),
+        "the message must not blame a `-p` the user never typed: {err}"
+    );
+    assert!(
+        err.contains("Files go before the separator"),
+        "`loom add -- file.txt` needs to be told where files go: {err}"
+    );
 }

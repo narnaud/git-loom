@@ -1,6 +1,5 @@
 use anyhow::{Result, bail};
 
-use crate::core::cli_args;
 use crate::core::graph;
 use crate::core::repo::{self, Target};
 use crate::git;
@@ -11,36 +10,18 @@ use crate::status;
 /// With no target, shows the commit at the top of `loom status` — the tip of
 /// the integration line, skipping merge commits and hidden branches.
 ///
-/// Options loom doesn't define are forwarded to `git show` unchanged, as is
-/// anything after a `--` separator.
-pub fn run(args: Vec<String>) -> Result<()> {
-    let split = cli_args::split(&args, &[]);
-    if split.targets.len() > 1 {
-        bail!(
-            "`show` takes a single target, got {}\n{}",
-            split
-                .targets
-                .iter()
-                .map(|t| format!("'{t}'"))
-                .collect::<Vec<_>>()
-                .join(", "),
-            cli_args::VALUE_HINT
-        );
-    }
-
+/// `git_args` is whatever followed a `--`, appended to the `git show`
+/// command line after the revisions (see spec 021).
+pub fn run(target: Option<String>, git_args: Vec<String>) -> Result<()> {
     let repo = repo::open_repo()?;
-    let revs = show_revs(&repo, split.targets.into_iter().next())?;
+    let revs = show_revs(&repo, target)?;
 
     let workdir = repo::require_workdir(&repo, "show")?;
-    let mut git_args = vec!["show".to_string()];
-    git_args.extend(split.options);
-    git_args.extend(revs);
-    if !split.pathspec.is_empty() {
-        git_args.push("--".to_string());
-        git_args.extend(split.pathspec);
-    }
+    let mut args = vec!["show".to_string()];
+    args.extend(revs);
+    args.extend(git_args);
 
-    let refs: Vec<&str> = git_args.iter().map(String::as_str).collect();
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
     git::run_git_interactive(workdir, &refs)
 }
 

@@ -71,6 +71,7 @@ The `specs/` directory contains detailed design documents that describe each fea
 | `specs/018-add.md` | Stage files using short IDs, paths, or `zz`; hunk-level staging with `-p` |
 | `specs/019-agent.md` | Agent integration: `agent init` skill install and `--agent` machine-readable mode |
 | `specs/020-tui.md` | Interactive status TUI: tree + diff panes, with actions |
+| `specs/021-git-args.md` | Forwarding arguments to git after a `--` separator |
 
 ## Build & Run Commands
 

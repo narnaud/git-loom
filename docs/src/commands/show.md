@@ -5,7 +5,7 @@ Show the diff and metadata for a commit, like `git show`.
 ## Usage
 
 ```
-git loom show [<target>] [git-options...] [-- <pathspec>...]
+git loom show [<target>] [-- <git args>...]
 ```
 
 Alias: `sh`
@@ -18,16 +18,13 @@ Alias: `sh`
 
 ### Git Options
 
-`show` defines no options of its own, so anything hyphenated is passed straight to `git show`:
+Everything after a `--` separator goes to `git show` untouched — see [Passing Options to Git](README.md#passing-options-to-git):
 
 ```bash
-git loom show --stat
-git loom show -U5 ab
-git loom show ab --stat        # options may follow the target too
-git loom show ab -- src/main.rs
+git loom show -- --stat
+git loom show ab -- -U5
+git loom show ab -- -- src/main.rs
 ```
-
-Only `-h`/`--help` is claimed by loom. Options that take a value must be attached — `-U5` or `--unified=5`, not `-U 5` — because loom has no list of git's value-taking options and would read the `5` as a second target, which `show` rejects. Everything after a `--` separator is a pathspec and is forwarded verbatim.
 
 ## What It Does
 
