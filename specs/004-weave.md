@@ -99,8 +99,14 @@ Remove an entire branch section and its merge entry.
 
 ### Move Commit
 
-Move a commit to the tip of a target branch section. The commit is removed
-from its current location and appended to the target.
+Move a commit to the tip of a target branch. The commit is removed from its
+current location and appended to the target.
+
+**Inner branch handling:** The target may be an inner (stacked) branch, one
+carried as an `update-ref` on a commit inside another branch's section. The
+commit is inserted right after that commit and takes the `update-ref`, so the
+target advances to it and the commits above it in the section are replayed on
+top. Other refs on the old tip stay there.
 
 **Co-located branch handling:** When the target branch shares a section with
 other branches, the section is split. The original section keeps the remaining

@@ -1196,16 +1196,15 @@ fn plan_move(
 ) -> Result<(Weave, Vec<String>)> {
     let mut graph = Weave::from_repo(repo)?;
 
-    // If the target branch has no section in the Weave graph, create one.
-    // This happens when the branch is at the merge-base (no commits of its
-    // own) — either it was never woven, or a previous rebase dropped the
-    // degenerate merge (merging two identical commits is a no-op for git).
-    // Same pattern as commit.rs for empty branches.
-    let has_section = graph
-        .branch_sections
-        .iter()
-        .any(|s| s.label == branch_name || s.branch_names.contains(&branch_name.to_string()));
-    if !has_section {
+    // If the target branch is neither a section nor an inner (stacked) ref in
+    // the Weave graph, create a section for it. This happens when the branch
+    // is at the merge-base (no commits of its own) — either it was never
+    // woven, or a previous rebase dropped the degenerate merge (merging two
+    // identical commits is a no-op for git). Same pattern as commit.rs for
+    // empty branches.
+    let is_woven =
+        graph.has_branch_section(branch_name) || graph.inner_branch_section(branch_name).is_some();
+    if !is_woven {
         // Only allow creating a synthetic section for branches that are
         // at the merge-base (empty) or don't exist yet. Reject branches
         // that have diverged — they are out of scope.

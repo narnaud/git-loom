@@ -497,14 +497,23 @@ impl Weave {
     /// Label of the section containing `branch_name` as an inner (stacked) ref,
     /// i.e. a branch whose tip is a commit inside another branch's section.
     pub fn inner_branch_section(&self, branch_name: &str) -> Option<&str> {
+        self.inner_ref_position(branch_name)
+            .map(|(s, _)| self.branch_sections[s].label.as_str())
+    }
+
+    /// Section and commit indices of the commit carrying `branch_name` as an
+    /// inner (stacked) ref.
+    fn inner_ref_position(&self, branch_name: &str) -> Option<(usize, usize)> {
         self.branch_sections
             .iter()
-            .find(|s| {
-                s.commits
+            .enumerate()
+            .find_map(|(s, section)| {
+                section
+                    .commits
                     .iter()
-                    .any(|c| c.update_refs.iter().any(|r| r == branch_name))
+                    .position(|c| c.update_refs.iter().any(|r| r == branch_name))
+                    .map(|pos| (s, pos))
             })
-            .map(|s| s.label.as_str())
     }
 
     /// Remove an entire branch section and its merge entry.
@@ -570,7 +579,12 @@ impl Weave {
         true
     }
 
-    /// Move a commit to the tip of a branch section.
+    /// Move a commit to the tip of a branch.
+    ///
+    /// The target is either a section's branch or an inner (stacked) branch
+    /// whose tip is a commit inside another branch's section. An inner target
+    /// gets the commit right after its tip and advances to it, so the commits
+    /// stacked above it are replayed on top of the moved commit.
     ///
     /// If the target branch is co-located with other branches (multiple branch
     /// names in the same section), the section is split: original commits stay
@@ -580,17 +594,26 @@ impl Weave {
     /// Returns the branches the commit left without one, parked at the base
     /// they built on.
     pub fn move_commit(&mut self, oid: Oid, to_branch: &str) -> anyhow::Result<Vec<String>> {
-        // Validate target section exists BEFORE removing the source
-        let section_idx = self
+        // Validate the target exists BEFORE removing the source
+        let mut section_idx = self
             .branch_sections
             .iter()
             .position(|s| s.label == to_branch || s.branch_names.contains(&to_branch.to_string()));
-        let Some(section_idx) = section_idx else {
-            anyhow::bail!(
-                "Cannot move commit: target branch section '{}' not found in weave graph",
-                to_branch
-            );
-        };
+        if section_idx.is_none() {
+            let Some((s, pos)) = self.inner_ref_position(to_branch) else {
+                anyhow::bail!(
+                    "Cannot move commit: target branch '{}' not found in weave graph",
+                    to_branch
+                );
+            };
+            // Already the tip of the target: nothing to move. This is also
+            // the precondition for the insert below — removing that commit
+            // would carry `to_branch` out of the section with it, and there
+            // would be no tip left to insert after.
+            if self.branch_sections[s].commits[pos].oid == oid {
+                return Ok(Vec::new());
+            }
+        }
 
         // Find and remove the commit from its current location. Inner
         // branches at it stay behind: they end at the commit before, or are
@@ -608,16 +631,31 @@ impl Weave {
 
         // The source section left empty goes, with its merge — unless it is
         // the target, which is about to get the commit back.
-        let mut section_idx = section_idx;
         if let Some(i) = source_idx
-            && i != section_idx
+            && Some(i) != section_idx
             && self.branch_sections[i].commits.is_empty()
         {
             parked.extend(self.remove_empty_section(i, EmptiedRefs::Park));
-            if i < section_idx {
-                section_idx -= 1;
+            if let Some(idx) = &mut section_idx
+                && i < *idx
+            {
+                *idx -= 1;
             }
         }
+
+        let Some(section_idx) = section_idx else {
+            // Inner target: the commit goes right after the target's tip and
+            // takes the ref, leaving any co-located inner refs where they are.
+            let (s, pos) = self
+                .inner_ref_position(to_branch)
+                .expect("the moved commit is not the target's tip, so its ref stayed put");
+            self.branch_sections[s].commits[pos]
+                .update_refs
+                .retain(|r| r != to_branch);
+            commit.update_refs.push(to_branch.to_string());
+            self.branch_sections[s].commits.insert(pos + 1, commit);
+            return Ok(parked);
+        };
 
         // If the target branch is co-located with others, split the section
         if self.branch_sections[section_idx].branch_names.len() > 1

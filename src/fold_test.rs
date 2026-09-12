@@ -1081,6 +1081,58 @@ fn fold_commit_to_branch_leaves_inner_branch_at_the_commit_before() {
     assert_eq!(test_repo.branch_commit_summary("other"), "I2");
 }
 
+/// The target is a branch stacked inside another: the commit becomes its
+/// tip and the branch above is replayed on top of it.
+#[test]
+fn fold_commit_to_inner_branch() {
+    let test_repo = TestRepo::new_with_remote();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    test_repo.create_branch_at("inner", &base_oid.to_string());
+    test_repo.switch_branch("inner");
+    let i1_oid = test_repo.commit("I1", "i1.txt");
+
+    test_repo.create_branch_at("outer", &i1_oid.to_string());
+    test_repo.switch_branch("outer");
+    test_repo.commit("O1", "o1.txt");
+
+    test_repo.create_branch_at("other", &base_oid.to_string());
+    test_repo.switch_branch("other");
+    let x1_oid = test_repo.commit("X1", "x1.txt");
+
+    test_repo.switch_branch("integration");
+    test_repo.merge_no_ff("outer");
+    test_repo.merge_no_ff("other");
+
+    let (_, parked) =
+        super::move_commits_to_branch(&test_repo.repo, &[x1_oid.to_string()], "inner")
+            .expect("moving a commit onto an inner branch");
+
+    assert_eq!(parked, vec!["other".to_string()]);
+    assert_eq!(test_repo.get_branch_target("other"), base_oid);
+
+    let repo = &test_repo.repo;
+    let inner = repo
+        .find_commit(test_repo.get_branch_target("inner"))
+        .unwrap();
+    assert_eq!(inner.summary().unwrap().unwrap(), "X1");
+    assert_eq!(
+        inner.parent_id(0).unwrap(),
+        i1_oid,
+        "X1 sits right after I1"
+    );
+    let outer = repo
+        .find_commit(test_repo.get_branch_target("outer"))
+        .unwrap();
+    assert_eq!(outer.summary().unwrap().unwrap(), "O1");
+    assert_eq!(
+        outer.parent_id(0).unwrap(),
+        inner.id(),
+        "outer is replayed on top of the moved commit"
+    );
+    assert!(test_repo.commit_has_file(outer.id(), "x1.txt"));
+}
+
 #[test]
 fn classify_commit_into_unstaged() {
     let sources = vec![repo::Target::Commit("abc123".into())];

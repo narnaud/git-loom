@@ -190,6 +190,12 @@ operation.
   entry are created automatically before moving the commit.
 - If the target branch shares its tip with other co-located branches, only
   the target branch advances; co-located branches remain unaffected.
+- The target may be a branch stacked inside another (an inner branch, whose
+  tip is a commit inside the outer branch's section). The commit is inserted
+  right after that tip and the target advances to it; the commits above it
+  in the outer branch are replayed on top of the moved commit. Moving a
+  commit from the outer branch onto the inner one this way reorders the
+  section. A branch co-located with the inner tip stays where it is.
 - A branch ending at the moved commit (an inner, stacked branch) stays
   behind: it ends at the commit before, or, when the moved commit was its
   only one, is parked at the base it built on (the upstream, or the tip of
