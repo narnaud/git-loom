@@ -1,5 +1,59 @@
 # Changelog
 
+## [0.23.0](https://github.com/narnaud/git-loom/compare/v0.22.0...v0.23.0) (2026-09-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* **fold:** `fold -c <commit>... <branch>` now fails when the branch already exists instead of warning and moving the commits onto it. Use `loom fold <commit>... <branch>` to move onto an existing branch.
+* **fold,drop:** `loom drop <commit>` no longer deletes a branch whose only commit it is. The branch survives, empty, at the base it built on, matching `loom fold <commit> zz`. Removing a branch together with its commits is `loom drop <branch>`.
+
+### Features ✨
+
+* **commit:** add -i to commit to the integration branch ([41dfb61](https://github.com/narnaud/git-loom/commit/41dfb61a0124032dcc3626919d3487f41a265760))
+* **fold:** move commits onto a branch stacked inside another ([6363e08](https://github.com/narnaud/git-loom/commit/6363e08242199c955a87acd4b852eaa3e4a1301f))
+* **fold:** move several commits at once, and keep -c for creating ([727687e](https://github.com/narnaud/git-loom/commit/727687e8c769f41a265e73c326b118a151529c79))
+* **push:** push stacked branches as GitHub stacked pull requests ([3a89863](https://github.com/narnaud/git-loom/commit/3a89863ce1b4394c0426dbfc4f29d398d0168db3))
+* **tui:** resize the two-pane split with Ctrl-arrows ([b182254](https://github.com/narnaud/git-loom/commit/b182254cc78a8d1a53685662f0fb05d2a9c2e176))
+
+
+### Bug Fixes 🐞
+
+* **fold,drop:** keep branches emptied by removing their only commit ([537483e](https://github.com/narnaud/git-loom/commit/537483e7407ef02eca199abe745eae969d36ae4b))
+* **fold:** keep uncommitted changes when a fold rolls back ([d2a6693](https://github.com/narnaud/git-loom/commit/d2a66935e14418afb37b0f8b2bc87eaf5ecd5926))
+* **fold:** stop a refused fold from leaving a commit and losing staging ([d10ec9b](https://github.com/narnaud/git-loom/commit/d10ec9bfedd01442952e9cb6a4408354273eabf0))
+* **git:** keep a user's gitconfig from reshaping what loom parses ([bd1cada](https://github.com/narnaud/git-loom/commit/bd1cadac55081a096406ac5a9b2dd3f2badd2724))
+* **git:** suppress the editor on captured git commands ([f60b5ab](https://github.com/narnaud/git-loom/commit/f60b5abe00dc754c653e59ff78bf6307af2c70dd))
+* **push:** spawn az as az.cmd instead of through cmd /C ([25c4976](https://github.com/narnaud/git-loom/commit/25c4976cbc5dbec8eafac7efe2f4d8c90795972f))
+* **rebase:** don't call a resolved conflict a broken rebase ([d078e38](https://github.com/narnaud/git-loom/commit/d078e380eff7ad317bdb2242741ebe9f427e6054))
+* **rebase:** stop commit.verbose from feeding the diff to commit-msg hooks ([e3bc5c8](https://github.com/narnaud/git-loom/commit/e3bc5c8302c8b21653a817585a8ac4f73d071ac8))
+* **skill:** Explain how to keep a backup of a branch before a rewrite ([ec94b39](https://github.com/narnaud/git-loom/commit/ec94b396313386461ac7562e81a6f557cedc866c))
+* **test:** build the loom binary that the unit tests drive ([373e795](https://github.com/narnaud/git-loom/commit/373e7953b7db21489c2919b3e475f66b6a92c18d))
+* **update:** remove branches fully merged upstream ([ea120cb](https://github.com/narnaud/git-loom/commit/ea120cbc880d15c0902d8cd5db3ab80807919765))
+
+
+### Documentation
+
+* document loom.pruneGoneBranches ([fa95cd0](https://github.com/narnaud/git-loom/commit/fa95cd0e1915640694dd722b1f8093d46187397c))
+
+
+### Changes
+
+* **push:** extract the az repository-locating arguments ([f29d85d](https://github.com/narnaud/git-loom/commit/f29d85d5997d6c951c4fe85766ccf837719a299b))
+* **rebase:** share the rebase outcome triage between all three rebase runners ([062a4eb](https://github.com/narnaud/git-loom/commit/062a4ebc66f7379b96e92570002d7ad2c97bba23))
+* **transaction:** rename warn_conflict_paused to warn_paused ([c309f3f](https://github.com/narnaud/git-loom/commit/c309f3f1c610c78d2924329e51eef5536ccde0c9))
+
+
+### Tests
+
+* **ci:** run the whole suite against a hostile gitconfig ([0d2e93b](https://github.com/narnaud/git-loom/commit/0d2e93b019363843c8f911bd8337323628ac6f17))
+
+
+### Other
+
+* **release:** show commit authors and a contributors list in the release notes ([5d57102](https://github.com/narnaud/git-loom/commit/5d571023fa5a862a27f8d66d30064bb69968d1ce))
+* silence clippy's nonminimal_bool in the TUI detection ([4271599](https://github.com/narnaud/git-loom/commit/4271599167cb2bcb7f93c3c3963df8a277dc993a))
+
 ## [0.22.0](https://github.com/narnaud/git-loom/compare/v0.21.0...v0.22.0) (2026-09-06)
 
 
