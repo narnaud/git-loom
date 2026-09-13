@@ -3,145 +3,97 @@ name: git-loom
 description: Use git-loom (loom) instead of raw git in repositories managed by git-loom. Applies whenever staging, committing, amending, splitting, reorganizing, dropping, updating, or pushing changes in a repo where `git loom status` succeeds.
 ---
 
-# Working with git-loom repositories
+# Working with git-loom
 
-git-loom (invoked as `git loom` or `loom`) manages an *integration branch* that
-weaves several *feature branches* together. All history-mutating work must go
-through loom — raw git rewrites desynchronize the weave.
+Loom manages feature branches woven into an integration branch. Raw Git history
+rewrites desynchronize the weave.
 
-## When this skill applies
+## Detect and operate
 
-Run `git loom status` once. If it succeeds and shows a branch graph, this is a
-loom-managed repository: use loom for every history-mutating operation below.
-Plain read-only git commands (`git log`, `git status`, `git blame`, ...) remain
-fine.
+Run `git loom status --agent` once. If it succeeds with a branch graph, use loom
+for every history mutation; read-only Git (`status`, `log`, `blame`, etc.) is
+allowed. Run `git loom status --agent` after every mutation.
 
-## Invocation rules (critical)
+Rules:
 
-1. **Always pass `--agent`** (or set `LOOM_AGENT=1`). Every invocation then
-   ends with exactly one JSON status as the **last line of stderr**.
-2. **Never use `-p`/`--patch`** — it opens a full-screen UI and is rejected in
-   agent mode.
-3. **Always pass `-m <message>`** to `commit`, `split`, and `reword` (commit
-   targets), and be explicit about the commit target: `-b <branch>` for a
-   feature branch, `-i` for the integration branch itself — omitted arguments
-   would need a prompt.
-4. **Never use the `zz` short ID**, except as the destination of
-   `git loom fold <commit> zz` (uncommitting). Always name the files you mean:
-   `git loom add <files>`, `git loom commit -b <branch> -m "<msg>" <files...>`,
-   `git loom drop <files...>`. `zz` sweeps up every local change, including
-   unrelated edits the user did not ask you to touch.
-5. Interpret the JSON status:
-   - `{"status":"ok","messages":[...]}` — success (exit 0). `messages` may
-     note skipped optional follow-ups (e.g. PR creation) with how to do them.
-   - `{"status":"needs_input",...}` / `{"status":"needs_confirmation",...}`
-     (exit 10) — **no history was changed**. Present `prompt` and `options` to
-     the user, then re-invoke following `hint`. `allow_other: true` means a
-     value outside `options` is also accepted (e.g. a new branch name).
-   - `{"status":"paused",...}` (exit 0) — a rebase stopped on conflicts. Not
-     a success: resolve the conflicted files, stage them (`git loom add`),
-     then `git loom continue --agent` — or `git loom abort --agent` to roll
-     everything back. While paused, most other loom commands are blocked.
-   - `{"status":"error","message":...}` (exit 1) — the command failed;
-     `git loom trace` shows the underlying git commands.
-   - Exit 2 with no JSON — the invocation itself was malformed (CLI usage
-     error).
-6. If a `messages` entry says **this skill differs from the one loom ships**,
-   run the `git-loom agent init` command it names — the skill you loaded is
-   not the one this loom version expects, and may describe commands that have
-   since changed. Then tell the user to restart their session to pick it up.
+1. Always pass `--agent` (or set `LOOM_AGENT=1`). Each invocation ends with one
+   JSON status as stderr's last line.
+2. Never use `-p`/`--patch`: it opens a full-screen UI and agent mode rejects it.
+3. Always pass `-m <message>` to `commit`, `split`, and commit `reword`. For
+   `commit`, explicitly choose `-b <branch>` or integration branch `-i`.
+4. Name files explicitly. Never use `zz`, except as the destination in
+   `git loom fold <commit> zz` (uncommit). In particular, never pass it to
+   `add`, `commit`, or `drop`; it includes unrelated local edits.
+5. Never pipe answers into prompts. In agent mode, re-invoke with explicit args.
+6. If a message says this skill differs from loom's shipped skill, run the named
+   `git-loom agent init` command and tell the user to restart the session.
 
-## The workflow loop
+## Agent status
 
-Run `git loom status --agent` first and after every mutation. It prints a
-graph of the integration branch, its feature branches, commits, and local
-changes — each with a **short ID**:
-
-- `zz` — the working tree / all local changes (only ever use it as the
-  *destination* of `git loom fold <commit> zz`; see the invocation rules)
-- two letters (e.g. `fa`, `ma`) — a branch (`feature-auth`) or file (`main.rs`)
-- hex prefix (e.g. `d0`, `3ac`) — a commit (prefix of the printed hash)
-- `d0:1` — file #1 inside commit `d0` (visible with `status -f`)
-
-Short IDs are accepted anywhere a branch, commit, or file is expected, but
-plain names, paths, and hashes always work too — prefer whichever you already
-know. `git loom status -f` lists files per commit; `-a` includes hidden
-branches.
-
-## Command mapping: use loom, not git
-
-| Instead of | Use |
+| Status / exit | Action |
 |---|---|
-| `git add <files>` | `git loom add <files>` — list the files explicitly, never `zz` |
-| `git commit` | `git loom commit -b <branch> -m "<msg>" <files...>` — commits onto a feature branch without leaving integration; a new branch name creates the branch. Use `-i` instead of `-b` to commit to the integration branch itself. Always name the files to commit (or omit them to commit exactly what you staged with `git loom add`); never `zz` |
-| `git commit --amend` (files into HEAD or any commit) | `git loom fold <files...> <commit>` (staged changes: `git loom fold <commit>`) |
-| `git rebase -i` + fixup | `git loom fold <commit> <commit>` or `git loom absorb` (auto-distributes working-tree changes into the commits that introduced those lines; `-n` for a dry run) |
-| moving a commit to another branch | `git loom fold <commit>... <branch>` (several commits move in one rebase; `-c` creates a new branch from them, and refuses a name that already exists) |
-| uncommitting | `git loom fold <commit> zz` |
-| splitting a commit | `git loom split <commit> -m "<msg>" <files...>` |
-| `git commit --amend -m` / editing any message | `git loom reword <commit> -m "<msg>"` |
-| renaming a branch | `git loom reword <branch> -m <new-name>` |
-| reordering commits | `git loom swap <a> <b>` |
-| `git reset` / deleting a commit or branch / discarding changes | `git loom drop <target> -y` — name the commit, branch, or files to drop; never `zz` |
-| creating a branch | usually just `git loom commit -b <new-name> ...`; empty branch: `git loom branch new <name>` |
-| merging a branch into integration | `git loom branch merge <branch>` / `git loom branch unmerge <branch>` |
-| `git pull --rebase` | `git loom update -y` |
-| `git push` (+ PR) | `git loom push <branch>` (`--no-pr` to skip PR/review creation; a stacked branch is pushed with the branches below it; in same-repository stacks, PRs target the branch below, while GitHub fork PRs all target upstream) |
-| `git diff` / `git show` | `git loom diff` / `git loom show` (short IDs work; git options go after `--`) |
-| checking out a branch to test it | `git loom switch <branch>` |
+| `{"status":"ok","messages":[...]}` / 0 | Success; report optional follow-up messages. |
+| `needs_input` or `needs_confirmation` / 10 | No history changed. Show `prompt` and `options`, ask the user, then re-invoke per `hint`; `allow_other: true` permits another value. |
+| `paused` / 0 | Conflict, not success. Follow Conflict recovery. Most loom commands are blocked. |
+| `error` / 1 | Failed; inspect `git loom trace`. |
+| no JSON / 2 | Malformed CLI invocation. |
 
-## What NOT to do
+## IDs and inspection
 
-In a loom-managed repository, never run these directly — they desynchronize
-the weave:
+Status shows: `zz` = all local changes; two letters such as `fa` = branch or
+file; hex prefix such as `3ac` = commit; `d0:1` = file 1 in commit `d0` (with
+`status -f`). Short IDs work wherever that entity is accepted; names, paths,
+and hashes also work. `status -a` includes hidden branches.
 
-- `git rebase` (any form)
-- `git commit --amend`
-- `git cherry-pick`
-- `git reset --hard`
-- `git push --force`
-- `git merge` into the integration branch
+## Commands
 
-Also never pipe answers into loom prompts and never pass `-p`/`--patch`; in
-agent mode prompts are answered by re-invoking with explicit arguments. And
-never pass `zz` to `add`, `commit`, `drop`, or anything else — the sole
-exception is `git loom fold <commit> zz`.
+| Intent | Command / rule |
+|---|---|
+| Stage | `git loom add <files>`; list files, never `zz`. |
+| Commit | `git loom commit -b <branch> -m "<msg>" <files...>`; a new branch name creates it. Use `-i` for integration. Name files, or omit them to commit exactly the staged set; never `zz`. |
+| Amend/fixup | `git loom fold <files...> <commit>`; for staged changes, `git loom fold <commit>`. |
+| Auto-fixup | `git loom absorb`; `-n` dry-runs. |
+| Move commits | `git loom fold <commit>... <branch>`; `-c` creates a new branch and rejects an existing name. |
+| Uncommit | `git loom fold <commit> zz`. |
+| Split | `git loom split <commit> -m "<msg>" <files...>`. |
+| Edit message | `git loom reword <commit> -m "<msg>"`. |
+| Rename branch | `git loom reword <branch> -m <new-name>`. |
+| Reorder | `git loom swap <a> <b>`. |
+| Delete/discard/reset | `git loom drop <target> -y`; explicitly name commits, branches, or files; never `zz`. |
+| Create branch | Usually commit with `-b <new-name>`; empty branch: `git loom branch new <name>`. |
+| Merge/unmerge | `git loom branch merge <branch>` / `git loom branch unmerge <branch>`. |
+| Pull-rebase | `git loom update -y`. |
+| Push / PR | `git loom push <branch>`; `--no-pr` skips PR/review creation. A stacked push includes lower branches. Same-repo PRs target the branch below; GitHub fork PRs target upstream. |
+| Diff/show | `git loom diff` / `git loom show`; short IDs work; Git options follow `--`. |
+| Test branch | `git loom switch <branch>`. |
 
-## Keeping a commit you are about to rewrite
+Never directly run `git rebase`, `git commit --amend`, `git cherry-pick`,
+`git reset --hard`, `git push --force`, or `git merge` into integration.
 
-Loom rebases with `git rebase --update-refs`, which moves *any* branch whose
-tip is one of the commits being rewritten. A branch created on a commit that is
-still in the weave is therefore not a backup: the next `fold`, `reword` or
-`swap` carries it along with the commit it points at. Branches outside the
-weave are left alone.
+## Preserve old commits
 
-To keep the old version before reworking a commit, do the rewrite first, then
-branch:
+`git rebase --update-refs` moves every branch pointing into rewritten weave
+history, so an in-weave branch is not a backup. Rewrite first, then preserve the
+old SHA outside the weave:
 
 ```sh
-git loom fold <files> <commit>     # the old commit is now unreferenced
-git branch <name> <old sha>        # outside the weave, so loom won't move it
+git loom fold <files> <commit>
+git branch <name> <old-sha>
 ```
 
-`git tag <name> <old sha>` works at any time, before or after, since
-`--update-refs` only updates `refs/heads/`.
+Alternatively, `git tag <name> <old-sha>` works before or after; update-refs
+only updates `refs/heads/`.
 
-## Conflict handling
+## Conflict recovery
 
-When a status line says `"paused"`, or any loom command reports that an
-operation is paused:
-
-1. Inspect conflicts with `git status` / `git loom diff --agent`.
-2. Edit the conflicted files, then stage them with **raw** `git add <files>` —
-   while paused, `git loom add` is blocked along with every loom command
-   except `continue`, `abort`, `diff`, `show`, and `trace`.
-3. `git loom continue --agent` — repeats `paused` if new conflicts appear.
-4. To give up instead: `git loom abort --agent` restores the original state,
+1. Inspect with `git status` or `git loom diff --agent`.
+2. Edit conflicts and stage with raw `git add <files>`. While paused,
+   `git loom add` and all loom commands except `continue`, `abort`, `diff`,
+   `show`, and `trace` are blocked.
+3. Run `git loom continue --agent`; repeat if it pauses again.
+4. Or run `git loom abort --agent`, which restores the original state,
    including staged and working-tree changes.
 
-## Recovering context
-
-- `git loom status --agent -f` — files changed in each commit, with `sid:index` IDs
-- `git loom status --agent -a` — include hidden branches
-- `git loom show <target> --agent` / `git loom diff <target> --agent` — inspect commits
-- `git loom trace` — the git commands the last loom invocation actually ran
+Context recovery: `git loom status --agent -f`, `git loom status --agent -a`,
+`git loom show <target> --agent`, `git loom diff <target> --agent`, and
+`git loom trace` (underlying Git commands from the last invocation).

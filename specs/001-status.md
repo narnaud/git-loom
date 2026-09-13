@@ -1,303 +1,99 @@
 # Spec 001: Status
 
-## Overview
+> **Normative.** This document defines `git loom status` behavior.
 
-`git loom` (or `git loom status`) displays a branch-aware commit graph in a
-GitButler CLI-inspired style. It shows the commits between the current branch's
-upstream tracking branch and HEAD, grouped by feature branch.
+## CLI and prerequisites
 
-## Prerequisites
-
-- The user must be on a local branch (not detached HEAD).
-- The branch must have an upstream tracking branch configured (e.g. `origin/main`).
-
-## Output Format
-
-The log is rendered top-to-bottom using UTF-8 box-drawing characters:
-
-Independent branches (each forked from integration line):
-
-```
-╭─ [local changes]
-│   !! conflicted.rs
-│    M file.txt
-│   A  new_file.rs
-│    ⁕ untracked.txt
-│
-│╭─ [feature-b]
-│●   d0472f9 Fix bug in feature B
-│●   7a067a9 Start feature B
-├╯
-│
-│╭─ [feature-a]
-│●   2ee61e1 Add feature A
-├╯
-│
-● ff1b247 (upstream) [origin/main] Initial commit
-```
-
-Stacked branches (feature-b on top of feature-a):
-
-```
-│╭─ [feature-b]
-│●   4e046ab B2: second commit on feature-b
-│●   0b85ca7 B1: first commit on feature-b
-││
-│├─ [feature-a]
-│●   caa87a9 A2: second commit on feature-a
-│●   18faee8 A1: first commit on feature-a
-├╯
-│
-● 2bda89d (upstream) [origin/main] Initial commit
-```
-
-Co-located branches (multiple branches pointing to the same commit):
-
-```
-│╭─ [feature-a-v2]
-│├─ [feature-a]
-│●   2ee61e1 Add feature A
-├╯
-│
-● ff1b247 (upstream) [origin/main] Initial commit
-```
-
-When several branches share the same tip commit, they are displayed as
-multiple header lines above the same set of commits. The newest branch
-(alphabetically last) appears on top with `│╭─`, and additional branches
-use `│├─`.
-
-Branches at the upstream base (no commits in range):
-
-```
-│╭─ [feature-a]
-│●   2ee61e1 Add feature A
-├╯
-│
-│╭─ [feature-stale]
-├╯
-│
-● ff1b247 (upstream) [origin/main] Initial commit
-```
-
-Local branches whose tip is the merge-base commit are shown as empty
-branch sections (header and close, no commits) above the upstream marker.
-Branches that track the same upstream remote as the integration branch
-(e.g. `main` tracking `origin/main`) are excluded.
-
-Loose commits (on the integration line, no feature branch):
-
-```
-╭─ [local changes]
-│   no changes
-│
-●   abc1234 Fix typo
-●   def5678 Refactor utils
-│
-● ff1b247 (upstream) [origin/main] Initial commit
-```
-
-Upstream ahead (upstream has new commits beyond the common base):
-
-```
-●   abc1234 Fix typo
-│
-│●  [origin/main] ⏫ 3 new commits
-├╯ 204e309 (common base) 2025-07-06 Merge pull request #10
-```
-
-Context commits (history before the base):
-
-```
-● ff1b247 (upstream) [origin/main] Initial commit
-· abc1234 2025-07-05 Previous work
-· def5678 2025-07-04 Earlier change
-```
-
-When invoked with a positional argument (`git loom status 3` or `git loom 3`),
-N-1 extra commits before the merge-base are shown below the upstream marker.
-They are rendered dimmed with a `·` prefix and are display-only (no short ID,
-not actionable). The default is 1 (no extra context).
-
-### Sections (top to bottom)
-
-1. **Local changes** (optional): shown only if the working tree has
-   modifications, new files, or deletions. Introduced with `╭─ [local changes]`.
-   Files are split into three groups, conflicted first, then tracked changes,
-   then untracked files:
-   - **Conflicted files** (unresolved merge conflicts): shown first with a `!!`
-     marker in bold red, with the filename also in bold red. These are files
-     detected as conflicted by git (e.g. during an in-progress rebase or merge).
-   - **Tracked changes** (staged/unstaged modifications, additions, deletions):
-     each file is listed with a 2-char `XY` status (index + worktree), matching
-     `git status --short`. The index char is colored green and the worktree char
-     is colored red.
-   - **Untracked files** (`??` status): shown after tracked changes with a ` ⁕`
-     marker (magenta) instead of the `XY` status. When there are more than 5
-     untracked files and output is a TTY, they are displayed in a multi-column
-     grid layout (top-to-bottom, left-to-right) sized to the terminal width.
-     Columns are separated by `│`. In non-TTY mode or with 5 or fewer files,
-     single-column layout is used.
-
-2. **Feature branches**: each local branch whose tip is reachable from HEAD
-   (or at the merge-base) is rendered as a side branch. The branch name
-   appears on its own line in brackets (`│╭─ [branch-name]`), followed by
-   its commits (`│●`), and closed with `├╯`. When multiple branches share
-   the same tip commit (co-located), they are shown as multiple header lines
-   above the same commits, with the newest on top. Branches at the
-   merge-base with no commits in range are shown as empty sections (header
-   and close only).
-
-   A remote tracking indicator is shown after the closing `]` when an
-   upstream has been configured for the branch:
-   - `✓` (green) — remote tracking ref exists and local tip matches it
-   - `↑` (yellow) — remote tracking ref exists but is not at the local tip:
-     the branch has commits the remote does not, was rewritten since it was
-     published, or both
-   - `✗` (red) — upstream was configured but the remote ref no longer exists
-     (e.g. after the remote branch was deleted and `git fetch --prune` ran)
-
-   No indicator is shown for local-only branches that have never been pushed.
-
-3. **Loose commits**: commits not belonging to any detected feature branch are
-   shown on the main integration line (`●`).
-
-4. **Upstream / common base marker**: the bottom of the log shows the merge-base
-   (common ancestor) between HEAD and the upstream tracking branch. When upstream
-   is up-to-date: `● <hash> (upstream) [<remote>/<branch>] <message>`.
-   When upstream has moved ahead, a side-branch indicator is shown:
-   `│●  [<remote>/<branch>] ⏫ N new commits` followed by
-   `├╯ <hash> (common base) <date> <message>`.
-
-5. **Context commits** (optional): when a context count > 1 is given, extra
-   commits before the merge-base are shown below the upstream marker, dimmed
-   with a `·` prefix. These are display-only and carry no short ID.
-
-### Symbols
-
-| Symbol | Meaning |
-|--------|---------|
-| `╭─`   | Start of a section (local changes or first branch in a stack/group) |
-| `├─`   | Start of a subsequent branch within a stack or co-located group |
-| `│`    | Continuation of the integration line (dotted) |
-| `││`   | Continuation between stacked branches |
-| `●`    | A commit |
-| `├╯`   | End of a side branch (or stack), merging back to integration line |
-| `!!`    | Conflicted file marker (bold red). Shown for files with unresolved merge conflicts |
-| `XY`    | 2-char file status (`X`=index, `Y`=worktree) for tracked changes, matching `git status --short`. `X` is green, `Y` is red. Values: `M` modified, `A` added, `D` deleted, `R` renamed, ` ` unchanged |
-| ` ⁕`    | Untracked file marker (magenta). Replaces `??` for untracked files |
-| `⏫`  | Upstream has new commits ahead of the common base |
-| `·`    | Context commit before the base (dimmed, display-only) |
-| `✓`    | Branch remote tracking ref exists and is in sync (green) |
-| `↑`    | Branch tip differs from its remote (yellow) |
-| `✗`    | Branch remote tracking ref is gone (red) |
-
-### Commit line format
-
-Each commit is displayed as: `<short-hash> <first line of commit message>`
-
-Short hashes are unique abbreviations that respect the repository's
-`core.abbrev` setting.
-
-## Branch Detection
-
-Feature branches are detected automatically: all local branches whose tip
-commit is in the range `upstream..HEAD` (inclusive of HEAD) or at the
-merge-base commit are considered feature branches. The current branch (the
-integration branch) is excluded from side branches. Branches that track
-the same upstream remote as the integration branch (e.g. `main` tracking
-`origin/main`) are also excluded.
-
-## Hidden Branches
-
-Branches whose names match the configured prefix (default: `local-`) are
-**hidden** from the status display by default. Both the branch section and
-all commits owned by the hidden branch are suppressed — they do not appear
-as loose commits either. This is useful for keeping local-only branches
-(secrets, personal configuration) out of the status view without removing
-them from the integration branch.
-
-The hidden prefix is configurable via:
-
-```
-git config loom.hideBranchPattern "local-"
-```
-
-Set to an empty string to disable hiding:
-
-```
-git config loom.hideBranchPattern ""
-```
-
-Pass `--all` to show all branches regardless of the configured pattern:
-
-```
-git-loom --all
-git-loom status --all
-```
-
-Hidden branches remain fully accessible to all other loom commands (fold,
-drop, commit, push, etc.).
-
-## CLI
+The current checkout MUST be a local branch with an upstream tracking branch.
 
 | Command | Behavior |
-|---------|----------|
-| `git-loom` | Shows the status (default command) |
-| `git-loom status` | Shows the status (explicit) |
-| `git-loom 3` | Shows status with 2 context commits before the base |
-| `git-loom status 3` | Same as above (explicit) |
-| `git-loom --all` | Shows all branches including hidden ones |
-| `git-loom status --all` | Same as above (explicit) |
-| `git-loom status -f` | Shows files changed in each commit |
-| `git-loom status -f <id>…` | Shows files only for the specified commits or branches |
+| --- | --- |
+| `git-loom`, `git-loom status` | Show branch-aware status; status is the default command. |
+| `git-loom [status] <N>` | Show `N-1` context commits before the base. Default `N` is 1. |
+| `git-loom [status] --all` | Include branches hidden by `loom.hideBranchPattern`. |
+| `git-loom status -f`, `--files` | Show changed files under every displayed commit. |
+| `git-loom status -f <id>...` | Show files only for identified commits/branches; accept loom commit short IDs and any hash accepted by `git rev-parse`; silently ignore unknown IDs. |
 
-### `-f` / `--files` flag
+ANSI color is enabled unless `--no-color` or `NO_COLOR` disables it. Paths are relative to the current working directory, as in `git status`: from `<repo>/src`, `src/main.rs` is `main.rs`.
 
-When `--files` is given without arguments, every commit in the log shows
-its changed files beneath it.
+## Rendering
 
-When one or more identifiers follow `--files`, only those commits show their
-files. All other commits are rendered without the file list. Each identifier
-may be:
+Output runs top-to-bottom in this order:
 
-- A **loom commit short ID** (e.g. `d0`, `ab`) as shown in the status output.
-- A **git hash or short hash** (e.g. `abc1234`) as accepted by `git rev-parse`.
+1. Local changes, only when changes exist.
+2. Feature-branch sections.
+3. Loose integration-line commits.
+4. Upstream or common-base marker.
+5. Optional context commits.
 
-Unknown identifiers are silently ignored.
+Commits use `<short-hash> <commit-message-first-line>`. Hashes are unique abbreviations respecting `core.abbrev`. Merge commits have no special treatment.
 
-## Design Decisions
+| Symbol | Normative meaning |
+| --- | --- |
+| `╭─` | Local-changes section or first branch in a stack/group. |
+| `├─` | Later branch in a stack or co-located group. |
+| `│`, `││` | Integration-line or stacked-branch continuation. |
+| `●` | Commit. |
+| `├╯` | Side branch/stack closes into integration. |
+| `!!` | Unresolved conflict; marker and filename are bold red. |
+| `XY` | Tracked status from `git status --short`; index `X` is green, worktree `Y` red. Values include `M`, `A`, `D`, `R`, and space. |
+| `⁕` preceded by one space | Untracked file (magenta), replacing `??`. |
+| `⏫` | Upstream commits ahead of the common base. |
+| `·` | Dimmed, display-only context commit with no short ID. |
+| `✓` | Configured branch remote exists at local tip (green). |
+| `↑` | Configured branch remote exists at another tip: local-only commits, rewritten publication, or both (yellow). |
+| `✗` | Configured upstream remote ref no longer exists (red). |
 
-- **Colored output**: ANSI colors are used for readability.
-  Colors can be disabled with `--no-color` or the `NO_COLOR` environment variable.
-- **No merge commit handling**: merge commits are displayed like regular
-  commits. There is no special visual treatment for merges.
+### Local changes
 
-### CWD-relative file paths
+The section begins `╭─ [local changes]`. Files are ordered by group:
 
-File paths in the status output are displayed relative to the current
-working directory, matching `git status` behavior. When run from
-`<repo>/src/`, the file `src/main.rs` is shown as `main.rs`.
+1. conflicted files (`!!`);
+2. tracked changes (`XY`);
+3. untracked files (`⁕` preceded by one space).
 
-## Branch Topology
+With more than five untracked files on a TTY, render a terminal-width multi-column grid filled top-to-bottom then left-to-right, with columns separated by `│`. Use one column for non-TTY output or at most five files.
 
-Feature branches are normally **parallel**: each forks from the upstream base
-and is woven into the integration branch by its own merge commit (spec 004,
-spec 006). Commit ownership is assigned by walking parent links from each
-branch tip and stopping at another branch's tip or at the base.
+### Branches and ownership
 
-Branches can also be **stacked**. Given feature-a (A1→A2) and feature-b (B1→B2)
-built on it, the commit history is:
+A feature branch is any local branch whose tip is in `upstream..HEAD` (including HEAD) or equals the base. Exclude:
 
+- the current integration branch;
+- branches tracking the same upstream remote as the integration branch.
+
+Each section has a bracketed header (`│╭─ [name]`), owned commits (`│●`), and `├╯`. A branch at the base is an empty header/close section. If several branches share a tip, render multiple headers over one commit set: alphabetically last on top with `│╭─`, then `│├─`.
+
+Ownership walks parents from each branch tip and stops at the base or another branch tip. Thus a stacked branch owns only commits above the branch below it. Adjacent sections are stacked (`│├─`, `││`) when the last commit of one parents the first commit of the next. The same adjacency determines stacked pushes (Spec 011).
+
+Feature branches normally remain parallel: each forks from the base and is woven into the integration branch by its own merge commit (Specs 004 and 006).
+
+Append the applicable remote indicator (`✓`, `↑`, or `✗`) after `]`; show none for a never-pushed local-only branch.
+
+### Loose commits and base
+
+Commits owned by no feature branch appear on the main line as `●`.
+
+- Upstream at base: `● <hash> (upstream) [<remote>/<branch>] <message>`.
+- Upstream ahead: `│●  [<remote>/<branch>] ⏫ N new commits`, then `├╯ <hash> (common base) <date> <message>`.
+- For context count `N > 1`, render `N-1` earlier commits after the marker as dimmed `· <hash> <date> <message>`. They are not actionable and receive no short ID.
+
+Minimal topology examples:
+
+```text
+│╭─ [feature-b]          │╭─ [feature-a-v2]     │╭─ [feature-stale]
+│●   bbbbbbb B           │├─ [feature-a]        ├╯
+│├─ [feature-a]          │●   aaaaaaa A          │
+│●   aaaaaaa A           ├╯                      ● base (upstream) [origin/main]
+├╯
 ```
-B2 → B1 → A2 → A1 → upstream
-          ^          ^
-          feature-a  upstream tip
-^
-feature-b
-```
 
-feature-b owns B1 and B2 only; the walk stops at feature-a's tip. Two adjacent
-branch sections are drawn as stacked (`│├─`, `││`) when the last commit of one
-has the first commit of the next as its parent. `loom push` relies on the same
-adjacency to push a stacked branch with the branches below it (spec 011).
+These respectively show stacking, co-location, and an empty base branch.
+
+## Hidden branches
+
+Branch names beginning with `loom.hideBranchPattern` (default `local-`) are hidden by default. Their sections and owned commits are both suppressed; owned commits MUST NOT reappear as loose commits. Empty configuration disables hiding. `--all` overrides hiding. Hidden branches remain valid targets for every other loom command.
+
+```bash
+git config loom.hideBranchPattern "local-"
+git config loom.hideBranchPattern "" # disable
+```

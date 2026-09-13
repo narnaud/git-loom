@@ -3,169 +3,59 @@ name: update-docs
 description: Create or update the user-facing documentation for a git-loom command. Invoke as /update-docs <command> (e.g. /update-docs swap). Reads the spec and implementation, then writes docs/src/commands/<command>.md and updates SUMMARY.md if needed.
 ---
 
-# Create or Update Command Documentation
+# Update Command Documentation
 
-The user has invoked `/update-docs <command>`. Your job is to produce or update
-the command's page in `docs/src/commands/` following the conventions of all
-existing pages.
+For `/update-docs <command>`, follow existing command-page conventions.
 
-## Step 1 — Gather context (read ALL of these before writing anything)
+## Required reads
 
-1. **Spec**: find and read `specs/0NN-<command>.md`. If the number is unknown,
-   list `specs/` to find it. This is the primary source of truth for behavior.
+Read all before editing:
 
-2. **Implementation**: read `src/<command>.rs` and find the command's variant
-   in `src/main.rs` — extract the exact argument names, flags, aliases, and
-   help text as they appear in the CLI.
+1. `specs/0NN-<command>.md` (list `specs/` if needed): behavioral authority.
+2. `src/<command>.rs` and its `src/main.rs` variant: exact arguments, flags,
+   aliases, help, and `GROUPED_COMMANDS`.
+3. Existing `docs/src/commands/<command>.md`, if any.
+4. Two structurally similar pages: prefer `drop.md` plus `reword.md` or `show.md`.
+5. `docs/src/SUMMARY.md` for presence and insertion point.
+6. The `## Commands` block in `README.md` and opening block in
+   `docs/src/commands/README.md`.
 
-3. **Existing doc page**: if `docs/src/commands/<command>.md` already exists,
-   read it in full before deciding what to change.
+## Page action and shape
 
-4. **Format reference**: read two existing command pages that are structurally
-   similar — prefer `docs/src/commands/drop.md` (a command with multiple
-   target types and conflict recovery) and one simpler page such as
-   `docs/src/commands/reword.md` or `docs/src/commands/show.md`.
+- New: create `docs/src/commands/<command>.md`; add it alphabetically under
+  `# Commands` in `docs/src/SUMMARY.md` as
+  `- [<command>](commands/<command>.md)`.
+- Existing: preserve accurate sections; change only stale content.
 
-5. **SUMMARY.md**: read `docs/src/SUMMARY.md` to check whether the command is
-   already listed, and to find the right insertion point if not.
+Use these sections in order; omit only where stated:
 
-6. **Command list files**: read `README.md` (the `## Commands` code block) and
-   `docs/src/commands/README.md` (the opening code block) — you will always
-   update both in Step 5.
+| Section | Requirement |
+|---|---|
+| `# <command>` | One-sentence purpose. |
+| `## Usage` | Exact `git-loom <command> [options] <args>` block; add 1-2 sentences only for non-obvious argument modes. |
+| `### Arguments` | Table of argument and accepted forms. |
+| `### Options` | Exact flags; omit if only global flags exist. |
+| `## What It Does` | One condition-named subsection per behavior, 1-3 sentences. No spec-style change/preservation blocks. For dispatch commands such as fold, use `## Type Dispatch` table then `## Actions`. |
+| `## Target Resolution` | Numbered priority list; omit without identifiers. |
+| `## Examples` | One titled subsection per use case: bash invocation, then a `# comment` explaining the result; match `drop.md`. |
+| `## Conflicts` | Only for rebase commands: paused output with `# !` warning comments, continue command, non-resumable auto-abort operations, and final link to [continue](continue.md) and [abort](abort.md). |
+| `## Prerequisites` | Hard requirements only. |
 
-## Step 2 — Determine action
+Style: terse, practical, present tense; `git-loom` in code and loom in prose.
+Treat short IDs as first-class in argument descriptions. Copy CLI names,
+aliases, and defaults verbatim from `src/main.rs`. Exclude design rationale.
+Use `# !` warnings and `# ✓` successes in conflict blocks. Use relative links.
 
-- **New page**: the command has no existing doc page — create
-  `docs/src/commands/<command>.md` and add it to `SUMMARY.md` under
-  `# Commands`, in alphabetical order among the other command entries.
-- **Update existing page**: preserve sections that are still accurate; revise
-  only what has changed.
+## Command lists (always)
 
-## Step 3 — Write the doc page
+Regenerate both from `GROUPED_COMMANDS`, even when updating an existing page:
 
-### File path
+- In `README.md`, replace the complete code block below `## Commands` with the
+  grouped list, preserving category headings/spacing. Exclude `Usage:` and
+  `Options:`.
+- In `docs/src/commands/README.md`, replace only the opening code block with:
 
-```
-docs/src/commands/<command>.md
-```
-
-### Required sections (in this order)
-
-```markdown
-# <command>
-
-<One sentence: what the command does.>
-
-## Usage
-
-‍```
-git-loom <command> [options] <args>
-‍```
-
-<One or two sentences if the argument interpretation isn't obvious
-(e.g. last arg is target, or single-arg mode differs from multi-arg mode).>
-
-### Arguments
-
-| Argument | Description |
-|----------|-------------|
-| `<arg>` | description and accepted forms |
-
-### Options
-
-| Option | Description |
-|--------|-------------|
-| `-f, --flag` | description |
-
-(Omit "Options" if the command has no flags beyond global ones.)
-
-## What It Does
-
-One subsection per distinct behavior path, named after the triggering condition
-("When Target is a Commit", "When Arguments Are Branches", etc.).
-
-Each subsection: 1–3 short sentences. No "What changes / What stays the same"
-blocks — those belong in specs, not user docs.
-
-(For commands with a dispatch table like `fold`, use "## Type Dispatch" with
-the dispatch table instead, followed by "## Actions" with one subsection per
-action type.)
-
-## Target Resolution
-
-Numbered list of resolution priority:
-1. **Type name** — how it resolves
-2. …
-
-(Omit if the command takes no user-supplied identifiers.)
-
-## Examples
-
-One `### Title` subsection per distinct use case. Each example:
-- A bash code block with the invocation
-- A `# comment` on the line after explaining what happened
-
-Mirror the style of `docs/src/commands/drop.md` exactly.
-
-## Conflicts
-
-If the command supports conflict recovery:
-- Show the conflict pause output (as a bash code block with "# !" warning comments)
-- Show the continue invocation
-- Note which sub-operations do NOT support pause/resume (auto-abort)
-- End with a cross-link: See [continue](continue.md) and [abort](abort.md) for details.
-
-(Omit entirely if the command never runs a rebase.)
-
-## Prerequisites
-
-Bullet list: hard requirements only (git version, working tree, upstream
-tracking config, etc.).
-```
-
-### Style conventions
-
-- **Terse and practical** — user docs are a quick reference, not a spec. One
-  sentence where specs use a paragraph. Tables where specs use bullet lists.
-- **Present tense**: "Removes the commit", not "will remove".
-- **"git-loom" in code blocks**, plain "loom" in prose.
-- **Short IDs**: mention them in argument descriptions — they are first-class.
-- **Exact CLI flags**: copy flag names, short aliases, and default values
-  verbatim from `src/main.rs`.
-- **No design rationale**: that belongs in specs. Docs answer "what does it
-  do?" not "why does it work this way?".
-- **Conflict output format**: use "# !" for warning lines, "# ✓" for success
-  lines in bash code blocks, matching the existing style in `drop.md`.
-- **Cross-links**: link to related commands using relative markdown links:
-  `[continue](continue.md)`.
-
-## Step 4 — Update SUMMARY.md (new pages only)
-
-Add the new command to the `# Commands` section of `docs/src/SUMMARY.md` in
-alphabetical order:
-
-```markdown
-- [<command>](commands/<command>.md)
-```
-
-## Step 5 — Update command lists (always)
-
-**Always** update the command list in both files, even for existing commands.
-The canonical source of truth is the `GROUPED_COMMANDS` constant in
-`src/main.rs` (already read in Step 1).
-
-### `README.md` — `## Commands` section
-
-Replace the entire code block under `## Commands` with the current grouped
-command list. Use the same category headings and spacing as `GROUPED_COMMANDS`.
-Do **not** include the `Options:` block or the `Usage:` header line — the
-README version is a trimmed overview.
-
-### `docs/src/commands/README.md` — opening code block
-
-Replace the entire opening code block with the current full help output:
-
-```
+```text
 Usage: git-loom [OPTIONS] [COMMAND]
 
 <categories and commands from GROUPED_COMMANDS>
@@ -177,14 +67,10 @@ Options:
   -V, --version        Print version
 ```
 
-Leave all prose after the code block unchanged.
+Leave subsequent prose unchanged.
 
-## Step 6 — Output
+## Output
 
-- Write the doc file (create or overwrite).
-- Write the updated `README.md`.
-- Write the updated `docs/src/commands/README.md`.
-- If SUMMARY.md was updated, write that file too.
-- Confirm all file paths written.
-- Remind the user that the built HTML under `docs/book/` is not regenerated
-  automatically — run `mdbook build docs` to rebuild if needed.
+Write the command page and both command-list files; write `SUMMARY.md` only for
+a new listing. Confirm every written path. Remind the user that `docs/book/` is
+not regenerated automatically and `mdbook build docs` rebuilds it.

@@ -1,246 +1,92 @@
 # Spec 004: Weave
 
-## Overview
+> **Normative.** This document defines the graph model and rebase execution used to rewrite integration topology.
 
-The **Weave** is the heart of git-loom's history rewriting. It provides a
-structured graph model of the integration branch topology and a set of pure
-mutation operations. All commands that modify history (branch, commit, drop,
-fold, reword) follow the same pattern:
+## Pipeline
 
-1. **Build** a graph from the repository state
-2. **Mutate** the graph (drop a commit, move a commit, fixup, etc.)
-3. **Serialize** the graph to a rebase todo
-4. **Execute** a single rebase with the pre-generated todo
+History-changing commands build the repository graph, mutate it in memory, serialize a complete `--rebase-merges` todo, then execute one native interactive rebase. Loom generates the todo from the graph; it does not patch Git's generated todo.
 
-git-loom generates the entire rebase todo from scratch based on the graph,
-rather than parsing and patching git's generated todo. This makes the process
-robust and predictable.
-
-## Data Model
-
-The Weave graph captures the integration branch topology as three components:
+## Graph model
 
 ### Base
 
-The point where the integration line meets the upstream — the root of the
-integration range.
+The base is where the integration first-parent line meets upstream. Starting at HEAD, follow first parents and choose the first commit contained by upstream. Normally this equals `merge-base HEAD <upstream>`.
 
-This is not always `git merge-base HEAD <upstream>`, which returns the best
-common ancestor anywhere in the graph. When a woven branch lands upstream as a
-fast-forward, the upstream tip *is* that branch's tip: a second parent, off the
-integration line entirely, and the merge-base lands there. Walking to it would
-mistake the rest of the integration line for a branch and discard the whole
-weave.
+This first-parent rule is required when upstream fast-forwards to a woven branch tip: that tip may be a merge's second parent, so the ordinary merge-base is off the integration line and would incorrectly classify/discard the remaining weave. If first-parent traversal reaches a root without meeting upstream, use the merge-base.
 
-The base is therefore found by following first parents from HEAD and stopping at
-the first commit the upstream already contains. That is the same commit as the
-merge-base in the ordinary case, and the integration line's own base in this
-one. If the line reaches a root without ever meeting the upstream, the
-merge-base is used.
+### Branch sections
 
-### Branch Sections
+Each woven section contains:
 
-Each woven branch is represented as a section containing:
+- reset target: base or another section;
+- oldest-first commits;
+- canonical label;
+- every branch ref at the tip, including co-located branches.
 
-- **Reset target**: Where the section forks from (the base, or another section)
-- **Commits**: The branch's commits in oldest-first order
-- **Label**: A canonical name for the section
-- **Branch names**: All branch refs at this tip (supports co-located branches
-  where multiple branches point to the same commit)
+Each commit has one rebase command: `Pick` (default), `Edit` (pause; reword), or `Fixup` (absorb into previous commit; fold).
 
-### Integration Line
+### Integration line
 
-The first-parent line from the base to HEAD. Each entry is either:
+The base-to-HEAD first-parent line contains regular commits (optionally carrying non-woven refs) and merge entries referencing sections. Preserve existing merge messages; let Git generate messages for new merges.
 
-- **A regular commit** (with optional branch refs for non-woven branches)
-- **A merge point** referencing a branch section
+## Graph construction
 
-For existing merge commits, the original merge message is preserved. For
-newly created merges, git generates a default message.
+Walk first parents from HEAD to the base:
 
-### Commit Commands
+- For a merge, follow its second parent to collect branch commits, match refs by tip, and create a section plus merge entry.
+- For a regular commit, create an integration entry and attach any branch ref at that commit as non-woven.
+- Skip empty branches whose tip is the base.
 
-Each commit in the graph carries a command that controls its behavior during
-rebase:
-
-- **Pick**: Replay the commit as-is (default)
-- **Edit**: Pause the rebase at this commit (used by reword)
-- **Fixup**: Absorb this commit's changes into the previous commit (used by fold)
-
-## Building the Graph
-
-The graph is constructed by walking the first-parent line from HEAD to the
-merge-base:
-
-- **Merge commits** identify woven branches: the second parent is followed
-  to collect the branch's commits, branch refs are matched by tip, and a
-  branch section + merge entry are created.
-- **Regular commits** become entries on the integration line. If a branch
-  ref points at a regular commit, it's recorded as a non-woven branch.
-- **Empty branches** (tip at merge-base with no commits) are skipped.
-
-Building the graph requires an integration branch with upstream tracking.
-Commands that need to operate outside this context (e.g., reword on a
-non-integration branch) fall back to a simpler linear approach.
+Building requires an upstream-configured integration branch. Reword alone may fall back to a simpler linear rewrite outside this context.
 
 ## Mutations
 
-All mutations are pure operations on the in-memory graph. They do not touch
-the repository until the graph is serialized and executed.
+Mutations MUST remain repository-free until serialization/execution.
 
-### Drop Commit
+| Mutation | Required effect |
+| --- | --- |
+| Drop commit | Remove it; if its section becomes empty, remove that section and merge entry. |
+| Drop branch | Remove its section and merge entry. |
+| Fixup commit | Move source directly after target and mark it `Fixup`. |
+| Edit commit | Mark it `Edit`. |
+| Add branch section / merge | Add corresponding topology, including an empty/new branch. |
+| Weave branch | Move non-woven integration commits to a new section and add its merge. |
+| Reassign branch | Transfer a co-located woven section to a surviving branch. |
 
-Remove a commit from the graph. If it was the last commit in a branch
-section, the section and its merge entry are also removed.
+### Move commit
 
-### Drop Branch
+Remove the commit from its current location and append it to the target branch tip, subject to:
 
-Remove an entire branch section and its merge entry.
-
-### Move Commit
-
-Move a commit to the tip of a target branch. The commit is removed from its
-current location and appended to the target.
-
-**Inner branch handling:** The target may be an inner (stacked) branch, one
-carried as an `update-ref` on a commit inside another branch's section. The
-commit is inserted right after that commit and takes the `update-ref`, so the
-target advances to it and the commits above it in the section are replayed on
-top. Other refs on the old tip stay there.
-
-**Co-located branch handling:** When the target branch shares a section with
-other branches, the section is split. The original section keeps the remaining
-branches and existing commits. A new stacked section is created for the target
-branch containing only the moved commit. This ensures the moved commit appears
-only on the target branch, not on all co-located branches.
-
-### Fixup Commit
-
-Remove a commit from its current location and insert it immediately after a
-target commit with a fixup command. During rebase, the source's changes are
-absorbed into the target.
-
-### Edit Commit
-
-Mark a commit so the rebase pauses there, allowing the user to amend it.
-
-### Add Branch Section
-
-Add a new branch section to the graph. Used when creating merge topology for
-a branch that doesn't have a section yet (e.g., a newly created empty branch).
-
-### Add Merge
-
-Add a merge entry on the integration line, referencing a branch section.
-
-### Weave Branch
-
-Convert a non-woven branch (commits on the integration line) into a woven
-branch. The commits are moved into a new branch section and a merge entry
-is added.
-
-### Reassign Branch
-
-Reassign a branch section from one branch to another. Used when dropping a
-co-located woven branch — the surviving branch inherits the section and
-merge topology.
+- **Inner/stacked target:** if its ref is an `update-ref` on a commit inside another section, insert immediately after that commit and transfer only the target ref to the insertion. Replay higher commits on top; leave other refs at the old tip.
+- **Co-located target:** split the section. Existing commits and other refs remain in the original section; create a stacked section containing only the moved commit for the target ref.
 
 ## Serialization
 
-The graph is serialized to a git rebase todo file. The output follows git's
-`--rebase-merges` format:
+Emit branch sections first in dependency order. Each resets to its fork and ends with a label. Then emit the integration line and merges referencing those labels. Preserve existing merge messages, use Git defaults for new merges, and retain non-woven refs through `update-ref` directives.
 
-- Branch sections are emitted first, in dependency order
-- Each section forks from its reset target and ends with a label
-- The integration line follows, with merge entries referencing branch sections
-- Existing merges preserve their original message
-- New merges use git's default message
-- Non-woven branch refs are tracked via update-ref directives
+## Execution and recovery
 
-## Execution
+Replay the complete base-to-HEAD range with `--rebase-merges`. Preserve/create merge topology, branch refs, uncommitted changes, and empty commits.
 
-The serialized todo is executed as a single native git interactive rebase.
-Key behaviors:
+Conflict policy belongs to the caller:
 
-- The full integration range (merge-base to HEAD) is replayed
-- Merge topology is preserved and created via `--rebase-merges`
-- All branch refs are kept up to date automatically
-- Uncommitted working tree changes are preserved
-- Empty commits are preserved
-- On conflict, the outcome depends on the calling command. Commands that own
-  the paused state (e.g., `update`, `commit`, `absorb`, `drop commit`, simple
-  `fold` paths) surface a `Stopped` outcome and leave the rebase paused for
-  the user to resolve with `loom continue` or `loom abort`. Out-of-scope
-  commands (e.g., `reword`, `split`, excluded `fold` paths) abort explicitly
-  and leave the repository in its original state
+- Resumable owners (`update`, `commit`, `absorb`, `drop commit`, `swap`, `branch merge`, supported `reword` replay, and simple supported `fold` paths) return `Stopped`, save `.git/loom/state.json`, and allow `loom continue` or `loom abort`.
+- Out-of-scope paths (including `split`, excluded `fold` paths, and non-pausing reword failures) explicitly abort and restore the original repository. Reword's supported replay conflict is governed by Spec 003.
 
-## Integration with Commands
+| Command | Graph operations |
+| --- | --- |
+| branch (Spec 005) | weave branch |
+| commit (Spec 006) | add section/merge; move commit |
+| drop (Spec 008) | drop commit/branch; reassign branch |
+| fold (Spec 007) | fixup/move/edit; add section/merge |
+| reword (Spec 003), split (Spec 013) | edit commit |
+| swap (Spec 015) | reorder commits/branch sections |
+| absorb (Spec 012) | fixup commit |
 
-| Command | Mutations used |
-|---------|---------------|
-| `branch` (Spec 005) | Weave branch |
-| `commit` (Spec 006) | Add branch section + merge (empty branch), move commit |
-| `drop` (Spec 008) | Drop commit, drop branch, reassign branch |
-| `fold` (Spec 007) | Fixup commit, move commit, edit commit, add branch section + merge |
-| `reword` (Spec 003) | Edit commit |
-| `split` (Spec 013) | Edit commit |
-| `absorb` (Spec 012) | Fixup commit |
+Only the commands listed above mutate via the Weave; status, init, update, push, and branch rename do not (update may use its execution/recovery infrastructure).
 
-Commands that don't modify history (`status`, `init`, `update`, `push`,
-`reword` for branch rename) do not use the Weave.
+## Worktree ref safety
 
-## Design Decisions
+Before rebase, enumerate `git worktree list --porcelain` and reject the entire operation if **any branch the todo can move** is checked out in another non-prunable worktree. This includes refs moved by `update-ref` and HEAD's own branch, moved on rebase completion. The error MUST name the branch and worktree path.
 
-### Generate Todo From Scratch
-
-Rather than parsing git's generated todo file and applying text-level edits,
-git-loom generates the entire todo from the commit graph. This eliminates
-dependence on git's exact output format and makes operations composable —
-multiple mutations can be applied to the graph before a single serialization.
-
-### Always Rebase from Merge-Base
-
-All operations scope the rebase from the merge-base commit, replaying the
-full integration history. The trade-off is slightly slower for large branches,
-but dramatically simpler — one graph covers the entire topology.
-
-### Co-Located Branch Splitting
-
-When moving a commit to a co-located branch (one that shares a section with
-other branches), the section is split into a stacked topology. This ensures
-the moved commit appears only on the target branch, not on all co-located
-branches.
-
-### Atomic Operations and Paused Conflicts
-
-Out-of-scope commands abort on conflict, leaving the repository in its original
-state. In-scope resumable commands (e.g., `update`, `commit`, `absorb`,
-`drop commit`, simple `fold` paths) pause on conflict and save state to
-`.git/loom/state.json`. The user resolves conflicts and runs `loom continue`
-or `loom abort` to complete or cancel the operation.
-
-### Fallback for Non-Integration Repos
-
-`reword` is the only command that can operate outside an integration branch
-context. When the full graph cannot be built, `reword` falls back to a
-simpler linear approach that doesn't require the Weave data model.
-
-## Worktree Ref Safety
-
-A weave rebase moves branch refs two ways, and neither goes through git's
-porcelain check against moving a branch that is checked out in another
-worktree:
-
-- the `update-ref` directives move the feature branches;
-- completing the rebase moves HEAD's own branch (which is why a branch
-  force-checked-out in a second worktree is at risk too).
-
-Moving such a ref desyncs that worktree: its index and files stay at the old
-tip, so `git status` there reports the old→new delta as phantom staged changes.
-Before executing the todo, loom therefore maps every branch it is about to move
-(`git worktree list --porcelain`) and refuses the whole operation — naming the
-branch and the worktree path — if one of them is checked out elsewhere.
-
-The worktree loom runs in is exempt: there, ref, index and files move together.
-Detached-HEAD worktrees hold no branch, and bare or prunable ones (directory
-gone) are ignored.
+The current worktree is exempt because ref, index, and files move together. Ignore detached-HEAD worktrees (no branch), bare worktrees, and prunable worktrees whose directories are gone. This guard prevents another worktree retaining its old index/files while its ref moves, which would appear there as phantom staged changes.

@@ -1,56 +1,25 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+git-loom is a Rust 2024 CLI that combines independent feature branches on an
+integration branch and rewrites/manages them without leaving that branch.
 
-## Project Overview
+## Code Map
 
-git-loom is a Git CLI tool written in Rust (edition 2024) that weaves your branches together. Inspired by tools like jujutsu and Git Butler, it focuses on making integration branches seamless by weaving together multiple feature branches.
+- `src/main.rs`: clap CLI/dispatch; command modules are `src/<command>.rs`.
+- `src/core/`: graph, short IDs, repository, transaction, agent mode, weave.
+- `src/git/`: low-level Git operations; `src/branch/`: new/merge/unmerge.
+- `src/tui/`: status tree, shell, hunk selector, widgets, theme.
+- `src/agent/`: `agent init`; embedded source is `skills/git-loom/SKILL.md`.
+- Tests are sibling `*_test.rs` files; shared fixtures are in
+  `src/core/test_helpers.rs`; integration tests are in `tests/integration/`.
 
-### Core Concepts
+## Specs
 
-- **Integration branch**: A branch that merges multiple feature branches together, allowing you to work on and test several features simultaneously.
-- **Feature branches**: Independent branches that are combined into the integration branch and can be managed (reordered, amended, split) without leaving the integration context.
-
-### Key Features (planned/in progress)
-
-- **Enhanced git log**: A nicer, more readable log output showing the relationship between integration and feature branches.
-- **Easy amending**: Amend any commit in your branch stack, not just the latest one.
-- **Commit mobility**: Move commits between branches or reorder them within a branch.
-- **Branch creation**: Quickly create and manage feature branches from the integration branch.
-- **Branch weaving**: Merge/unmerge feature branches into/from the integration branch.
-
-### Architecture
-
-- Entry point: `src/main.rs` — CLI parsing via `clap`, dispatches to subcommands.
-- `src/status.rs` — Branch-aware commit graph display.
-- `src/shortid.rs` — Compact human-friendly identifiers for branches, commits, and files.
-- `src/show.rs` — Show commit details (like `git show`) using short IDs.
-- `src/reword.rs` — Commit message editing / branch renaming via short IDs.
-- `src/init.rs` — Initialize a new integration branch tracking a remote upstream.
-- `src/branch/` — Branch management (subcommands: new, merge, unmerge).
-- `src/commit.rs` — Commit to feature branches from the integration branch.
-- `src/drop.rs` — Drop commits or branches from history, with automatic unweaving.
-- `src/fold.rs` — Fold: amend files into commits, fixup commits, move commits between branches.
-- `src/absorb.rs` — Absorb: auto-distribute working tree changes into the commits that last touched the affected lines.
-- `src/push.rs` — Push a feature branch with its stack to remote (plain, GitHub, GitLab, Azure, Gerrit auto-detection); stacked PRs on GitHub.
-- `src/weave.rs` — Weave: structured graph model for integration topology, rebase todo generation, and execution.
-- `src/update.rs` — Pull-rebase the integration branch and update submodules.
-- `src/agent/` — AI agent integration: `agent init` installs the embedded skill (source: `skills/git-loom/SKILL.md` at the repo root).
-- `src/core/agent_mode.rs` — Agent mode (`--agent`/`LOOM_AGENT`): JSON status line, structured prompt answers.
-- `src/graph.rs` — Graph rendering logic for the status output.
-- `src/tui/` — Terminal UI components: interactive status TUI (`app.rs`, `status_tree.rs`), hunk selector, shared theme.
-- `src/git.rs` — Git abstraction layer (uses `git2` crate).
-- `src/git_commands/` — Lower-level Git operations split by domain:
-  - `git_branch.rs`, `git_commit.rs`, `git_merge.rs`, `git_rebase.rs`
-- `src/test_helpers.rs` — Shared test utilities (temp repos, etc.).
-- Tests live alongside their modules as `*_test.rs` sibling files.
-
-### Specs
-
-The `specs/` directory contains detailed design documents that describe each feature's behavior, edge cases, and expected output. **Always consult the relevant spec before implementing or modifying a feature.**
+Specs are compact AI context. Read the relevant spec before changing behavior;
+keep it terse and normative, and do not duplicate rules, docs, or examples.
 
 | Spec | Feature |
-|------|---------|
+| --- | --- |
 | `specs/001-status.md` | Branch-aware status / commit graph display |
 | `specs/002-shortid.md` | Short ID generation and collision resolution |
 | `specs/003-reword.md` | Commit reword / branch rename via short IDs |
@@ -73,56 +42,43 @@ The `specs/` directory contains detailed design documents that describe each fea
 | `specs/020-tui.md` | Interactive status TUI: tree + diff panes, with actions |
 | `specs/021-git-args.md` | Forwarding arguments to git after a `--` separator |
 
-## Build & Run Commands
+## Commands
 
-- **Build:** `cargo build`
-- **Run:** `cargo run`
-- **Test:** `cargo test`
-- **Run single test:** `cargo test <test_name>`
-- **Lint:** `cargo clippy`
-- **Format:** `cargo fmt`
-- **Check (fast compile check):** `cargo check`
+`cargo build`; `cargo run`; `cargo test [name]`; `cargo clippy`; `cargo fmt`;
+`cargo check`.
 
-### `tests/bin_is_built.rs`
+Keep `tests/bin_is_built.rs`: it makes `cargo test` build the binary used as the
+sequence editor by rebase tests. Removing it breaks rebase tests in an unbuilt tree.
 
-The unit tests drive real rebases, and they hand git the binary at
-`target/<profile>/git-loom` as its sequence editor. `cargo test` builds a bin target
-only when the package has an integration test, so that file's existence is what
-puts the binary there — and what rebuilds it when a source file changes.
-Deleting it makes every rebase-driven test fail in a tree that has not been
-built, around 120 of them.
+## Data Safety (Non-Negotiable)
 
-## Non-Negotiable: Never Lose User Data
+No operation, including continue/abort, may discard staged, unstaged, or
+uncommitted data.
 
-git-loom must never discard user data — staged changes, working tree changes, or uncommitted work — as a side effect of any operation, including conflict resolution, abort, or continue flows.
+`loom abort` first uses `git rebase --abort` (restores HEAD, `--update-refs`
+branches, and autostash), then `Rollback::apply_abort()` applies populated fields:
 
-**The abort architecture:** `loom abort` calls `git rebase --abort`, which already restores HEAD, all branch refs (via `--update-refs`), and any autostashed working-tree changes. Extra cleanup beyond that is driven entirely by the `Rollback` struct saved in `LoomState` — `Rollback::apply_abort()` acts on whichever fields are populated:
+| Field | Abort action / users |
+| --- | --- |
+| `reset_mixed_to` | mixed reset; `commit` |
+| `reset_hard_to` | hard reset to pre-fixup HEAD; `absorb` |
+| `delete_branches` | remove temp refs; `commit`, fold files/commit |
+| `saved_staged_patch` | restore index; `commit`, `absorb`, fold files |
+| `saved_worktree_patch` | restore worktree; `absorb` |
 
-- `reset_mixed_to` → `reset --mixed` to undo a pre-rebase commit (used by `commit`)
-- `reset_hard_to` → `reset --hard` to undo pre-rebase commits (used by `absorb`: `git rebase --abort` restores HEAD to after the fixup commits, not to the original pre-absorb HEAD)
-- `delete_branches` → delete temp branches (used by `commit` and `fold FilesIntoCommit`/`CommitIntoCommit`)
-- `saved_staged_patch` → re-stage changes that were saved aside (used by `commit`, `absorb`, `fold FilesIntoCommit`)
-- `saved_worktree_patch` → re-apply working-tree changes (used by `absorb`)
+Every new resumable `weave::run_rebase` caller must populate `Rollback` before
+saving `LoomState` and register in `transaction::dispatch_after_continue`.
+There is no abort dispatcher; `Rollback::apply_abort()` owns cleanup.
 
-**Required pattern** for any new resumable command (one that calls `weave::run_rebase`):
+Before rebase, `weave::run_rebase` must reject every moved branch checked out
+in another non-prunable worktree (see `git/git_worktree.rs`, Spec 004), because
+`update-ref` todo lines and rebase completion bypass Git's porcelain guard.
 
-1. Populate the appropriate `Rollback` fields before saving `LoomState`
-2. Register the command name in `transaction::dispatch_after_continue`
-3. There is no `dispatch_after_abort` — abort is handled automatically by `Rollback::apply_abort()`
+## Error Convention
 
-**Worktree ref safety** (`git/git_worktree.rs`, spec 004): a rebase moves the
-feature branches through explicit `update-ref` todo lines and HEAD's own branch
-by completing, neither of which passes git's check against moving a branch
-checked out in another worktree. `weave::run_rebase` therefore refuses up front
-if any branch it would move is checked out elsewhere.
+`run_git`/`run_git_stdout` failures log stderr only to trace. Never put Git
+stderr in `bail!`; `main.rs` already tells users to run `loom trace`.
 
-## Error Reporting Convention
+## Required Validation
 
-Git command failures (via `run_git`/`run_git_stdout`) log stderr to the trace only — do **not** include stderr in the `bail!` error message. The top-level error handler in `main.rs` already appends a hint to run `loom trace`. Never add stderr to user-facing error messages from git subprocess wrappers.
-
-## Non-Negotiable: After Every Code Change
-
-After editing any code, you **must** run the following before considering the task done:
-
-1. `cargo fmt` — format all code
-2. `cargo test` — all tests must pass
+After every code change, run `cargo fmt`, then `cargo test`; all tests must pass.

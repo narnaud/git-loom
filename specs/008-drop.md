@@ -1,402 +1,105 @@
 # Spec 008: Drop
 
-## Overview
-
-`git loom drop` removes a commit or an entire branch from history. When
-dropping a branch, it removes all the branch's commits, unweaves the merge
-topology (if the branch was woven), and deletes the branch ref — all in a
-single operation.
-
-## Why Drop?
-
-Removing commits or branches from an integration branch is a multi-step
-process in raw git:
-
-- Dropping a commit requires interactive rebase with manual `drop` editing
-- Removing a woven branch requires understanding the merge topology, running
-  an interactive rebase to remove the branch section and merge commit, then
-  deleting the branch ref
-- Getting it wrong can leave the repository in an inconsistent state
-
-`git-loom drop` provides a single command that handles all cases:
-
-- Direct: target a commit or branch by hash, name, or short ID
-- Safe: uses native git rebase under the hood with automatic abort on failure
-- Complete: for branches, handles topology cleanup and ref deletion atomically
+> **Normative.** This document defines required `git loom drop` behavior.
 
 ## CLI
 
 ```bash
-git-loom drop <target>
+git-loom drop <target> [-y]
 ```
 
-**Arguments:**
+`<target>` accepts a full/partial commit hash, Git ref, local branch name,
+short ID, file, or `zz`. `-y` skips file/change-discard confirmation.
 
-- `<target>`: A commit hash (full or partial), branch name, or short ID
+Resolve with `resolve_arg(accept = [File, Branch, Commit, Unstaged])` using
+Spec 002. Exact local branch names resolve as branches before Git refs; Git
+refs (including `HEAD`) resolve as commits; branch and commit short IDs retain
+their types. `zz` means all local changes.
 
-**Behavior:**
+Requirements: Git 2.38+, a non-bare repository, upstream tracking for short
+IDs, and (for branch targets) a branch in the integration range.
 
-- If `<target>` resolves to a commit: removes the commit from history
-- If `<target>` resolves to a branch: removes all commits, unweaves merge
-  topology, and deletes the branch ref
-- If `<target>` resolves to a file: discards changes after a y/n confirmation
-  (skippable with `-y`); see "When Target is a File" below
-- If `<target>` is `zz`: discards all local changes (restore + clean)
+## Commit Targets
 
-## What Happens
+Remove the commit by interactive rebase and replay descendants. Descendant
+OIDs and affected branch refs change; other content, messages, topology except
+the removed commit, and refs outside the ancestry chain do not.
 
-### When Target is a Commit
+Dropping a commit never deletes a branch. If it is the last commit owned by
+one or more branches, remove their section and merge entry and park every such
+branch at its base, unwoven and reusable by `loom commit -b <branch>`. This
+also applies to co-located branches and an inner stacked branch. Prompt:
 
-The commit is removed from history via interactive rebase. All descendant
-commits are replayed to maintain a consistent history.
-
-**Special case — last commit on a branch:** dropping a commit never deletes a
-branch. A branch left without a commit survives, empty, parked at the base it
-built on — the same as `fold <commit> zz` (spec 007). Its section and merge
-entry go, so the branch is no longer woven, and `loom commit -b <branch>` can
-fill it again. Deleting the branch is `loom drop <branch>`, which takes its
-commits with it in one command.
-
-This covers a branch that owns the commit outright, several branches at the
-same sole commit, and an inner (stacked) branch whose only commit it is. The
-prompt names them — `"Drop commit `<id>` <subject>, leaving branches `<a>`,
-`<b>` empty?"` — and the parking happens through `update-ref` lines in the
-rebase todo, so `loom abort` restores them to their original tips. Success:
-`"Dropped commit `<id>`"` followed by
-`"branches `<a>`, `<b>` now empty, at the base"`.
-
-Because the refs move with the rebase, a branch about to be emptied that is
-checked out in another worktree refuses the drop up front (spec 004), before
-any history is rewritten.
-
-**What changes:**
-
-- Target commit is removed from history
-- All descendant commits get new hashes (same content/messages)
-- Branch refs are updated automatically
-
-**What stays the same:**
-
-- All other commits' content and messages
-- Commit topology (minus the removed commit)
-- Branch refs not in the ancestry chain
-
-### When Target is a Branch
-
-The entire branch is removed: all commits owned by the branch are dropped,
-the merge topology is unwoven, and the branch ref is deleted.
-
-Five sub-cases are handled:
-
-#### Branch at merge-base (no commits)
-
-If the branch tip equals the merge-base, it has no owned commits. The branch
-ref is simply deleted. No rebase is needed, and the working tree does not
-need to be clean.
-
-#### Woven branch (merged into integration via merge commit)
-
-A branch is "woven" when its tip is NOT on the first-parent line from HEAD
-to the merge-base — meaning it was merged into the integration branch via a
-merge commit and lives on a side branch.
-
-The branch section and its merge entry are removed from the integration
-topology, and the branch ref is deleted. All of this happens in a single
-atomic operation.
-
-The branch must be in the integration range (between merge-base and HEAD).
-Branches outside this range are rejected with: `"Branch '<name>' is not woven
-into the integration branch"` and a hint to use `git branch -d <name>` to
-delete it directly.
-
-#### Inner (stacked) branch — refused
-
-A branch is "inner" when it is woven but another branch is stacked on top of
-it: its tip is a commit inside another branch's section rather than a merge
-parent (e.g. `feat1` when `feat2` builds on `feat1` and `feat2` was merged).
-
-Dropping an inner branch is refused, before any confirmation prompt, because
-removing its commits would rewrite the outer branch as a side effect:
-
+```text
+Drop commit `<id>` <subject>, leaving branches `<a>`, `<b>` empty?
 ```
+
+Success prints `Dropped commit <id>` followed by
+`branches <a>, <b> now empty, at the base`. Move the refs with rebase
+`update-ref` lines so `loom abort` restores their original tips. Before
+rewriting, reject an affected branch checked out in another non-prunable
+worktree (Spec 004).
+
+Conflicts are resumable through `loom continue` / `loom abort`: save state in
+`.git/loom/state.json`, block other commands as specified by Spec 014, and
+restore the original operation on abort.
+
+## Branch Targets
+
+Dropping a branch removes its ref and, unless commits are shared, all commits
+it owns. Branch drop is atomic and hard-fail: any failure restores the original
+repository rather than leaving resumable state.
+
+| Case | Required behavior |
+| --- | --- |
+| Tip equals merge-base | Delete only the ref. Do not rebase or require a clean working tree. |
+| Woven (tip is off the first-parent line) | Remove its section and merge entry, drop its owned commits, update affected refs, then delete its ref atomically. |
+| Non-woven (tip is on the first-parent line) | Drop its owned commits from the integration line and delete its ref. |
+| Co-located woven | Preserve shared commits and merge topology, assign the section to the first surviving sibling in branch order, and delete only the target ref. |
+| Co-located non-woven | Preserve shared commits and delete only the target ref. |
+| Inner/stacked | Refuse before confirmation because removing it would rewrite the outer branch. |
+
+A woven or non-woven branch must be between merge-base and `HEAD`. Otherwise
+error `Branch '<name>' is not woven into the integration branch` and hint to
+use `git branch -d <name>` directly.
+
+For an inner branch, print:
+
+```text
 Cannot drop branch: 'feat1' is stacked inside 'feat2'
 Drop individual commits with `loom drop <id>`, or delete just the ref with `git branch -D feat1`
 ```
 
-Dropping the *outer* branch works and preserves the inner branch (see
-co-located and stacked handling below).
+Dropping the outer branch is allowed and preserves an inner branch. Preserve
+commits and refs on other branches and direct integration commits; rewrite
+only affected descendants and refs. Automatically preserve uncommitted
+changes. The merge-base-only case works with any working-tree state.
 
-#### Non-woven branch (on the first-parent line)
+## File and `zz` Targets
 
-A branch is "non-woven" when its tip IS on the first-parent line — meaning
-it was fast-forward merged or its commits sit directly on the integration
-line without merge topology.
+Prompt unless `-y`; affect no commits, refs, or other files.
 
-All commits owned by the branch are removed from history, and the branch
-ref is deleted.
+| Target/status | Prompt | Operation | Success |
+| --- | --- | --- | --- |
+| Tracked `M`, `D`, or `R` | `Discard changes to '<path>'?` | `git restore --staged --worktree <path>` | `Restored '<path>'` |
+| Staged new file (`A`) | `Delete '<path>'?` | `git rm --force <path>` (index and disk) | `Deleted '<path>'` |
+| Untracked (`??`) | `Delete '<path>'?` | Delete from disk | `Deleted '<path>'` |
+| `zz` | `Discard all local changes?` | `git restore --staged --worktree .`, then `git clean -fd` | `Discarded all local changes` |
 
-#### Co-located woven branch (shares tip with another branch)
+`zz` restores all tracked modifications and deletes all untracked files and
+directories; ignored files remain. With no changes, error exactly
+`No local changes to discard`.
 
-Two or more branches are "co-located" when they point to the same tip commit.
-When dropping a co-located woven branch, the commits are preserved for
-the surviving sibling branch.
-
-The section and merge topology are reassigned to the surviving branch.
-The dropped branch ref is deleted, but no commits are removed. If multiple
-co-located branches exist, the first one found (by branch order) becomes
-the new section owner.
-
-#### Co-located non-woven branch (shares tip, on first-parent line)
-
-When dropping a co-located non-woven branch, the commits are shared with
-the sibling branch. No commits are removed — only the branch ref is deleted.
-
-**What changes (woven and non-woven, non-co-located):**
-
-- All branch commits are removed from history
-- Merge commit is removed (woven case)
-- Branch ref is deleted
-- Remaining commits get new hashes
-- Other branch refs are updated automatically
-
-**What changes (co-located):**
-
-- Branch ref is deleted
-- Merge topology is reassigned to sibling branch (woven case)
-- No commits are removed (sibling branch still needs them)
-
-**What stays the same:**
-
-- Commits on other branches
-- Other branch refs
-- Integration line commits (e.g., commits made directly on integration)
-
-### When Target is a File
-
-The behavior depends on the file's status:
-
-- **Tracked file with modifications** (`M`, `D`, `R` in index or worktree):
-  `git restore --staged --worktree <path>` restores it to its committed state.
-  Prompt: `"Discard changes to '<path>'?"`. Success: `"Restored '<path>'"`.
-
-- **Staged new file** (`A` in index): `git rm --force <path>` removes it
-  from the index and deletes the file from disk.
-  Prompt: `"Delete '<path>'?"`. Success: `"Deleted '<path>'"`.
-
-- **Untracked file** (`??`): the file is deleted from disk.
-  Prompt: `"Delete '<path>'?"`. Success: `"Deleted '<path>'"`.
-
-A confirmation prompt is shown first (skippable with `-y`).
-
-**What changes:**
-
-- The file is removed or restored (staged and unstaged changes are discarded)
-
-**What stays the same:**
-
-- All commits and branch refs
-- Changes to other files
-
-### When Target is `zz` (all local changes)
-
-`zz` is the special short ID for all local changes. Running `drop zz` discards
-everything in the working tree and index:
-
-1. `git restore --staged --worktree .` — restores all tracked modifications
-2. `git clean -fd` — deletes all untracked files and directories
-
-If there are no local changes, the command errors with:
-`"No local changes to discard"`.
-
-Prompt: `"Discard all local changes?"`. Success: `"Discarded all local changes"`.
-
-**What changes:**
-
-- All tracked modifications are reverted
-- All untracked files and directories are deleted
-
-**What stays the same:**
-
-- All commits and branch refs
-- Ignored files
-
-## Target Resolution
-
-Arguments are resolved via `resolve_arg()` with `accept = [File, Branch, Commit, Unstaged]` — see spec 002 for the resolution algorithm.
-
-The `<target>` is interpreted using the shared resolution strategy
-(see Spec 002):
-
-1. **Local branch names** — exact match resolves to a branch (drops the branch)
-2. **Git references** — full/partial hashes, `HEAD`, etc. resolve to commits
-3. **Short IDs** — branch short IDs resolve to branches, commit short IDs to
-   commits
-
-File targets restore the file to its committed state (see "When Target is a
-File" above).
-
-## Prerequisites
-
-- Git 2.38 or later
-- Must be in a git repository with a working tree (not bare)
-- For branch drops: the branch must be in the integration range
-- For short ID arguments: must have upstream tracking configured
+File and `zz` operations are atomic: either all requested changes are
+discarded or the repository remains unchanged.
 
 ## Examples
 
-### Drop a commit by short ID
-
 ```bash
-git-loom status
-# Shows: │●  ab  72f9d3 Unwanted commit
-
-git-loom drop ab
-# Removes the commit from history
+git-loom drop ab          # commit/branch short ID, according to its type
+git-loom drop src/main.rs # restore or delete one file after confirmation
+git-loom drop zz -y       # discard all tracked and untracked changes
 ```
 
-### Drop a commit by hash
-
-```bash
-git-loom drop abc123d
-# Removes the commit from history
-```
-
-### Drop a woven branch
-
-```bash
-git-loom status
-# Shows:
-# │╭─ fa [feature-a]
-# ││●  a1  ...  Add login form
-# ││●  a2  ...  Add login validation
-# │╰─── merge
-
-git-loom drop feature-a
-# Removes A1, A2, the merge commit, and deletes feature-a ref
-```
-
-### Drop a branch by short ID
-
-```bash
-git-loom drop fa
-# Same as above, using the short ID for feature-a
-```
-
-### Drop a co-located branch (preserves sibling)
-
-```bash
-git-loom status
-# Shows:
-# │╭─ fa, fb [feature-a, feature-b]
-# ││●  a1  ...  Shared commit
-# │╰─── merge
-
-git-loom drop feature-a
-# Removes feature-a ref, reassigns section to feature-b
-# Commits and merge topology are preserved for feature-b
-```
-
-### Drop a file (discard changes)
-
-```bash
-git-loom status
-# Shows: │   ma  M src/main.rs
-
-git-loom drop ma
-# Discard changes to `src/main.rs`? (y/n)
-# Restored `src/main.rs`
-```
-
-### Drop a new/untracked file
-
-```bash
-git-loom status
-# Shows: │   nf  ? new_feature.rs
-
-git-loom drop nf
-# Delete `new_feature.rs`? (y/n)
-# Deleted `new_feature.rs`
-```
-
-### Drop all local changes
-
-```bash
-git-loom drop zz
-# Discard all local changes? (y/n)
-# Discarded all local changes
-```
-
-### Drop the last commit on a branch (branch survives, empty)
-
-```bash
-git-loom status
-# Shows:
-# │╭─ fa [feature-a]
-# ││●  a1  ...  Only commit
-# │╰─── merge
-
-git-loom drop a1
-# ✓ Dropped commit a1
-#   › branch feature-a now empty, at the base
-# feature-a is no longer woven; `loom drop feature-a` removes it entirely
-```
-
-## Design Decisions
-
-### Dropping a Commit Never Deletes a Branch
-
-`drop <commit>` acts on the commit only; the branch is left empty at its base.
-This was chosen because:
-
-- It matches `fold <commit> zz`, which parks the branch the same way. Two
-  commands that remove a commit from a branch should leave the same topology
-- Deleting a ref is not recoverable from the command that asked to drop a
-  commit, and the branch may still be pushed, reviewed, or referenced
-- The empty branch is immediately reusable: rework the change and run
-  `loom commit -b <branch>`
-- Removing the branch and its commits together is already one command,
-  `loom drop <branch>`
-
-### Woven vs Non-Woven Strategy
-
-Woven and non-woven branches are handled differently because they have
-different topologies:
-
-- Woven branches have a distinct merge topology (side branch + merge commit)
-  that can be removed as a unit
-- Non-woven branches have their commits inline on the integration line,
-  so individual commit removal is the natural approach
-
-### Branch Must Be in Integration Range
-
-Dropping a branch that is not in the integration range (not between
-merge-base and HEAD) is rejected with a helpful error suggesting
-`git branch -d` instead. This was chosen because:
-
-- `git loom drop` operates on the integration topology — branches outside
-  the range are not part of the integration workflow
-- Trying to rebase-drop commits from an unreachable branch would silently
-  do nothing, which is confusing
-- The error message guides users to the right tool
-
-### Automatic Working Tree Preservation
-
-All operations automatically preserve uncommitted changes in the working tree.
-Users don't need to manually stash before dropping. Dropping a branch at the
-merge-base (which only deletes the ref) works regardless of working tree state.
-
-### Co-Located Branches Preserve Shared Commits
-
-When dropping a branch that shares its tip with another branch (co-located),
-the commits are preserved for the surviving branch. The surviving branch
-transparently inherits the topology — no manual intervention required.
-
-### Atomic Operations and Resumable Conflicts
-
-`drop branch` and working-tree operations (`drop file`, `drop zz`) are atomic:
-either they complete fully or the repository is left in its original state.
-
-`drop commit` supports resumable conflict handling. If the rebase encounters a
-conflict, the operation is paused and state is saved to `.git/loom/state.json`.
-The user resolves conflicts and runs `loom continue` or `loom abort`. While
-paused, most other loom commands are blocked.
+Dropping a woven branch removes its owned commits and merge entry; dropping a
+co-located branch removes only that ref and transfers section ownership.

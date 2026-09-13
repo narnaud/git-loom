@@ -1,32 +1,13 @@
 # Spec 016: Diff
 
+This specification is normative.
+
 ## Overview
 
 `git loom diff` shows diffs using short IDs alongside all the standard `git
 diff` reference forms. It is a thin, short-ID–aware wrapper around `git diff`
 that delegates actual rendering to git, so all pager, color, and diff-driver
 configuration is respected automatically.
-
-## Why Diff?
-
-`git diff` is a daily-use command, but its reference syntax requires full or
-partial hashes that are not immediately visible. `git-loom status` displays
-short IDs for every commit and every changed file; `loom diff` makes those IDs
-directly usable:
-
-```
-# Raw git workflow
-git log --oneline           # find the hash
-git diff abc1234            # copy-paste it
-
-# With git-loom
-git-loom status             # see "ab" next to the commit
-git-loom diff ab            # use it directly
-```
-
-Beyond convenience, the command composes naturally: the same short IDs shown
-in status work identically in `diff`, `show`, `reword`, `fold`, and every
-other loom command.
 
 ## CLI
 
@@ -61,7 +42,7 @@ Everything after a `--` separator goes to `git diff` untouched, so `--stat`,
 surface all work — including `-a` (`--text`), which loom's own `-a` shadows
 before the separator. See spec 021 for the convention.
 
-## What Happens
+## Required Translation
 
 ### When No Arguments Are Given
 
@@ -72,19 +53,11 @@ With `--staged`, `git diff --staged` is invoked instead, showing staged
 changes (index vs `HEAD`). With `--all`, `git diff HEAD` is invoked, showing
 both staged and unstaged changes in one view.
 
-**What changes:** nothing — this is a read-only inspection command.
-
-**What stays the same:** everything.
-
 ### When a Commit Is Given
 
 The token is resolved to a full hash (via short ID lookup or direct git
 reference lookup) and passed to `git diff`. This shows the diff between the
 given commit and the working tree, including both staged and unstaged changes.
-
-**What changes:** nothing.
-
-**What stays the same:** everything.
 
 ### When a File Is Given
 
@@ -95,10 +68,6 @@ with no arguments: `--staged` shows staged changes
 (`git diff --staged -- <path>`) and `--all` shows both
 (`git diff HEAD -- <path>`).
 
-**What changes:** nothing.
-
-**What stays the same:** everything.
-
 ### When a Commit Range Is Given (`left..right`)
 
 Each side of the `..` is resolved leniently: short IDs and hashes are looked
@@ -106,27 +75,11 @@ up and replaced with full hashes; anything that cannot be resolved (branch
 names, `HEAD`, tags, etc.) is passed through to git as-is. The resulting
 `<hash>..<hash>` range is forwarded to `git diff`.
 
-This means all standard git range forms work:
-
-```
-git-loom diff HEAD~3..HEAD   # last three commits
-git-loom diff main..HEAD     # divergence from main
-git-loom diff ab..3c         # short IDs on both sides
-```
-
-**What changes:** nothing.
-
-**What stays the same:** everything.
-
 ### When an Unknown Option Is Given
 
 Before the `--` separator, loom rejects it: an option loom does not define is an
 error, with a tip to pass it after `--`. After the separator it is forwarded in
 the order it was given, ahead of the pathspec loom builds from file tokens.
-
-**What changes:** nothing.
-
-**What stays the same:** everything.
 
 ### When a Commit and a File Are Both Given
 
@@ -162,120 +115,12 @@ branch names, `HEAD`, `HEAD~N`, and tags to work in ranges without error.
 
 ## Examples
 
-### Show unstaged changes
-
-```
-git-loom diff
-# Equivalent to: git diff
-```
-
-### Show staged changes
-
-```
-git-loom diff --staged
-# Equivalent to: git diff --staged
-```
-
-### Show all changes (staged and unstaged)
-
-```
-git-loom diff --all
-# Equivalent to: git diff HEAD
-```
-
-### Diff a single commit by short ID
-
-```
-git-loom status
-# ●   ab  Fix authentication bug
-
-git-loom diff ab
-# Shows what changed in that commit vs the working tree
-```
-
-### Diff a file by short ID
-
-```
-git-loom status
-# M  ma  src/auth/login.rs
-
-git-loom diff ma
-# Shows unstaged changes to src/auth/login.rs
-```
-
-### Diff a commit range using short IDs
-
-```
-git-loom status
-# ●   d0  Add login endpoint
-# ●   ab  Fix authentication bug
-
-git-loom diff ab..d0
-# Shows what changed between those two commits
-```
-
-### Diff a range using standard git references
-
-```
-git-loom diff HEAD~3..HEAD
-git-loom diff main..HEAD
-# Both work without short ID lookup
-```
-
-### Pass options through to git diff
-
-```
-git-loom diff -- --stat
-git-loom diff ma -- -w
-git-loom diff ab..d0 -- --name-only
-git-loom diff -- -a            # git's --text, which loom's own -a shadows
-```
-
-### Limit diff to a specific file at a specific commit
-
-```
+```bash
+git-loom diff ma -- --name-only
+git-loom diff ab..HEAD -- -U5
 git-loom diff ab ma
-# Equivalent to: git diff <hash-of-ab> -- src/auth/login.rs
 ```
 
-## Design Decisions
-
-### Delegation to git diff
-
-The command forwards its resolved arguments to `git diff` and lets git do the
-rendering. This preserves all user configuration: pager settings, color
-themes, diff drivers (e.g. for binary files), and external diff tools. Loom
-does not reimplement diff output.
-
-### Git's options live behind the separator
-
-Loom defines only the options it needs (`--staged`, `--all`) and takes the rest
-after a `--`. Mirroring git's option surface would guarantee drift; delegating
-means the command inherits new git options for free and reports errors in git's
-own words. See spec 021 for why a separator rather than a guess.
-
-### Lenient range endpoint resolution
-
-Range endpoints (`left..right`) use a lenient resolver that falls back to the
-raw token on failure, rather than rejecting unrecognised references. This is
-intentional: ranges frequently mix short IDs with standard git refs like
-`HEAD`, branch names, or tags. Strict resolution would block these common
-forms. If a token is genuinely invalid, git will report the error with its
-usual diagnostic.
-
-### File diffs compared against the index, HEAD, or working tree
-
-When a file is specified without an explicit commit, the comparison base
-follows the same rule as the no-argument case: unstaged changes by default,
-staged changes with `--staged`, and all changes (`git diff HEAD -- <path>`)
-with `--all`. This keeps file diffs consistent with whole-tree diffs and lets
-the user choose precisely which changes to inspect.
-
-### File before commit in resolution priority
-
-When a single token could be either a file short ID or a commit short ID, the
-file interpretation wins. Short IDs for files are allocated from the working
-tree change list and are typically two characters; commit short IDs are also
-two characters. Preferring file resolution matches the principle of least
-surprise: if you see a changed file in status and type its ID into `diff`, you
-get the file diff, not an unexpected commit diff.
+The last form becomes `git diff <hash-of-ab> -- <path-of-ma>`. Git performs
+rendering and diagnostics, preserving pager, color, diff-driver, and external
+diff configuration. See Spec 021 for forwarding semantics.
