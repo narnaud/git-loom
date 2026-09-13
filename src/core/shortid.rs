@@ -65,7 +65,8 @@ impl IdAllocator {
 /// For commits, candidates are successive prefixes of the hex hash (2, 3, 4…).
 fn generate_candidates(entity: &Entity) -> Vec<String> {
     let candidates = match entity {
-        Entity::Unstaged => vec!["zz".to_string()],
+        // `zz` belongs to unstaged changes, which commands match literally.
+        Entity::Unstaged => return vec!["zz".to_string()],
         Entity::Commit(oid) => {
             let hex = oid.to_string();
             let chars: Vec<char> = hex.chars().collect();
@@ -86,8 +87,21 @@ fn generate_candidates(entity: &Entity) -> Vec<String> {
             word_candidates(stem)
         }
     };
-    // Short IDs are always lowercase for consistency.
-    candidates.into_iter().map(|c| c.to_lowercase()).collect()
+    // Short IDs are always lowercase for consistency. Any other entity holding
+    // `zz` would be unaddressable when the worktree is clean, so drop it.
+    let candidates: Vec<String> = candidates
+        .into_iter()
+        .map(|c| c.to_lowercase())
+        .filter(|c| c != "zz")
+        .collect();
+
+    if candidates.is_empty() {
+        // Reached when every candidate was `zz` (an entity literally named
+        // `zz`), or when the name yielded no candidates at all.
+        vec!["zz1".to_string()]
+    } else {
+        candidates
+    }
 }
 
 /// Build candidate IDs from a name, splitting on `-`, `_`, `/`.

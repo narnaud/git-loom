@@ -241,3 +241,15 @@ fn collision_shifts_forward_single_word() {
     assert_eq!(alloc.get_branch("main"), "ma");
     assert_eq!(alloc.get_branch("mainstream"), "mi");
 }
+
+#[test]
+fn zz_is_never_generated_for_other_entities() {
+    // "zoo-zulu" would naturally want "zz", and "zz.rs" has no other candidate.
+    let alloc = IdAllocator::new(vec![
+        Entity::Branch("zoo-zulu".to_string()),
+        Entity::File("zz.rs".to_string()),
+    ]);
+    assert_ne!(alloc.get_branch("zoo-zulu"), "zz");
+    // "zz.rs" exhausts its candidates, so it falls back to the reserved escape.
+    assert_eq!(alloc.get_file("zz.rs"), "zz1");
+}
