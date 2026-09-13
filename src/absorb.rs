@@ -27,23 +27,21 @@ struct AbsorbContext {
     num_commits: usize,
 }
 
-/// Per-hunk analysis result.
 enum HunkAnalysis {
-    /// Hunk assigned to a specific in-scope commit.
+    /// Assigned to a specific in-scope commit.
     Assigned { commit_oid: Oid },
-    /// Hunk skipped with a reason.
+    /// Not absorbable; `reason` says why.
     Skipped { reason: String },
 }
 
-/// Result of analyzing a single file.
 enum FileAnalysis {
     /// All hunks assigned to the same commit (whole-file absorb).
     Assigned { commit_oid: Oid },
-    /// Hunks split across multiple targets or some skipped.
+    /// Hunks split across multiple targets, or some skipped.
     Split {
         hunks: Vec<(DiffHunk, HunkAnalysis)>,
     },
-    /// Entire file skipped.
+    /// Not absorbable; `reason` says why.
     Skipped { reason: String },
 }
 
@@ -90,9 +88,8 @@ pub fn run(dry_run: bool, user_files: Vec<String>) -> Result<()> {
     apply_plan(&repo, workdir, &git_dir, plan)
 }
 
-/// Analyze changed files and build an absorb plan.
-///
-/// Prints each assignment as it's determined. Returns an error if nothing can be absorbed.
+/// Analyze changed files and build an absorb plan, printing each assignment as
+/// it is determined. Errors if nothing can be absorbed.
 fn build_plan(
     repo: &Repository,
     workdir: &Path,
@@ -261,7 +258,6 @@ fn apply_plan(repo: &Repository, workdir: &Path, git_dir: &Path, plan: AbsorbPla
     // Save diffs for skipped files and restore their working-tree state before the rebase.
     let skipped_patch = save_skipped_patch(workdir, &plan.skipped_files)?;
 
-    // Build Weave with the fixup commits.
     let repo2 = Repository::discover(workdir)?;
     let mut graph = Weave::from_repo(&repo2)?;
     for (fixup_oid, target_oid) in &fixup_pairs {
@@ -277,9 +273,8 @@ fn apply_plan(repo: &Repository, workdir: &Path, git_dir: &Path, plan: AbsorbPla
     let state = LoomState {
         command: "absorb".to_string(),
         rollback: Rollback {
-            // reset_hard_to undoes the fixup commits created before the rebase.
-            // git rebase --abort restores HEAD to after the fixup commits, not to
-            // the original pre-absorb HEAD, so we must hard-reset to fully undo them.
+            // `git rebase --abort` restores HEAD to after the fixup commits, so
+            // reset_hard_to has to go further back to undo them.
             reset_hard_to: saved_head.to_string(),
             saved_staged_patch: saved_staged.clone(),
             saved_worktree_patch: saved_worktree.clone(),
@@ -313,9 +308,8 @@ fn apply_plan(repo: &Repository, workdir: &Path, git_dir: &Path, plan: AbsorbPla
     Ok(())
 }
 
-/// Create fixup commits for each whole-file and hunk-level assignment.
-///
-/// On any failure, rolls back to the pre-mutation state (reset hard, restore refs and patches)
+/// Create fixup commits for each whole-file and hunk-level assignment, rolling
+/// back to the pre-mutation state on any failure.
 /// before returning the error.
 fn create_fixup_commits(
     repo: &Repository,
@@ -389,10 +383,9 @@ fn save_skipped_patch(workdir: &Path, skipped_files: &[String]) -> Result<Option
 }
 
 /// Roll back pre-rebase mutations: reset hard, restore refs and saved patches.
-///
-/// Used when a failure occurs during fixup commit creation, before any rebase has started.
-/// This is distinct from `Rollback::apply_abort()`, which handles post-conflict abort and
-/// trusts `git rebase --abort --update-refs` to restore branch refs.
+/// For a failure during fixup creation, before any rebase started — unlike
+/// `Rollback::apply_abort()`, which trusts `git rebase --abort --update-refs`
+/// to restore branch refs.
 fn rollback_pre_rebase(workdir: &Path, state: &PreRebaseState<'_>) {
     let _ = git::reset_hard(workdir, state.saved_head);
     let _ = repo::restore_branch_refs(workdir, state.saved_refs);
@@ -467,7 +460,6 @@ fn commit_label(
     format!("{} \"{}\"{}", short, message, branch_info)
 }
 
-/// Print a whole-file assignment line.
 fn print_assignment(
     file: &str,
     commit_oid: Oid,
@@ -481,7 +473,6 @@ fn print_assignment(
     );
 }
 
-/// Print a hunk-level assignment line.
 fn print_hunk_assignment(
     file: &str,
     hunk_num: usize,
@@ -509,7 +500,6 @@ fn get_changed_files(
     user_files: &[String],
 ) -> Result<Vec<String>> {
     if user_files.is_empty() {
-        // All tracked files with uncommitted changes
         let output = git::diff_head_name_only(workdir)?;
         Ok(output
             .lines()
@@ -579,7 +569,6 @@ fn analyze_file(
         })
         .collect();
 
-    // Collect unique assigned commits
     let assigned_oids: HashSet<Oid> = analyzed
         .iter()
         .filter_map(|(_, a)| match a {

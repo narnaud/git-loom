@@ -60,7 +60,6 @@ pub fn run(branch: Option<String>) -> Result<()> {
     Ok(())
 }
 
-/// Resolve a branch argument to a woven branch name.
 fn resolve_woven_branch(
     repo: &git2::Repository,
     info: &repo::RepoInfo,

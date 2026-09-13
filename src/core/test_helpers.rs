@@ -1,18 +1,12 @@
-/// Shared test utilities for git repository testing.
-///
-/// Provides a clean API for creating and manipulating test repositories,
-/// reducing boilerplate in test code.
+/// Shared test utilities for creating and manipulating test repositories.
 use git2::{BranchType, Repository, Signature};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tempfile::TempDir;
 
-/// Global mutex to serialize `in_dir` calls.
-///
-/// `std::env::set_current_dir` mutates process-global state, and Cargo runs
-/// tests in parallel threads.  Without serialization two concurrent `in_dir`
-/// calls would corrupt each other's working directory.
+/// Global mutex to serialize `in_dir` calls: `set_current_dir` mutates
+/// process-global state, and Cargo runs tests in parallel threads.
 static IN_DIR_LOCK: Mutex<()> = Mutex::new(());
 
 /// Whether `output` mentions `path`.
@@ -37,7 +31,6 @@ impl TestRepo {
         let repo = Repository::init(dir.path()).unwrap();
         Self::configure_identity(&repo);
 
-        // Create an initial commit
         {
             let sig = Self::sig();
             let tree_id = repo.index().unwrap().write_tree().unwrap();
@@ -57,25 +50,17 @@ impl TestRepo {
         TestRepo { repo, _dir: dir }
     }
 
-    /// Create a test repository with a remote (bare repo) and an integration branch.
-    ///
-    /// Sets up:
-    /// - A bare "remote" repository at remote.git
-    /// - A cloned working repository
-    /// - An initial commit on the main branch
-    /// - An integration branch tracking origin/main
-    ///
-    /// This mimics a typical development setup with an upstream remote.
+    /// Create a test repository with a bare "remote" at remote.git, a clone of it
+    /// with an initial commit on `main`, and an `integration` branch tracking
+    /// `origin/main` — a typical development setup.
     pub fn new_with_remote() -> Self {
         let dir = tempfile::tempdir().unwrap();
 
-        // Create a bare "remote"
         let remote_path = dir.path().join("remote.git");
         let remote_repo = Repository::init_bare(&remote_path).unwrap();
         // Ensure HEAD points to main regardless of system default
         remote_repo.set_head("refs/heads/main").unwrap();
 
-        // Create initial commit in the bare repo so it has a main branch
         {
             let sig = Self::sig();
             let tree_id = {
@@ -88,18 +73,15 @@ impl TestRepo {
                 .unwrap();
         }
 
-        // Clone it
         let work_path = dir.path().join("work");
         let repo = Repository::clone(remote_path.to_str().unwrap(), &work_path).unwrap();
         Self::configure_identity(&repo);
 
-        // Create integration branch pointing at main, tracking origin/main
         {
             let head_commit = repo.head().unwrap().peel_to_commit().unwrap();
             repo.branch("integration", &head_commit, false).unwrap();
             repo.set_head("refs/heads/integration").unwrap();
 
-            // Set upstream tracking
             let mut integration = repo.find_branch("integration", BranchType::Local).unwrap();
             integration.set_upstream(Some("origin/main")).unwrap();
         }
@@ -164,14 +146,7 @@ impl TestRepo {
         Signature::now("Test", "test@test.com").unwrap()
     }
 
-    /// Create a commit with a file.
-    ///
-    /// # Arguments
-    /// * `message` - The commit message
-    /// * `filename` - The filename to create/modify
-    ///
-    /// # Returns
-    /// The OID of the created commit
+    /// Create a commit that writes `filename`.
     pub fn commit(&self, message: &str, filename: &str) -> git2::Oid {
         self.commit_with_sig(message, filename, &Self::sig())
     }
@@ -212,13 +187,7 @@ impl TestRepo {
         }
     }
 
-    /// Create a commit without changing files (using current tree).
-    ///
-    /// # Arguments
-    /// * `message` - The commit message
-    ///
-    /// # Returns
-    /// The OID of the created commit
+    /// Create a commit without changing files (reusing the current tree).
     pub fn commit_empty(&self, message: &str) -> git2::Oid {
         let sig = Self::sig();
         let tree_id = {
@@ -240,14 +209,6 @@ impl TestRepo {
     }
 
     /// Create a merge commit combining two parent commits.
-    ///
-    /// # Arguments
-    /// * `message` - The commit message
-    /// * `parent1_oid` - OID of the first parent
-    /// * `parent2_oid` - OID of the second parent
-    ///
-    /// # Returns
-    /// The OID of the merge commit
     pub fn commit_merge(
         &self,
         message: &str,
@@ -263,20 +224,7 @@ impl TestRepo {
             .unwrap()
     }
 
-    /// Get a commit relative to HEAD.
-    ///
-    /// # Arguments
-    /// * `steps_back` - Number of steps back from HEAD (0 = HEAD, 1 = HEAD~1, etc.)
-    ///
-    /// # Returns
-    /// The commit at the specified position
-    ///
-    /// # Example
-    /// ```ignore
-    /// let head = test_repo.get_commit(0);      // HEAD
-    /// let parent = test_repo.get_commit(1);    // HEAD~1
-    /// let grandparent = test_repo.get_commit(2); // HEAD~2
-    /// ```
+    /// Get a commit relative to HEAD (0 = HEAD, 1 = HEAD~1, …).
     pub fn get_commit(&self, steps_back: usize) -> git2::Commit<'_> {
         let mut commit = self.repo.head().unwrap().peel_to_commit().unwrap();
         for _ in 0..steps_back {
@@ -315,11 +263,9 @@ impl TestRepo {
         self.repo.workdir().unwrap().to_path_buf()
     }
 
-    /// Run a closure with the current directory set to the repo's working directory.
-    ///
-    /// Holds a global mutex so that concurrent test threads cannot corrupt
-    /// each other's process-wide cwd, and uses a drop guard to guarantee the
-    /// original directory is restored even if the closure panics.
+    /// Run a closure with the current directory set to the repo's working
+    /// directory, under a global mutex and a drop guard so concurrent test
+    /// threads cannot corrupt each other's cwd even on a panic.
     pub fn in_dir<F, R>(&self, f: F) -> R
     where
         F: FnOnce() -> R,
@@ -329,7 +275,6 @@ impl TestRepo {
         let restore = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         std::env::set_current_dir(self.workdir()).unwrap();
 
-        // Drop guard: restores cwd whether `f` returns normally or panics.
         struct RestoreDir(PathBuf);
         impl Drop for RestoreDir {
             fn drop(&mut self) {
@@ -432,22 +377,12 @@ impl TestRepo {
     }
 
     /// Create a branch at a specific commit.
-    ///
-    /// # Arguments
-    /// * `name` - The branch name
-    /// * `oid` - The commit OID where the branch should point
     pub fn create_branch_at_commit(&self, name: &str, oid: git2::Oid) -> git2::Branch<'_> {
         let commit = self.find_commit(oid);
         self.repo.branch(name, &commit, false).unwrap()
     }
 
-    /// Get the target OID of a remote branch.
-    ///
-    /// # Arguments
-    /// * `name` - The remote branch name (e.g., "origin/main")
-    ///
-    /// # Returns
-    /// The OID that the remote branch points to
+    /// Get the target OID of a remote branch (e.g. "origin/main").
     pub fn find_remote_branch_target(&self, name: &str) -> git2::Oid {
         self.repo
             .find_branch(name, BranchType::Remote)
@@ -457,16 +392,7 @@ impl TestRepo {
             .unwrap()
     }
 
-    /// Get the target OID of a branch.
-    ///
-    /// # Arguments
-    /// * `name` - The branch name
-    ///
-    /// # Returns
-    /// The OID that the branch points to
-    ///
-    /// # Panics
-    /// Panics if the branch doesn't exist
+    /// Get the target OID of a branch. Panics if it does not exist.
     pub fn get_branch_target(&self, name: &str) -> git2::Oid {
         self.repo
             .find_branch(name, BranchType::Local)
@@ -477,23 +403,15 @@ impl TestRepo {
     }
 
     /// Set HEAD to a detached state at a specific commit.
-    ///
-    /// # Arguments
-    /// * `oid` - The commit OID to detach HEAD to
     pub fn set_detached_head(&self, oid: git2::Oid) {
         self.repo.set_head_detached(oid).unwrap();
     }
 
-    /// Set up a fake editor that replaces commit messages.
+    /// Set up a fake editor that replaces commit messages, returning the script
+    /// path.
     ///
     /// Only reaches `run_git_interactive` commands: `run_git_captured` sets
     /// `GIT_EDITOR=true` itself, so captured commands ignore it.
-    ///
-    /// # Arguments
-    /// * `new_message` - The message that the fake editor will write
-    ///
-    /// # Returns
-    /// The path to the editor script (for reference)
     pub fn set_fake_editor(&self, new_message: &str) -> String {
         // Git on Windows uses Git Bash, so we use the same shell command format for all platforms
         let editor_script = format!("sh -c 'echo \"{}\" > \"$1\"' --", new_message);
@@ -509,9 +427,7 @@ impl TestRepo {
         editor_script
     }
 
-    /// Get the path to the remote repository (if created with new_with_remote).
-    ///
-    /// Returns None if the repository doesn't have a remote.git setup.
+    /// Path to the remote repository, `None` without a remote.git setup.
     pub fn remote_path(&self) -> Option<PathBuf> {
         let remote_path = self._dir.path().join("remote.git");
         if remote_path.exists() {
@@ -521,15 +437,8 @@ impl TestRepo {
         }
     }
 
-    /// Add commits directly to the remote repository.
-    ///
-    /// This is useful for simulating upstream changes.
-    ///
-    /// # Arguments
-    /// * `messages` - Commit messages to add to the remote's main branch
-    ///
-    /// # Returns
-    /// OID of the last commit added
+    /// Add commits to the remote's main branch, simulating upstream changes.
+    /// Returns the OID of the last one.
     pub fn add_remote_commits(&self, messages: &[&str]) -> git2::Oid {
         let remote_path = self.remote_path().expect("No remote repository found");
         let remote_repo = Repository::open_bare(&remote_path).unwrap();
@@ -581,7 +490,6 @@ impl TestRepo {
             .unwrap();
         let parent = remote_repo.find_commit(remote_tip).unwrap();
 
-        // Diff the local commit against its parent to find changed files
         let local_commit = self.repo.find_commit(local_oid).unwrap();
         let local_tree = local_commit.tree().unwrap();
         let local_parent_tree = local_commit.parent(0).unwrap().tree().unwrap();
@@ -590,7 +498,6 @@ impl TestRepo {
             .diff_tree_to_tree(Some(&local_parent_tree), Some(&local_tree), None)
             .unwrap();
 
-        // Start from the remote tip's tree and overlay changed files
         let remote_parent_tree = parent.tree().unwrap();
         let mut builder = remote_repo.treebuilder(Some(&remote_parent_tree)).unwrap();
 
@@ -634,9 +541,7 @@ impl TestRepo {
             .unwrap()
     }
 
-    /// Fetch from the remote repository.
-    ///
-    /// Updates origin/* references in the working repository.
+    /// Fetch from the remote repository, updating origin/* references.
     pub fn fetch_remote(&self) {
         self.repo
             .find_remote("origin")
@@ -742,10 +647,7 @@ impl TestRepo {
             .is_ok()
     }
 
-    /// Create a commit touching multiple files at once.
-    ///
-    /// Each entry is a `(filename, content)` pair.  Uses the git2 API
-    /// directly so it stays consistent with the single-file `commit()`.
+    /// Create a commit touching multiple `(filename, content)` files at once.
     pub fn commit_multi(&self, files: &[(&str, &str)], message: &str) -> git2::Oid {
         for (filename, content) in files {
             self.write_file(filename, content);
@@ -783,15 +685,6 @@ impl TestRepo {
 }
 
 /// Builder for creating test repositories with a fluent API.
-///
-/// # Example
-/// ```ignore
-/// let test_repo = TestRepoBuilder::new()
-///     .commit("First commit", "file1.txt")
-///     .commit("Second commit", "file2.txt")
-///     .branch("feature")
-///     .build();
-/// ```
 pub struct TestRepoBuilder {
     repo: TestRepo,
 }
@@ -868,7 +761,6 @@ mod tests {
         assert_eq!(repo.get_message(0), "Third");
         assert_eq!(repo.get_message(1), "Second");
 
-        // Verify branch was created
         assert!(
             repo.repo
                 .find_branch("feature", git2::BranchType::Local)

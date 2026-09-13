@@ -3,9 +3,7 @@
 set -euo pipefail
 source "$(dirname "$0")/helpers.sh"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PRECONDITIONS
-# ══════════════════════════════════════════════════════════════════════════════
+# ── PRECONDITIONS ─────────────────────────────────────────────────────────────
 
 describe "precond: not in a git repository"
 new_tmpdir TMP_NOGIT
@@ -24,9 +22,7 @@ setup_repo_with_remote
 gl_capture split "zzzz9999" -m "msg" file.txt
 assert_exit_fail "$CODE" "precond_unknown_short"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# VALIDATION — SINGLE-FILE COMMIT
-# ══════════════════════════════════════════════════════════════════════════════
+# ── VALIDATION — SINGLE-FILE COMMIT ───────────────────────────────────────────
 
 describe "single-file HEAD commit is rejected with clear message"
 setup_repo_with_remote
@@ -53,9 +49,7 @@ gl_capture split "$short_id" -m "First part" only.txt
 assert_exit_fail "$CODE" "single_file_shortid_fail"
 assert_contains "$OUT" "only one file" "single_file_shortid_msg"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# VALIDATION — OTHER ERRORS
-# ══════════════════════════════════════════════════════════════════════════════
+# ── VALIDATION — OTHER ERRORS ─────────────────────────────────────────────────
 
 describe "merge commit is rejected with clear message"
 setup_repo_with_remote
@@ -79,9 +73,7 @@ gl_capture split HEAD -m "First part" qa.txt qb.txt
 assert_exit_fail "$CODE" "all_files_fail"
 assert_contains "$OUT" "at least one file for the second commit" "all_files_err_msg"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# HEAD SPLIT
-# ══════════════════════════════════════════════════════════════════════════════
+# ── HEAD SPLIT ────────────────────────────────────────────────────────────────
 
 describe "split HEAD: commit messages are assigned correctly"
 setup_repo_with_remote
@@ -92,9 +84,7 @@ git -C "$WORK" commit -q -m "HEAD two files"
 out=$(gl split HEAD -m "First part" ha.txt)
 assert_exit_ok $? "head_split_ok"
 assert_contains "$out" "Split" "head_split_success_msg"
-# Second commit (HEAD) keeps original message
 assert_head_msg "HEAD two files" "head_split_second_msg"
-# First commit (HEAD~1) gets new message
 assert_msg_at 1 "First part" "head_split_first_msg"
 
 describe "split HEAD: files are distributed between the two commits"
@@ -154,9 +144,7 @@ assert_contains "$files_in_first" "ta.txt" "three_file_first_has_ta"
 assert_contains "$files_in_first" "tb.txt" "three_file_first_has_tb"
 assert_not_contains "$files_in_first" "tc.txt" "three_file_first_no_tc"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# NON-HEAD SPLIT
-# ══════════════════════════════════════════════════════════════════════════════
+# ── NON-HEAD SPLIT ────────────────────────────────────────────────────────────
 
 describe "split non-HEAD commit by full hash: messages assigned correctly"
 setup_repo_with_remote
@@ -169,11 +157,8 @@ commit_file "Later commit" "later.txt"
 out=$(gl split "$target_hash" -m "Non-HEAD first part" na.txt)
 assert_exit_ok $? "nonhead_split_hash_ok"
 assert_contains "$out" "Split" "nonhead_split_hash_success_msg"
-# HEAD is still the later commit
 assert_head_msg "Later commit" "nonhead_split_later_preserved"
-# HEAD~1 is the second split commit (original message)
 assert_msg_at 1 "Non-HEAD two files" "nonhead_split_second_msg"
-# HEAD~2 is the first split commit (new message)
 assert_msg_at 2 "Non-HEAD first part" "nonhead_split_first_msg"
 
 describe "split non-HEAD commit by full hash: files distributed correctly"
@@ -217,15 +202,12 @@ target_hash="$(head_hash)"
 commit_file "Above 1" "above1.txt"
 commit_file "Above 2" "above2.txt"
 gl split "$target_hash" -m "Split first" ra.txt
-# History from top: "Above 2", "Above 1", "Target to split" (second), "Split first"
 assert_head_msg "Above 2" "preserve_above2"
 assert_msg_at 1 "Above 1" "preserve_above1"
 assert_msg_at 2 "Target to split" "preserve_second_split"
 assert_msg_at 3 "Split first" "preserve_first_split"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# WOVEN BRANCH PRESERVATION
-# ══════════════════════════════════════════════════════════════════════════════
+# ── WOVEN BRANCH PRESERVATION ─────────────────────────────────────────────────
 
 describe "split commit in woven branch: branch ref and merge topology preserved"
 setup_repo_with_remote
@@ -241,7 +223,6 @@ weave_branch "g-woven"
 out=$(gl split "$target_hash" -m "Woven first part" wa.txt)
 assert_exit_ok $? "woven_split_ok"
 assert_branch_exists "g-woven" "woven_branch_still_exists"
-# Integration HEAD should still be a merge commit
 assert_head_parent_count 2 "woven_merge_topology_preserved"
 
 describe "split commit in woven branch: g-woven ref points to second commit"
@@ -260,9 +241,7 @@ gl split "$target_hash" -m "Woven extracted" xa.txt
 branch_tip_msg=$(git -C "$WORK" log -1 --pretty=%s g-woven2)
 assert_eq "$branch_tip_msg" "Woven split target" "woven_branch_tip_is_second_commit"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# STAGED CHANGES PRESERVATION
-# ══════════════════════════════════════════════════════════════════════════════
+# ── STAGED CHANGES PRESERVATION ───────────────────────────────────────────────
 
 describe "pre-existing staged changes are preserved after HEAD split"
 setup_repo_with_remote

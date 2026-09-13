@@ -3,9 +3,7 @@
 set -euo pipefail
 source "$(dirname "$0")/helpers.sh"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PRECONDITIONS
-# ══════════════════════════════════════════════════════════════════════════════
+# ── PRECONDITIONS ─────────────────────────────────────────────────────────────
 
 describe "precond: unknown target is rejected"
 setup_repo_with_remote
@@ -17,9 +15,7 @@ setup_repo_with_remote
 gl_capture show "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 assert_exit_fail "$CODE" "precond_unknown_hash"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# SHOW BY GIT REFERENCE
-# ══════════════════════════════════════════════════════════════════════════════
+# ── SHOW BY GIT REFERENCE ─────────────────────────────────────────────────────
 
 describe "show HEAD commit by full hash shows message and diff"
 setup_repo_with_remote
@@ -69,9 +65,7 @@ out=$(gl show "$hash")
 assert_exit_ok $? "show_content_ok"
 assert_contains "$out" "hello from content" "show_content_in_diff"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# SHOW BRANCH TIP
-# ══════════════════════════════════════════════════════════════════════════════
+# ── SHOW BRANCH TIP ───────────────────────────────────────────────────────────
 
 describe "show branch name displays its tip commit"
 setup_repo_with_remote
@@ -103,9 +97,7 @@ out=$(gl show integration)
 assert_exit_ok $? "show_integration_ok"
 assert_contains "$out" "Integration HEAD commit" "show_integration_msg"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# SHOW BY SHORT ID
-# ══════════════════════════════════════════════════════════════════════════════
+# ── SHOW BY SHORT ID ──────────────────────────────────────────────────────────
 
 describe "show commit by short ID"
 setup_repo_with_remote
@@ -148,9 +140,7 @@ assert_exit_ok $? "show_equiv_sid_ok"
 assert_contains "$out_sid" "Equiv show commit" "show_equiv_sid_msg"
 assert_contains "$out_sid" "equiv-show.txt"    "show_equiv_sid_file"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# GIT OPTION PASSTHROUGH
-# ══════════════════════════════════════════════════════════════════════════════
+# ── GIT OPTION PASSTHROUGH ────────────────────────────────────────────────────
 
 describe "an option after -- is passed to git show"
 setup_repo_with_remote
@@ -206,9 +196,7 @@ commit_file "Bogus option commit" "bogus.txt"
 gl_capture show -- --definitely-not-a-git-option
 assert_exit_fail "$CODE" "show_bogus_option_fails"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# ALIAS
-# ══════════════════════════════════════════════════════════════════════════════
+# ── ALIAS ─────────────────────────────────────────────────────────────────────
 
 describe "gl sh alias works identically to gl show"
 setup_repo_with_remote

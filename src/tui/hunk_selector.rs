@@ -16,9 +16,7 @@ use crate::tui::widgets::common::pane_block;
 use crate::tui::widgets::hunk_view::{HunkEvent, HunkView};
 use crate::tui::widgets::list_pane::ListPane;
 
-// ---------------------------------------------------------------------------
-// Data model
-// ---------------------------------------------------------------------------
+// ── Data model ───────────────────────────────────────────────────────────
 
 /// Where a hunk came from — determines how to apply/reverse on confirm.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -129,9 +127,7 @@ pub(crate) struct HunkSelectorApp {
     theme: TuiTheme,
 }
 
-// ---------------------------------------------------------------------------
-// Tree helpers
-// ---------------------------------------------------------------------------
+// ── Tree helpers ─────────────────────────────────────────────────────────
 
 /// Extract the directory portion of a path, or `""` for root-level files.
 fn directory_of(path: &str) -> &str {
@@ -176,9 +172,7 @@ fn build_display_rows(files: &[FileEntry]) -> Vec<DisplayRow> {
     rows
 }
 
-// ---------------------------------------------------------------------------
-// App logic
-// ---------------------------------------------------------------------------
+// ── App logic ────────────────────────────────────────────────────────────
 
 impl HunkSelectorApp {
     pub(crate) fn new(files: Vec<FileEntry>, theme: TuiTheme) -> Self {
@@ -409,9 +403,7 @@ impl HunkSelectorApp {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Shell integration
-// ---------------------------------------------------------------------------
+// ── Shell integration ────────────────────────────────────────────────────
 
 impl ShellApp for HunkSelectorApp {
     type Exit = Verdict;
@@ -511,9 +503,7 @@ impl ShellApp for HunkSelectorApp {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Public entry point
-// ---------------------------------------------------------------------------
+// ── Public entry point ───────────────────────────────────────────────────
 
 /// Run the interactive hunk selector TUI.
 ///

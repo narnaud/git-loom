@@ -17,10 +17,8 @@ fn commit_or_editor(workdir: &std::path::Path, message: Option<&str>) -> Result<
     }
 }
 
-/// Split a commit into two sequential commits.
-///
-/// Dispatches based on the resolved target type:
-/// - Commit → split the commit by selecting files (or hunks with `-p`) for the first commit
+/// Split a commit into two sequential commits, selecting files (or hunks with
+/// `-p`) for the first one.
 pub fn run(
     target: String,
     message: Option<String>,
@@ -133,9 +131,7 @@ fn split_commit(
     )
 }
 
-/// Split a commit with pre-selected files (no interactive picker).
-///
-/// Bypasses the interactive file picker — useful for tests.
+/// Split a commit with pre-selected files, bypassing the picker (for tests).
 #[cfg(test)]
 pub fn split_commit_with_selection(
     repo: &Repository,
@@ -174,9 +170,8 @@ fn run_split(
     let is_head = repo::head_oid(repo)? == commit_oid;
     let oid_str = commit_oid.to_string();
     let short_hash = git::short_hash(&oid_str);
-    // Save pre-existing staged changes so reset --mixed doesn't discard them.
-    // (For non-HEAD splits, the rebase autostash handles this, but saving
-    // here is harmless — it will be empty.)
+    // Save pre-existing staged changes so `reset --mixed` does not discard them.
+    // (Empty for non-HEAD splits, where the rebase autostash handles it.)
     let saved_staged = staging::save_and_unstage_staged(repo, workdir)?;
     let split_result = do_split(is_head);
     // Restore pre-existing staged changes regardless of outcome.
@@ -205,9 +200,8 @@ fn perform_non_head_with(
         Ok(hashes) => hashes,
         Err(e) => return Err(git::rebase_abort_then_cleanup(workdir, e, || {})),
     };
-    // Continue the rebase — later commits are replayed on top of the split
-    // commits, so hash1 and hash2 remain valid (they are ancestors).
-    // Abort automatically on conflict — split does not save LoomState.
+    // Continue the rebase: later commits replay on top of the split commits, so
+    // hash1/hash2 stay valid. Aborts on conflict — split saves no LoomState.
     git::continue_rebase_expecting_edit(workdir)?;
     Ok(result)
 }

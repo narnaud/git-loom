@@ -6,20 +6,16 @@ use crate::core::test_helpers::TestRepo;
 fn absorb_single_file() {
     let test_repo = TestRepo::new_with_remote();
 
-    // Create a commit that introduces file1.txt with specific content
     test_repo.commit("Add file1", "file1.txt");
 
-    // Modify file1.txt in the working tree (change existing content)
     test_repo.write_file("file1.txt", "modified content");
 
     test_repo.in_dir(|| {
         let result = super::run(false, vec![]);
         assert!(result.is_ok(), "absorb failed: {:?}", result);
 
-        // file1.txt should now be clean (absorbed into the commit)
         test_repo.assert_working_tree_clean();
 
-        // Commit message should be preserved
         assert_eq!(test_repo.get_message(0), "Add file1");
     });
 }
@@ -31,7 +27,6 @@ fn absorb_multiple_files_different_commits() {
     test_repo.commit("Add file1", "file1.txt");
     test_repo.commit("Add file2", "file2.txt");
 
-    // Modify both files
     test_repo.write_file("file1.txt", "modified file1");
     test_repo.write_file("file2.txt", "modified file2");
 
@@ -39,10 +34,8 @@ fn absorb_multiple_files_different_commits() {
         let result = super::run(false, vec![]);
         assert!(result.is_ok(), "absorb failed: {:?}", result);
 
-        // Both files should be clean
         test_repo.assert_working_tree_clean();
 
-        // Commit messages preserved
         assert_eq!(test_repo.get_message(0), "Add file2");
         assert_eq!(test_repo.get_message(1), "Add file1");
     });
@@ -53,7 +46,6 @@ fn absorb_skips_new_file() {
     let test_repo = TestRepo::new_with_remote();
     test_repo.commit("Add file1", "file1.txt");
 
-    // Modify tracked file and create a new untracked file
     test_repo.write_file("file1.txt", "modified");
     test_repo.write_file("new_file.txt", "brand new");
 
@@ -67,7 +59,6 @@ fn absorb_skips_new_file() {
         );
         assert!(result.is_ok(), "absorb failed: {:?}", result);
 
-        // new_file.txt should still exist in working tree (skipped)
         assert_eq!(test_repo.read_file("new_file.txt"), "brand new");
     });
 }
@@ -75,12 +66,10 @@ fn absorb_skips_new_file() {
 #[test]
 fn absorb_skips_pure_addition() {
     let test_repo = TestRepo::new_with_remote();
-    // Write multi-line content and commit it manually (so file content != message)
     test_repo.write_file("file1.txt", "line1\nline2\n");
     test_repo.stage_files(&["file1.txt"]);
     test_repo.commit_staged("Add file1");
 
-    // Add lines without modifying existing ones
     test_repo.write_file("file1.txt", "line1\nline2\nnew line3\n");
 
     test_repo.in_dir(|| {
@@ -116,7 +105,6 @@ fn absorb_dry_run() {
             "dry-run should not modify HEAD"
         );
 
-        // Working tree changes should still be there
         assert_eq!(test_repo.read_file("file1.txt"), "modified content");
     });
 }
@@ -127,16 +115,13 @@ fn absorb_with_file_filter() {
     test_repo.commit("Add file1", "file1.txt");
     test_repo.commit("Add file2", "file2.txt");
 
-    // Modify both files
     test_repo.write_file("file1.txt", "modified file1");
     test_repo.write_file("file2.txt", "modified file2");
 
     test_repo.in_dir(|| {
-        // Only absorb file1
         let result = super::run(false, vec!["file1.txt".to_string()]);
         assert!(result.is_ok(), "absorb failed: {:?}", result);
 
-        // file2.txt should still have uncommitted changes
         assert_eq!(
             test_repo.read_file("file2.txt"),
             "modified file2",
@@ -166,22 +151,18 @@ fn absorb_no_changes_error() {
 fn absorb_preserves_skipped_changes() {
     let test_repo = TestRepo::new_with_remote();
 
-    // Create an absorbable file
     test_repo.commit("Add tracked", "tracked.txt");
 
-    // Modify tracked file (will be absorbed) and create a new untracked file
     test_repo.write_file("tracked.txt", "modified tracked");
     test_repo.write_file("untracked.txt", "new content");
 
     test_repo.in_dir(|| {
-        // Pass both files explicitly — untracked.txt will be skipped (new file)
         let result = super::run(
             false,
             vec!["tracked.txt".to_string(), "untracked.txt".to_string()],
         );
         assert!(result.is_ok(), "absorb failed: {:?}", result);
 
-        // untracked.txt should still exist with its content (skipped)
         assert_eq!(test_repo.read_file("untracked.txt"), "new content");
     });
 }
@@ -204,7 +185,6 @@ fn absorb_skips_multiple_sources() {
 
     test_repo.in_dir(|| {
         let result = super::run(true, vec![]);
-        // All files should be skipped → error
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(
@@ -219,10 +199,8 @@ fn absorb_skips_multiple_sources() {
 fn absorb_skips_out_of_scope() {
     let test_repo = TestRepo::new_with_remote();
 
-    // Create a commit on the integration branch
     test_repo.commit("In-scope commit", "in_scope.txt");
 
-    // Modify the in-scope file - verify it works
     test_repo.write_file("in_scope.txt", "modified");
 
     test_repo.in_dir(|| {
@@ -236,18 +214,15 @@ fn absorb_with_woven_branches() {
     let test_repo = TestRepo::new_with_remote();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
-    // Create feature branch off base with a commit
     test_repo.create_branch_at("feat1", &base_oid.to_string());
     test_repo.switch_branch("feat1");
     test_repo.write_file("feature.txt", "initial feature content");
     test_repo.stage_files(&["feature.txt"]);
     test_repo.commit_staged("Feature 1");
 
-    // Merge feat1 into integration branch
     test_repo.switch_branch("integration");
     test_repo.merge_no_ff("feat1");
 
-    // Modify the feature file in working tree
     test_repo.write_file("feature.txt", "updated feature content");
 
     test_repo.in_dir(|| {
@@ -258,7 +233,6 @@ fn absorb_with_woven_branches() {
             result
         );
 
-        // Working tree should be clean (feature.txt absorbed)
         test_repo.assert_working_tree_clean();
     });
 }
@@ -267,9 +241,6 @@ fn absorb_with_woven_branches() {
 fn absorb_split_hunks_to_different_commits() {
     let test_repo = TestRepo::new_with_remote();
 
-    // Create two commits with content in distant regions of the same file.
-    // Need enough gap (>6 lines) between regions so git diff produces separate hunks.
-    // Commit 1: lines 1-3 plus padding
     test_repo.write_file(
         "shared.txt",
         "line1 from c1\nline2 from c1\nline3 from c1\n\
@@ -278,7 +249,6 @@ fn absorb_split_hunks_to_different_commits() {
     test_repo.stage_files(&["shared.txt"]);
     test_repo.commit_staged("Commit 1");
 
-    // Commit 2: appends lines far away from commit 1's region
     test_repo.write_file(
         "shared.txt",
         "line1 from c1\nline2 from c1\nline3 from c1\n\
@@ -288,7 +258,6 @@ fn absorb_split_hunks_to_different_commits() {
     test_repo.stage_files(&["shared.txt"]);
     test_repo.commit_staged("Commit 2");
 
-    // Modify lines from both commits — separate hunks due to distance
     test_repo.write_file(
         "shared.txt",
         "MODIFIED line1\nline2 from c1\nline3 from c1\n\
@@ -304,10 +273,8 @@ fn absorb_split_hunks_to_different_commits() {
             result
         );
 
-        // Working tree should be clean — both hunks absorbed
         test_repo.assert_working_tree_clean();
 
-        // Commit messages preserved
         assert_eq!(test_repo.get_message(0), "Commit 2");
         assert_eq!(test_repo.get_message(1), "Commit 1");
     });
@@ -321,7 +288,6 @@ fn absorb_split_with_pure_addition_hunk() {
     test_repo.stage_files(&["file.txt"]);
     test_repo.commit_staged("Add file");
 
-    // Modify line1 (absorbable) and append new lines (pure addition)
     test_repo.write_file(
         "file.txt",
         "MODIFIED line1\nline2\nline3\nnew line4\nnew line5\n",
@@ -335,7 +301,6 @@ fn absorb_split_with_pure_addition_hunk() {
             result
         );
 
-        // The modified hunk should be absorbed, but pure addition stays in working tree
         let content = test_repo.read_file("file.txt");
         assert!(
             content.contains("new line4"),
@@ -348,7 +313,6 @@ fn absorb_split_with_pure_addition_hunk() {
 fn absorb_skipped_patch_only_contains_skipped_files() {
     let test_repo = TestRepo::new_with_remote();
 
-    // Create two commits with separate files
     test_repo.write_file("absorbable.txt", "original content\n");
     test_repo.stage_files(&["absorbable.txt"]);
     test_repo.commit_staged("Add absorbable");
@@ -357,10 +321,8 @@ fn absorb_skipped_patch_only_contains_skipped_files() {
     test_repo.stage_files(&["skippable.txt"]);
     test_repo.commit_staged("Add skippable");
 
-    // Modify absorbable.txt (will be absorbed into its commit)
     test_repo.write_file("absorbable.txt", "modified content\n");
 
-    // Append pure-addition lines to skippable.txt (will be skipped)
     test_repo.write_file("skippable.txt", "line1\nline2\nnew line3\n");
 
     test_repo.in_dir(|| {
@@ -370,7 +332,6 @@ fn absorb_skipped_patch_only_contains_skipped_files() {
         );
         assert!(result.is_ok(), "absorb failed: {:?}", result);
 
-        // absorbable.txt should be clean (absorbed into its commit)
         let abs_diff =
             crate::git::diff_head_file(&std::path::PathBuf::from("."), "absorbable.txt").unwrap();
         assert!(
@@ -379,7 +340,6 @@ fn absorb_skipped_patch_only_contains_skipped_files() {
             abs_diff
         );
 
-        // skippable.txt should still have the pure-addition leftover
         let content = test_repo.read_file("skippable.txt");
         assert!(
             content.contains("new line3"),
@@ -391,12 +351,10 @@ fn absorb_skipped_patch_only_contains_skipped_files() {
 #[test]
 fn absorb_file_with_sql_comment_lines() {
     let test_repo = TestRepo::new_with_remote();
-    // Create a SQL file with comment lines
     test_repo.write_file("query.sql", "SELECT *\n-- main query\nFROM users\n");
     test_repo.stage_files(&["query.sql"]);
     test_repo.commit_staged("Add SQL query");
 
-    // Modify the comment line
     test_repo.write_file("query.sql", "SELECT *\n-- updated query\nFROM users\n");
 
     test_repo.in_dir(|| {
@@ -407,7 +365,6 @@ fn absorb_file_with_sql_comment_lines() {
             result.err()
         );
         test_repo.assert_working_tree_clean();
-        // Verify the change was absorbed
         let content = test_repo.read_file("query.sql");
         assert!(
             content.contains("-- updated query"),
@@ -421,7 +378,6 @@ fn absorb_staged_only_changes() {
     let test_repo = TestRepo::new_with_remote();
     test_repo.commit("Add file", "target.txt");
 
-    // Stage a change without leaving unstaged modifications
     test_repo.write_file("target.txt", "staged content\n");
     test_repo.stage_files(&["target.txt"]);
 
@@ -435,8 +391,6 @@ fn absorb_staged_only_changes() {
         test_repo.assert_working_tree_clean();
     });
 }
-
-// ── Abort preserves working state ────────────────────────────────────────
 
 /// Regression: loom abort for absorb must restore the pre-absorb HEAD
 /// (`reset_hard_to`) and re-apply saved staged/worktree patches.
@@ -453,9 +407,6 @@ fn absorb_staged_only_changes() {
 fn absorb_abort_preserves_working_state() {
     let test_repo = TestRepo::new_with_remote();
 
-    // Commit the files that will serve as bystanders and the absorb target.
-    // They must be committed so that `git diff HEAD` / `git diff --cached`
-    // can capture modifications to them.
     test_repo.write_file("feature.txt", "original\n");
     test_repo.write_file("other-staged.txt", "original-staged\n");
     test_repo.write_file("other-unstaged.txt", "original-unstaged\n");
@@ -464,35 +415,25 @@ fn absorb_abort_preserves_working_state() {
 
     let pre_absorb_oid = test_repo.head_oid();
 
-    // Set up bystander modifications (what the user has before running absorb).
     test_repo.write_file("other-staged.txt", "staged-content");
     test_repo.stage_files(&["other-staged.txt"]);
     test_repo.write_file("other-unstaged.txt", "unstaged-content");
     test_repo.write_file("new-file.txt", "new-content"); // new untracked file
 
-    // Modify feature.txt (this is what absorb would absorb).
     test_repo.write_file("feature.txt", "modified\n");
 
     let workdir = test_repo.workdir();
     let git_dir = test_repo.repo.path().to_path_buf();
 
-    // Mirror absorb's pre-rebase cleanup sequence:
-    // 1. Save staged diff (other-staged.txt).
     let saved_staged = crate::git::diff_cached_files(&workdir, &["other-staged.txt"]).unwrap();
-    // 2. Unstage everything so that git diff HEAD captures all working changes.
     crate::git::run_git(&workdir, &["restore", "--staged", "."]).unwrap();
-    // 3. Save full working-tree diff (other-staged.txt unstaged + other-unstaged.txt + feature.txt).
     let saved_worktree = crate::git::diff_head(&workdir).unwrap();
-    // 4. Clear the working tree back to HEAD (absorb does this before creating fixup commits).
-    //    new-file.txt is untracked and is not touched by `restore`.
     crate::git::run_git(&workdir, &["restore", "--staged", "--worktree", "."]).unwrap();
 
-    // 5. Simulate absorb creating a fixup commit (HEAD moves past pre_absorb_oid).
     test_repo.write_file("feature.txt", "modified\n");
     test_repo.stage_files(&["feature.txt"]);
     test_repo.commit_staged("fixup! Initial setup");
 
-    // Inject LoomState as absorb would save it before the rebase.
     let state = crate::core::transaction::LoomState {
         command: "absorb".to_string(),
         rollback: crate::core::transaction::Rollback {
@@ -505,17 +446,14 @@ fn absorb_abort_preserves_working_state() {
     };
     crate::core::transaction::save(&git_dir, &state).unwrap();
 
-    // Abort (no active rebase; just applies rollback fields).
     crate::core::transaction::abort_cmd(&workdir, &git_dir).unwrap();
 
-    // HEAD must be at the pre-absorb position (reset_hard_to undo the fixup commit).
     assert_eq!(
         test_repo.head_oid(),
         pre_absorb_oid,
         "HEAD must be restored to pre-absorb state"
     );
 
-    // Bystander state preserved.
     assert_eq!(test_repo.read_file("other-staged.txt"), "staged-content");
     assert_eq!(
         test_repo.read_file("other-unstaged.txt"),

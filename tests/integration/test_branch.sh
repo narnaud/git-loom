@@ -3,9 +3,7 @@
 set -euo pipefail
 source "$(dirname "$0")/helpers.sh"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PRECONDITIONS
-# ══════════════════════════════════════════════════════════════════════════════
+# ── PRECONDITIONS ─────────────────────────────────────────────────────────────
 
 describe "precond: not in a git repository"
 new_tmpdir TMP_NOGIT
@@ -14,9 +12,7 @@ CODE=0
 assert_exit_fail "$CODE" "precond_not_git_repo"
 rm -rf "$TMP_NOGIT"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# BRANCH NEW — DEFAULT TARGET (MERGE-BASE)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── BRANCH NEW — DEFAULT TARGET (MERGE-BASE) ──────────────────────────────────
 
 describe "branch new creates branch at upstream merge-base by default"
 setup_repo_with_remote
@@ -43,12 +39,9 @@ describe "branch at merge-base does not create merge topology"
 setup_repo_with_remote
 commit_file "Loose commit" "loose.txt"
 gl branch new g-at-base
-# HEAD should still be a single-parent commit (no weaving at merge-base)
 assert_head_parent_count 1 "new_no_weave_at_base"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# BRANCH NEW — EXPLICIT TARGET
-# ══════════════════════════════════════════════════════════════════════════════
+# ── BRANCH NEW — EXPLICIT TARGET ──────────────────────────────────────────────
 
 describe "branch new --target by full commit hash"
 setup_repo_with_remote
@@ -79,9 +72,7 @@ assert_exit_ok $? "new_branch_tip_ok"
 assert_branch_exists "g-from-branch" "new_branch_tip_exists"
 assert_eq "$(branch_oid g-source)" "$(branch_oid g-from-branch)" "new_branch_tip_eq"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# BRANCH NEW — WEAVING
-# ══════════════════════════════════════════════════════════════════════════════
+# ── BRANCH NEW — WEAVING ──────────────────────────────────────────────────────
 
 describe "target on first-parent line triggers automatic weaving"
 setup_repo_with_remote
@@ -104,9 +95,7 @@ gl branch new g-at-head --target HEAD
 assert_branch_exists "g-at-head" "new_head_branch_exists"
 assert_head_parent_count 2 "new_head_merge_topo"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# BRANCH NEW — NAME VALIDATION
-# ══════════════════════════════════════════════════════════════════════════════
+# ── BRANCH NEW — NAME VALIDATION ──────────────────────────────────────────────
 
 describe "duplicate branch name is rejected"
 setup_repo_with_remote
@@ -120,9 +109,7 @@ setup_repo_with_remote
 gl_capture branch new "g..bad"
 assert_exit_fail "$CODE" "new_invalid_name_fail"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# BRANCH MERGE
-# ══════════════════════════════════════════════════════════════════════════════
+# ── BRANCH MERGE ──────────────────────────────────────────────────────────────
 
 describe "branch merge weaves a local branch into integration"
 setup_repo_with_remote
@@ -153,9 +140,7 @@ setup_repo_with_remote
 gl_capture branch merge g-does-not-exist
 assert_exit_fail "$CODE" "merge_nonexistent_fail"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# BRANCH MERGE — CONFLICT RECOVERY
-# ══════════════════════════════════════════════════════════════════════════════
+# ── BRANCH MERGE — CONFLICT RECOVERY ──────────────────────────────────────────
 # Both branches modify the same file to trigger a conflict on merge.
 
 describe "branch merge: conflict → continue (resolving conflict) → success"
@@ -202,9 +187,7 @@ assert_no_state_file               "merge_abort_state_removed"
 assert_eq "$old_head" "$(head_hash)" "merge_abort_head_restored"
 assert_head_parent_count 1         "merge_abort_not_merged"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# BRANCH UNMERGE
-# ══════════════════════════════════════════════════════════════════════════════
+# ── BRANCH UNMERGE ────────────────────────────────────────────────────────────
 
 describe "branch unmerge removes commits from integration, preserves branch ref"
 setup_repo_with_remote

@@ -3,9 +3,7 @@
 set -euo pipefail
 source "$(dirname "$0")/helpers.sh"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PRECONDITIONS
-# ══════════════════════════════════════════════════════════════════════════════
+# ── PRECONDITIONS ─────────────────────────────────────────────────────────────
 
 describe "precond: unknown target is rejected"
 setup_repo_with_remote
@@ -18,9 +16,7 @@ commit_file "Some commit" "s.txt"
 gl_capture reword HEAD --message ""
 assert_exit_fail "$CODE" "precond_empty_message"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# COMMIT REWORDING — BY GIT REFERENCE
-# ══════════════════════════════════════════════════════════════════════════════
+# ── COMMIT REWORDING — BY GIT REFERENCE ───────────────────────────────────────
 
 describe "reword HEAD commit message"
 setup_repo_with_remote
@@ -90,9 +86,7 @@ assert_head_msg  "Top commit"     "reword_descendants_top_msg"
 top_hash_after="$(head_hash)"
 assert_ne "$top_hash_before" "$top_hash_after" "reword_descendants_hash_changed"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# COMMIT REWORDING — BY SHORT ID
-# ══════════════════════════════════════════════════════════════════════════════
+# ── COMMIT REWORDING — BY SHORT ID ────────────────────────────────────────────
 
 describe "reword HEAD commit by short ID"
 setup_repo_with_remote
@@ -123,9 +117,7 @@ out=$(gl reword "$lower_sid" --message "Equiv lower reworded")
 assert_exit_ok $? "reword_equiv_sid_ok"
 assert_log_contains "Equiv lower reworded" "reword_equiv_sid_msg"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# BRANCH RENAMING — BY FULL NAME
-# ══════════════════════════════════════════════════════════════════════════════
+# ── BRANCH RENAMING — BY FULL NAME ────────────────────────────────────────────
 
 describe "rename branch with -m flag"
 setup_repo_with_remote
@@ -161,9 +153,7 @@ out=$(gl reword g-same-name --message "g-same-name")
 assert_exit_ok $? "reword_branch_same_name_ok"
 assert_branch_exists "g-same-name" "reword_branch_same_name_still_exists"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# BRANCH RENAMING — BY SHORT ID
-# ══════════════════════════════════════════════════════════════════════════════
+# ── BRANCH RENAMING — BY SHORT ID ─────────────────────────────────────────────
 
 describe "rename branch by short ID"
 setup_repo_with_remote
@@ -192,9 +182,7 @@ assert_exit_ok $? "reword_fullname_sid_equiv_ok"
 assert_branch_exists     "h-renamed-via-sid" "reword_fullname_sid_equiv_new"
 assert_branch_not_exists "g-fullname-sid"    "reword_fullname_sid_equiv_old"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# WORKING TREE HANDLING
-# ══════════════════════════════════════════════════════════════════════════════
+# ── WORKING TREE HANDLING ─────────────────────────────────────────────────────
 
 describe "reword succeeds with staged changes (stash/restore)"
 setup_repo_with_remote
@@ -217,7 +205,6 @@ write_file "unstaged-reword.txt" "modified content"
 out=$(gl reword HEAD --message "Unstaged reword done")
 assert_exit_ok $? "reword_unstaged_ok"
 assert_head_msg "Unstaged reword done" "reword_unstaged_msg"
-# Unstaged change should be restored
 assert_file_content "unstaged-reword.txt" "modified content" "reword_unstaged_restored"
 
 pass

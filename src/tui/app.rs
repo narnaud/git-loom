@@ -33,9 +33,7 @@ use crate::tui::widgets::diff_pane::DiffPane;
 use crate::tui::widgets::list_pane::ListPane;
 use crate::{branch, commit, drop, fold, reword};
 
-// ---------------------------------------------------------------------------
-// Data model
-// ---------------------------------------------------------------------------
+// ── Data model ───────────────────────────────────────────────────────────
 
 /// Everything gathered from the repo for one TUI round.
 struct Snapshot {
@@ -76,9 +74,7 @@ enum Mode {
     FoldTarget { sources: Vec<String> },
 }
 
-// ---------------------------------------------------------------------------
-// Entry point
-// ---------------------------------------------------------------------------
+// ── Entry point ──────────────────────────────────────────────────────────
 
 /// Run the interactive status TUI.
 pub fn run(theme: graph::Theme) -> Result<()> {
@@ -201,9 +197,7 @@ fn run_tui_once(
     Ok((outcome, key))
 }
 
-// ---------------------------------------------------------------------------
-// App state
-// ---------------------------------------------------------------------------
+// ── App state ────────────────────────────────────────────────────────────
 
 struct App<'a> {
     snapshot: &'a Snapshot,
@@ -547,9 +541,7 @@ fn borrowed_lines<'a>(lines: &'a [Line<'static>]) -> Vec<Line<'a>> {
         .collect()
 }
 
-// ---------------------------------------------------------------------------
-// Shell integration
-// ---------------------------------------------------------------------------
+// ── Shell integration ────────────────────────────────────────────────────
 
 impl ShellApp for App<'_> {
     type Exit = Outcome;
@@ -682,9 +674,7 @@ impl ShellApp for App<'_> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Row rendering
-// ---------------------------------------------------------------------------
+// ── Row rendering ────────────────────────────────────────────────────────
 
 /// Render one tree row as a styled line. The first span is the multi-select
 /// gutter.
@@ -848,9 +838,7 @@ fn row_line(
     Line::from(spans)
 }
 
-// ---------------------------------------------------------------------------
-// Diff pane content
-// ---------------------------------------------------------------------------
+// ── Diff pane content ────────────────────────────────────────────────────
 
 /// Produce the raw diff text for a row by shelling out to git.
 fn diff_text(snapshot: &Snapshot, row: &Row) -> String {

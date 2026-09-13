@@ -48,26 +48,21 @@ use crate::trace as loom_trace;
 ///
 /// A user's gitconfig shapes git's behavior and output, and loom parses that
 /// output, replays it as patches, and hands git todo lists to execute. Each key
-/// here is one a real gitconfig sets and loom cannot let vary. Left alone on
-/// purpose: `run_git_interactive` (what the user reads is theirs to configure),
-/// `git push` and `git check-ref-format` (no output loom parses).
+/// here is one a real gitconfig sets and loom cannot let vary:
 ///
-/// - `commit.verbose`: git appends the diff to `COMMIT_EDITMSG`, and no editor
-///   opens here to strip it back out, so a `commit-msg` hook reads the whole
-///   diff as if it were the message.
-/// - the four `diff.*` prefix keys: they drop or rename the `a/`…`b/` prefixes,
-///   and `git apply` can no longer strip a leading path component from a patch
-///   loom saved.
+/// - `commit.verbose` appends the diff to `COMMIT_EDITMSG`, and no editor opens
+///   here to strip it, so a `commit-msg` hook reads the diff as the message.
+/// - the four `diff.*` prefix keys drop or rename the `a/`…`b/` prefixes, after
+///   which `git apply` cannot strip a leading component from a saved patch.
 /// - `apply.whitespace=error` makes `git apply` reject a saved patch that adds
-///   trailing whitespace; `apply.ignoreWhitespace=change` applies it somewhere
-///   else.
-/// - `rebase.missingCommitsCheck`: loom builds todo lists that leave commits
-///   out on purpose (`drop`, moving a commit to another branch); git refuses
-///   its own todo under `error` and complains under `warn`.
+///   trailing whitespace; `apply.ignoreWhitespace=change` applies it elsewhere.
+/// - `rebase.missingCommitsCheck` refuses (`error`) or complains (`warn`) about
+///   the todo lists loom builds that leave commits out on purpose.
 ///
-/// Color is not handled here: `color.ui` is only the default for `color.diff`
-/// and friends, and an explicit `color.diff=always` beats it. The diff helpers
-/// pass `--no-color` instead (see `git_diff.rs`).
+/// Left alone on purpose: `run_git_interactive` (what the user reads is theirs
+/// to configure), `git push` and `git check-ref-format` (no parsed output).
+/// Color is not here either: `color.ui` is only a default an explicit
+/// `color.diff=always` beats, so the diff helpers pass `--no-color`.
 pub const FORCED_CONFIG: &[&str] = &[
     "-c",
     "commit.verbose=false",
@@ -134,24 +129,19 @@ fn run_git_captured(workdir: &Path, args: &[&str]) -> Result<std::process::Outpu
 }
 
 /// Run a git command in the given working directory.
-/// On failure, returns an error with the command name; stderr is recorded
-/// in the trace log via `loom_trace::log_command`.
 pub fn run_git(workdir: &Path, args: &[&str]) -> Result<()> {
     run_git_captured(workdir, args).map(|_| ())
 }
 
 /// Run a git command and return its stdout as a string.
-/// On failure, returns an error with the command name; stderr is recorded
-/// in the trace log via `loom_trace::log_command`.
 pub fn run_git_stdout(workdir: &Path, args: &[&str]) -> Result<String> {
     let output = run_git_captured(workdir, args)?;
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-/// Run a git command and return its combined stdout+stderr, trimmed.
-/// Useful for commands (like `fetch`) that print their summary to stderr, so a
-/// caller can show git's output after a spinner instead of streaming it live.
-/// On failure, returns an error with the command name; stderr is still traced.
+/// Run a git command and return its combined stdout+stderr, trimmed. For
+/// commands like `fetch` that print their summary to stderr, so a caller can
+/// show git's output after a spinner instead of streaming it live.
 pub fn run_git_combined(workdir: &Path, args: &[&str]) -> Result<String> {
     let output = run_git_captured(workdir, args)?;
     let mut combined = String::from_utf8_lossy(&output.stdout).into_owned();
@@ -160,7 +150,6 @@ pub fn run_git_combined(workdir: &Path, args: &[&str]) -> Result<String> {
 }
 
 /// Check that the installed Git version meets the minimum requirement.
-/// Returns an error with an actionable message if the version is too old.
 pub fn check_git_version() -> Result<()> {
     let output = Command::new("git").arg("--version").output()?;
     let version_str = String::from_utf8_lossy(&output.stdout);
@@ -194,10 +183,7 @@ fn parse_git_version(version_str: &str) -> Option<(u32, u32)> {
 }
 
 /// Run a git command with inherited stdio (for interactive commands / pager).
-/// On failure, returns an error containing the command that failed.
-///
-/// Note: stderr is not captured (it flows to the terminal directly),
-/// so the trace log will record an empty stderr string for these calls.
+/// stderr is not captured, so the trace log records it empty for these calls.
 pub fn run_git_interactive(workdir: &Path, args: &[&str]) -> Result<()> {
     // A pty-hosted agent must never hang inside `less` — disable the pager.
     let mut full_args: Vec<&str> = Vec::new();
@@ -223,27 +209,24 @@ pub fn run_git_interactive(workdir: &Path, args: &[&str]) -> Result<()> {
     Ok(())
 }
 
-/// Unstage specific files (remove from index without touching the working tree).
-///
-/// Wraps `git reset HEAD -- <files>`.
+/// Unstage specific files (`git reset HEAD -- <files>`), leaving the working
+/// tree alone.
 pub fn unstage_files(workdir: &Path, files: &[&str]) -> Result<()> {
     let mut args = vec!["reset", "HEAD", "--"];
     args.extend(files);
     run_git(workdir, &args)
 }
 
-/// Restore tracked files in the working tree to their HEAD state.
-///
-/// Wraps `git checkout HEAD -- <files>`.
+/// Restore tracked files in the working tree to their HEAD state
+/// (`git checkout HEAD -- <files>`).
 pub fn restore_files_to_head(workdir: &Path, files: &[&str]) -> Result<()> {
     let mut args = vec!["checkout", "HEAD", "--"];
     args.extend(files);
     run_git(workdir, &args)
 }
 
-/// Restore tracked files in the working tree to their index state.
-///
-/// Wraps `git checkout-index -f --`.
+/// Restore tracked files in the working tree to their index state
+/// (`git checkout-index -f --`).
 pub fn checkout_index_force(workdir: &Path, files: &[&str]) -> Result<()> {
     let mut args = vec!["checkout-index", "-f", "--"];
     args.extend(files);
@@ -329,9 +312,7 @@ pub fn current_branch(workdir: &Path) -> Result<String> {
     )
 }
 
-/// Resolve a git ref to its full commit hash.
-///
-/// Wraps `git rev-parse <ref>` and trims the output.
+/// Resolve a git ref to its full commit hash (`git rev-parse <ref>`, trimmed).
 pub fn rev_parse(workdir: &Path, reference: &str) -> Result<String> {
     let out = run_git_stdout(workdir, &["rev-parse", reference])?;
     Ok(out.trim().to_string())

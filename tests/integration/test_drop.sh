@@ -3,9 +3,7 @@
 set -euo pipefail
 source "$(dirname "$0")/helpers.sh"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PRECONDITIONS
-# ══════════════════════════════════════════════════════════════════════════════
+# ── PRECONDITIONS ─────────────────────────────────────────────────────────────
 
 describe "precond: unknown full hash is rejected"
 setup_repo_with_remote
@@ -17,9 +15,7 @@ setup_repo_with_remote
 gl_capture drop "nonexistent-xyz-9999" --yes
 assert_exit_fail "$CODE" "precond_unknown_name"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# DROP COMMIT — BY GIT REFERENCE
-# ══════════════════════════════════════════════════════════════════════════════
+# ── DROP COMMIT — BY GIT REFERENCE ────────────────────────────────────────────
 
 describe "drop HEAD commit by full hash"
 setup_repo_with_remote
@@ -92,9 +88,7 @@ assert_log_contains "A1 keep"          "drop_branch_a1_remains"
 assert_log_contains "A3 keep"          "drop_branch_a3_remains"
 assert_log_not_contains "A2 drop"      "drop_branch_a2_gone"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# DROP COMMIT — BY SHORT ID
-# ══════════════════════════════════════════════════════════════════════════════
+# ── DROP COMMIT — BY SHORT ID ─────────────────────────────────────────────────
 
 describe "drop commit by short ID (woven branch)"
 setup_repo_with_remote
@@ -112,9 +106,7 @@ assert_commit_not_in_log "$full_hash"  "drop_commit_sid_gone"
 assert_log_contains "SID keep above"   "drop_commit_sid_sibling_remains"
 assert_log_not_contains "SID drop target" "drop_commit_sid_target_gone"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# DROP LAST COMMIT ON BRANCH (BRANCH SURVIVES, EMPTY)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── DROP LAST COMMIT ON BRANCH (BRANCH SURVIVES, EMPTY) ───────────────────────
 
 describe "drop last commit on woven branch leaves the branch empty at the base"
 setup_repo_with_remote
@@ -147,9 +139,7 @@ assert_exit_ok $? "drop_solo_sid_ok"
 assert_commit_not_in_log "$full_hash" "drop_solo_sid_commit_gone"
 assert_branch_exists "g-solo-sid" "drop_solo_sid_branch_kept"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# DROP WOVEN BRANCH — BY FULL NAME
-# ══════════════════════════════════════════════════════════════════════════════
+# ── DROP WOVEN BRANCH — BY FULL NAME ──────────────────────────────────────────
 
 describe "drop woven branch removes all its commits, merge commit, and ref"
 setup_repo_with_remote
@@ -187,9 +177,7 @@ assert_branch_exists     "g-keep-woven"     "drop_woven_preserve_kept_ref"
 assert_log_contains      "Keep woven commit" "drop_woven_preserve_kept_msg"
 assert_log_not_contains  "Drop woven commit" "drop_woven_preserve_gone_msg"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# DROP WOVEN BRANCH — BY SHORT ID
-# ══════════════════════════════════════════════════════════════════════════════
+# ── DROP WOVEN BRANCH — BY SHORT ID ───────────────────────────────────────────
 
 describe "drop woven branch by branch short ID"
 setup_repo_with_remote
@@ -217,9 +205,7 @@ assert_exit_ok $? "drop_sid_equiv_ok"
 assert_branch_not_exists "g-sid-equiv"    "drop_sid_equiv_ref_gone"
 assert_log_not_contains  "SID equiv commit" "drop_sid_equiv_commit_gone"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# DROP NON-WOVEN BRANCH
-# ══════════════════════════════════════════════════════════════════════════════
+# ── DROP NON-WOVEN BRANCH ─────────────────────────────────────────────────────
 
 describe "drop non-woven branch removes its commits and deletes ref"
 setup_repo_with_remote
@@ -235,9 +221,7 @@ assert_branch_not_exists "g-nonwoven"   "drop_nonwoven_ref_gone"
 assert_log_not_contains  "Non-woven X"  "drop_nonwoven_x_gone"
 assert_log_not_contains  "Non-woven Y"  "drop_nonwoven_y_gone"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# DROP CO-LOCATED WOVEN BRANCH
-# ══════════════════════════════════════════════════════════════════════════════
+# ── DROP CO-LOCATED WOVEN BRANCH ──────────────────────────────────────────────
 
 describe "drop co-located woven branch preserves commits for sibling"
 setup_repo_with_remote
@@ -267,9 +251,7 @@ assert_branch_not_exists "g-coloc-nw-a"    "drop_coloc_nw_a_gone"
 assert_branch_exists     "h-coloc-nw-b"    "drop_coloc_nw_b_survives"
 assert_log_contains      "Coloc NW commit" "drop_coloc_nw_commits_preserved"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# DROP BRANCH AT MERGE-BASE (NO COMMITS)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── DROP BRANCH AT MERGE-BASE (NO COMMITS) ────────────────────────────────────
 
 describe "drop branch at merge-base deletes ref, no rebase needed"
 setup_repo_with_remote
@@ -279,12 +261,9 @@ write_file "dirty.txt" "not staged"
 out=$(gl drop g-empty-branch --yes)
 assert_exit_ok $? "drop_empty_branch_ok"
 assert_branch_not_exists "g-empty-branch" "drop_empty_branch_ref_gone"
-# Working tree must remain untouched (no stash was performed)
 assert_file_content "dirty.txt" "not staged" "drop_empty_branch_wt_intact"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# DROP BRANCH OUT OF INTEGRATION RANGE
-# ══════════════════════════════════════════════════════════════════════════════
+# ── DROP BRANCH OUT OF INTEGRATION RANGE ──────────────────────────────────────
 
 describe "drop branch outside integration range is rejected with helpful message"
 setup_repo_with_remote
@@ -295,9 +274,7 @@ gl_capture drop g-out-of-range --yes
 assert_exit_fail "$CODE"                          "drop_oor_fail"
 assert_contains  "$OUT" "not woven into the integration branch" "drop_oor_msg"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# DROP FILE
-# ══════════════════════════════════════════════════════════════════════════════
+# ── DROP FILE ─────────────────────────────────────────────────────────────────
 
 describe "drop tracked modified file restores it to committed state"
 setup_repo_with_remote
@@ -336,9 +313,7 @@ out=$(gl drop to-drop.txt --yes)
 assert_exit_ok $? "drop_file_isolated_ok"
 assert_file_content "untouched.txt" "Untouched file" "drop_file_isolated_untouched"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# DROP ZZ (ALL LOCAL CHANGES)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── DROP ZZ (ALL LOCAL CHANGES) ───────────────────────────────────────────────
 
 describe "drop zz discards staged changes, unstaged changes, and untracked files"
 setup_repo_with_remote
@@ -359,9 +334,7 @@ gl_capture drop zz --yes
 assert_exit_fail "$CODE"                       "drop_zz_no_changes_fail"
 assert_contains  "$OUT" "No local changes"     "drop_zz_no_changes_msg"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# WORKING TREE PRESERVATION
-# ══════════════════════════════════════════════════════════════════════════════
+# ── WORKING TREE PRESERVATION ─────────────────────────────────────────────────
 
 describe "drop commit preserves staged changes"
 setup_repo_with_remote
@@ -450,9 +423,7 @@ out=$(gl drop solo --yes)
 assert_exit_ok $? "drop_solo_branch_ok"
 assert_branch_not_exists "solo" "drop_solo_branch_gone"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# CONTINUE / ABORT
-# ══════════════════════════════════════════════════════════════════════════════
+# ── CONTINUE / ABORT ──────────────────────────────────────────────────────────
 # Shared conflict setup: C1 changes A→B, C2 changes B→C.
 # Dropping C1 forces C2 to cherry-pick onto A → 3-way merge conflict.
 

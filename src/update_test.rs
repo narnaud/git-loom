@@ -5,17 +5,14 @@ use git2::{BranchType, Repository, Signature};
 fn update_pulls_upstream_changes() {
     let test_repo = TestRepo::new_with_remote();
 
-    // Add commits to the remote
     let remote_oid = test_repo.add_remote_commits(&["Remote commit 1"]);
 
-    // Before update, integration should be behind
     let before_oid = test_repo.head_oid();
     assert_ne!(before_oid, remote_oid);
 
     let result = test_repo.in_dir(|| super::run(false));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
-    // After update, integration should point at the remote commit
     let after_oid = test_repo.head_oid();
     assert_eq!(
         after_oid, remote_oid,
@@ -66,16 +63,13 @@ fn update_fails_without_upstream() {
 fn update_rebases_local_commits_on_top_of_upstream() {
     let test_repo = TestRepo::new_with_remote();
 
-    // Add a local commit on the integration branch
     test_repo.commit("Local work", "local.txt");
 
-    // Add commits to the remote
     test_repo.add_remote_commits(&["Remote commit"]);
 
     let result = test_repo.in_dir(|| super::run(false));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
-    // Local commit should still be on top
     assert_eq!(test_repo.get_message(0), "Local work");
 }
 
@@ -83,7 +77,6 @@ fn update_rebases_local_commits_on_top_of_upstream() {
 fn update_fetches_tags_from_remote() {
     let test_repo = TestRepo::new_with_remote();
 
-    // Create a tag on the remote
     let remote_path = test_repo.remote_path().unwrap();
     let remote_repo = Repository::open_bare(&remote_path).unwrap();
     let remote_head = remote_repo
@@ -104,7 +97,6 @@ fn update_fetches_tags_from_remote() {
         )
         .unwrap();
 
-    // Tag should not exist locally yet
     assert!(
         test_repo.repo.find_reference("refs/tags/v1.0.0").is_err(),
         "Tag should not exist locally before update"
@@ -113,7 +105,6 @@ fn update_fetches_tags_from_remote() {
     let result = test_repo.in_dir(|| super::run(false));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
-    // Tag should now exist locally
     assert!(
         test_repo.repo.find_reference("refs/tags/v1.0.0").is_ok(),
         "Tag should exist locally after update"
@@ -124,7 +115,6 @@ fn update_fetches_tags_from_remote() {
 fn update_keeps_tags_when_fetch_all_hits_a_tagless_remote() {
     let test_repo = TestRepo::new_with_remote();
 
-    // Create a tag on the integration remote
     let remote_path = test_repo.remote_path().unwrap();
     let remote_repo = Repository::open_bare(&remote_path).unwrap();
     let remote_head = remote_repo
@@ -174,7 +164,6 @@ fn update_keeps_tags_when_fetch_all_hits_a_tagless_remote() {
 fn update_prunes_deleted_remote_branches() {
     let test_repo = TestRepo::new_with_remote();
 
-    // Create a branch on the remote
     let remote_path = test_repo.remote_path().unwrap();
     {
         let remote_repo = Repository::open_bare(&remote_path).unwrap();
@@ -190,7 +179,6 @@ fn update_prunes_deleted_remote_branches() {
 
     // Fetch so that origin/feature-temp appears locally
     test_repo.fetch_remote();
-    // Also fetch the new branch specifically
     test_repo
         .repo
         .find_remote("origin")
@@ -206,7 +194,6 @@ fn update_prunes_deleted_remote_branches() {
         "Remote-tracking branch should exist after fetch"
     );
 
-    // Delete the branch on the remote
     {
         let remote_repo = Repository::open_bare(&remote_path).unwrap();
         let mut branch = remote_repo
@@ -218,7 +205,6 @@ fn update_prunes_deleted_remote_branches() {
     let result = test_repo.in_dir(|| super::run(false));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
-    // Remote-tracking branch should be pruned
     assert!(
         test_repo
             .repo
@@ -236,31 +222,24 @@ fn update_preserves_merge_topology() {
     //   merge-base (Initial) <- feature commit <- merge commit (HEAD)
     //                        ^--- on feature-a ---^
 
-    // Create a feature branch at the current HEAD (merge-base)
     let merge_base_oid = test_repo.head_oid();
     test_repo.create_branch_at_commit("feature-a", merge_base_oid);
 
-    // Add a commit on the feature branch
     test_repo.switch_branch("feature-a");
     test_repo.commit("Feature A work", "feature-a.txt");
     let feature_tip = test_repo.head_oid();
 
-    // Switch back to integration and create a merge commit
     test_repo.switch_branch("integration");
     test_repo.commit_merge("Merge branch 'feature-a'", merge_base_oid, feature_tip);
 
-    // Verify we have a merge commit (2 parents)
     let head = test_repo.head_commit();
     assert_eq!(head.parent_count(), 2, "HEAD should be a merge commit");
 
-    // Add upstream commits
     test_repo.add_remote_commits(&["Upstream change"]);
 
-    // Run update
     let result = test_repo.in_dir(|| super::run(false));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
-    // After update, HEAD should still be a merge commit (topology preserved)
     // Need to re-open since the rebase changed things
     let log = test_repo.in_dir(|| {
         let workdir = test_repo.workdir();
@@ -272,7 +251,6 @@ fn update_preserves_merge_topology() {
         String::from_utf8(output.stdout).unwrap()
     });
 
-    // The HEAD commit should still be a merge
     let repo = &test_repo.repo;
     // Force re-read of HEAD after rebase
     let new_head = repo.head().unwrap().peel_to_commit().unwrap();
@@ -283,7 +261,6 @@ fn update_preserves_merge_topology() {
         log
     );
 
-    // The merge commit's message should be preserved
     assert!(
         new_head.message().unwrap().contains("Merge branch"),
         "Merge commit message should be preserved"
@@ -366,7 +343,6 @@ fn update_removes_branches_with_gone_upstream() {
         .fetch(&["feature-x"], None, None)
         .unwrap();
 
-    // Create a local branch tracking origin/feature-x
     test_repo.create_branch_tracking("feature-x", "origin/feature-x");
 
     assert!(
@@ -383,11 +359,9 @@ fn update_removes_branches_with_gone_upstream() {
         branch.delete().unwrap();
     }
 
-    // Run update with --yes to skip the interactive prompt
     let result = test_repo.in_dir(|| super::run(true));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
-    // The local branch with gone upstream should be removed
     assert!(
         !test_repo.branch_exists("feature-x"),
         "feature-x should be removed after update (upstream is gone)"
@@ -408,7 +382,6 @@ fn update_prunes_the_push_remote_in_a_fork_workflow() {
         .unwrap();
     test_repo.set_config("loom.push-remote", "personal");
 
-    // Push feature-x to the fork, so it tracks personal/feature-x
     test_repo.create_branch("feature-x");
     let workdir = test_repo.workdir();
     crate::git::run_git(&workdir, &["push", "-u", "personal", "feature-x"]).unwrap();
@@ -478,14 +451,11 @@ fn update_does_not_put_upstream_commits_in_feature_branch() {
     test_repo.switch_branch("integration");
     test_repo.commit_merge("Merge branch 'feature-a'", merge_base_oid, feature_tip);
 
-    // Push 3 new commits to the remote (simulating teammates' work)
     test_repo.add_remote_commits(&["Remote 1", "Remote 2", "Remote 3"]);
 
-    // Run update
     let result = test_repo.in_dir(|| super::run(false));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
-    // Verify: HEAD is still a merge commit
     let repo = &test_repo.repo;
     let new_head = repo.head().unwrap().peel_to_commit().unwrap();
     assert_eq!(
@@ -557,32 +527,27 @@ fn update_with_multiple_woven_branches() {
 
     let merge_base_oid = test_repo.head_oid();
 
-    // Feature A
     test_repo.create_branch_at_commit("feature-a", merge_base_oid);
     test_repo.switch_branch("feature-a");
     test_repo.commit("Feature A work", "feature-a.txt");
     test_repo.switch_branch("integration");
     test_repo.merge_no_ff("feature-a");
 
-    // Feature B
     test_repo.create_branch_at_commit("feature-b", merge_base_oid);
     test_repo.switch_branch("feature-b");
     test_repo.commit("Feature B work", "feature-b.txt");
     test_repo.switch_branch("integration");
     test_repo.merge_no_ff("feature-b");
 
-    // Push upstream commits
     test_repo.add_remote_commits(&["Remote work"]);
 
     let result = test_repo.in_dir(|| super::run(false));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
-    // Verify merge topology is preserved (HEAD is a merge)
     let repo = &test_repo.repo;
     let head = repo.head().unwrap().peel_to_commit().unwrap();
     assert_eq!(head.parent_count(), 2, "HEAD should be a merge (feature-b)");
 
-    // Walk first-parent to find the feature-a merge
     let first_parent = head.parent(0).unwrap();
     assert_eq!(
         first_parent.parent_count(),
@@ -590,11 +555,9 @@ fn update_with_multiple_woven_branches() {
         "First parent of HEAD should be a merge (feature-a)"
     );
 
-    // Both feature branches should still exist
     assert!(test_repo.branch_exists("feature-a"));
     assert!(test_repo.branch_exists("feature-b"));
 
-    // Feature commits should be preserved
     let fa = repo
         .find_branch("feature-a", BranchType::Local)
         .unwrap()
@@ -642,18 +605,15 @@ fn update_preserves_multi_commit_branch() {
     test_repo.switch_branch("integration");
     test_repo.merge_no_ff("feature-a");
 
-    // Push upstream changes (no overlap with feature commits)
     test_repo.add_remote_commits(&["Upstream work"]);
 
     let result = test_repo.in_dir(|| super::run(false));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
-    // Verify merge topology
     let repo = &test_repo.repo;
     let head = repo.head().unwrap().peel_to_commit().unwrap();
     assert_eq!(head.parent_count(), 2, "HEAD should still be a merge");
 
-    // Feature-a should still exist and point at F3
     let fa = repo
         .find_branch("feature-a", BranchType::Local)
         .unwrap()
@@ -717,7 +677,6 @@ fn update_with_partially_cherry_picked_branch() {
     test_repo.switch_branch("integration");
     test_repo.merge_no_ff("feature-a");
 
-    // Upstream cherry-picks F1 and F2
     test_repo.cherry_pick_to_remote(f1_oid, "F1");
     test_repo.cherry_pick_to_remote(f2_oid, "F2");
 
@@ -728,7 +687,6 @@ fn update_with_partially_cherry_picked_branch() {
     let head = repo.head().unwrap().peel_to_commit().unwrap();
     assert_eq!(head.parent_count(), 2, "HEAD should still be a merge");
 
-    // Feature-a should point at F3
     let fa = repo
         .find_branch("feature-a", BranchType::Local)
         .unwrap()
@@ -785,10 +743,8 @@ fn update_handles_branch_cherry_picked_into_upstream() {
     test_repo.switch_branch("integration");
     test_repo.merge_no_ff("feature-a");
 
-    // Simulate: upstream cherry-picks the feature commit
     test_repo.cherry_pick_to_remote(feature_oid, "Feature A work");
 
-    // Run update
     let result = test_repo.in_dir(|| super::run(true));
     assert!(
         result.is_ok(),
@@ -819,7 +775,6 @@ fn update_handles_partial_cherry_pick_to_upstream() {
     test_repo.switch_branch("integration");
     test_repo.merge_no_ff("feature-a");
 
-    // Upstream cherry-picks only F1
     test_repo.cherry_pick_to_remote(f1_oid, "F1");
 
     let result = test_repo.in_dir(|| super::run(false));
@@ -883,7 +838,6 @@ fn update_handles_fully_cherry_picked_branch() {
     test_repo.switch_branch("integration");
     test_repo.merge_no_ff("feature-a");
 
-    // Upstream cherry-picks ALL feature commits
     test_repo.cherry_pick_to_remote(f1_oid, "F1");
     test_repo.cherry_pick_to_remote(f2_oid, "F2");
 
@@ -897,7 +851,6 @@ fn update_handles_fully_cherry_picked_branch() {
     let repo = &test_repo.repo;
     let head = repo.head().unwrap().peel_to_commit().unwrap();
 
-    // HEAD should still be on a branch
     assert!(
         repo.head().unwrap().is_branch(),
         "HEAD should still be on a branch after update"
@@ -1017,7 +970,6 @@ fn update_handles_inverted_parent_merge_on_integration() {
         (c1_oid, f1_oid)
     };
 
-    // Fetch remote state
     test_repo
         .repo
         .find_remote("origin")
@@ -1028,7 +980,6 @@ fn update_handles_inverted_parent_merge_on_integration() {
     let c1 = test_repo.repo.find_commit(c1_oid).unwrap();
     let f1 = test_repo.repo.find_commit(f1_oid).unwrap();
 
-    // Set integration to C1 (merge base)
     test_repo
         .repo
         .reference("refs/heads/integration", c1_oid, true, "to C1")
@@ -1068,12 +1019,10 @@ fn update_handles_inverted_parent_merge_on_integration() {
         .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
         .unwrap();
 
-    // Verify inverted parents
     let head = test_repo.repo.head().unwrap().peel_to_commit().unwrap();
     assert_eq!(head.parent_count(), 2);
     assert_eq!(head.parent_id(0).unwrap(), f1_oid);
 
-    // Add one more remote commit
     test_repo.add_remote_commits(&["C3"]);
 
     // Run update — should succeed and flatten (no conflicts)
@@ -1140,7 +1089,6 @@ fn update_keeps_other_branches_when_one_lands_upstream() {
     test_repo.merge_no_ff("feature-a");
     test_repo.merge_no_ff("feature-b");
 
-    // feature-b lands upstream unchanged: origin/main is now feature-b's tip.
     test_repo.push_branch_to_remote_main("feature-b");
 
     let result = test_repo.in_dir(|| super::run(true));
@@ -1168,7 +1116,6 @@ fn update_keeps_other_branches_when_one_lands_upstream() {
         "feature-a should still be woven into integration"
     );
 
-    // Both feature-a commits survive, rebased onto the new upstream.
     let a2 = repo.find_commit(feature_a).unwrap();
     assert_eq!(a2.summary().unwrap().unwrap(), "A2");
     let a1 = a2.parent(0).unwrap();
@@ -1220,7 +1167,6 @@ fn update_removes_inner_branch_merged_upstream() {
         .unwrap();
     assert_eq!(head.parent_id(1).unwrap(), feature_b);
 
-    // feature-b keeps only its own commit, rebased onto the new upstream tip
     let b1 = repo.find_commit(feature_b).unwrap();
     assert_eq!(b1.summary().unwrap().unwrap(), "B1");
     assert_eq!(
@@ -1228,8 +1174,6 @@ fn update_removes_inner_branch_merged_upstream() {
         test_repo.find_remote_branch_target("origin/main")
     );
 
-    // The local `main` at the base is also "contained upstream", but it is
-    // upstream history, not a merged feature branch.
     assert!(
         test_repo.branch_exists("main"),
         "local main must not be treated as a merged branch"
@@ -1317,7 +1261,6 @@ fn update_keeps_branches_below_the_base() {
     let test_repo = TestRepo::new_with_remote();
     let initial_oid = test_repo.head_oid();
 
-    // Move the base forward: integration already has upstream commit X
     let x_oid = test_repo.add_remote_commits(&["X"]);
     test_repo.fetch_remote();
     test_repo.reset_hard(x_oid);
@@ -1357,8 +1300,6 @@ fn update_removes_its_state_when_the_rebase_never_starts() {
 
     test_repo.add_remote_commits(&["Remote work"]);
 
-    // Checking the woven branch out elsewhere makes `run_rebase` refuse up
-    // front, before any rebase exists to abort.
     let wt = test_repo.workdir().parent().unwrap().join("wt");
     crate::git::run_git(
         &test_repo.workdir(),

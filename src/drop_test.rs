@@ -18,16 +18,13 @@ fn setup_woven_branch(num_commits: usize) -> TestRepo {
     let test_repo = TestRepo::new_with_remote();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
-    // Create feature-a at merge-base
     test_repo.create_branch_at("feature-a", &base_oid.to_string());
 
-    // Switch to feature-a and add commits
     test_repo.switch_branch("feature-a");
     for i in 1..=num_commits {
         test_repo.commit(&format!("A{}", i), &format!("a{}.txt", i));
     }
 
-    // Switch back to integration
     test_repo.switch_branch("integration");
 
     // Add a commit on integration BEFORE merging to prevent fast-forward
@@ -154,13 +151,11 @@ fn drop_refuses_when_an_emptied_branch_is_checked_out_elsewhere() {
 fn drop_one_of_two_commits_preserves_branch() {
     let test_repo = setup_woven_branch(2);
 
-    // Get the tip commit of feature-a (A2)
     let a2_oid = test_repo.get_branch_target("feature-a");
 
     let result = super::drop_commit(&test_repo.repo, &a2_oid.to_string(), true);
     assert!(result.is_ok(), "drop_commit failed: {:?}", result);
 
-    // Branch should still exist (A1 remains)
     assert!(
         test_repo.branch_exists("feature-a"),
         "feature-a should still exist"
@@ -213,13 +208,11 @@ fn drop_woven_branch_removes_commits_and_ref() {
     let result = super::drop_branch(&test_repo.repo, "feature-a", true);
     assert!(result.is_ok(), "drop_branch failed: {:?}", result);
 
-    // Branch ref is deleted
     assert!(
         !test_repo.branch_exists("feature-a"),
         "feature-a should be deleted"
     );
 
-    // A1, A2 are gone from history, Int should remain
     let messages = test_repo.commit_messages();
     assert!(!messages.contains(&"A1".to_string()), "A1 should be gone");
     assert!(!messages.contains(&"A2".to_string()), "A2 should be gone");
@@ -237,7 +230,6 @@ fn drop_branch_at_merge_base_just_deletes_ref() {
     // Create a branch at merge-base (no commits, no weaving)
     test_repo.create_branch_at("empty-branch", &base_oid.to_string());
 
-    // Add a commit on integration so there's something in the range
     test_repo.commit("C1", "c1.txt");
 
     let result = super::drop_branch(&test_repo.repo, "empty-branch", true);
@@ -248,7 +240,6 @@ fn drop_branch_at_merge_base_just_deletes_ref() {
         "empty-branch should be deleted"
     );
 
-    // C1 should still be there
     assert_eq!(test_repo.get_message(0), "C1");
 }
 
@@ -257,7 +248,6 @@ fn drop_non_woven_branch_removes_commits_and_ref() {
     let test_repo = TestRepo::new_with_remote();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
-    // Create feature-a at merge-base and add commits
     test_repo.create_branch_at("feature-a", &base_oid.to_string());
     test_repo.switch_branch("feature-a");
     test_repo.commit("A1", "a1.txt");
@@ -281,7 +271,6 @@ fn drop_non_woven_branch_removes_commits_and_ref() {
         "feature-a should be deleted"
     );
 
-    // A1, A2 should be gone, Int should remain
     let messages = test_repo.commit_messages();
     assert!(!messages.contains(&"A1".to_string()), "A1 should be gone");
     assert!(!messages.contains(&"A2".to_string()), "A2 should be gone");
@@ -307,14 +296,12 @@ fn drop_woven_branch_with_two_branches_preserves_other() {
     let test_repo = TestRepo::new_with_remote();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
-    // Create feature-a with commits
     test_repo.create_branch_at("feature-a", &base_oid.to_string());
     test_repo.switch_branch("feature-a");
     test_repo.commit("A1", "a1.txt");
     test_repo.commit("A2", "a2.txt");
     test_repo.switch_branch("integration");
 
-    // Create feature-b with commits
     test_repo.create_branch_at("feature-b", &base_oid.to_string());
     test_repo.switch_branch("feature-b");
     test_repo.commit("B1", "b1.txt");
@@ -325,15 +312,12 @@ fn drop_woven_branch_with_two_branches_preserves_other() {
     test_repo.merge_no_ff("feature-a");
     test_repo.merge_no_ff("feature-b");
 
-    // Drop feature-a
     let result = super::drop_branch(&test_repo.repo, "feature-a", true);
     assert!(result.is_ok(), "drop_branch failed: {:?}", result);
 
-    // feature-a gone, feature-b still exists
     assert!(!test_repo.branch_exists("feature-a"));
     assert!(test_repo.branch_exists("feature-b"));
 
-    // B1 should remain, A1 and A2 should be gone
     let messages = test_repo.commit_messages();
     assert!(!messages.contains(&"A1".to_string()), "A1 should be gone");
     assert!(!messages.contains(&"A2".to_string()), "A2 should be gone");
@@ -347,13 +331,11 @@ fn drop_colocated_non_woven_preserves_other_branch_and_commits() {
     let test_repo = TestRepo::new_with_remote();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
-    // Create feature-a with a commit
     test_repo.create_branch_at("feature-a", &base_oid.to_string());
     test_repo.switch_branch("feature-a");
     test_repo.commit("A1", "a1.txt");
     test_repo.switch_branch("integration");
 
-    // Fast-forward integration to feature-a
     test_repo.merge_no_ff("feature-a");
     test_repo.force_checkout();
 
@@ -368,13 +350,11 @@ fn drop_colocated_non_woven_preserves_other_branch_and_commits() {
     let result = super::drop_branch(&test_repo.repo, "feature-a", true);
     assert!(result.is_ok(), "drop_branch failed: {:?}", result);
 
-    // feature-a should be deleted
     assert!(
         !test_repo.branch_exists("feature-a"),
         "feature-a should be deleted"
     );
 
-    // feature-b should still exist and point to the same commit content
     assert!(
         test_repo.branch_exists("feature-b"),
         "feature-b should still exist"
@@ -397,7 +377,6 @@ fn drop_colocated_woven_preserves_other_branch_and_commits() {
     let test_repo = TestRepo::new_with_remote();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
-    // Create feature-a with a commit
     test_repo.create_branch_at("feature-a", &base_oid.to_string());
     test_repo.switch_branch("feature-a");
     test_repo.commit("A1", "a1.txt");
@@ -415,13 +394,11 @@ fn drop_colocated_woven_preserves_other_branch_and_commits() {
     let result = super::drop_branch(&test_repo.repo, "feature-a", true);
     assert!(result.is_ok(), "drop_branch failed: {:?}", result);
 
-    // feature-a should be deleted
     assert!(
         !test_repo.branch_exists("feature-a"),
         "feature-a should be deleted"
     );
 
-    // feature-b should still exist
     assert!(
         test_repo.branch_exists("feature-b"),
         "feature-b should still exist"
@@ -439,8 +416,6 @@ fn drop_colocated_woven_preserves_other_branch_and_commits() {
     );
 }
 
-// ── Stacked branch tests ─────────────────────────────────────────────────
-
 #[test]
 fn drop_stacked_outer_branch_preserves_inner_branch() {
     // Stacked topology: feat2 is stacked on feat1.
@@ -452,7 +427,6 @@ fn drop_stacked_outer_branch_preserves_inner_branch() {
     let test_repo = TestRepo::new_with_remote();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
-    // Create feat1 at merge-base with one commit
     test_repo.create_branch_at("feat1", &base_oid.to_string());
     test_repo.switch_branch("feat1");
     test_repo.commit("A1", "a1.txt");
@@ -468,14 +442,11 @@ fn drop_stacked_outer_branch_preserves_inner_branch() {
     test_repo.commit("Int", "int.txt");
     test_repo.merge_no_ff("feat2");
 
-    // Drop feat2
     let result = super::drop_branch(&test_repo.repo, "feat2", true);
     assert!(result.is_ok(), "drop_branch failed: {:?}", result);
 
-    // feat2 should be deleted
     assert!(!test_repo.branch_exists("feat2"), "feat2 should be deleted");
 
-    // feat1 should still exist
     assert!(test_repo.branch_exists("feat1"), "feat1 should still exist");
 
     // A1 should remain in history, A2 should be gone
@@ -637,7 +608,6 @@ fn drop_file_restores_tracked_modifications() {
     let test_repo = TestRepo::new_with_remote();
     test_repo.commit("Base", "base.txt");
 
-    // Modify the tracked file
     test_repo.write_file("base.txt", "modified content");
 
     let result = super::drop_file(&test_repo.repo, "base.txt", true);
@@ -656,13 +626,11 @@ fn drop_file_deletes_untracked_file() {
     let test_repo = TestRepo::new_with_remote();
     test_repo.commit("Base", "base.txt");
 
-    // Write an untracked file
     test_repo.write_file("untracked.txt", "new content");
 
     let result = super::drop_file(&test_repo.repo, "untracked.txt", true);
     assert!(result.is_ok(), "drop_file failed: {:?}", result);
 
-    // File should be deleted
     let path = test_repo.workdir().join("untracked.txt");
     assert!(!path.exists(), "untracked.txt should be deleted");
     assert!(
@@ -676,14 +644,12 @@ fn drop_file_deletes_staged_new_file() {
     let test_repo = TestRepo::new_with_remote();
     test_repo.commit("Base", "base.txt");
 
-    // Write and stage a new file
     test_repo.write_file("new.txt", "new content");
     test_repo.stage_files(&["new.txt"]);
 
     let result = super::drop_file(&test_repo.repo, "new.txt", true);
     assert!(result.is_ok(), "drop_file failed: {:?}", result);
 
-    // File should be deleted
     let path = test_repo.workdir().join("new.txt");
     assert!(!path.exists(), "new.txt should be deleted");
     assert!(
@@ -721,14 +687,12 @@ fn drop_dir_with_only_untracked_files() {
 fn drop_dir_with_only_tracked_modifications() {
     let test_repo = TestRepo::new_with_remote();
 
-    // Commit files inside a directory
     std::fs::create_dir_all(test_repo.workdir().join("src")).unwrap();
     test_repo.write_file("src/one.txt", "original-one");
     test_repo.write_file("src/two.txt", "original-two");
     test_repo.stage_files(&["src/one.txt", "src/two.txt"]);
     test_repo.commit_staged("Initial src files");
 
-    // Modify both tracked files
     test_repo.write_file("src/one.txt", "modified-one");
     test_repo.write_file("src/two.txt", "modified-two");
 
@@ -747,7 +711,6 @@ fn drop_dir_with_only_tracked_modifications() {
 fn drop_dir_with_mixed_tracked_and_untracked() {
     let test_repo = TestRepo::new_with_remote();
 
-    // Commit a file inside a directory
     std::fs::create_dir_all(test_repo.workdir().join("mix")).unwrap();
     test_repo.write_file("mix/tracked.txt", "original");
     test_repo.stage_files(&["mix/tracked.txt"]);
@@ -776,7 +739,6 @@ fn drop_dir_with_staged_new_files() {
     let test_repo = TestRepo::new_with_remote();
     test_repo.commit("Base", "base.txt");
 
-    // Create and stage new files in a directory
     std::fs::create_dir_all(test_repo.workdir().join("staged")).unwrap();
     test_repo.write_file("staged/a.txt", "aaa");
     test_repo.write_file("staged/b.txt", "bbb");
@@ -840,7 +802,6 @@ fn drop_merge_commit_fails() {
     let a_oid = test_repo.head_oid();
     let upstream_oid = test_repo.find_remote_branch_target("origin/main");
 
-    // Create a merge commit
     test_repo.commit_merge("Merge side", a_oid, upstream_oid);
     let merge_oid = test_repo.head_oid();
 
@@ -874,7 +835,6 @@ fn drop_file_resolves_from_nested_cwd() {
     std::fs::write(sub_dir.join("file.txt"), "content").unwrap();
     test_repo.stage_files(&["sub/file.txt"]);
     test_repo.commit_staged("add sub/file.txt");
-    // Dirty the file
     std::fs::write(sub_dir.join("file.txt"), "modified").unwrap();
 
     let result = test_repo.in_dir_path(&sub_dir, || crate::drop::run("file.txt".to_string(), true));

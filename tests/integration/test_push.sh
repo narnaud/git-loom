@@ -26,9 +26,7 @@ build_stack() {
     weave_branch "x"
 }
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PRECONDITIONS
-# ══════════════════════════════════════════════════════════════════════════════
+# ── PRECONDITIONS ─────────────────────────────────────────────────────────────
 
 describe "precond: no woven branches"
 setup_repo_with_remote
@@ -66,9 +64,7 @@ gl_capture push stray
 assert_exit_fail "$CODE" "precond_not_woven"
 assert_contains "$OUT" "not woven" "precond_not_woven_msg"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PLAIN REMOTE
-# ══════════════════════════════════════════════════════════════════════════════
+# ── PLAIN REMOTE ──────────────────────────────────────────────────────────────
 
 describe "a lone branch is pushed on its own"
 build_stack
@@ -119,9 +115,7 @@ assert_exit_ok "$CODE" "nopr_ok"
 assert_eq "$(remote_oid a)" "$(branch_oid a)" "nopr_a_oid"
 assert_eq "$(remote_oid b)" "$(branch_oid b)" "nopr_b_oid"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# GITLAB (push options checked in the trace of the push)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── GITLAB (push options checked in the trace of the push) ────────────────────
 
 # Let the bare remote accept push options; the trace of the push records the
 # exact `git push` line loom ran, options included.
@@ -154,9 +148,7 @@ assert_contains "$trace" "-o merge_request.create -o merge_request.target=$BASE_
 assert_contains "$trace" "-o merge_request.target=a -u origin b" "gitlab_republish_opts_b"
 assert_not_contains "$trace" "merge_request.create -o merge_request.target=a -u origin b" "gitlab_republish_no_create"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# GITHUB (gh shim)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── GITHUB (gh shim) ──────────────────────────────────────────────────────────
 # The shim is a shell script on PATH; Rust's Command cannot spawn one on
 # Windows, so these scenarios only run elsewhere.
 

@@ -6,9 +6,7 @@ source "$(dirname "$0")/helpers.sh"
 # The JSON status is the last line of stderr; gl_capture merges stdout+stderr,
 # so assertions grep for the JSON fragments rather than compare whole output.
 
-# ══════════════════════════════════════════════════════════════════════════════
-# agent init
-# ══════════════════════════════════════════════════════════════════════════════
+# ── agent init ────────────────────────────────────────────────────────────────
 
 describe "agent init: installs, is idempotent, refreshes stale content"
 setup_repo_with_remote
@@ -53,7 +51,6 @@ gl_capture status --agent
 assert_exit_ok "$CODE" "skill_outdated_exit"
 assert_contains "$OUT" '"status":"ok"' "skill_outdated_still_ok"
 assert_contains "$OUT" "differs from the one this loom ships" "skill_outdated_warned"
-# The notice rides in the JSON only — no duplicate human line for the agent to read twice.
 assert_not_contains "$OUT" "! The Claude git-loom skill" "skill_outdated_not_printed"
 assert_contains "$OUT" "git-loom agent init --project" "skill_outdated_hint"
 # Advisory only: the stale file is never rewritten behind the user's back.
@@ -66,9 +63,7 @@ assert_not_contains "$OUT" "differs from the one this loom ships" "skill_current
 rm -rf "$WORK/.claude"
 export HOME="$OLD_HOME"; export USERPROFILE="$OLD_USERPROFILE"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# needs_input: commit without a branch
-# ══════════════════════════════════════════════════════════════════════════════
+# ── needs_input: commit without a branch ──────────────────────────────────────
 
 describe "agent mode: commit without -b lists woven branches, changes nothing"
 setup_repo_with_remote
@@ -88,7 +83,6 @@ assert_contains "$OUT" '"allow_other":true' "commit_needs_input_allow_other"
 assert_contains "$OUT" '"hint":' "commit_needs_input_hint"
 assert_contains "$OUT" "or -i for the integration branch itself" \
     "commit_needs_input_hint_mentions_integration"
-# Nothing was committed
 assert_log_not_contains "C1" "commit_needs_input_no_commit"
 
 describe "agent mode: answering the hint commits and reports ok"
@@ -105,9 +99,7 @@ assert_eq "10" "$CODE" "env_var_exit"
 assert_contains "$OUT" '"status":"needs_input"' "env_var_status"
 gl drop zz -y > /dev/null 2>&1  # clean the leftover staged change
 
-# ══════════════════════════════════════════════════════════════════════════════
-# needs_input: missing -m (editor guard)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── needs_input: missing -m (editor guard) ────────────────────────────────────
 
 describe "agent mode: commit without -m never opens an editor"
 write_file "e.txt" "content e"
@@ -117,9 +109,7 @@ assert_contains "$OUT" '"status":"needs_input"' "no_message_status"
 assert_contains "$OUT" '"kind":"text"' "no_message_kind"
 gl drop zz -y > /dev/null 2>&1
 
-# ══════════════════════════════════════════════════════════════════════════════
-# needs_confirmation: drop without -y
-# ══════════════════════════════════════════════════════════════════════════════
+# ── needs_confirmation: drop without -y ───────────────────────────────────────
 
 describe "agent mode: drop a file without -y asks for confirmation"
 write_file "a.txt" "modified content"
@@ -134,9 +124,7 @@ assert_exit_ok "$CODE" "drop_yes_exit"
 assert_contains "$OUT" '"status":"ok"' "drop_yes_status"
 assert_file_content "a.txt" "content a" "drop_yes_restored"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# completions: dispatched early, but still ends with a JSON status
-# ══════════════════════════════════════════════════════════════════════════════
+# ── completions: dispatched early, but still ends with a JSON status ──────────
 
 describe "agent mode: completions still ends with a JSON status"
 gl_capture completions powershell --agent
@@ -147,9 +135,7 @@ gl_capture completions notashell --agent
 assert_eq "1" "$CODE" "completions_bad_shell_exit"
 assert_contains "$OUT" '"status":"error"' "completions_bad_shell_status"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# error: -p is rejected
-# ══════════════════════════════════════════════════════════════════════════════
+# ── error: -p is rejected ─────────────────────────────────────────────────────
 
 describe "agent mode: -p/--patch is rejected with a structured error"
 gl_capture add --agent -p
@@ -157,9 +143,7 @@ assert_eq "1" "$CODE" "patch_rejected_exit"
 assert_contains "$OUT" '"status":"error"' "patch_rejected_status"
 assert_contains "$OUT" "--patch is interactive" "patch_rejected_msg"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# error: tui is rejected
-# ══════════════════════════════════════════════════════════════════════════════
+# ── error: tui is rejected ────────────────────────────────────────────────────
 
 describe "agent mode: tui is rejected with a structured error"
 gl_capture tui --agent
@@ -167,18 +151,14 @@ assert_eq "1" "$CODE" "tui_rejected_exit"
 assert_contains "$OUT" '"status":"error"' "tui_rejected_status"
 assert_contains "$OUT" "the TUI is interactive" "tui_rejected_msg"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# error: normal failures still end with a JSON status
-# ══════════════════════════════════════════════════════════════════════════════
+# ── error: normal failures still end with a JSON status ───────────────────────
 
 describe "agent mode: a failing command reports status error"
 gl_capture drop --agent no-such-target-xyz -y
 assert_eq "1" "$CODE" "error_exit"
 assert_contains "$OUT" '"status":"error"' "error_status"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# paused: a conflicting update
-# ══════════════════════════════════════════════════════════════════════════════
+# ── paused: a conflicting update ──────────────────────────────────────────────
 
 describe "agent mode: a conflicting update reports paused, continue reports ok"
 setup_repo_with_remote

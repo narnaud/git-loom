@@ -3,9 +3,7 @@
 set -euo pipefail
 source "$(dirname "$0")/helpers.sh"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PRECONDITIONS
-# ══════════════════════════════════════════════════════════════════════════════
+# ── PRECONDITIONS ─────────────────────────────────────────────────────────────
 
 describe "precond: not in a git repository"
 new_tmpdir TMP_NOGIT
@@ -26,9 +24,7 @@ git -C "$WORK" branch --unset-upstream integration
 gl_capture status
 assert_exit_fail "$CODE" "precond_no_upstream"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# EMPTY INTEGRATION BRANCH
-# ══════════════════════════════════════════════════════════════════════════════
+# ── EMPTY INTEGRATION BRANCH ──────────────────────────────────────────────────
 
 describe "empty branch shows upstream marker and no changes"
 setup_repo_with_remote
@@ -39,9 +35,7 @@ assert_contains "$out" "Initial"     "empty_upstream_msg"
 assert_contains "$out" "origin/"     "empty_upstream_remote"
 assert_contains "$out" "no changes"  "empty_shows_no_changes"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# WORKING CHANGES
-# ══════════════════════════════════════════════════════════════════════════════
+# ── WORKING CHANGES ───────────────────────────────────────────────────────────
 
 describe "staged file appears in local changes section"
 setup_repo_with_remote
@@ -77,9 +71,7 @@ setup_repo_with_remote
 out=$(gl status)
 assert_contains "$out" "no changes" "clean_shows_no_changes"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# SINGLE WOVEN BRANCH
-# ══════════════════════════════════════════════════════════════════════════════
+# ── SINGLE WOVEN BRANCH ───────────────────────────────────────────────────────
 
 # Branch names starting with g–z avoid short-ID collisions with hex digits a–f.
 describe "single branch: name, commit message, and graph symbols"
@@ -98,9 +90,7 @@ assert_contains "$out" "│●"           "single_branch_commit"
 assert_contains "$out" "├╯"           "single_branch_close"
 assert_contains "$out" "(upstream)"   "single_branch_upstream"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# MULTIPLE INDEPENDENT WOVEN BRANCHES
-# ══════════════════════════════════════════════════════════════════════════════
+# ── MULTIPLE INDEPENDENT WOVEN BRANCHES ───────────────────────────────────────
 
 describe "two independent branches both appear with their commits"
 setup_repo_with_remote
@@ -123,9 +113,7 @@ assert_contains "$out" "h-beta"       "two_branches_second_name"
 assert_contains "$out" "Alpha commit" "two_branches_first_msg"
 assert_contains "$out" "Beta commit"  "two_branches_second_msg"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# STACKED BRANCHES (h-top built on top of g-base)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── STACKED BRANCHES (h-top built on top of g-base) ───────────────────────────
 
 describe "stacked branches show │├─ and ││ connectors"
 setup_repo_with_remote
@@ -149,13 +137,10 @@ assert_contains "$out" "h-top"   "stacked_top_name"
 assert_contains "$out" "Base A1" "stacked_base_msg_a1"
 assert_contains "$out" "Base A2" "stacked_base_msg_a2"
 assert_contains "$out" "Top B1"  "stacked_top_msg_b1"
-# Lower branch uses │├─ and the gap between stacked branches uses ││
 assert_contains "$out" "│├─"     "stacked_lower_connector"
 assert_contains "$out" "││"      "stacked_between_connector"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# CO-LOCATED BRANCHES (two refs pointing to the same tip commit)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── CO-LOCATED BRANCHES (two refs pointing to the same tip commit) ────────────
 
 describe "co-located branches: both headers appear above shared commits"
 setup_repo_with_remote
@@ -172,16 +157,13 @@ out=$(gl status)
 assert_contains "$out" "g-coloc-a"       "coloc_first_name"
 assert_contains "$out" "h-coloc-b"       "coloc_second_name"
 assert_contains "$out" "Colocated commit" "coloc_commit_msg"
-# First branch uses │╭─, co-located branch uses │├─ (no ││ gap between them)
 assert_contains "$out" "│╭─"             "coloc_first_header"
 assert_contains "$out" "│├─"             "coloc_second_header"
 # Shared commit appears exactly once
 count=$(grep -c "Colocated commit" <<< "$out")
 assert_eq "$count" "1" "coloc_commit_not_duplicated"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# EMPTY BRANCH (at upstream base, no commits in range)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── EMPTY BRANCH (at upstream base, no commits in range) ──────────────────────
 
 describe "branch at merge-base shows as header+close with no commits"
 setup_repo_with_remote
@@ -194,21 +176,16 @@ assert_contains     "$out" "│╭─"     "empty_branch_open"
 assert_contains     "$out" "├╯"      "empty_branch_close"
 assert_not_contains "$out" "│●"      "empty_branch_no_commits"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# LOOSE COMMITS (on integration line, not owned by any feature branch)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── LOOSE COMMITS (on integration line, not owned by any feature branch) ──────
 
 describe "loose commit on integration line renders with bare ●"
 setup_repo_with_remote
 commit_file "Loose commit" "loose.txt"
 out=$(gl status)
 assert_contains     "$out" "Loose commit" "loose_commit_msg"
-# Loose commits use bare ● (no │ prefix), unlike branch commits │●
 assert_not_contains "$out" "│●"           "loose_no_branch_marker"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# UPSTREAM-TRACKING BRANCH EXCLUSION
-# ══════════════════════════════════════════════════════════════════════════════
+# ── UPSTREAM-TRACKING BRANCH EXCLUSION ────────────────────────────────────────
 
 describe "branch tracking same upstream as integration is excluded"
 setup_repo_with_remote
@@ -219,9 +196,7 @@ switch_to integration
 out=$(gl status)
 assert_not_contains "$out" "g-mirror-upstream" "same_upstream_excluded"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# REMOTE TRACKING INDICATORS
-# ══════════════════════════════════════════════════════════════════════════════
+# ── REMOTE TRACKING INDICATORS ────────────────────────────────────────────────
 
 describe "local-only branch (never pushed) has no remote indicator"
 setup_repo_with_remote
@@ -272,9 +247,7 @@ git -C "$WORK" fetch -q --prune origin
 out=$(gl status)
 assert_contains "$out" "✗" "pruned_cross"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# HIDDEN BRANCHES (loom.hideBranchPattern)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── HIDDEN BRANCHES (loom.hideBranchPattern) ──────────────────────────────────
 
 describe "branch matching hide prefix is invisible (name and commits)"
 setup_repo_with_remote
@@ -326,9 +299,7 @@ out=$(gl status)
 assert_contains "$out" "local-visible"  "empty_pattern_shows_name"
 assert_contains "$out" "Visible commit" "empty_pattern_shows_commit"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# UPSTREAM WITH NEW COMMITS (⏫)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── UPSTREAM WITH NEW COMMITS (⏫) ─────────────────────────────────────────────
 
 describe "upstream moved ahead shows ⏫ indicator with common base label"
 setup_repo_with_remote
@@ -345,9 +316,7 @@ assert_contains "$out" "⏫"          "upstream_ahead_indicator"
 assert_contains "$out" "new commit"  "upstream_ahead_count_text"
 assert_contains "$out" "common base" "upstream_common_base_label"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# CONTEXT COMMITS (gl status N)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── CONTEXT COMMITS (gl status N) ─────────────────────────────────────────────
 
 describe "gl status 2 shows 1 context commit (·) before the merge-base"
 setup_repo_with_remote
@@ -367,9 +336,7 @@ out=$(gl status 2)
 assert_contains "$out" "·"       "context_dot_marker"
 assert_contains "$out" "Initial" "context_shows_history"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# CWD-RELATIVE FILE PATHS
-# ══════════════════════════════════════════════════════════════════════════════
+# ── CWD-RELATIVE FILE PATHS ───────────────────────────────────────────────────
 
 describe "file paths are CWD-relative when run from a subdirectory"
 setup_repo_with_remote
@@ -381,9 +348,7 @@ out=$(cd "$WORK/src" && NO_COLOR=1 GIT_TERMINAL_PROMPT=0 "$GL_BIN" status)
 assert_contains     "$out" "widget.rs"     "cwd_relative_basename"
 assert_not_contains "$out" "src/widget.rs" "cwd_relative_no_prefix"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# FILES FLAG (-f / --files)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── FILES FLAG (-f / --files) ─────────────────────────────────────────────────
 
 describe "-f shows changed files beneath each commit"
 setup_repo_with_remote

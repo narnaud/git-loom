@@ -8,7 +8,6 @@ use crate::core::msg;
 use crate::core::repo;
 use crate::git;
 
-/// Command for a commit in the todo file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Pick,
@@ -26,7 +25,6 @@ impl Command {
     }
 }
 
-/// A commit in the todo file.
 #[derive(Debug, Clone)]
 pub struct CommitEntry {
     pub oid: Oid,
@@ -37,14 +35,13 @@ pub struct CommitEntry {
     pub update_refs: Vec<String>,
 }
 
-/// A woven branch section in the todo file.
 #[derive(Debug, Clone)]
 pub struct BranchSection {
-    /// The reset target ("onto" or another branch label).
+    /// "onto", or the label of the section this one is stacked on.
     pub reset_target: String,
-    /// Commits in the section, oldest first.
+    /// Oldest first.
     pub commits: Vec<CommitEntry>,
-    /// Canonical label for the section (used in `label` and `merge` directives).
+    /// Canonical label, used in `label` and `merge` directives.
     pub label: String,
     /// All branch refs at this section's tip (co-located branches).
     pub branch_names: Vec<String>,
@@ -53,7 +50,6 @@ pub struct BranchSection {
 /// An entry on the integration (first-parent) line.
 #[derive(Debug, Clone)]
 pub enum IntegrationEntry {
-    /// A regular commit on the integration line.
     Pick(CommitEntry),
     /// A merge point (weave) referencing a branch section.
     Merge {
@@ -67,11 +63,10 @@ pub enum IntegrationEntry {
 /// The weave: a structured representation of the integration branch topology.
 #[derive(Debug, Clone)]
 pub struct Weave {
-    /// The merge-base OID (the "onto" target).
+    /// The merge-base: the todo's "onto" target.
     pub base_oid: Oid,
     /// Woven branch sections in dependency order.
     pub branch_sections: Vec<BranchSection>,
-    /// The integration (first-parent) line entries.
     pub integration_line: Vec<IntegrationEntry>,
     /// Branches parked at the base: `update-ref` lines right after
     /// `reset onto`, for branches left without a commit (see `EmptiedRefs`).
@@ -90,14 +85,11 @@ pub enum EmptiedRefs {
 }
 
 impl Weave {
-    /// Serialize the weave to a git rebase todo file string.
     pub fn to_todo(&self) -> String {
         let mut out = String::new();
 
-        // Start with label onto
         out.push_str("label onto\n");
 
-        // Branch sections
         for section in &self.branch_sections {
             out.push('\n');
             out.push_str(&format!("reset {}\n", section.reset_target));
@@ -109,7 +101,6 @@ impl Weave {
             }
         }
 
-        // Integration line
         out.push('\n');
         out.push_str("reset onto\n");
         flush_refs(&mut out, &self.base_refs);
@@ -153,28 +144,21 @@ impl Weave {
         out
     }
 
-    /// Build the weave from the current repository state.
-    ///
-    /// Convenience wrapper that calls `gather_repo_info` internally.
-    /// When `RepoInfo` is already available, prefer `from_repo_with_info`
-    /// to avoid a redundant graph walk.
+    /// Build the weave from the current repository state. Prefer
+    /// `from_repo_with_info` when `RepoInfo` is already available.
     pub fn from_repo(repo: &Repository) -> Result<Self> {
         let info = repo::gather_repo_info(repo, false, 1)?;
         Self::from_repo_with_info(repo, &info)
     }
 
-    /// Build the weave from a pre-gathered `RepoInfo`.
-    ///
-    /// Walks the first-parent line from HEAD to the merge-base, collecting
-    /// branch sections (from merge commits) and integration-line entries.
+    /// Build the weave by walking the first-parent line from HEAD to the
+    /// merge-base, collecting branch sections and integration-line entries.
     pub fn from_repo_with_info(repo: &Repository, info: &repo::RepoInfo) -> Result<Self> {
         let head_oid = repo::head_oid(repo)?;
         let merge_base_oid = base_oid(repo, info)?;
 
-        // Walk the first-parent line from HEAD to merge-base
         let first_parent_entries = walk_first_parent_line(repo, head_oid, merge_base_oid)?;
 
-        // Build a set of all branch tips for matching
         let branch_tips: std::collections::HashMap<Oid, Vec<String>> = {
             let mut map: std::collections::HashMap<Oid, Vec<String>> =
                 std::collections::HashMap::new();
@@ -189,27 +173,21 @@ impl Weave {
         let mut branch_sections = Vec::new();
         let mut integration_line = Vec::new();
 
-        // Track which branch names have been assigned to sections
         let mut assigned_branches: std::collections::HashSet<String> =
             std::collections::HashSet::new();
 
         for entry in &first_parent_entries {
             if entry.is_merge {
-                // This is a merge commit on the integration line.
-                // The second parent leads to a branch.
                 if let Some(merge_parent_oid) = entry.merge_parent {
-                    // Find which branch this merge represents
                     let branch_names_at_tip = branch_tips
                         .get(&merge_parent_oid)
                         .cloned()
                         .unwrap_or_default();
 
-                    // Walk the second parent backward to collect branch commits
                     let branch_commits =
                         walk_branch_commits(repo, merge_parent_oid, merge_base_oid)?;
 
                     if !branch_commits.is_empty() || !branch_names_at_tip.is_empty() {
-                        // Determine the section label (use the first branch name, or generate one)
                         let label = if !branch_names_at_tip.is_empty() {
                             branch_names_at_tip[0].clone()
                         } else {
@@ -217,13 +195,11 @@ impl Weave {
                             format!("section-{}", git::short_hash(&merge_parent_oid.to_string()))
                         };
 
-                        // Convert to CommitEntry (oldest first)
                         let todo_commits: Vec<CommitEntry> = branch_commits
                             .into_iter()
                             .rev()
                             .map(|c| {
                                 let mut update_refs = Vec::new();
-                                // Check if any non-woven branches point at this commit
                                 if let Some(names) = branch_tips.get(&c.oid) {
                                     for name in names {
                                         if !branch_names_at_tip.contains(name)
@@ -256,7 +232,6 @@ impl Weave {
 
                         branch_sections.push(section);
 
-                        // Add merge entry on integration line
                         integration_line.push(IntegrationEntry::Merge {
                             original_oid: Some(entry.oid),
                             label,
@@ -264,9 +239,7 @@ impl Weave {
                     }
                 }
             } else {
-                // Regular commit on the integration line
                 let mut update_refs = Vec::new();
-                // Check if any non-woven branches point at this commit
                 if let Some(names) = branch_tips.get(&entry.oid) {
                     for name in names {
                         if !assigned_branches.contains(name) {
@@ -296,16 +269,11 @@ impl Weave {
 
     // ── Mutation methods ─────────────────────────────────────────────────
 
-    /// Remove branch-section commits that are already in the new upstream
-    /// (merged or cherry-picked). Empty sections and their merges are removed.
+    /// Remove branch-section commits already in the new upstream (merged or
+    /// cherry-picked); empty sections and their merges go too.
     ///
-    /// Returns the branches that lost all their commits (a removed section,
-    /// or an inner branch): they disappear from the todo, so the rebase leaves
-    /// their refs untouched.
-    ///
-    /// Uses two strategies:
-    /// 1. Exact OID ancestry (commit was directly merged)
-    /// 2. `git cherry` for cherry-pick detection (only when candidates remain)
+    /// Returns branches that lost all their commits: they vanish from the todo,
+    /// so the rebase leaves their refs untouched.
     pub fn filter_upstream_commits(
         &mut self,
         repo: &Repository,
@@ -325,7 +293,7 @@ impl Weave {
             }
         }
 
-        // Strategy 2: git cherry for remaining candidates (O(feature commits), not O(upstream commits))
+        // Strategy 2: git cherry for the rest — O(feature commits), not O(upstream)
         if !candidates.is_empty() {
             let candidate_set: HashSet<Oid> = candidates.into_iter().collect();
             match cherry_pick_equivalents(workdir, &new_upstream_oid, &self.base_oid) {
@@ -351,14 +319,11 @@ impl Weave {
         Ok(emptied)
     }
 
-    /// Remove a commit from the graph.
+    /// Remove a commit from the graph, dropping its section and merge entry if
+    /// it was the section's last commit.
     ///
-    /// If the commit is in a branch section and is the last commit, the section
-    /// and its merge entry are also removed.
-    ///
-    /// Returns the branches left without a commit, handled per `emptied` (the
-    /// section's own when the section is removed), or `None` if the commit is
-    /// not in the graph.
+    /// Returns the branches left without a commit, handled per `emptied`, or
+    /// `None` if the commit is not in the graph.
     #[must_use]
     pub fn drop_commit(&mut self, oid: Oid, emptied: EmptiedRefs) -> Option<Vec<String>> {
         let (_, mut names, section) = self.remove_commit(oid, emptied)?;
@@ -372,10 +337,9 @@ impl Weave {
         Some(names)
     }
 
-    /// Remove a section left without commits, along with its merge entry.
-    /// Sections stacked on it move down to what it was built on.
-    ///
-    /// Returns its branch names, handled per `emptied`.
+    /// Remove a section left without commits, along with its merge entry;
+    /// sections stacked on it move down to what it was built on. Returns its
+    /// branch names, handled per `emptied`.
     fn remove_empty_section(&mut self, idx: usize, emptied: EmptiedRefs) -> Vec<String> {
         let section = self.branch_sections.remove(idx);
         for s in &mut self.branch_sections {
@@ -393,22 +357,17 @@ impl Weave {
     }
 
     /// Take a commit out of the graph, leaving its section in place even when
-    /// empty.
-    ///
-    /// An inner branch ending at the removed commit now ends at the commit
-    /// before it. When the removed commit was the first of its section (or a
-    /// loose branch sat at the first integration-line commit), the branch has
-    /// no commits left and is handled per `emptied`. Moving it onto the next
+    /// empty. An inner branch ending at the commit ends at the one before it;
+    /// if none is left it is handled per `emptied` — moving it onto the next
     /// commit would give the branch a commit it never contained.
     ///
-    /// Returns the commit, its `update_refs` cleared, the branches left
-    /// without a commit, and the index of the section it came from.
+    /// Returns the commit (`update_refs` cleared), the emptied branches, and
+    /// the index of the section it came from.
     fn remove_commit(
         &mut self,
         oid: Oid,
         emptied: EmptiedRefs,
     ) -> Option<(CommitEntry, Vec<String>, Option<usize>)> {
-        // Check branch sections first
         for i in 0..self.branch_sections.len() {
             if let Some(pos) = self.branch_sections[i]
                 .commits
@@ -431,7 +390,6 @@ impl Weave {
             }
         }
 
-        // Check integration line
         let pos = self
             .integration_line
             .iter()
@@ -482,7 +440,7 @@ impl Weave {
         }
     }
 
-    /// Whether a branch owns a section (matches a section's branch names or label).
+    /// Whether `branch_name` matches a section's branch names or label.
     pub fn has_branch_section(&self, branch_name: &str) -> bool {
         self.branch_sections
             .iter()
@@ -511,12 +469,10 @@ impl Weave {
             })
     }
 
-    /// Remove an entire branch section and its merge entry.
-    ///
-    /// Returns false if no section matches the branch name.
+    /// Remove an entire branch section and its merge entry. False if no section
+    /// matches.
     #[must_use]
     pub fn drop_branch(&mut self, branch_name: &str) -> bool {
-        // Find the section that has this branch name
         let Some(idx) = self.branch_sections.iter().position(|s| {
             s.branch_names.contains(&branch_name.to_string()) || s.label == branch_name
         }) else {
@@ -525,18 +481,14 @@ impl Weave {
 
         let old_label = self.branch_sections[idx].label.clone();
 
-        // Check if an inner branch exists in this section's update_refs.
-        // In a stacked topology (e.g. feat1 stacked under feat2), commits
-        // belonging to the inner branch have update_refs marking their tip.
+        // An inner branch in a stacked topology marks its tip in update_refs.
         let inner_branch_boundary = self.branch_sections[idx]
             .commits
             .iter()
             .rposition(|c| !c.update_refs.is_empty());
 
         if let Some(boundary) = inner_branch_boundary {
-            // Keep commits up to and including the inner branch boundary.
-            // The remaining commits (after the boundary) belong to the
-            // dropped branch.
+            // Commits after the inner boundary belong to the dropped branch.
             let inner_ref = self.branch_sections[idx].commits[boundary]
                 .update_refs
                 .first()
@@ -552,7 +504,6 @@ impl Weave {
                 .update_refs
                 .retain(|r| *r != inner);
 
-            // Update the merge entry to reference the inner branch
             for entry in &mut self.integration_line {
                 if let IntegrationEntry::Merge {
                     label,
@@ -576,18 +527,12 @@ impl Weave {
 
     /// Move a commit to the tip of a branch.
     ///
-    /// The target is either a section's branch or an inner (stacked) branch
-    /// whose tip is a commit inside another branch's section. An inner target
-    /// gets the commit right after its tip and advances to it, so the commits
-    /// stacked above it are replayed on top of the moved commit.
+    /// An inner (stacked) target gets the commit right after its tip and
+    /// advances to it, so commits stacked above replay on top of it. If the
+    /// target is co-located with other branches the section is split, and the
+    /// target gets a new stacked section holding the moved commit.
     ///
-    /// If the target branch is co-located with other branches (multiple branch
-    /// names in the same section), the section is split: original commits stay
-    /// with the remaining branches, and a new stacked section is created for the
-    /// target branch containing the moved commit.
-    ///
-    /// Returns the branches the commit left without one, parked at the base
-    /// they built on.
+    /// Returns the branches left without a commit, parked at their base.
     pub fn move_commit(&mut self, oid: Oid, to_branch: &str) -> anyhow::Result<Vec<String>> {
         // Validate the target exists BEFORE removing the source
         let mut section_idx = self
@@ -621,7 +566,6 @@ impl Weave {
             );
         };
 
-        // Ensure command is Pick (not Fixup etc.)
         commit.command = Command::Pick;
 
         // The source section left empty goes, with its merge — unless it is
@@ -652,7 +596,6 @@ impl Weave {
             return Ok(parked);
         };
 
-        // If the target branch is co-located with others, split the section
         if self.branch_sections[section_idx].branch_names.len() > 1
             && self.branch_sections[section_idx]
                 .branch_names
@@ -660,12 +603,10 @@ impl Weave {
         {
             let old_label = self.branch_sections[section_idx].label.clone();
 
-            // Remove the target branch from the original section
             self.branch_sections[section_idx]
                 .branch_names
                 .retain(|n| n != to_branch);
 
-            // If the old label was the target, rename to a remaining branch name
             if old_label == to_branch
                 && let Some(first_remaining) =
                     self.branch_sections[section_idx].branch_names.first()
@@ -675,7 +616,6 @@ impl Weave {
 
             let base_label = self.branch_sections[section_idx].label.clone();
 
-            // Create a stacked section for the target branch
             let new_section = BranchSection {
                 reset_target: base_label,
                 commits: vec![commit],
@@ -704,7 +644,6 @@ impl Weave {
                 parked.extend(self.remove_empty_section(section_idx, EmptiedRefs::Park));
             }
         } else {
-            // Simple case: only one branch in the section, just append
             self.branch_sections[section_idx].commits.push(commit);
         }
         Ok(parked)
@@ -752,7 +691,6 @@ impl Weave {
         };
         commit.command = Command::Fixup;
 
-        // Find the target commit and insert the fixup after it
         for section in &mut self.branch_sections {
             if let Some(pos) = section.commits.iter().position(|c| c.oid == target_oid) {
                 section.commits.insert(pos + 1, commit);
@@ -760,7 +698,6 @@ impl Weave {
             }
         }
 
-        // Check integration line
         for (i, entry) in self.integration_line.iter().enumerate() {
             if let IntegrationEntry::Pick(c) = entry
                 && c.oid == target_oid
@@ -771,19 +708,16 @@ impl Weave {
             }
         }
 
-        // Should be unreachable given the pre-validation, but be safe
         anyhow::bail!(
             "Cannot fixup commit: target commit {} disappeared during operation",
             target_oid
         )
     }
 
-    /// Change a commit's command to Edit.
     pub fn edit_commit(&mut self, oid: Oid) {
         self.set_command(oid, Command::Edit);
     }
 
-    /// Add a new branch section to the graph.
     pub fn add_branch_section(
         &mut self,
         label: String,
@@ -799,12 +733,9 @@ impl Weave {
         });
     }
 
-    /// Add a merge entry on the integration line.
-    ///
-    /// If `position` is `None`, inserts before any loose `Pick` entries (after
-    /// all existing `Merge` entries), so the new branch sits below loose commits
-    /// in the resulting history.
-    /// If `position` is `Some(idx)`, inserts at that exact index.
+    /// Add a merge entry on the integration line, at `position` or — when
+    /// `None` — after all existing merges, so the new branch sits below any
+    /// loose commits in the resulting history.
     pub fn add_merge(&mut self, label: String, original_oid: Option<Oid>, position: Option<usize>) {
         let entry = IntegrationEntry::Merge {
             original_oid,
@@ -819,10 +750,9 @@ impl Weave {
         self.integration_line.insert(idx, entry);
     }
 
-    /// Weave a non-woven branch into the integration line.
-    ///
-    /// Moves all integration line picks from the start up to (and including) the
-    /// branch tip into a new branch section, and adds a merge entry at the end.
+    /// Weave a non-woven branch into the integration line: the integration-line
+    /// picks up to and including the branch tip become a new branch section, and a
+    /// merge entry is added for it.
     pub fn weave_branch(&mut self, branch_name: &str) {
         // Find which integration line Pick has this branch in update_refs
         let branch_idx = self.integration_line.iter().position(|e| {
@@ -843,7 +773,6 @@ impl Weave {
         for i in 0..=branch_idx {
             if let IntegrationEntry::Pick(commit) = &self.integration_line[i] {
                 let mut commit = commit.clone();
-                // Remove this branch from the commit's update_refs
                 commit.update_refs.retain(|r| r != branch_name);
                 section_commits.push(commit);
                 indices_to_remove.push(i);
@@ -858,7 +787,6 @@ impl Weave {
             self.integration_line.remove(i);
         }
 
-        // Create the branch section
         self.branch_sections.push(BranchSection {
             reset_target: "onto".to_string(),
             commits: section_commits,
@@ -877,12 +805,8 @@ impl Weave {
         );
     }
 
-    /// Reassign a branch section from one branch name to another.
-    ///
-    /// Renames the section's label and merge line, removes the dropped branch
-    /// from branch_names, ensures the keep branch is present.
-    ///
-    /// Returns false if no section matches the dropped branch name.
+    /// Reassign a branch section from one branch name to another, renaming its
+    /// label and merge line. Returns false if no section matches `drop_branch`.
     #[must_use]
     pub fn reassign_branch(&mut self, drop_branch: &str, keep_branch: &str) -> bool {
         let Some(section) = self
@@ -895,15 +819,12 @@ impl Weave {
 
         let old_label = section.label.clone();
 
-        // If the section was labeled with the drop branch, rename the label
         if section.label == drop_branch {
             section.label = keep_branch.to_string();
         }
 
-        // Remove the drop branch from branch_names
         section.branch_names.retain(|n| n != drop_branch);
 
-        // Ensure the keep branch is in branch_names
         if !section.branch_names.contains(&keep_branch.to_string()) {
             section.branch_names.push(keep_branch.to_string());
         }
@@ -925,17 +846,13 @@ impl Weave {
         true
     }
 
-    /// Swap two commits within the same sequence.
-    ///
-    /// Both commits must be in the same container: either the same branch section
-    /// or both on the integration line. Returns an error if they are in different
-    /// locations or if either commit is not found.
+    /// Swap two commits in the same container: one branch section, or both on the
+    /// integration line. Errors otherwise, or if either commit is missing.
     pub fn swap_commits(&mut self, oid_a: Oid, oid_b: Oid) -> Result<()> {
         if oid_a == oid_b {
             bail!("Cannot swap a commit with itself");
         }
 
-        // Locate both commits in branch sections
         let mut sec_a: Option<(usize, usize)> = None;
         let mut sec_b: Option<(usize, usize)> = None;
         for (si, section) in self.branch_sections.iter().enumerate() {
@@ -949,7 +866,6 @@ impl Weave {
             }
         }
 
-        // Locate both commits on the integration line
         let mut int_a: Option<usize> = None;
         let mut int_b: Option<usize> = None;
         for (i, entry) in self.integration_line.iter().enumerate() {
@@ -1008,9 +924,8 @@ impl Weave {
         }
     }
 
-    /// Add a branch name to a commit's `update_refs` so that `--update-refs`
-    /// keeps the ref in sync through the rebase.  Used to track a commit's new
-    /// OID after a fixup rebase (where the commit is rewritten).
+    /// Add a branch name to a commit's `update_refs` so `--update-refs` keeps it in
+    /// sync — how a caller tracks a commit's new OID across a rebase.
     pub fn track_commit(&mut self, oid: Oid, ref_name: &str) {
         for section in &mut self.branch_sections {
             for commit in &mut section.commits {
@@ -1031,7 +946,6 @@ impl Weave {
         }
     }
 
-    /// Set the command for a commit in the graph.
     fn set_command(&mut self, oid: Oid, command: Command) {
         for section in &mut self.branch_sections {
             for commit in &mut section.commits {
@@ -1053,10 +967,7 @@ impl Weave {
     }
 }
 
-/// Emit commit lines and collect pending update-ref entries.
-///
-/// Returns any refs that are still pending after the last commit
-/// (i.e. refs attached to the final pick/fixup sequence).
+/// Emit commit lines, returning the refs still pending after the last one.
 fn emit_commits_with_refs(out: &mut String, commits: &[CommitEntry]) -> Vec<String> {
     let mut pending_refs: Vec<String> = Vec::new();
     for commit in commits {
@@ -1075,7 +986,6 @@ fn emit_commits_with_refs(out: &mut String, commits: &[CommitEntry]) -> Vec<Stri
     pending_refs
 }
 
-/// Emit update-ref lines for accumulated pending refs.
 fn flush_refs(out: &mut String, refs: &[String]) {
     for r in refs {
         out.push_str(&format!("update-ref refs/heads/{}\n", r));
@@ -1097,7 +1007,6 @@ pub fn describe_branches(names: &[String]) -> String {
     }
 }
 
-/// An entry from the first-parent walk of the integration branch.
 #[derive(Debug)]
 struct FirstParentEntry {
     oid: Oid,
@@ -1110,16 +1019,14 @@ struct FirstParentEntry {
 
 /// Find where the integration line meets the upstream.
 ///
-/// `git merge-base` returns the best common ancestor anywhere in the graph,
-/// which is not always on the integration line. When a woven branch lands
-/// upstream as a fast-forward, the upstream tip *is* that branch's tip — a
-/// second parent — and the merge-base lands on the branch side. Walking to
-/// that base would mistake the rest of the integration line for a branch and
-/// discard the whole weave.
+/// Not `git merge-base`: that returns the best common ancestor anywhere in the
+/// graph. When a woven branch lands upstream as a fast-forward the upstream tip
+/// *is* that branch's tip — a second parent — and the merge-base lands on the
+/// branch side; walking to it would mistake the rest of the integration line
+/// for a branch and discard the whole weave.
 ///
-/// Follow first parents instead and stop at the first commit the upstream
-/// already contains: that is the integration line's own base. Falls back to
-/// `merge_base` if the line reaches a root without ever meeting the upstream.
+/// So follow first parents and stop at the first commit the upstream already
+/// contains, falling back to `merge_base` if the line reaches a root first.
 fn integration_base(repo: &Repository, head: Oid, upstream: Oid, merge_base: Oid) -> Result<Oid> {
     let mut current = head;
     loop {
@@ -1147,15 +1054,9 @@ pub fn base_oid(repo: &Repository, info: &repo::RepoInfo) -> Result<Oid> {
     )
 }
 
-/// Walk the first-parent line from `head` to `stop` (exclusive).
-///
-/// Returns entries in oldest-first order (reversed from the walk direction).
-/// Includes both regular and merge commits.
-///
-/// For merge commits with inverted parent ordering (feature branch as first
-/// parent instead of the integration line), the parents are swapped so that
-/// `merge_parent` always points to the branch side and the walk continues
-/// along the line that leads back to `stop`.
+/// Walk the first-parent line from `head` to `stop` (exclusive), oldest-first,
+/// merges included. `merge_parent` always names the branch side, even when an
+/// upstream merge has its parents the other way round.
 fn walk_first_parent_line(
     repo: &Repository,
     head: Oid,
@@ -1222,7 +1123,6 @@ fn walk_first_parent_line(
                 merge_parent: None,
             });
 
-            // Follow first parent
             current = match commit.parent_id(0) {
                 Ok(oid) => oid,
                 Err(_) => {
@@ -1236,22 +1136,14 @@ fn walk_first_parent_line(
         }
     }
 
-    // Reverse to oldest-first
     entries.reverse();
     Ok(entries)
 }
 
-/// Walk branch commits from `tip` back to `stop` (exclusive), skipping merges.
-///
-/// Returns entries in newest-first order (like a revwalk).
-///
-/// When the branch was forked from before `stop` (e.g. an upstream merge with
-/// inverted parent ordering), the actual fork point is computed via
-/// `merge_base(tip, stop)` and used as the stop instead.
+/// Walk branch commits from `tip` back to `stop` (exclusive), newest first,
+/// skipping merges. A branch forked before `stop` stops at
+/// `merge_base(tip, stop)` instead, so the walk stays out of shared history.
 fn walk_branch_commits(repo: &Repository, tip: Oid, stop: Oid) -> Result<Vec<BranchCommitEntry>> {
-    // For loom-woven branches, tip descends from stop (the branch was forked
-    // from the merge base). For branches forked earlier, compute the actual
-    // fork point so we don't walk past it into shared history.
     let actual_stop = if tip == stop {
         stop
     } else {
@@ -1268,7 +1160,6 @@ fn walk_branch_commits(repo: &Repository, tip: Oid, stop: Oid) -> Result<Vec<Bra
         }
         let commit = repo.find_commit(current)?;
 
-        // Skip merge commits
         if commit.parent_count() <= 1 {
             let short_hash = commit
                 .as_object()
@@ -1285,7 +1176,6 @@ fn walk_branch_commits(repo: &Repository, tip: Oid, stop: Oid) -> Result<Vec<Bra
             });
         }
 
-        // Follow first parent
         current = match commit.parent_id(0) {
             Ok(oid) => oid,
             Err(_) => break,
@@ -1302,27 +1192,20 @@ struct BranchCommitEntry {
     message: String,
 }
 
-/// Start an interactive rebase that pauses at the given commit (edit command).
-///
-/// Tries `Weave::from_repo()` first for full topology-aware rebase on
-/// integration branches. Falls back to a minimal linear todo for non-integration
-/// repos (no upstream tracking).
+/// Start an interactive rebase that pauses at `commit_oid` (`edit`), using the
+/// weave when there is one and a minimal linear todo otherwise.
 pub fn start_edit_rebase(repo: &Repository, workdir: &Path, commit_oid: Oid) -> Result<()> {
-    // Try Weave::from_repo first (for integration branches)
     if let Ok(mut graph) = Weave::from_repo(repo) {
         graph.edit_commit(commit_oid);
         let todo = graph.to_todo();
         return run_rebase_expecting_edit(workdir, Some(&graph.base_oid.to_string()), &todo);
     }
 
-    // Fallback: build a minimal linear todo for non-integration repos
     build_and_run_linear_edit(repo, workdir, commit_oid)
 }
 
-/// Build a linear todo and run rebase for a commit range containing the target.
-///
-/// Used for non-integration repos where `Weave::from_repo()` is not available.
-/// Walks the first-parent line from HEAD to the target's parent (or root).
+/// Build a linear todo from HEAD to the target's parent (or root) and rebase.
+/// For repos with no upstream, where `Weave::from_repo` does not work.
 fn build_and_run_linear_edit(repo: &Repository, workdir: &Path, commit_oid: Oid) -> Result<()> {
     let head_oid = repo::head_oid(repo)?;
     let commit = repo.find_commit(commit_oid)?;
@@ -1336,7 +1219,6 @@ fn build_and_run_linear_edit(repo: &Repository, workdir: &Path, commit_oid: Oid)
 
     let stop = upstream.as_ref().and_then(|s| Oid::from_str(s).ok());
 
-    // Walk from HEAD backward, collecting commits in the range
     let mut entries = Vec::new();
     let mut current = head_oid;
     let mut visited: HashSet<Oid> = HashSet::new();
@@ -1372,7 +1254,6 @@ fn build_and_run_linear_edit(repo: &Repository, workdir: &Path, commit_oid: Oid)
 
     entries.reverse(); // oldest first
 
-    // Build the todo string
     let mut todo = String::from("label onto\n\nreset onto\n");
     for line in &entries {
         todo.push_str(line);
@@ -1382,18 +1263,14 @@ fn build_and_run_linear_edit(repo: &Repository, workdir: &Path, commit_oid: Oid)
     run_rebase_expecting_edit(workdir, upstream.as_deref(), &todo)
 }
 
-/// Outcome of a weave-based rebase.
 pub use crate::git::RebaseOutcome;
 
 /// Execute a weave-based rebase, aborting automatically if it stops.
 ///
-/// The rebase is expected to run to the end: a todo with no `edit` or `break`
-/// in it has nowhere to stop on purpose, so anything short of `Completed` is a
-/// failure. Callers that do drive `edit` steps want
-/// [`run_rebase_expecting_edit`] instead.
-///
-/// For out-of-scope callers — the ones that do not save `LoomState` and so
-/// cannot be resumed. Use `run_rebase` directly for resumable commands.
+/// The todo has no `edit`/`break`, so anything short of `Completed` is a
+/// failure; callers that do drive `edit` steps want
+/// [`run_rebase_expecting_edit`]. For out-of-scope callers only — a resumable
+/// command saves `LoomState` and calls `run_rebase` directly.
 pub fn run_rebase_or_abort(
     workdir: &Path,
     upstream: Option<&str>,
@@ -1422,19 +1299,14 @@ pub fn run_rebase_expecting_edit(
     }
 }
 
-/// Execute a weave-based rebase.
+/// Execute a weave-based rebase, writing the todo to a temp file and running
+/// `git rebase` with `internal-write-todo` as the sequence editor.
 ///
-/// Writes the todo content to a temp file and runs git rebase with
-/// `internal-write-todo` as the sequence editor.
+/// `upstream` is passed as git's `<upstream>` argument verbatim — no `^` suffix
+/// — so commits after it up to HEAD are rebased; `None` means `--root`.
 ///
-/// `upstream` is the OID to use as the upstream for the rebase. Commits after
-/// this OID (exclusive) up to HEAD are rebased. This is passed directly as the
-/// `<upstream>` argument to `git rebase`, NOT with a `^` suffix. For root
-/// commits, pass `None` to use `--root`.
-///
-/// Returns `RebaseOutcome::Completed` once the rebase is over,
-/// `RebaseOutcome::Paused` if it stopped at an `edit` step the todo asked for,
-/// and `RebaseOutcome::Stopped` if it stopped part-way. Does NOT abort.
+/// Returns `Paused` when it stopped at an `edit` the todo asked for and
+/// `Stopped` when it stopped part-way. Does NOT abort.
 pub fn run_rebase(
     workdir: &Path,
     upstream: Option<&str>,
@@ -1451,21 +1323,18 @@ pub fn run_rebase(
     // before anything is rewritten.
     git::ensure_not_checked_out_elsewhere(workdir, &rewritten_branches(workdir, todo_content))?;
 
-    // Resolve the git dir up front. Both exits below need it to tell a finished
-    // rebase from one still on disk, and failing here — before anything is
-    // rewritten — is harmless, while failing afterwards would strand a
-    // resumable command's state file with its rebase already done.
+    // Resolve the git dir up front: both exits below need it, and failing
+    // afterwards would strand a resumable command's state file with its
+    // rebase already done.
     let git_dir = git::absolute_git_dir(workdir)?;
 
     let self_exe = git::loom_exe_path()?;
 
-    // Write todo content to a temp file
     let mut temp_file = tempfile::NamedTempFile::new()?;
     temp_file.write_all(todo_content.as_bytes())?;
     temp_file.flush()?;
     let temp_path = temp_file.into_temp_path();
 
-    // Build the sequence editor command
     let exe_str = self_exe.display().to_string().replace('\\', "/");
     let source_path = temp_path.display().to_string().replace('\\', "/");
 
@@ -1475,7 +1344,6 @@ pub fn run_rebase(
         shell_escape::unix::escape(source_path.into()),
     );
 
-    // Build args string for logging
     let upstream_arg = upstream.unwrap_or("--root");
     let log_args = format!(
         "rebase --interactive --autostash --keep-empty --empty=drop --no-autosquash --rebase-merges --update-refs {}",
@@ -1496,10 +1364,9 @@ pub fn run_rebase(
             "--update-refs",
         ])
         .env("GIT_SEQUENCE_EDITOR", sequence_editor)
-        // Suppress editor for new merge commits (those without -C in the todo).
-        // `true` is a no-op that leaves the default "Merge branch '...'" message intact.
-        // This only affects the rebase process — not the user's shell when rebase
-        // pauses at an `edit` command.
+        // Suppress the editor for new merge commits (no -C in the todo), keeping
+        // the default "Merge branch '...'" message. Does not affect the user's
+        // shell when the rebase pauses at `edit`.
         .env("GIT_EDITOR", "true");
 
     match upstream {
@@ -1562,15 +1429,11 @@ fn rewritten_branches(workdir: &Path, todo: &str) -> Vec<String> {
     branches
 }
 
-/// Returns OIDs in `base..HEAD` that have cherry-pick equivalents in `upstream`.
+/// OIDs in `base..HEAD` that have cherry-pick equivalents in `upstream`.
 ///
-/// Runs `git cherry <upstream> HEAD <base>`, which outputs one line per commit:
-///   `- <sha>` — equivalent already in upstream (cherry-picked)
-///   `+ <sha>` — not yet in upstream
-///
-/// This is O(feature commits), unlike the old patch-ID pipeline which was
-/// O(upstream commits). `git cherry` uses the same patch-ID logic internally
-/// and respects diff.algorithm consistently.
+/// From `git cherry <upstream> HEAD <base>`, whose `- <sha>` lines mark the
+/// commits already upstream. O(feature commits), and it shares git's own
+/// patch-ID logic, so `diff.algorithm` stays consistent.
 fn cherry_pick_equivalents(workdir: &Path, upstream: &Oid, base: &Oid) -> Option<HashSet<Oid>> {
     let stdout = git::run_git_stdout(
         workdir,

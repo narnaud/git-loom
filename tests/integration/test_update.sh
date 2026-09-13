@@ -3,9 +3,7 @@
 set -euo pipefail
 source "$(dirname "$0")/helpers.sh"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PRECONDITIONS
-# ══════════════════════════════════════════════════════════════════════════════
+# ── PRECONDITIONS ─────────────────────────────────────────────────────────────
 
 describe "precond: not in a git repository"
 new_tmpdir TMP_NOGIT
@@ -28,9 +26,7 @@ gl_capture update
 assert_exit_fail "$CODE" "precond_no_upstream"
 assert_contains "$OUT" "no upstream" "precond_no_upstream_msg"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# ALREADY UP TO DATE
-# ══════════════════════════════════════════════════════════════════════════════
+# ── ALREADY UP TO DATE ────────────────────────────────────────────────────────
 
 describe "already up-to-date: succeeds and reports updated branch"
 setup_repo_with_remote
@@ -40,9 +36,7 @@ assert_contains "$out" "Fetched latest changes"  "already_up_to_date_fetched"
 assert_contains "$out" "Rebased onto upstream"   "already_up_to_date_rebased"
 assert_contains "$out" "Updated branch"          "already_up_to_date_success_msg"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# FETCH AND REBASE NEW UPSTREAM COMMITS
-# ══════════════════════════════════════════════════════════════════════════════
+# ── FETCH AND REBASE NEW UPSTREAM COMMITS ─────────────────────────────────────
 
 describe "new upstream commit: integration rebased on top"
 setup_repo_with_remote
@@ -63,16 +57,12 @@ assert_contains "$out" "Updated branch"          "upstream_new_success_msg"
 # Integration HEAD moved forward (merged upstream)
 new_head=$(head_hash)
 assert_ne "$old_head" "$new_head" "upstream_new_head_advanced"
-# The upstream commit is now in history
 assert_log_contains "Upstream feature" "upstream_new_commit_in_log"
 
 describe "new upstream commit: output includes upstream short hash"
-# (upstream_info is appended to the success message)
 assert_contains "$out" "origin/" "upstream_remote_name_in_msg"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# LOCAL COMMITS PRESERVED
-# ══════════════════════════════════════════════════════════════════════════════
+# ── LOCAL COMMITS PRESERVED ───────────────────────────────────────────────────
 
 describe "local commits on integration are preserved after rebase"
 setup_repo_with_remote
@@ -89,14 +79,10 @@ git -C "$OTHER" push -q origin
 
 out=$(gl update 2>&1)
 assert_exit_ok $? "local_commits_preserved_ok"
-# Local commit message still in history
 assert_log_contains "Local integration work" "local_commits_still_in_log"
-# Remote commit also in history
 assert_log_contains "Remote upstream work" "remote_commit_in_log"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# DIRTY WORKING TREE (AUTOSTASH)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── DIRTY WORKING TREE (AUTOSTASH) ────────────────────────────────────────────
 
 describe "dirty working tree is preserved via autostash"
 setup_repo_with_remote
@@ -117,12 +103,9 @@ write_file "tracked.txt" "dirty content"
 out=$(gl update 2>&1)
 assert_exit_ok $? "dirty_tree_ok"
 assert_contains "$out" "Rebased onto upstream" "dirty_tree_rebased"
-# The uncommitted change must survive
 assert_file_content "tracked.txt" "dirty content" "dirty_tree_change_preserved"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# WOVEN BRANCHES SURVIVE REBASE (--update-refs)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── WOVEN BRANCHES SURVIVE REBASE (--update-refs) ─────────────────────────────
 
 describe "woven feature branch ref is updated after rebase"
 setup_repo_with_remote
@@ -145,17 +128,13 @@ git -C "$OTHER" push -q origin
 out=$(gl update 2>&1)
 assert_exit_ok $? "woven_survive_ok"
 assert_contains "$out" "Rebased onto upstream" "woven_survive_rebased"
-# The feature branch still exists
 assert_branch_exists "g-woven" "woven_survive_branch_exists"
 # The feature branch tip changed (was rebased)
 new_tip=$(branch_oid "g-woven")
 assert_ne "$local_tip" "$new_tip" "woven_survive_ref_updated"
-# Its commits are still reachable from the branch
 assert_contains "$(git -C "$WORK" log g-woven --oneline)" "Woven commit B" "woven_survive_tip_msg"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# GONE UPSTREAM CLEANUP
-# ══════════════════════════════════════════════════════════════════════════════
+# ── GONE UPSTREAM CLEANUP ─────────────────────────────────────────────────────
 
 describe "--yes removes a local branch whose remote tracking branch was deleted"
 setup_repo_with_remote
@@ -199,9 +178,7 @@ assert_exit_ok $? "gone_selective_ok"
 assert_branch_not_exists "h-gone-only"  "gone_selective_gone_removed"
 assert_branch_exists     "g-live-branch" "gone_selective_live_kept"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# SUBMODULE UPDATE
-# ══════════════════════════════════════════════════════════════════════════════
+# ── SUBMODULE UPDATE ──────────────────────────────────────────────────────────
 
 describe "submodule update runs when .gitmodules is present"
 setup_repo_with_remote
@@ -232,9 +209,7 @@ assert_exit_ok $? "submodule_ok"
 assert_not_contains "$out" "Updating submodules" "submodule_spinner_no_frames"
 assert_contains "$out" "Updated submodules" "submodule_spinner_stop"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# CHERRY-PICKED UPSTREAM COMMITS ARE FILTERED
-# ══════════════════════════════════════════════════════════════════════════════
+# ── CHERRY-PICKED UPSTREAM COMMITS ARE FILTERED ───────────────────────────────
 
 describe "cherry-picked feature commit is filtered from rebase"
 setup_repo_with_remote
@@ -425,7 +400,6 @@ git -C "$OTHER" push -q origin "$base_branch"
 out=$(gl update -y 2>&1)
 assert_exit_ok $? "cherry_pick_filter_ok"
 assert_contains "$out" "Rebased onto upstream" "cherry_pick_rebased"
-# The feature commit message should still be in history (from the upstream copy)
 assert_log_contains "Rewrite doc" "cherry_pick_commit_in_log"
 assert_branch_not_exists "cherry-feat" "cherry_pick_branch_removed"
 
@@ -455,7 +429,6 @@ git -C "$OTHER" push -q origin "$base_branch"
 out=$(gl update 2>&1)
 assert_exit_ok $? "partial_cherry_ok"
 assert_contains "$out" "Rebased onto upstream" "partial_cherry_rebased"
-# F2 and F3 should still be on the branch
 assert_contains "$(git -C "$WORK" log partial-cherry --oneline)" "Partial F2" "partial_cherry_f2_kept"
 assert_contains "$(git -C "$WORK" log partial-cherry --oneline)" "Partial F3" "partial_cherry_f3_kept"
 
@@ -493,9 +466,7 @@ assert_contains "$out" "fully merged upstream" "full_cherry_merged_warning"
 assert_contains "$out" "Removed branch" "full_cherry_branch_removed"
 assert_branch_not_exists "full-cherry" "full_cherry_branch_deleted"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# WOVEN BRANCH LANDING UPSTREAM
-# ══════════════════════════════════════════════════════════════════════════════
+# ── WOVEN BRANCH LANDING UPSTREAM ─────────────────────────────────────────────
 
 describe "branch fast-forwarded upstream leaves the rest of the weave intact"
 setup_repo_with_remote

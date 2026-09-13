@@ -65,10 +65,9 @@ pub fn rebase(git_dir: &Path, workdir: &Path, upstream: &str) -> Result<RebaseOu
     )
 }
 
-/// Rebase commits between `upstream` and HEAD onto `newbase`.
-///
-/// Runs `git rebase --onto <newbase> <upstream> --update-refs`.
-/// The `--update-refs` flag keeps any branch refs in the rebased range up to date.
+/// Rebase commits between `upstream` and HEAD onto `newbase`
+/// (`git rebase --onto <newbase> <upstream> --update-refs`), keeping branch
+/// refs in the range up to date.
 #[cfg(test)]
 pub fn rebase_onto(workdir: &Path, newbase: &str, upstream: &str) -> Result<()> {
     super::run_git(
@@ -89,18 +88,15 @@ pub fn rebase_abort(workdir: &Path) -> Result<()> {
     super::run_git(workdir, &["rebase", "--abort"])
 }
 
-/// Check whether a rebase is currently in progress in the repository.
-///
-/// Detects the presence of `rebase-merge/` or `rebase-apply/` directories
-/// under the git dir, which git creates when a rebase is paused.
+/// Whether a rebase is in progress: git leaves a `rebase-merge/` or
+/// `rebase-apply/` directory under the git dir while one is paused.
 pub fn rebase_is_in_progress(git_dir: &Path) -> bool {
     git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists()
 }
 
-/// Step numbers of a paused rebase, as `(current, total)`.
-///
-/// Read from the `msgnum`/`end` files git keeps in the rebase state directory.
-/// Returns `None` if no rebase is in progress or the files are unreadable.
+/// Step numbers of a paused rebase as `(current, total)`, read from the
+/// `msgnum`/`end` files in git's rebase state dir. `None` when no rebase is in
+/// progress or the files are unreadable.
 pub fn rebase_progress(git_dir: &Path) -> Option<(usize, usize)> {
     let dir = ["rebase-merge", "rebase-apply"]
         .iter()
@@ -191,16 +187,13 @@ pub fn has_unmerged_paths(workdir: &Path) -> bool {
 /// The id of `AUTO_MERGE`, the ref git keeps while a conflicted merge is
 /// unfinished — a conflicted pick during a rebase included — and drops once the
 /// resolution is committed. `Some` therefore means the stop came from a
-/// conflict, resolved or not.
+/// conflict, resolved or not, and the id names *which* conflict, so a caller
+/// that read it before continuing can tell a fresh one from the one it was on.
 ///
-/// The id names *which* conflict, so a caller that read it before continuing
-/// can tell a fresh conflict from the one it was already on.
-///
-/// Asks git rather than looking for a file under the git dir: `AUTO_MERGE` is a
-/// ref, and the reftable backend keeps no file of that name.
-///
-/// Only the `ort` merge strategy writes the ref; under any other strategy this
-/// reports `None` and the caller falls back to its generic message.
+/// Asks git rather than looking for a file: `AUTO_MERGE` is a ref, and the
+/// reftable backend keeps no file of that name. Only the `ort` strategy writes
+/// it, so under any other this reports `None` and the caller falls back to its
+/// generic message.
 pub fn auto_merge_id(workdir: &Path) -> Option<String> {
     let out =
         super::run_git_stdout(workdir, &["rev-parse", "--verify", "--quiet", "AUTO_MERGE"]).ok()?;

@@ -74,6 +74,24 @@ Before rebase, `weave::run_rebase` must reject every moved branch checked out
 in another non-prunable worktree (see `git/git_worktree.rs`, Spec 004), because
 `update-ref` todo lines and rebase completion bypass Git's porcelain guard.
 
+## Comments
+
+Comments are AI context: keep them few and dense. A `///` doc comment is one
+line saying what the item is, plus only the non-obvious contract — an
+invariant, an ordering requirement, a data-safety rule, why a git flag is
+there. A `//` comment explains *why*, never what the next line already says.
+
+Do not write: comments restating the code or the signature, rustdoc
+`# Arguments`/`# Returns`/`# Example` sections, multi-line ASCII banners
+(one-line `// ── Name ──` if a long file needs sections), or a rationale
+already given nearby or in a spec — link the spec instead.
+
+In tests the function name, the fixture calls, and an assert's own label say
+what is happening, so do not narrate them. Comment a test only to record why
+it exists (the bug it guards), to draw the commit topology it builds, or to
+flag a non-obvious fixture trick. Same for `tests/integration/*.sh`, where
+`assert_* "..." "<name>"` already names the case.
+
 ## Error Convention
 
 `run_git`/`run_git_stdout` failures log stderr only to trace. Never put Git

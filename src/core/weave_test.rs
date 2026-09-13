@@ -763,7 +763,6 @@ fn move_commit_to_colocated_branch_when_target_is_label() {
 
     graph.move_commit(oid(OID_C1), "feature-a").unwrap();
 
-    // Should have 2 sections now
     assert_eq!(graph.branch_sections.len(), 2);
 
     // Base section is renamed to feature-b
@@ -853,7 +852,6 @@ fn fixup_commit_to_missing_target_errors() {
         base_refs: vec![],
     };
 
-    // Try to fixup to a non-existent target
     let result = graph.fixup_commit(oid(OID_FIX), oid(OID_C2));
     assert!(result.is_err());
     assert!(
@@ -981,33 +979,26 @@ fn from_repo_with_woven_branch() {
     let test_repo = TestRepo::new_with_remote();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
-    // Create feature-a at merge-base
     test_repo.create_branch_at("feature-a", &base_oid.to_string());
 
-    // Switch to feature-a and add commits
     test_repo.switch_branch("feature-a");
     test_repo.commit("A1", "a1.txt");
     test_repo.commit("A2", "a2.txt");
 
-    // Switch back to integration
     test_repo.switch_branch("integration");
 
-    // Add a commit on integration before merging
     test_repo.commit("Int", "int.txt");
 
-    // Merge feature-a
     test_repo.merge_no_ff("feature-a");
 
     let graph = Weave::from_repo(&test_repo.repo).unwrap();
 
-    // Should have one branch section for feature-a
     assert_eq!(graph.branch_sections.len(), 1);
     assert_eq!(graph.branch_sections[0].label, "feature-a");
     assert_eq!(graph.branch_sections[0].commits.len(), 2);
     assert_eq!(graph.branch_sections[0].commits[0].message, "A1");
     assert_eq!(graph.branch_sections[0].commits[1].message, "A2");
 
-    // Integration line should have Int + merge
     assert_eq!(graph.integration_line.len(), 2);
     if let IntegrationEntry::Pick(c) = &graph.integration_line[0] {
         assert_eq!(c.message, "Int");
@@ -1032,11 +1023,9 @@ fn from_repo_with_non_woven_branch() {
 
     let test_repo = TestRepo::new_with_remote();
 
-    // Add commits on integration
     test_repo.commit("C1", "c1.txt");
     let c1_oid = test_repo.head_oid();
 
-    // Create feature-a at C1 (non-woven, just a branch pointing at a commit)
     test_repo.create_branch_at("feature-a", &c1_oid.to_string());
 
     test_repo.commit("C2", "c2.txt");
@@ -1064,7 +1053,6 @@ fn from_repo_round_trip_preserves_identity() {
     let workdir = test_repo.workdir();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
-    // Build a non-trivial graph
     test_repo.create_branch_at("feature-a", &base_oid.to_string());
     test_repo.switch_branch("feature-a");
     test_repo.commit("A1", "a1.txt");
@@ -1072,13 +1060,11 @@ fn from_repo_round_trip_preserves_identity() {
     test_repo.commit("Int", "int.txt");
     test_repo.merge_no_ff("feature-a");
 
-    // Record state before round-trip
     let messages_before: Vec<String> = {
         let info = repo::gather_repo_info(&test_repo.repo, false, 1).unwrap();
         info.commits.iter().map(|c| c.message.clone()).collect()
     };
 
-    // Build graph, serialize, and run through rebase
     let graph = Weave::from_repo(&test_repo.repo).unwrap();
     let todo = graph.to_todo();
 
@@ -1346,7 +1332,6 @@ fn weave_branch_moves_picks_into_section() {
 
     graph.weave_branch("feature-x");
 
-    // C1 and C2 should be in a new branch section
     assert_eq!(graph.branch_sections.len(), 1);
     assert_eq!(graph.branch_sections[0].label, "feature-x");
     assert_eq!(graph.branch_sections[0].commits.len(), 2);

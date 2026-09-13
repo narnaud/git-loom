@@ -19,7 +19,6 @@ pub struct Theme {
     pub label: Color,
     /// Dimmed secondary text: messages, dates, file changes, "no changes".
     pub dim: Color,
-    /// Commit message text.
     pub message: Color,
     /// Short ID prefix (also underlined in rendering).
     pub shortid: Color,
@@ -44,7 +43,6 @@ pub struct Theme {
     /// Replacement for `dim` on the cursor/selected line, with enough
     /// contrast against `selection_bg`.
     pub dim_selected: Color,
-    /// Rotating colors for commit dots on feature branches.
     pub branch_dots: &'static [Color],
 }
 
@@ -71,7 +69,6 @@ impl Theme {
         }
     }
 
-    /// Light terminal background theme.
     pub fn light() -> Self {
         Theme {
             graph: Color::AnsiColor(248),
@@ -117,7 +114,6 @@ pub struct RenderOpts {
     /// Terminal column width, used for multi-column untracked layout.
     /// `None` means non-TTY (e.g. pipe) — fall back to single-column.
     pub terminal_width: Option<u16>,
-    /// Color theme for the graph output.
     pub theme: Theme,
     /// CWD prefix relative to repo root (empty string if at root).
     pub cwd_prefix: String,
@@ -182,18 +178,14 @@ fn canonical_branch_name(info: &RepoInfo, tip: git2::Oid) -> &str {
 /// are "loose": they sit on the integration line and belong to no feature
 /// branch.
 fn assign_commits_to_branches(info: &RepoInfo) -> HashMap<git2::Oid, String> {
-    // Build a set of branch tip OIDs for quick lookup.
     let branch_tip_set: HashSet<git2::Oid> = info.branches.iter().map(|b| b.tip_oid).collect();
 
-    // Build a parent lookup from the commit list so we can walk ancestry chains.
     let parent_map: HashMap<git2::Oid, Option<git2::Oid>> =
         info.commits.iter().map(|c| (c.oid, c.parent_oid)).collect();
 
-    // For each unique branch tip, compute the set of commits belonging to it.
-    // Walk from the branch tip along parent links, stopping at:
-    //   - A commit not in our range (outside upstream..HEAD)
-    //   - Another branch's tip (stacked-branch boundary)
-    // Use the first name in the group as the canonical name for commit assignment.
+    // From each branch tip, walk parent links until a commit outside the range
+    // or another branch's tip (the stacked-branch boundary). The first name in a
+    // co-located group is the canonical one for assignment.
     let mut commit_to_branch: HashMap<git2::Oid, String> = HashMap::new();
     let mut seen_tips: HashSet<git2::Oid> = HashSet::new();
     for b in &info.branches {

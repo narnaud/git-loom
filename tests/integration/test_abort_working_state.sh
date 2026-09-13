@@ -26,9 +26,7 @@ assert_bystanders_preserved() {
     assert_file_content "new-file.txt" "new-content" "${label}_new_file"
 }
 
-# ══════════════════════════════════════════════════════════════════════════════
-# DROP
-# ══════════════════════════════════════════════════════════════════════════════
+# ── DROP ──────────────────────────────────────────────────────────────────────
 # Conflict: C1 changes A→B, C2 changes B→C. Dropping C1 forces C2 to replay
 # "B→C" against "A" → 3-way merge conflict.
 
@@ -49,9 +47,7 @@ assert_exit_ok   "$CODE" "drop_wsp_abort_ok"
 assert_no_state_file     "drop_wsp_no_state"
 assert_bystanders_preserved "drop_wsp"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# SWAP
-# ══════════════════════════════════════════════════════════════════════════════
+# ── SWAP ──────────────────────────────────────────────────────────────────────
 # Conflict: swap A↔B where A changes "base"→"from A" and B changes "from A"→"from B".
 # Swapping puts B first → B's diff ("from A"→"from B") applied to "base" → conflict.
 
@@ -74,9 +70,7 @@ assert_exit_ok   "$CODE" "swap_wsp_abort_ok"
 assert_no_state_file     "swap_wsp_no_state"
 assert_bystanders_preserved "swap_wsp"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# FOLD (uncommit)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── FOLD (uncommit) ───────────────────────────────────────────────────────────
 # Same A→B→C conflict: uncommitting C1 (fold <C1> zz) forces C2 to replay
 # without C1 → 3-way merge conflict.
 
@@ -97,9 +91,7 @@ assert_exit_ok   "$CODE" "fold_wsp_abort_ok"
 assert_no_state_file     "fold_wsp_no_state"
 assert_bystanders_preserved "fold_wsp"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# COMMIT
-# ══════════════════════════════════════════════════════════════════════════════
+# ── COMMIT ────────────────────────────────────────────────────────────────────
 # Conflict: feature branch has "feature\n" in shared.txt; integration has
 # "integration\n". The new commit changes shared.txt to "feature-v2\n". When
 # moved to the feature branch section (which has "feature\n"), the cherry-pick
@@ -128,9 +120,7 @@ assert_exit_ok   "$CODE" "commit_wsp_abort_ok"
 assert_no_state_file     "commit_wsp_no_state"
 assert_bystanders_preserved "commit_wsp"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# FOLD (fold two commits — fixup path)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── FOLD (fold two commits — fixup path) ──────────────────────────────────────
 # Conflict: A→B→C all modify shared.txt. Folding C (source) into A (target)
 # inserts C's fixup right after A. C's diff "B→C" is applied when the file is
 # still in state "A" → 3-way merge conflict.

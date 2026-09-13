@@ -50,24 +50,19 @@ fn patch_stdout(workdir: &Path, command: &str, flags: &[&str], args: &[&str]) ->
     run_git_stdout(workdir, &full)
 }
 
-/// Get the diff for a single commit (its changes relative to its parent).
-///
-/// Wraps `git diff <oid>^..<oid>`.
+/// Get the diff for a single commit (`git diff <oid>^..<oid>`).
 pub fn diff_commit(workdir: &Path, oid: &str) -> Result<String> {
     diff_stdout(workdir, &[&format!("{}^..{}", oid, oid)])
 }
 
-/// Get the diff for a single file within a commit (relative to its parent).
-///
-/// Wraps `git diff <oid>^..<oid> -- <path>`.
+/// Get the diff for a single file within a commit
+/// (`git diff <oid>^..<oid> -- <path>`).
 pub fn diff_commit_file(workdir: &Path, oid: &str, path: &str) -> Result<String> {
     diff_stdout(workdir, &[&format!("{}^..{}", oid, oid), "--", path])
 }
 
-/// Get the whole staged diff (HEAD → index).
-///
-/// Wraps `git diff --binary --cached`; saved to be restored, like
-/// [`diff_head`].
+/// Get the whole staged diff, HEAD → index (`git diff --binary --cached`);
+/// saved to be restored, like [`diff_head`].
 pub fn diff_cached(workdir: &Path) -> Result<String> {
     diff_cached_files(workdir, &[])
 }
@@ -84,63 +79,54 @@ pub fn diff_cached_files(workdir: &Path, files: &[&str]) -> Result<String> {
     restore_stdout(workdir, &args)
 }
 
-/// Get the diff of all tracked files against HEAD (name-only).
-///
-/// Wraps `git diff HEAD --name-only`. Returns one filename per line.
+/// Get the diff of all tracked files against HEAD, one filename per line
+/// (`git diff HEAD --name-only`).
 pub fn diff_head_name_only(workdir: &Path) -> Result<String> {
     diff_stdout(workdir, &["HEAD", "--name-only"])
 }
 
-/// Get the unified diff for a single file against HEAD.
-///
-/// Wraps `git diff HEAD -- <path>`.
+/// Get the unified diff for a single file against HEAD
+/// (`git diff HEAD -- <path>`).
 pub fn diff_head_file(workdir: &Path, path: &str) -> Result<String> {
     diff_stdout(workdir, &["HEAD", "--", path])
 }
 
-/// Check whether a file is binary (has working-tree changes vs HEAD that git cannot diff as text).
+/// Whether a file's working-tree changes against HEAD are binary.
 ///
-/// Uses `git diff --numstat HEAD -- <path>`: binary files are reported with `-\t-` instead of
-/// numeric insertion/deletion counts. This is locale-independent, unlike the "Binary files"
-/// string in the standard diff output.
+/// Uses `git diff --numstat HEAD -- <path>`: binary files report dashes instead
+/// of counts, which is locale-independent unlike the "Binary files" string.
 pub fn diff_head_file_is_binary(workdir: &Path, path: &str) -> Result<bool> {
     let out = diff_stdout(workdir, &["--numstat", "HEAD", "--", path])?;
     Ok(out.starts_with("-\t"))
 }
 
-/// Get the unified diff for a single file (unstaged changes only: index → worktree).
-///
-/// Wraps `git diff -- <path>`.
+/// Get the unified diff for a single file, unstaged only: index → worktree
+/// (`git diff -- <path>`).
 pub fn diff_file(workdir: &Path, path: &str) -> Result<String> {
     diff_stdout(workdir, &["--", path])
 }
 
-/// Get the staged diff for a single file (HEAD → index).
-///
-/// Wraps `git diff --cached -- <path>`.
+/// Get the staged diff for a single file, HEAD → index
+/// (`git diff --cached -- <path>`).
 pub fn diff_cached_file(workdir: &Path, path: &str) -> Result<String> {
     diff_stdout(workdir, &["--cached", "--", path])
 }
 
-/// Check whether a file's unstaged changes are binary.
-///
-/// Uses `git diff --numstat -- <path>`.
+/// Whether a file's unstaged changes are binary (`git diff --numstat -- <path>`).
 pub fn diff_file_is_binary(workdir: &Path, path: &str) -> Result<bool> {
     let out = diff_stdout(workdir, &["--numstat", "--", path])?;
     Ok(out.starts_with("-\t"))
 }
 
-/// Check whether a file's staged changes are binary.
-///
-/// Uses `git diff --cached --numstat -- <path>`.
+/// Whether a file's staged changes are binary
+/// (`git diff --cached --numstat -- <path>`).
 pub fn diff_cached_file_is_binary(workdir: &Path, path: &str) -> Result<bool> {
     let out = diff_stdout(workdir, &["--cached", "--numstat", "--", path])?;
     Ok(out.starts_with("-\t"))
 }
 
-/// Check whether a file's changes within a commit are binary.
-///
-/// Uses `git diff --numstat <oid>^..<oid> -- <path>`.
+/// Whether a file's changes within a commit are binary
+/// (`git diff --numstat <oid>^..<oid> -- <path>`).
 pub fn diff_commit_file_is_binary(workdir: &Path, oid: &str, path: &str) -> Result<bool> {
     let out = diff_stdout(
         workdir,
@@ -149,9 +135,8 @@ pub fn diff_commit_file_is_binary(workdir: &Path, oid: &str, path: &str) -> Resu
     Ok(out.starts_with("-\t"))
 }
 
-/// List files changed in a commit with their status character (A/M/D/R/etc.).
-///
-/// Wraps `git diff --name-status <oid>^..<oid>`. Returns `(status_char, path)` pairs.
+/// List files changed in a commit as `(status_char, path)` pairs
+/// (`git diff --name-status <oid>^..<oid>`).
 pub fn diff_commit_name_status(workdir: &Path, oid: &str) -> Result<Vec<(char, String)>> {
     let out = diff_stdout(workdir, &["--name-status", &format!("{}^..{}", oid, oid)])?;
     let mut result = Vec::new();
@@ -186,9 +171,8 @@ pub fn diff_head(workdir: &Path) -> Result<String> {
     restore_stdout(workdir, &["HEAD"])
 }
 
-/// Get the unified diff for specific files against HEAD.
-///
-/// Wraps `git diff --binary HEAD -- <files>`; saved to be restored, like
+/// Get the unified diff for specific files against HEAD
+/// (`git diff --binary HEAD -- <files>`); saved to be restored, like
 /// [`diff_head`].
 pub fn diff_head_files(workdir: &Path, files: &[&str]) -> Result<String> {
     let mut args = vec!["HEAD", "--"];
@@ -196,39 +180,32 @@ pub fn diff_head_files(workdir: &Path, files: &[&str]) -> Result<String> {
     restore_stdout(workdir, &args)
 }
 
-/// Get the working-tree diff against HEAD, for display.
-///
-/// Wraps `git diff HEAD`. Unlike [`diff_head`], keeps the user's textconv
-/// filters: the output is read, never applied.
+/// Get the working-tree diff against HEAD, for display (`git diff HEAD`).
+/// Unlike [`diff_head`], keeps the user's textconv filters: the output is
+/// read, never applied.
 pub fn diff_head_display(workdir: &Path) -> Result<String> {
     patch_stdout(workdir, "diff", DISPLAY, &["HEAD"])
 }
 
-/// Get the working-tree diff of one file against HEAD, for display.
-///
-/// Wraps `git diff HEAD -- <path>`, keeping the user's textconv filters.
+/// Get the working-tree diff of one file against HEAD, for display
+/// (`git diff HEAD -- <path>`), keeping the user's textconv filters.
 pub fn diff_head_file_display(workdir: &Path, path: &str) -> Result<String> {
     patch_stdout(workdir, "diff", DISPLAY, &["HEAD", "--", path])
 }
 
-/// Get the diff between two commits, for display.
-///
-/// Wraps `git diff <base> <tip>`.
+/// Get the diff between two commits, for display (`git diff <base> <tip>`).
 pub fn diff_range(workdir: &Path, base: &str, tip: &str) -> Result<String> {
     patch_stdout(workdir, "diff", DISPLAY, &[base, tip])
 }
 
-/// Get a commit's summary and patch, for display.
-///
-/// Wraps `git show --stat --patch <oid>`.
+/// Get a commit's summary and patch, for display
+/// (`git show --stat --patch <oid>`).
 pub fn show_commit_patch(workdir: &Path, oid: &str) -> Result<String> {
     patch_stdout(workdir, "show", DISPLAY, &["--stat", "--patch", oid])
 }
 
 /// Get the patch a commit applied to one file, without the commit header, for
-/// display.
-///
-/// Wraps `git show --format= <oid> -- <path>`.
+/// display (`git show --format= <oid> -- <path>`).
 pub fn show_commit_file(workdir: &Path, oid: &str, path: &str) -> Result<String> {
     patch_stdout(workdir, "show", DISPLAY, &["--format=", oid, "--", path])
 }

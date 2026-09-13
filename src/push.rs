@@ -233,16 +233,12 @@ fn refuse_stacked_azure(remote_type: &RemoteType, plan: &PushPlan) -> Result<()>
     )
 }
 
-/// Push a feature branch to remote.
+/// Push a feature branch to remote, dispatching on the detected remote type
+/// (plain, GitHub, GitLab, Azure, Gerrit). Without a branch argument, shows
+/// an interactive picker.
 ///
-/// Detects the remote type (plain, GitHub, Gerrit) and dispatches to the
-/// appropriate push strategy. Accepts an optional branch argument (name or
-/// shortID); if omitted, shows an interactive picker.
-///
-/// When `no_pr` is true, skips PR/review creation for all remote types.
-/// For Gerrit, branches without a `wip/` prefix get a confirmation prompt.
-///
-/// When `force` is true, pushes with `--force` instead of the default
+/// `no_pr` skips PR/review creation; for Gerrit it prompts unless the branch
+/// is `wip/`-prefixed. `force` pushes with `--force` instead of the default
 /// `--force-with-lease --force-if-includes`.
 pub fn run(branch: Option<String>, no_pr: bool, force: bool) -> Result<()> {
     let repo = repo::open_repo()?;
@@ -434,13 +430,10 @@ fn detect_remote_type(
     Ok(RemoteType::Plain)
 }
 
-/// Heuristics that suggest — but don't prove — a Gerrit remote: the remote URL
-/// uses Gerrit's standard SSH port (29418), or a recent commit carries a
-/// `Change-Id:` trailer added by Gerrit's commit-msg hook.
-///
-/// These are only hints (the hook string check in [`detect_remote_type`] can
-/// miss, e.g. when pre-commit manages the commit-msg hook), so callers should
-/// confirm with the user before treating the remote as Gerrit.
+/// Hints of a Gerrit remote: the standard SSH port (29418), or a recent
+/// commit carrying a `Change-Id:` trailer. Only hints — the hook check in
+/// [`detect_remote_type`] can miss (e.g. pre-commit owns commit-msg) — so
+/// callers confirm with the user first.
 fn looks_like_gerrit(repo: &Repository, upstream_label: &str) -> bool {
     let remote_name = extract_remote_name(upstream_label);
     if let Ok(remote) = repo.find_remote(&remote_name)
@@ -469,10 +462,8 @@ fn recent_commits_have_change_id(repo: &Repository) -> bool {
     })
 }
 
-/// Ask the user to confirm a suspected Gerrit remote and persist the answer.
-///
-/// The answer is saved as `loom.remote-type` (`gerrit` or `plain`) in the repo
-/// config so the question is asked at most once per repository.
+/// Ask the user to confirm a suspected Gerrit remote, saving the answer as
+/// `loom.remote-type` so the question is asked at most once per repository.
 fn confirm_gerrit(workdir: &Path, upstream_label: &str) -> Result<RemoteType> {
     let is_gerrit = msg::confirm(
         "This remote looks like Gerrit (SSH port 29418 or Change-Id trailers). Is it a Gerrit remote?",
@@ -498,23 +489,15 @@ fn extract_remote_name(upstream_label: &str) -> String {
         .to_string()
 }
 
-/// Extract `owner/repo` from a git remote URL for use with `gh --repo`.
-///
-/// Handles SCP-style SSH URLs (with or without `git@` prefix) and HTTPS URLs:
-/// - `git@github.com:owner/repo.git`
-/// - `git@github-alias:owner/repo.git`
-/// - `github-work:owner/repo` (bare alias, no `git@`)
-/// - `https://github.com/owner/repo.git`
-///
-/// Returns `None` if the remote doesn't exist or the URL can't be parsed.
+/// Extract `owner/repo` from a git remote URL for `gh --repo`, or `None` when
+/// the remote is missing or the URL is unrecognised.
 fn extract_gh_repo(repo: &Repository, remote: &str) -> Option<String> {
     let remote = repo.find_remote(remote).ok()?;
     let url = remote.url().ok()?;
 
-    // SCP-style SSH URLs: [git@]<hostname>:owner/repo[.git]
-    // Covers git@github.com:owner/repo.git, git@github-alias:owner/repo.git,
-    // and bare aliases like github-work:owner/repo (no git@ prefix).
-    // Distinguish from URLs by requiring no '://' and no '/' before the ':'.
+    // SCP-style SSH URLs: [git@]<host>:owner/repo[.git], including bare aliases
+    // like `github-work:owner/repo`. Told from real URLs by having no '://' and
+    // no '/' before the ':'.
     let scp_url = url.strip_prefix("git@").unwrap_or(url);
     if !scp_url.contains("://")
         && let Some(colon_idx) = scp_url.find(':')
@@ -547,15 +530,9 @@ fn extract_target_branch(upstream_label: &str) -> String {
     }
 }
 
-/// Determine the push remote for the given upstream label and remote type.
-///
-/// Priority:
-/// 1. `git config loom.push-remote` — explicit override
-/// 2. GitHub fork convention — if integration remote is `upstream` and `origin` exists, use `origin`
-/// 3. Integration branch's remote — fallback
-///
-/// For non-standard fork setups (e.g., integration tracks `origin`, fork is `personal`),
-/// set `git config loom.push-remote personal`.
+/// The remote `loom push` sends to: `loom.push-remote` if set, else `origin`
+/// when the integration branch tracks `upstream` (GitHub fork convention),
+/// else the integration branch's own remote.
 fn resolve_push_remote(
     repo: &Repository,
     workdir: &Path,
@@ -600,15 +577,11 @@ const PUSH_FAILED: &str = "git push failed";
 
 /// Add the flag that gets past a refused push.
 ///
-/// Woven branches are rewritten constantly, and a forge rebases a stacked
-/// branch for us when the pull request below it lands — after which
-/// `--force-with-lease` and `--force-if-includes` refuse every later push of
-/// it, and nothing done locally makes them stop. Git's own hint for that, to
-/// pull first, only merges back content the branch already carries.
-///
-/// Whether the force is warranted is left to the user, who has to type it:
-/// working out whether the remote really holds nothing of theirs is a job for
-/// someone who can look, and the flag is the part that is hard to guess.
+/// A forge rebases a stacked branch for us when the pull request below it
+/// lands, after which `--force-with-lease`/`--force-if-includes` refuse every
+/// later push and nothing done locally helps; git's own "pull first" hint
+/// only merges back content the branch already carries. Whether the force is
+/// warranted is the user's call, so they have to type it.
 fn force_hint(err: anyhow::Error, branch: &str, no_pr: bool, force: bool) -> anyhow::Error {
     if force || err.to_string() != PUSH_FAILED {
         return err;
@@ -651,11 +624,8 @@ fn run_push_capture(workdir: &Path, args: &[&str]) -> Result<String> {
     Ok(stderr)
 }
 
-/// Append `remote:` URLs found in git push stderr to `message`.
-///
-/// Servers print MR/review links as `remote:   https://…` lines. Each such URL
-/// is added as an indented continuation line. A trailing `[tag]` (Gerrit) is
-/// wrapped in backticks.
+/// Append `remote:` URLs found in git push stderr to `message` as indented
+/// continuation lines. A trailing `[tag]` (Gerrit) is wrapped in backticks.
 fn append_remote_urls(message: &mut String, stderr: &str) {
     for line in stderr.lines() {
         if let Some(rest) = line.strip_prefix("remote:") {
@@ -709,13 +679,11 @@ fn push_args<'a>(remote: &'a str, branches: &[&'a str], force: bool) -> Vec<&'a 
     args
 }
 
-/// The commits a PR from `branch` onto `base` contains, oldest first: every
-/// branch from `base` (exclusive) up to `branch`.
+/// The commits a PR from `branch` onto `base` contains, oldest first.
 ///
-/// For a layer stacked straight on its base that is the branch's own commits.
-/// When the base is further down — a fork's trunk-targeted PR, or a layer
-/// dropped because its remote branch is gone — the PR's diff spans the
-/// branches in between, and the description has to span them too.
+/// Usually the branch's own commits; when the base is further down — a fork's
+/// trunk-targeted PR, or a layer dropped because its remote branch is gone —
+/// the range spans the branches in between, and so must the description.
 fn commits_in_pr(info: &repo::RepoInfo, branch: &str, base: &str) -> Vec<git2::Oid> {
     let chain = graph::downstack(info, branch);
     let from = chain
@@ -751,11 +719,9 @@ fn gather_branch_commits(
         .collect()
 }
 
-/// Build a PR title and description from the commits the PR contains.
-///
-/// - **Single commit**: title = commit subject, description = commit body.
-/// - **Multiple commits**: prompts the user for a title, then concatenates all
-///   commit messages (oldest → newest) as the description.
+/// Build a PR title and description from the commits the PR contains: a lone
+/// commit gives subject and body; several prompt for a title and concatenate
+/// their messages oldest first.
 fn pr_title_and_description(
     repo: &Repository,
     info: &repo::RepoInfo,
@@ -1115,21 +1081,16 @@ fn register_github_stack(workdir: &Path, gh_repo: &str, numbers: &[u64]) {
 
 /// Push to GitHub: push the plan's branches, then look after their PRs.
 ///
-/// Supports fork workflow where the integration branch tracks the upstream
-/// repository and the branch is pushed to a fork remote. The PR is created
-/// against the integration branch's remote (usually the upstream/main repo)
-/// with the head pointing to the push remote. GitHub cannot stack PRs across
-/// forks, so there every PR targets the upstream branch.
-///
-/// If the branch being pushed is the upstream target branch itself (e.g.
-/// pushing `main` when tracking `origin/main`), skip PR creation and fall
-/// back to a plain force-with-lease push.
-///
 /// For each layer, bottom to top: an existing PR is retargeted if its base is
 /// wrong and reported; a missing one is created. A lone branch keeps the
 /// `gh pr create --web` flow; a stack creates PRs directly, because the stack
 /// can only be registered once every PR exists. Re-published upstack branches
 /// never get a PR created.
+///
+/// In a fork workflow the PR is based on the integration branch's remote with
+/// its head on the push remote; GitHub cannot stack PRs across forks, so
+/// there every PR targets the upstream branch. Pushing the upstream target
+/// branch itself skips PRs and falls back to a plain push.
 fn push_github(
     repo: &Repository,
     workdir: &Path,
@@ -1157,15 +1118,13 @@ fn push_github(
         return Ok(());
     }
 
-    // Determine PR target repo and head:
-    // - For fork workflow: upstream branch's remote is the target (base of PR),
-    //   push remote is the head (where the branch is pushed).
-    // - For non-fork: both are the same.
+    // Fork workflow: the upstream branch's remote is the PR base, the push
+    // remote holds the head. Non-fork: both are the same.
     let integration_remote = extract_remote_name(upstream_label);
     let (pr_target_remote, pr_target_repo) = extract_gh_repo(repo, &integration_remote)
         .map(|r| (integration_remote.as_str(), r))
         .or_else(|| {
-            // Fallback: try to extract from push remote if integration remote doesn't exist
+            // Integration remote missing: fall back to the push remote.
             extract_gh_repo(repo, remote).map(|r| (remote, r))
         })
         .ok_or_else(|| {
@@ -1289,16 +1248,14 @@ fn push_github(
     Ok(())
 }
 
-/// Push to GitLab: push each branch with `merge_request.create` push options so
-/// GitLab creates (or points to) a merge request, then surface the MR URL it
-/// prints in the push output. Re-published upstack layers only carry the
-/// target option, which updates an existing MR without creating one.
+/// Push to GitLab: push each branch with `merge_request.create` push options
+/// so GitLab creates or updates a merge request, then surface the MR URL from
+/// the push output. Re-published upstack layers carry only the target option,
+/// updating an existing MR without creating one.
 ///
-/// Push options apply to the whole push, and each layer of a stack targets a
-/// different branch, so the layers go out one push at a time, bottom first.
-///
-/// If the branch being pushed is the upstream target branch itself, skip the
-/// MR push options and fall back to a plain push.
+/// Push options apply to the whole push and each layer targets a different
+/// branch, so layers go out one push at a time, bottom first. Pushing the
+/// upstream target branch itself falls back to a plain push.
 fn push_gitlab(workdir: &Path, remote: &str, plan: &PushPlan, force: bool) -> Result<()> {
     if plan.requested() == plan.target_branch {
         return push_plain(workdir, remote, plan, force);
@@ -1331,18 +1288,12 @@ struct AzureRemote {
     repository: Option<String>,
 }
 
-/// Extract the Azure DevOps organization URL and project from a remote URL.
+/// Extract the Azure DevOps organization URL, project, and repository from a
+/// remote URL (`dev.azure.com` HTTPS or SSH, or legacy `<org>.visualstudio.com`
+/// which yields the org only). `None` when the URL is unrecognised.
 ///
-/// Supports:
-/// - HTTPS:  `https://dev.azure.com/<org>/<project>/...`    → org + project
-/// - SSH:    `git@ssh.dev.azure.com:v3/<org>/<project>/...` → org + project
-/// - Legacy: `https://<org>.visualstudio.com/...`           → org only
-///
-/// The project matters because `az repos pr create` only auto-detects it from
-/// the git remote for the HTTPS form; with an SSH remote it must be passed
-/// explicitly via `--project`.
-///
-/// Returns `None` if the URL is unrecognised.
+/// The project matters because `az repos pr create` only auto-detects it for
+/// the HTTPS form; an SSH remote needs it passed via `--project`.
 fn extract_azure_remote(repo: &Repository, remote: &str) -> Option<AzureRemote> {
     let remote = repo.find_remote(remote).ok()?;
     let url = remote.url().ok()?;
@@ -1421,13 +1372,10 @@ fn azure_location_args(azure: Option<&AzureRemote>) -> Vec<&str> {
 
 /// Build a `Command` for the Azure CLI.
 ///
-/// On Windows `az` is normally a batch script, which `CreateProcess` cannot
-/// start directly: the MSI installer ships `az.cmd` and `pip install
-/// azure-cli` ships `az.bat`. Naming the script explicitly makes the standard
-/// library run it through `cmd.exe` with every argument escaped for cmd, where
-/// a hand-rolled `cmd /C az` would let cmd expand `%VAR%` and reparse quotes
-/// inside PR titles. Installs that ship an `az.exe` are found by the plain
-/// name.
+/// On Windows `az` usually ships as `az.cmd`/`az.bat`, which `CreateProcess`
+/// cannot start directly. Naming the script explicitly lets std run it via
+/// `cmd.exe` with every argument escaped, where a hand-rolled `cmd /C az`
+/// would let cmd expand `%VAR%` and reparse quotes inside PR titles.
 fn az_command() -> Command {
     Command::new(az_program())
 }
@@ -1594,9 +1542,8 @@ fn azure_pr_url(pr: &serde_json::Value) -> Option<String> {
     ))
 }
 
-/// Check if an Azure DevOps PR already exists for the given source branch.
-///
-/// Returns the PR web URL if found, or `None` if no PR exists or the check fails.
+/// The web URL of an existing Azure DevOps PR for the source branch, or
+/// `None` when there is none or the check fails.
 fn find_existing_azure_pr(
     workdir: &Path,
     branch: &str,
@@ -1625,14 +1572,10 @@ fn find_existing_azure_pr(
     azure_pr_url(prs.get(0)?)
 }
 
-/// Push to Gerrit without creating a review (plain force push).
-///
-/// If the branch is already prefixed with `wip/`, pushes directly.
-/// Otherwise, warns the user that a Gerrit admin will be needed to delete
-/// the remote branch later, and asks them to choose:
-///   - Push as-is
-///   - Push as `wip/<branch>` instead (no admin needed to delete)
-///   - Cancel
+/// Push to Gerrit without creating a review (plain force push). A branch not
+/// already `wip/`-prefixed prompts first, since deleting a non-wip remote
+/// branch later needs a Gerrit admin: push as-is, push as `wip/<branch>`, or
+/// cancel.
 fn push_gerrit_no_pr(workdir: &Path, remote: &str, branch: &str, force: bool) -> Result<()> {
     if branch.starts_with("wip/") {
         return push_plain(workdir, remote, &PushPlan::single(branch), force);
@@ -1669,10 +1612,8 @@ fn push_gerrit_no_pr(workdir: &Path, remote: &str, branch: &str, force: bool) ->
     }
 }
 
-/// Push to Gerrit with the refs/for/ refspec.
-///
-/// Captures stderr from the push command and extracts Gerrit review URLs
-/// (lines starting with `remote:` that contain `http://` or `https://`).
+/// Push to Gerrit with the `refs/for/` refspec, surfacing the review URLs
+/// Gerrit prints in the push output.
 fn push_gerrit(workdir: &Path, remote: &str, branch: &str, target_branch: &str) -> Result<()> {
     let refspec = format!("{}:refs/for/{}", branch, target_branch);
 

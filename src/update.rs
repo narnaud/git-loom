@@ -28,7 +28,6 @@ pub fn run(skip_confirm: bool) -> Result<()> {
     let workdir = repo::require_workdir(&repo, "update")?.to_path_buf();
     let git_dir = repo.path().to_path_buf();
 
-    // Validate that we're on a branch with an upstream tracking ref
     let head = repo.head().context("Failed to get HEAD reference")?;
     if !head.is_branch() {
         bail!("HEAD is detached\nSwitch to an integration branch");
@@ -61,16 +60,13 @@ pub fn run(skip_confirm: bool) -> Result<()> {
         .context("Upstream remote name is not valid UTF-8")?
         .to_string();
 
-    // Fetch with tags, force-update, and prune deleted remote branches.
-    // The integration remote is named explicitly: `--tags` makes the tag
-    // refspec explicit, so `--prune` deletes any local tag missing from the
-    // fetched remote — with `fetch.all = true` a plain `git fetch` would also
-    // hit other (typically tagless) remotes and wipe every tag on each run.
-    // The spinner reassures the user that work is happening (fetches can be slow);
-    // afterwards we print git's own summary so they can tell whether anything was
-    // actually pulled (e.g. `a309e49..7b3c4c1 main -> origin/main`). `--no-progress`
-    // drops the transfer noise (`remote: ...`, `Receiving objects`) so the captured
-    // output is just the clean ref-update summary.
+    // Fetch with tags, force-update, and prune deleted remote branches. The
+    // remote is named explicitly so `--tags` makes the tag refspec explicit and
+    // `--prune` only drops tags missing from *this* remote: under
+    // `fetch.all = true` a plain `git fetch` would also hit other (typically
+    // tagless) remotes and wipe every tag on each run. The spinner covers a slow
+    // fetch; git's own summary is printed afterwards so the user can see whether
+    // anything was pulled, with `--no-progress` keeping out the transfer noise.
     let spinner = msg::spinner();
     spinner.start("Fetching latest changes...");
 
@@ -101,23 +97,17 @@ pub fn run(skip_confirm: bool) -> Result<()> {
 
     fetch_push_remote(&repo, &workdir, &upstream_name);
 
-    // Re-open repo after fetch (remote refs changed)
     let repo = git2::Repository::discover(&workdir)?;
 
-    // Rebase onto upstream using the weave model.
-    //
-    // Plain `git rebase --rebase-merges` preserves merge topology literally,
-    // which can place new upstream commits on the wrong side of merge commits
-    // (inside a feature branch instead of on the base line). The weave model
-    // generates a clean todo where every branch section `reset onto`, ensuring
-    // branches are correctly rebased onto the new upstream tip.
-    //
-    // No topology (e.g. a plain branch with no weave) means a plain rebase.
+    // Rebase onto upstream using the weave model. Plain
+    // `git rebase --rebase-merges` preserves merge topology literally, which can
+    // place new upstream commits inside a feature branch instead of on the base
+    // line; the weave's todo `reset onto` for every branch section, so branches
+    // land on the new upstream tip. No topology means a plain rebase.
     let (todo, merged_branches) = match Weave::from_repo(&repo) {
         Ok(mut graph) => {
-            // Drop branch-section commits already in the new upstream
-            // (merged or cherry-picked). This prevents conflicts from
-            // replaying commits whose content is already in the base.
+            // Drop branch-section commits already in the new upstream, so their
+            // content is not replayed onto a base that already has it.
             let new_upstream_oid = repo
                 .revparse_single(&upstream_name)
                 .context("Failed to resolve upstream ref")?
@@ -171,7 +161,6 @@ pub fn run(skip_confirm: bool) -> Result<()> {
         Ok(RebaseOutcome::Completed) => {
             spinner.stop("Rebased onto upstream");
             transaction::delete(&git_dir)?;
-            // Re-open repo after rebase (OIDs changed)
             let repo2 = git2::Repository::discover(&workdir)?;
             post_update(&workdir, &repo2, &ctx)?;
         }
@@ -202,14 +191,13 @@ pub fn run(skip_confirm: bool) -> Result<()> {
 /// branch's remote.
 ///
 /// In a fork workflow feature branches live on the push remote, which the
-/// fetch above never touches — its remote-tracking refs would stay stale
-/// forever and branches deleted on the fork would never show up as gone.
+/// fetch above never touches: its remote-tracking refs would stay stale and
+/// branches deleted on the fork would never show up as gone.
 ///
-/// Only branches are pruned here: tags come from the integration remote,
-/// whose tags are the authoritative ones. `--no-prune-tags` makes that
-/// explicit — a user-level `fetch.pruneTags = true` would otherwise delete
-/// every tag missing from the fork, and the next update's `--tags` fetch
-/// would re-add them all, flooding the output on every run.
+/// Only branches are pruned: tags come from the integration remote, which is
+/// the authoritative one. `--no-prune-tags` says so explicitly — a user-level
+/// `fetch.pruneTags = true` would delete every tag missing from the fork, and
+/// the next update's `--tags` fetch would re-add them all.
 fn fetch_push_remote(repo: &git2::Repository, workdir: &Path, upstream_name: &str) {
     let Some(remote) = crate::push::fork_push_remote(repo, workdir, upstream_name) else {
         return;
@@ -255,7 +243,6 @@ pub fn after_continue(workdir: &Path, context: &serde_json::Value) -> Result<()>
 
 /// Post-rebase work: submodule update, upstream reporting, gone-branch cleanup.
 fn post_update(workdir: &Path, repo: &git2::Repository, ctx: &UpdateContext) -> Result<()> {
-    // Update submodules if .gitmodules exists
     if workdir.join(".gitmodules").exists() {
         let spinner = msg::spinner();
         spinner.start("Updating submodules...");
@@ -273,7 +260,6 @@ fn post_update(workdir: &Path, repo: &git2::Repository, ctx: &UpdateContext) -> 
         }
     }
 
-    // Show the latest upstream commit
     let upstream_info = repo
         .revparse_single(&ctx.upstream_name)
         .ok()
@@ -413,11 +399,8 @@ fn find_branches_merged_upstream(
     Ok(merged)
 }
 
-/// Find local branches whose configured upstream tracking ref no longer exists.
-///
-/// After `git fetch --prune`, remote-tracking refs for deleted remote branches
-/// are removed. Any local branch that had an upstream configured pointing to
-/// one of those refs is considered "gone".
+/// Find local branches whose configured upstream tracking ref no longer
+/// exists — `git fetch --prune` removed it, so the branch counts as "gone".
 fn find_branches_with_gone_upstream(
     repo: &git2::Repository,
     current_branch: &str,
@@ -435,7 +418,6 @@ fn find_branches_with_gone_upstream(
             continue;
         }
 
-        // Check if an upstream remote is configured for this branch
         let remote_key = format!("branch.{}.remote", name);
         let Ok(remote) = config.get_string(&remote_key) else {
             continue;

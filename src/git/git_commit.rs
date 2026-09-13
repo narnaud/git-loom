@@ -2,12 +2,10 @@ use std::path::Path;
 
 use anyhow::Result;
 
-/// Amend the current commit, optionally replacing its message.
-///
-/// Wraps `git commit --quiet --allow-empty --amend --only [-m msg]`.
-/// Uses `--only` so that staged changes are not accidentally included, and
-/// `--quiet` so the editor path doesn't print git's commit summary.
-/// When `message` is `None`, inherits stdio so git can open the user's editor.
+/// Amend the current commit, optionally replacing its message
+/// (`git commit --quiet --allow-empty --amend --only [-m msg]`). `--only` keeps
+/// staged changes out, `--quiet` suppresses the summary on the editor path, and
+/// a `None` message inherits stdio so git can open the user's editor.
 pub fn commit_amend(workdir: &Path, message: Option<&str>) -> Result<()> {
     if let Some(msg) = message {
         super::run_git(
@@ -30,10 +28,9 @@ pub fn commit_amend(workdir: &Path, message: Option<&str>) -> Result<()> {
     }
 }
 
-/// Amend the current commit, keeping its message and including staged changes.
-///
-/// Wraps `git commit --amend --no-edit --allow-empty`.
-/// Unlike `amend()`, this does NOT use `--only`, so staged changes are included.
+/// Amend the current commit, keeping its message and including staged changes
+/// (`git commit --amend --no-edit --allow-empty` — no `--only`, unlike
+/// [`commit_amend`]).
 pub fn commit_amend_no_edit(workdir: &Path) -> Result<()> {
     super::run_git(
         workdir,
@@ -66,10 +63,8 @@ fn deletion_already_staged(workdir: &Path, path: &str) -> Result<bool> {
     Ok(!out.trim().is_empty())
 }
 
-/// Stage specific files.
-///
-/// Wraps `git add <files>`. Files whose deletion is already staged are left
-/// alone, since there is nothing left for `git add` to match.
+/// Stage specific files (`git add <files>`). Files whose deletion is already
+/// staged are left alone, since `git add` has nothing left to match.
 pub fn stage_files(workdir: &Path, files: &[&str]) -> Result<()> {
     stage_files_opts(workdir, files, &[])
 }
@@ -96,17 +91,13 @@ pub fn stage_files_opts(workdir: &Path, files: &[&str], opts: &[&str]) -> Result
     run_add(workdir, &args, opts)
 }
 
-/// Stage all changes for a specific path, including deletions.
-///
-/// Forwards to `stage_files`, so a path whose deletion is already staged is
-/// left alone.
+/// Stage all changes for a specific path, including deletions. Forwards to
+/// [`stage_files`], so a path whose deletion is already staged is left alone.
 pub fn stage_path(workdir: &Path, path: &str) -> Result<()> {
     stage_files(workdir, &[path])
 }
 
-/// Create a commit with a message.
-///
-/// Wraps `git commit -m <message>`.
+/// Create a commit with a message (`git commit -m <message>`).
 pub fn commit(workdir: &Path, message: &str) -> Result<()> {
     commit_opts(workdir, Some(message), &[])
 }
@@ -143,33 +134,25 @@ fn runs_uncaptured(opts: &[&str]) -> bool {
     !opts.is_empty() && !crate::core::agent_mode::enabled()
 }
 
-/// Mixed reset to a target ref (uncommit and unstage).
-///
-/// Wraps `git reset <target>`. Moves HEAD to the target while keeping
-/// changes in the working directory as unstaged modifications.
+/// Mixed reset to a target ref (`git reset <target>`): HEAD moves, and what the
+/// commit held comes back as unstaged working-tree changes.
 pub fn reset_mixed(workdir: &Path, target: &str) -> Result<()> {
     super::run_git(workdir, &["reset", target])
 }
 
-/// Soft reset to a target ref (uncommit, keeping the content staged).
-///
-/// Wraps `git reset --soft <target>`. Undoing a commit loom made itself: what
-/// that commit held goes back to the index exactly as it was staged.
+/// Soft reset to a target ref (`git reset --soft <target>`): undoing a commit
+/// loom made itself, so what it held goes back to the index as it was staged.
 pub fn reset_soft(workdir: &Path, target: &str) -> Result<()> {
     super::run_git(workdir, &["reset", "--soft", target])
 }
 
-/// Hard reset to a target ref (discard all changes).
-///
-/// Wraps `git reset --hard <target>`. Moves HEAD and discards all working
-/// directory and index changes.
+/// Hard reset to a target ref (`git reset --hard <target>`), discarding all
+/// working directory and index changes.
 pub fn reset_hard(workdir: &Path, target: &str) -> Result<()> {
     super::run_git(workdir, &["reset", "--hard", target])
 }
 
-/// Stage all changes (staged, unstaged, and untracked).
-///
-/// Wraps `git add -A`.
+/// Stage all changes — staged, unstaged, and untracked (`git add -A`).
 pub fn stage_all(workdir: &Path) -> Result<()> {
     stage_all_opts(workdir, &[])
 }
@@ -194,10 +177,8 @@ fn run_add(workdir: &Path, args: &[&str], opts: &[&str]) -> Result<()> {
     }
 }
 
-/// Create a commit by opening the user's editor for the message.
-///
-/// Wraps `git commit` (no -m flag). Inherits stdin/stdout so the editor
-/// can interact with the terminal.
+/// Create a commit by opening the user's editor for the message (`git commit`,
+/// no `-m`). Inherits stdio so the editor reaches the terminal.
 pub fn commit_with_editor(workdir: &Path) -> Result<()> {
     commit_opts(workdir, None, &[])
 }

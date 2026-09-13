@@ -22,7 +22,6 @@ pub fn require_workdir<'a>(repo: &'a Repository, operation: &str) -> Result<&'a 
         .with_context(|| format!("Cannot {operation} in bare repository"))
 }
 
-/// Return the OID that HEAD points to.
 pub fn head_oid(repo: &Repository) -> Result<git2::Oid> {
     repo.head()?.target().context("HEAD has no target")
 }
@@ -57,7 +56,6 @@ pub fn snapshot_branch_refs(repo: &Repository) -> Result<HashMap<String, git2::O
 pub fn restore_branch_refs(workdir: &Path, snapshot: &HashMap<String, git2::Oid>) -> Result<()> {
     let repo = Repository::discover(workdir)?;
 
-    // Collect current branches
     let mut current_branches: HashMap<String, git2::Oid> = HashMap::new();
     for branch_result in repo.branches(Some(BranchType::Local))? {
         let (branch, _) = branch_result?;
@@ -68,7 +66,6 @@ pub fn restore_branch_refs(workdir: &Path, snapshot: &HashMap<String, git2::Oid>
         }
     }
 
-    // Get the current branch name so we skip it (can't force-update HEAD's branch)
     let head_branch = repo
         .head()
         .ok()
@@ -76,7 +73,6 @@ pub fn restore_branch_refs(workdir: &Path, snapshot: &HashMap<String, git2::Oid>
 
     let mut failures: Vec<String> = Vec::new();
 
-    // Delete branches that weren't in the snapshot
     for name in current_branches.keys() {
         if !snapshot.contains_key(name)
             && Some(name.as_str()) != head_branch.as_deref()
@@ -86,7 +82,6 @@ pub fn restore_branch_refs(workdir: &Path, snapshot: &HashMap<String, git2::Oid>
         }
     }
 
-    // Restore branches to their snapshot OIDs
     for (name, oid) in snapshot {
         if Some(name.as_str()) == head_branch.as_deref() {
             continue; // HEAD's branch is handled by reset --hard
@@ -107,7 +102,6 @@ pub fn restore_branch_refs(workdir: &Path, snapshot: &HashMap<String, git2::Oid>
     Ok(())
 }
 
-/// Error if a local branch with the given name already exists.
 pub fn ensure_branch_not_exists(repo: &Repository, name: &str) -> Result<()> {
     if repo.find_branch(name, BranchType::Local).is_ok() {
         bail!("Branch '{name}' already exists");
@@ -119,7 +113,6 @@ pub fn ensure_branch_not_exists(repo: &Repository, name: &str) -> Result<()> {
 pub(crate) const DEFAULT_HIDE_PATTERN: &str = "local-";
 
 /// Read the hidden branch prefix from git config `loom.hideBranchPattern`.
-/// Returns `None` if the config key is not set.
 pub fn hide_branch_pattern(repo: &Repository) -> Option<String> {
     repo.config()
         .ok()?
@@ -127,9 +120,8 @@ pub fn hide_branch_pattern(repo: &Repository) -> Option<String> {
         .ok()
 }
 
-/// Read git config `loom.pruneGoneBranches`. When `true`, `loom update`
-/// removes fully merged and gone-upstream local branches without prompting.
-/// Returns `false` if the key is unset or not a boolean.
+/// Read git config `loom.pruneGoneBranches`: when true, `loom update` removes
+/// merged and gone-upstream local branches without prompting. False if unset.
 pub fn prune_gone_branches(repo: &Repository) -> bool {
     repo.config()
         .ok()
@@ -153,12 +145,14 @@ pub fn upstream_local_branch(upstream_ref: &str) -> String {
 pub enum Target {
     /// A commit (full or partial hash).
     Commit(String),
-    /// A branch name.
     Branch(String),
     /// A file path (working tree change).
     File(String),
     /// A file within a specific commit (e.g. short ID `02:0`).
-    CommitFile { commit: String, path: String },
+    CommitFile {
+        commit: String,
+        path: String,
+    },
     /// The unstaged working directory (short ID: `zz`).
     Unstaged,
 }
@@ -227,7 +221,6 @@ pub fn resolve_arg(repo: &Repository, arg: &str, accept: &[TargetKind]) -> Resul
     bail!("'{}' did not resolve to a {}", arg, types.join(" or "))
 }
 
-/// Reject a commit if it is a merge commit.
 fn reject_merge_commit(repo: &Repository, oid: git2::Oid) -> Result<()> {
     let commit = repo.find_commit(oid)?;
     if commit.parent_count() > 1 {
@@ -467,9 +460,7 @@ pub fn cwd_relative_path(repo_path: &str, cwd_prefix: &str) -> String {
 pub struct UpstreamInfo {
     /// Full name of the upstream ref (e.g. "origin/main").
     pub label: String,
-    /// Full OID of the upstream tip.
     pub tip_oid: git2::Oid,
-    /// Full OID of the merge-base commit.
     pub merge_base_oid: git2::Oid,
     /// Short hash of the merge-base commit.
     pub base_short_id: String,
@@ -487,7 +478,6 @@ pub struct UpstreamInfo {
 pub struct RepoInfo {
     /// Name of the current (integration) branch.
     pub branch_name: String,
-    /// Upstream tracking branch info (merge-base, ahead count, etc.).
     pub upstream: UpstreamInfo,
     /// Non-merge commits in topological order (newest first) between HEAD
     /// and the merge-base. Merge commits are filtered out.
@@ -611,10 +601,9 @@ struct GatherOpts {
     working_changes: bool,
 }
 
-/// Collect all data needed for the status display: walk commits from HEAD to the
-/// upstream tracking branch, detect feature branches, and gather working tree status.
-///
-/// When `show_files` is true, each commit will include the list of files it touches.
+/// Collect all data needed for the status display: commits from HEAD to the
+/// upstream tracking branch, feature branches, and working tree status.
+/// `show_files` adds each commit's file list.
 pub fn gather_repo_info(repo: &Repository, show_files: bool, context: usize) -> Result<RepoInfo> {
     gather(
         repo,
@@ -683,10 +672,8 @@ fn gather(repo: &Repository, opts: GatherOpts) -> Result<RepoInfo> {
         vec![]
     };
 
-    // Count how many commits upstream is ahead of the merge-base
     let commits_ahead = count_commits(repo, upstream_oid, merge_base_oid)?;
 
-    // Get merge-base commit info
     let base_commit = repo.find_commit(merge_base_oid)?;
     let base_short_id = base_commit
         .as_object()
@@ -718,7 +705,6 @@ fn gather(repo: &Repository, opts: GatherOpts) -> Result<RepoInfo> {
     })
 }
 
-/// Check if a path (file or directory) has staged or unstaged changes.
 pub fn path_has_changes(repo: &Repository, path: &str) -> Result<bool> {
     let mut opts = StatusOptions::new();
     opts.pathspec(path)
@@ -729,7 +715,6 @@ pub fn path_has_changes(repo: &Repository, path: &str) -> Result<bool> {
     Ok(!statuses.is_empty())
 }
 
-/// Collect file paths that have staged (index) changes.
 pub fn get_staged_files(repo: &Repository) -> Result<Vec<String>> {
     let mut opts = StatusOptions::new();
     opts.include_untracked(false);
@@ -843,7 +828,6 @@ fn walk_commits(
     for oid_result in revwalk {
         let oid = oid_result?;
         let commit = repo.find_commit(oid)?;
-        // Skip merge commits
         if commit.parent_count() > 1 {
             continue;
         }
@@ -872,7 +856,6 @@ fn walk_commits(
     Ok(commits)
 }
 
-/// Return the file paths changed in a commit.
 pub fn commit_file_paths(repo: &Repository, oid: git2::Oid) -> Result<Vec<String>> {
     let commit = repo.find_commit(oid)?;
     let files = get_commit_files(repo, &commit)?;
@@ -934,7 +917,6 @@ fn find_branches_in_range(
             continue;
         };
         let name = name.to_string();
-        // Skip the current (integration) branch itself
         if name == current_branch {
             continue;
         }
@@ -975,7 +957,6 @@ fn detect_remote_status(
     name: &str,
     tip_oid: git2::Oid,
 ) -> Option<RemoteStatus> {
-    // Try to access the upstream ref directly via git2.
     if let Ok(upstream) = branch.upstream() {
         return Some(match upstream.get().target() {
             Some(upstream_oid) if upstream_oid == tip_oid => RemoteStatus::Synced,
@@ -983,9 +964,8 @@ fn detect_remote_status(
         });
     }
 
-    // upstream() failed — check if an upstream was ever configured (gone case).
-    // branch.upstream() returns Err for both "no upstream" and "upstream gone",
-    // so we must consult git config to distinguish the two.
+    // `branch.upstream()` errs for both "no upstream" and "upstream gone", so
+    // git config settles which.
     let config = repo.config().ok()?;
     let remote_key = format!("branch.{}.remote", name);
     let Ok(remote) = config.get_string(&remote_key) else {
@@ -1025,10 +1005,7 @@ fn get_working_changes_opts(repo: &Repository, recurse_untracked: bool) -> Resul
     for entry in statuses.iter() {
         let path = match entry.path() {
             Ok(p) => p.to_string(),
-            Err(_) => {
-                // Handle non-UTF-8 paths by using lossy conversion
-                String::from_utf8_lossy(entry.path_bytes()).into_owned()
-            }
+            Err(_) => String::from_utf8_lossy(entry.path_bytes()).into_owned(),
         };
         let status = entry.status();
 

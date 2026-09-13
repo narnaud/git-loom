@@ -28,10 +28,8 @@ thread_local! {
     static LOGGER: RefCell<Option<LoomLogger>> = const { RefCell::new(None) };
 }
 
-/// Initialize the logger for this invocation.
-///
-/// Call once from `main()` before dispatching the command.
-/// No-op if already initialized (prevents double-init in subprocess).
+/// Initialize the logger for this invocation. Call once from `main()` before
+/// dispatching; a no-op if already initialized (a subprocess would double-init).
 pub fn init(git_dir: &Path, command_line: &str) {
     LOGGER.with(|cell| {
         let mut logger = cell.borrow_mut();
@@ -48,10 +46,8 @@ pub fn init(git_dir: &Path, command_line: &str) {
     });
 }
 
-/// Initialize the logger in append mode: entries will be appended to the
-/// most recent existing log file rather than creating a new one.
-///
-/// Falls back to normal (new-file) mode if no prior log exists.
+/// Initialize the logger in append mode: entries go to the most recent existing
+/// log file, or to a new one when there is none.
 pub fn init_appending(git_dir: &Path, command_line: &str) {
     let append_to = latest_log_path(git_dir);
     LOGGER.with(|cell| {
@@ -69,9 +65,7 @@ pub fn init_appending(git_dir: &Path, command_line: &str) {
     });
 }
 
-/// Log a command execution.
-///
-/// Safe to call when logger is not initialized (no-op).
+/// Log a command execution; a no-op when the logger is not initialized.
 pub fn log_command(program: &str, args: &str, duration_ms: u128, success: bool, stderr: &str) {
     LOGGER.with(|cell| {
         let mut logger = cell.borrow_mut();
@@ -88,9 +82,8 @@ pub fn log_command(program: &str, args: &str, duration_ms: u128, success: bool, 
     });
 }
 
-/// Attach an annotation to the most recent log entry.
-///
-/// Used to record extra context like generated rebase todo content.
+/// Attach an annotation to the most recent log entry, e.g. generated rebase
+/// todo content.
 pub fn annotate(label: &str, content: &str) {
     LOGGER.with(|cell| {
         let mut logger = cell.borrow_mut();
@@ -104,10 +97,9 @@ pub fn annotate(label: &str, content: &str) {
     });
 }
 
-/// Write the log file and prune old logs. Returns the path written.
-///
-/// No-op if logger was never initialized. Consumes the logger state.
-/// If initialized with `init_appending`, appends to the existing log file.
+/// Write the log file and prune old logs, returning the path written. Consumes
+/// the logger state; a no-op if it was never initialized. In `init_appending`
+/// mode, appends to the existing file.
 pub fn finalize() -> Option<PathBuf> {
     LOGGER.with(|cell| {
         let logger = cell.borrow_mut().take()?;
@@ -179,7 +171,6 @@ fn print_log_colored(content: &str) {
     if let Some(header) = lines.next() {
         println!("{}", header.bold());
     }
-    // Separator line
     if let Some(sep) = lines.next() {
         println!("{}", sep.dimmed());
     }
@@ -256,7 +247,6 @@ fn format_log_suffix(logger: &LoomLogger) -> String {
 fn format_log(logger: &LoomLogger) -> String {
     let mut out = String::new();
 
-    // Header
     out.push_str(&format!(
         "[{}] {}\n",
         logger.start_time.format("%Y-%m-%d %H:%M:%S%.3f"),
@@ -268,14 +258,12 @@ fn format_log(logger: &LoomLogger) -> String {
     for entry in &logger.entries {
         out.push('\n');
 
-        // Command line with timing
         let status = if entry.success { "" } else { " FAILED" };
         out.push_str(&format!(
             "  [{}] {}  [{}ms]{}\n",
             entry.program, entry.args, entry.duration_ms, status
         ));
 
-        // Annotations
         for (label, content) in &entry.annotations {
             out.push_str(&format!("    [{}]\n", label));
             for line in content.lines() {

@@ -3,9 +3,7 @@
 set -euo pipefail
 source "$(dirname "$0")/helpers.sh"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PRECONDITIONS
-# ══════════════════════════════════════════════════════════════════════════════
+# ── PRECONDITIONS ─────────────────────────────────────────────────────────────
 
 describe "precond: not in a git repository"
 new_tmpdir TMP_NOGIT
@@ -109,9 +107,7 @@ gl_capture fold nochange.txt "$target_hash"
 assert_exit_fail "$CODE" "precond_no_file_changes_fail"
 assert_contains "$OUT" "has no changes" "precond_no_file_changes_msg"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# CASE 0: STAGED FILES + COMMIT (SINGLE-ARGUMENT)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── CASE 0: STAGED FILES + COMMIT (SINGLE-ARGUMENT) ───────────────────────────
 
 describe "staged: fold staged file into HEAD using full hash"
 setup_repo_with_remote
@@ -163,9 +159,7 @@ out=$(gl fold "$target_hash")
 assert_exit_ok $? "staged_preserve_unstaged_ok"
 assert_file_content "preserve.txt" "unstaged line" "staged_preserve_unstaged_wt"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# CASE 1: FILE(S) + COMMIT (AMEND)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── CASE 1: FILE(S) + COMMIT (AMEND) ──────────────────────────────────────────
 
 describe "amend: fold single file into HEAD using full hash"
 setup_repo_with_remote
@@ -236,9 +230,7 @@ out=$(gl fold amend-target.txt "$target_hash")
 assert_exit_ok $? "amend_preserve_other_ok"
 assert_file_content "preserve-other.txt" "should stay dirty" "amend_preserve_other_content"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# CASE 1b: UNSTAGED (zz) + COMMIT (AMEND ALL)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── CASE 1b: UNSTAGED (zz) + COMMIT (AMEND ALL) ───────────────────────────────
 
 describe "amend-all: fold all working tree changes into HEAD"
 setup_repo_with_remote
@@ -267,9 +259,7 @@ assert_exit_ok $? "amend_all_non_head_ok"
 assert_head_msg "ZZ top" "amend_all_non_head_top_msg"
 assert_file_content "zz-base.txt" "zz modified base" "amend_all_non_head_content"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# CASE 2: COMMIT + COMMIT (FIXUP)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── CASE 2: COMMIT + COMMIT (FIXUP) ───────────────────────────────────────────
 
 describe "fixup: source commit absorbed into target using full hashes"
 setup_repo_with_remote
@@ -328,9 +318,7 @@ out=$(gl fold "$source_hash" "$target_hash")
 assert_exit_ok $? "fixup_preserve_wt_ok"
 assert_file_content "fp-target.txt" "uncommitted dirty" "fixup_preserve_wt_content"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# CASE 3: COMMIT + BRANCH (MOVE)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── CASE 3: COMMIT + BRANCH (MOVE) ────────────────────────────────────────────
 
 describe "move: commit relocated to target branch by branch name"
 setup_repo_with_remote
@@ -347,7 +335,6 @@ weave_branch "h-move-dst"
 move_sid=$(commit_sid_from_status "Move me")
 out=$(gl fold "$move_sid" h-move-dst)
 assert_exit_ok $? "move_branch_name_ok"
-# Commit should now be on h-move-dst
 assert_contains "$(git -C "$WORK" log h-move-dst --oneline)" "Move me" "move_branch_name_on_dst"
 # Commit should no longer be in g-move-src's unique commits (not between src and its base)
 upstream_oid=$(upstream_oid)
@@ -407,14 +394,12 @@ write_file "s-added.txt" "brand new"
 git -C "$WORK" add s-added.txt
 porcelain_before="$(git -C "$WORK" status --porcelain | sort)"
 assert_contains "$porcelain_before" "M  .gitkeep" "single_abort_is_staged"
-# A staged new file needs the index back at HEAD before the patch applies.
 assert_contains "$porcelain_before" "A  s-added.txt" "single_abort_has_added"
 conflicting=$(commit_sid_from_status "Conflicting")
 gl_capture fold "$conflicting" s-abort-dst
 assert_state_file "single_abort_state"
 gl_capture abort
 assert_exit_ok "$CODE" "single_abort_ok"
-# The abort says it restored the original state, so the index has to match.
 assert_eq "$(git -C "$WORK" status --porcelain | sort)" "$porcelain_before" "single_abort_index"
 
 describe "move: several commits that conflict — rolled back, working tree kept"
@@ -457,7 +442,6 @@ assert_exit_fail "$CODE" "move_rollback_fails"
 assert_contains "$OUT" "conflicts" "move_rollback_reason"
 assert_eq "$(head_hash)" "$head_before" "move_rollback_head"
 assert_eq "$(git -C "$WORK" rev-parse n-roll-dst)" "$dst_before" "move_rollback_dst"
-# Content alone is half a check: the staging has to come back too.
 assert_eq "$(git -C "$WORK" status --porcelain | sort)" "$porcelain_before" "move_rollback_index"
 assert_no_state_file "move_rollback_no_state"
 
@@ -600,9 +584,7 @@ out=$(gl fold "$move_sid" h-move-preserve-dst)
 assert_exit_ok $? "move_preserve_wt_ok"
 assert_file_content "preserve-move.txt" "dirty during move" "move_preserve_wt_content"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# CASE 4: COMMIT + zz (UNCOMMIT)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── CASE 4: COMMIT + zz (UNCOMMIT) ────────────────────────────────────────────
 
 describe "uncommit: HEAD commit removed, changes land in working directory"
 setup_repo_with_remote
@@ -641,9 +623,7 @@ out=$(gl fold "$uncommit_sid" zz)
 assert_exit_ok $? "uncommit_preserve_ok"
 assert_file_content "stay-commit.txt" "dirty during uncommit" "uncommit_preserve_wt"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# CASE 5: COMMITFILE + zz (UNCOMMIT FILE)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── CASE 5: COMMITFILE + zz (UNCOMMIT FILE) ───────────────────────────────────
 
 describe "uncommit-file: remove one file from a commit to working directory"
 setup_repo_with_remote
@@ -657,7 +637,6 @@ cf_ref=$(gl status -f | grep "main.txt" | grep -oE '[0-9a-z]+:[0-9]+' | head -1)
 old_hash="$(head_hash)"
 out=$(gl fold "$cf_ref" zz)
 assert_exit_ok $? "uncommit_file_ok"
-# Commit should still exist but without main.txt
 assert_ne "$old_hash" "$(head_hash)" "uncommit_file_commit_rewrote"
 assert_head_msg "Two file commit" "uncommit_file_msg_preserved"
 # main.txt changes should be in working directory
@@ -692,9 +671,7 @@ assert_exit_ok $? "uncommit_file_other_ok"
 status_out=$(gl status)
 assert_not_contains "$status_out" "keep.txt" "uncommit_file_keep_in_commit"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# CASE 6: COMMITFILE + COMMIT (MOVE FILE)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── CASE 6: COMMITFILE + COMMIT (MOVE FILE) ───────────────────────────────────
 
 describe "move-file: move a file's changes from one commit to another"
 setup_repo_with_remote
@@ -707,9 +684,7 @@ cf_ref=$(gl status -f | grep "other.txt" | grep -oE '[0-9a-z]+:[0-9]+' | head -1
 alpha_sid=$(commit_sid_from_status "Commit Alpha")
 out=$(gl fold "$cf_ref" "$alpha_sid")
 assert_exit_ok $? "move_file_ok"
-# other.txt should now be in Commit Alpha
 assert_contains "$(git -C "$WORK" show HEAD~1 --name-only)" "other.txt" "move_file_in_target"
-# Commit Beta should no longer contain other.txt
 assert_not_contains "$(git -C "$WORK" show HEAD --name-only)" "other.txt" "move_file_not_in_src"
 assert_head_msg "Commit Beta" "move_file_src_msg_preserved"
 
@@ -735,9 +710,7 @@ out=$(gl fold "$cf_ref" "$target_sid")
 assert_exit_ok $? "move_file_preserve_wt_ok"
 assert_file_content "mfp-src.txt" "dirty during move file" "move_file_preserve_wt_content"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# --CREATE FLAG (NEW BRANCH FROM COMMIT)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── --CREATE FLAG (NEW BRANCH FROM COMMIT) ────────────────────────────────────
 
 describe "create: move commit to a new branch"
 setup_repo_with_remote
@@ -746,7 +719,6 @@ loose_sid=$(commit_sid_from_status "Loose commit")
 out=$(gl fold --create "$loose_sid" g-new-branch)
 assert_exit_ok $? "create_ok"
 assert_branch_exists "g-new-branch" "create_branch_exists"
-# The commit should be on the new branch
 assert_contains "$(git -C "$WORK" log g-new-branch --oneline)" "Loose commit" "create_commit_on_branch"
 
 describe "create: target branch already exists — refused"
@@ -769,9 +741,7 @@ assert_exit_ok $? "create_full_hash_ok"
 assert_branch_exists "h-from-hash" "create_full_hash_branch_exists"
 assert_contains "$(git -C "$WORK" log h-from-hash --oneline)" "Create from hash" "create_full_hash_on_branch"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# EMPTIED BRANCHES
-# ══════════════════════════════════════════════════════════════════════════════
+# ── EMPTIED BRANCHES ──────────────────────────────────────────────────────────
 
 describe "uncommit the only commit of a stacked branch: branch parked at the base"
 setup_repo_with_remote
@@ -832,9 +802,7 @@ assert_eq "$(git -C "$WORK" rev-parse inner)" "$base_hash" "move_inner_parked"
 assert_eq "$(git -C "$WORK" log --format=%s -1 other)" "Inner I1" "move_inner_on_other"
 assert_eq "$(git -C "$WORK" log --format=%s -1 outer)" "Outer O1" "move_inner_outer_kept"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# CONTINUE / ABORT
-# ══════════════════════════════════════════════════════════════════════════════
+# ── CONTINUE / ABORT ──────────────────────────────────────────────────────────
 # Shared conflict setup: C1 changes A→B, C2 changes B→C.
 # Uncommitting C1 (fold zz) drops it from history, forcing C2 to cherry-pick
 # onto A → 3-way merge conflict.

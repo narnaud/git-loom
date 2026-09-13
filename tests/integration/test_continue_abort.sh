@@ -3,9 +3,7 @@
 set -euo pipefail
 source "$(dirname "$0")/helpers.sh"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PRECONDITIONS — no operation in progress
-# ══════════════════════════════════════════════════════════════════════════════
+# ── PRECONDITIONS — no operation in progress ──────────────────────────────────
 
 describe "continue: no state file → error"
 setup_repo_with_remote
@@ -19,9 +17,7 @@ gl_capture abort
 assert_exit_fail "$CODE" "no_state_abort"
 assert_contains "$OUT" "No loom operation" "no_state_abort_msg"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# GUARD — another command blocked while paused
-# ══════════════════════════════════════════════════════════════════════════════
+# ── GUARD — another command blocked while paused ──────────────────────────────
 
 describe "blocked: non-exempt command is rejected while a state file exists"
 setup_repo_with_remote
@@ -31,7 +27,6 @@ echo '{"command":"update","rollback":{"saved_head":"","saved_refs":{},"delete_br
 gl_capture update
 assert_exit_fail "$CODE" "blocked_while_paused"
 assert_contains "$OUT" "loom continue" "blocked_while_paused_hint"
-# No rebase is in progress here: the hint must say so, not claim conflicts.
 assert_contains "$OUT" "no rebase is in progress" "blocked_while_stale_hint"
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -67,9 +62,7 @@ setup_conflict() {
     OLD_HEAD="$(head_hash)"
 }
 
-# ══════════════════════════════════════════════════════════════════════════════
-# loom update: continue cycle
-# ══════════════════════════════════════════════════════════════════════════════
+# ── loom update: continue cycle ───────────────────────────────────────────────
 
 describe "update: conflict pauses, resolve, continue → success"
 setup_conflict
@@ -95,9 +88,7 @@ assert_no_state_file "state_file_removed_after_continue"
 assert_log_contains "Local change"    "update_continue_local_commit_in_log"
 assert_log_contains "Upstream change" "update_continue_upstream_in_log"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# loom update: abort cycle
-# ══════════════════════════════════════════════════════════════════════════════
+# ── loom update: abort cycle ──────────────────────────────────────────────────
 
 describe "update: conflict pauses, abort → original state restored"
 setup_conflict
@@ -115,12 +106,9 @@ assert_no_state_file "state_file_removed_after_abort"
 new_head="$(head_hash)"
 assert_eq "$OLD_HEAD" "$new_head" "update_abort_head_restored"
 
-# Upstream commit must NOT be in local log
 assert_log_not_contains "Upstream change" "update_abort_upstream_gone"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Stray rebase: git has a rebase in progress but no loom state file
-# ══════════════════════════════════════════════════════════════════════════════
+# ── Stray rebase: git has a rebase in progress but no loom state file ─────────
 
 # Set up a conflict and fetch, leaving the ref to conflict with in $UPSTREAM.
 setup_conflict_and_fetch() {
@@ -196,9 +184,7 @@ assert_head_parent_count 2 "stray_merge_continue_made_merge_commit"
 assert_no_merge_in_progress "stray_merge_continue_merge_finished"
 assert_no_state_file "stray_merge_continue_no_state_file"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Non-conflict stop: an untracked file blocks the rebase, nothing is conflicted
-# ══════════════════════════════════════════════════════════════════════════════
+# ── Non-conflict stop: an untracked file blocks the rebase, nothing is conflicted ───
 
 describe "untracked file in the way: the pause message does not claim conflicts"
 setup_repo_with_remote
@@ -228,9 +214,7 @@ gl_capture abort
 assert_exit_ok "$CODE" "untracked_stop_abort_ok"
 assert_no_state_file "untracked_stop_state_removed"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Edit pause: git rebase --continue exits 0 while the rebase is far from over
-# ══════════════════════════════════════════════════════════════════════════════
+# ── Edit pause: git rebase --continue exits 0 while the rebase is far from over ───
 
 describe "edit pause: continue does not claim the rebase completed"
 setup_repo_with_remote
@@ -265,9 +249,7 @@ assert_exit_ok "$CODE" "edit_pause_continue3_ok"
 assert_contains "$OUT" "Completed" "edit_pause_final_completed"
 assert_no_rebase_in_progress "edit_pause_rebase_finished"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# A failed abort must not roll back on top of a live rebase
-# ══════════════════════════════════════════════════════════════════════════════
+# ── A failed abort must not roll back on top of a live rebase ─────────────────
 
 describe "abort: a failing git rebase --abort leaves the rollback undone"
 # `commit` is the case with something to roll back: it creates a branch and a
@@ -293,7 +275,6 @@ assert_exit_fail "$CODE" "failed_abort_fails"
 assert_branch_exists "feat" "failed_abort_rollback_not_applied"
 assert_state_file "failed_abort_state_kept"
 assert_rebase_in_progress "failed_abort_rebase_kept"
-# Nothing was rolled back: the `reset --mixed` never ran either.
 assert_eq "$HEAD_BEFORE" "$(head_hash)" "failed_abort_head_untouched"
 # "loom abort" alone also matches the ordinary conflict message, so assert on
 # the part that only the kept-state hint says.

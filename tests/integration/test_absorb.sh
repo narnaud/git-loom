@@ -3,9 +3,7 @@
 set -euo pipefail
 source "$(dirname "$0")/helpers.sh"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PRECONDITIONS
-# ══════════════════════════════════════════════════════════════════════════════
+# ── PRECONDITIONS ─────────────────────────────────────────────────────────────
 
 describe "precond: not in a git repository"
 new_tmpdir TMP_NOGIT
@@ -39,9 +37,7 @@ assert_exit_fail "$CODE" "precond_all_skipped_fail"
 assert_contains "$OUT" "skipped" "precond_all_skipped_reason"
 assert_contains "$OUT" "No files could be absorbed" "precond_all_skipped_msg"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# BASIC ABSORPTION
-# ══════════════════════════════════════════════════════════════════════════════
+# ── BASIC ABSORPTION ──────────────────────────────────────────────────────────
 
 describe "single file absorbed into its originating commit"
 setup_repo_with_remote
@@ -71,9 +67,7 @@ assert_contains "$out" "file-beta.txt"                               "absorb_mul
 assert_contains "$out" "2 hunk(s) from 2 file(s) into 2 commit(s)"  "absorb_multi_summary"
 assert_contains "$(gl status)" "no changes"                          "absorb_multi_clean_wt"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# --DRY-RUN
-# ══════════════════════════════════════════════════════════════════════════════
+# ── --DRY-RUN ─────────────────────────────────────────────────────────────────
 
 describe "--dry-run prints the plan without modifying the repository"
 setup_repo_with_remote
@@ -85,7 +79,6 @@ assert_exit_ok $? "dryrun_ok"
 assert_contains "$out" "dry.txt"       "dryrun_file_listed"
 assert_contains "$out" "Dry run:"      "dryrun_prefix"
 assert_contains "$out" "would absorb"  "dryrun_would_absorb"
-# Commit and working tree must be unchanged
 assert_eq "$saved_hash" "$(head_hash)"         "dryrun_commit_unchanged"
 assert_file_content "dry.txt" "dry modified"   "dryrun_wt_unchanged"
 
@@ -98,9 +91,7 @@ assert_exit_ok $? "dryrun_short_ok"
 assert_contains "$out" "Dry run:"                      "dryrun_short_prefix"
 assert_file_content "sf.txt" "sf modified"             "dryrun_short_wt_unchanged"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# FILE ARGUMENTS
-# ══════════════════════════════════════════════════════════════════════════════
+# ── FILE ARGUMENTS ────────────────────────────────────────────────────────────
 
 describe "file argument restricts absorption to the named file only"
 setup_repo_with_remote
@@ -122,9 +113,7 @@ commit_file "Base" "base.txt"
 gl_capture absorb totally-nonexistent-xyz.txt
 assert_exit_fail "$CODE" "restrict_unknown_fail"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# SKIPPED HUNKS AND FILES
-# ══════════════════════════════════════════════════════════════════════════════
+# ── SKIPPED HUNKS AND FILES ───────────────────────────────────────────────────
 
 describe "pure-addition hunk is skipped and reported"
 setup_repo_with_remote
@@ -136,9 +125,7 @@ assert_exit_fail "$CODE" "skip_pure_add_fail"
 assert_contains "$OUT" "skipped"                  "skip_pure_add_skipped"
 assert_contains "$OUT" "No files could be absorbed" "skip_pure_add_nofiles"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# WOVEN BRANCHES
-# ══════════════════════════════════════════════════════════════════════════════
+# ── WOVEN BRANCHES ────────────────────────────────────────────────────────────
 
 describe "absorb into a woven branch commit shows branch name in output"
 setup_repo_with_remote
@@ -165,13 +152,10 @@ weave_branch "g-topo-abs"
 write_file "topo.txt" "improved topo"
 out=$(gl absorb)
 assert_exit_ok $? "topo_abs_ok"
-# Merge topology must survive the rebase
 assert_head_parent_count 2   "topo_abs_merge_preserved"
 assert_branch_exists "g-topo-abs" "topo_abs_branch_exists"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# CONTINUE / ABORT
-# ══════════════════════════════════════════════════════════════════════════════
+# ── CONTINUE / ABORT ──────────────────────────────────────────────────────────
 # Note: absorb attributes each hunk to the last commit that touched the lines,
 # so subsequent commits never conflict with the amended version.  We therefore
 # test the continue/abort machinery directly via a synthetic state file rather

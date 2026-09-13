@@ -3,9 +3,7 @@
 set -euo pipefail
 source "$(dirname "$0")/helpers.sh"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PRECONDITIONS
-# ══════════════════════════════════════════════════════════════════════════════
+# ── PRECONDITIONS ─────────────────────────────────────────────────────────────
 
 describe "precond: not in a git repository"
 new_tmpdir TMP_NOGIT
@@ -21,9 +19,7 @@ gl_capture commit -b g-target -m "nothing staged"
 assert_exit_fail "$CODE" "precond_nothing_staged_fail"
 assert_contains "$OUT" "Nothing to commit" "precond_nothing_staged_msg"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# LOOSE COMMIT (branch name matches upstream local counterpart)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── LOOSE COMMIT (branch name matches upstream local counterpart) ─────────────
 
 describe "loose commit: created directly when branch name matches upstream"
 setup_repo_with_remote
@@ -90,9 +86,7 @@ assert_exit_fail "$CODE" "integration_conflict_fails"
 assert_contains "$OUT" "cannot be used with" "integration_conflict_msg"
 assert_branch_not_exists "g-nope"            "integration_conflict_no_branch"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# COMMIT TO EXISTING WOVEN BRANCH
-# ══════════════════════════════════════════════════════════════════════════════
+# ── COMMIT TO EXISTING WOVEN BRANCH ───────────────────────────────────────────
 
 describe "commit to existing woven branch by name"
 setup_repo_with_remote
@@ -140,9 +134,7 @@ gl_capture commit -b g-not-woven -m "should fail"
 assert_exit_fail "$CODE" "non_woven_fail"
 assert_contains "$OUT" "is not woven" "non_woven_msg"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# COMMIT TO NEW BRANCH
-# ══════════════════════════════════════════════════════════════════════════════
+# ── COMMIT TO NEW BRANCH ──────────────────────────────────────────────────────
 
 describe "new branch name: branch is created, commit lands there, topology woven"
 setup_repo_with_remote
@@ -154,7 +146,6 @@ assert_branch_exists "g-brand-new"                       "new_branch_exists"
 assert_contains "$out" "g-brand-new"                     "new_branch_name_in_out"
 assert_contains "$out" "on branch"                       "new_branch_on_branch"
 assert_log_contains "First commit on new branch"         "new_branch_in_log"
-# New branch is woven in — integration HEAD becomes a merge commit
 assert_head_parent_count 2                               "new_branch_woven_topo"
 
 describe "second commit to same new branch appends correctly"
@@ -169,9 +160,7 @@ assert_exit_ok $? "second_commit_ok"
 assert_log_contains "Second"  "second_commit_in_log"
 assert_log_contains "First"   "first_commit_preserved"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# STAGING — ZZ TOKEN
-# ══════════════════════════════════════════════════════════════════════════════
+# ── STAGING — ZZ TOKEN ────────────────────────────────────────────────────────
 
 describe "zz stages all unstaged changes before committing"
 setup_repo_with_remote
@@ -181,7 +170,6 @@ write_file "zz-b.txt" "beta"
 out=$(gl commit -b g-zz-dest zz -m "Staged all via zz")
 assert_exit_ok $? "zz_ok"
 assert_log_contains "Staged all via zz"          "zz_in_log"
-# Working tree should be clean after zz-staged commit
 assert_contains "$(gl status)" "no changes"      "zz_clean_wt"
 
 describe "zz wins over explicit file arguments when both provided"
@@ -193,9 +181,7 @@ out=$(gl commit -b g-zz-wins zz zz-win-a.txt -m "ZZ wins")
 assert_exit_ok $? "zz_wins_ok"
 assert_contains "$(gl status)" "no changes" "zz_wins_clean"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# STAGING — SPECIFIC FILES
-# ══════════════════════════════════════════════════════════════════════════════
+# ── STAGING — SPECIFIC FILES ──────────────────────────────────────────────────
 
 describe "specific file argument stages only that file, leaving others dirty"
 setup_repo_with_remote
@@ -209,9 +195,7 @@ status_out=$(gl status)
 assert_contains     "$status_out" "leave-this.txt"        "specific_leave_dirty"
 assert_not_contains "$status_out" "stage-this.txt"        "specific_staged_clean"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# ALIAS
-# ══════════════════════════════════════════════════════════════════════════════
+# ── ALIAS ─────────────────────────────────────────────────────────────────────
 
 describe "ci alias works identically to commit"
 setup_repo_with_remote
@@ -222,9 +206,7 @@ assert_exit_ok $? "alias_ci_ok"
 assert_contains "$out" "on branch"       "alias_ci_on_branch"
 assert_log_contains "Via ci alias"       "alias_ci_in_log"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# CONTINUE / ABORT
-# ══════════════════════════════════════════════════════════════════════════════
+# ── CONTINUE / ABORT ──────────────────────────────────────────────────────────
 # Engineering a rebase conflict for `commit` is impractical: the staged diff
 # is relative to the integration HEAD, but it must apply to the feature branch
 # state, so any file touched by both will conflict during commit creation itself
@@ -248,7 +230,6 @@ assert_contains "$OUT" "loom continue" "commit_cont_hint"
 # 1st conflict: cherry-pick C onto FA1. Resolve to a non-empty value.
 printf "resolved\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt
 gl_capture continue
-# 2nd conflict: cherry-pick I1 (diff "feature"→"integration") onto "resolved" ≠ "feature".
 assert_state_file   "commit_cont_state2"
 printf "integration\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt
 gl_capture continue
@@ -276,9 +257,7 @@ assert_no_state_file   "commit_abort_state_removed"
 assert_eq "$old_head" "$(head_hash)" "commit_abort_head_restored"
 assert_log_not_contains "Feature v2" "commit_abort_new_commit_gone"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# GIT ARGUMENT FORWARDING
-# ══════════════════════════════════════════════════════════════════════════════
+# ── GIT ARGUMENT FORWARDING ───────────────────────────────────────────────────
 
 describe "an option after -- is passed to git commit"
 setup_repo_with_remote

@@ -41,7 +41,6 @@ fn detect_remote_type_gerrit_by_config() {
     let workdir = test_repo.workdir();
     test_repo.commit("C1", "c1.txt");
 
-    // Set loom.remote-type to gerrit
     test_repo.set_config("loom.remote-type", "gerrit");
 
     let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
@@ -60,7 +59,6 @@ fn detect_remote_type_github_by_config() {
     let workdir = test_repo.workdir();
     test_repo.commit("C1", "c1.txt");
 
-    // Set loom.remote-type to github
     test_repo.set_config("loom.remote-type", "github");
 
     let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
@@ -171,7 +169,6 @@ fn looks_like_gerrit_negative_without_hints() {
 fn resolve_push_remote_github_fork_uses_origin() {
     let test_repo = TestRepo::new_with_remote();
 
-    // Set up origin with a github.com URL and add an "upstream" remote
     test_repo
         .repo
         .remote_set_url("origin", "https://github.com/user/fork.git")
@@ -182,7 +179,6 @@ fn resolve_push_remote_github_fork_uses_origin() {
         .remote("upstream", remote_path.to_str().unwrap())
         .unwrap();
 
-    // When tracking upstream/main on GitHub, push should go to origin
     let result = super::resolve_push_remote(
         &test_repo.repo,
         &test_repo.workdir(),
@@ -196,7 +192,6 @@ fn resolve_push_remote_github_fork_uses_origin() {
 fn resolve_push_remote_github_origin_stays_origin() {
     let test_repo = TestRepo::new_with_remote();
 
-    // When tracking origin/main on GitHub, push should stay on origin
     let result = super::resolve_push_remote(
         &test_repo.repo,
         &test_repo.workdir(),
@@ -216,7 +211,6 @@ fn resolve_push_remote_plain_upstream_stays_upstream() {
         .remote("upstream", remote_path.to_str().unwrap())
         .unwrap();
 
-    // Plain remote type should NOT redirect, even if "upstream" remote exists
     let result = super::resolve_push_remote(
         &test_repo.repo,
         &test_repo.workdir(),
@@ -233,15 +227,12 @@ fn resolve_branch_accepts_woven_branch() {
     let test_repo = TestRepo::new_with_remote();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
-    // Create feature-a at merge-base
     test_repo.create_branch_at("feature-a", &base_oid.to_string());
 
-    // Switch to feature-a, add a commit, switch back
     test_repo.switch_branch("feature-a");
     test_repo.commit("A1", "a1.txt");
     test_repo.switch_branch("integration");
 
-    // Add integration commit + merge to create woven topology
     test_repo.commit("Int", "int.txt");
     test_repo.merge_no_ff("feature-a");
 
@@ -332,7 +323,6 @@ fn detect_remote_type_gerrit_in_worktree() {
         .output()
         .unwrap();
 
-    // Open the worktree as a Repository
     let wt_repo = git2::Repository::open(&wt_path).unwrap();
 
     // .git should be a file in the worktree, not a directory
@@ -423,7 +413,6 @@ fn detect_remote_type_azure_by_url() {
     let workdir = test_repo.workdir();
     test_repo.commit("C1", "c1.txt");
 
-    // Set remote URL to a dev.azure.com URL
     test_repo
         .repo
         .remote_set_url(
@@ -549,13 +538,8 @@ fn extract_azure_remote_unrecognized() {
     assert!(super::extract_azure_remote(&test_repo.repo, "origin").is_none());
 }
 
-// ── force tests ──────────────────────────────────────────────────────────
-
 #[test]
 fn a_refused_push_names_the_flag_that_gets_past_it() {
-    // Git's own hint here is to pull, which would only merge back what the
-    // branch already carries, so the way out has to come from loom. Whether
-    // forcing is the right call is left to whoever reads it.
     let refused = || anyhow::anyhow!("{}", super::PUSH_FAILED);
 
     let hinted = super::force_hint(refused(), "feature-a", false, false);
@@ -564,8 +548,6 @@ fn a_refused_push_names_the_flag_that_gets_past_it() {
         "no way out offered: {}",
         hinted
     );
-    // `--no-pr` has to survive it, or the re-run opens a pull request that was
-    // deliberately declined — and on Gerrit pushes a review, not a branch.
     let hinted = super::force_hint(refused(), "feature-a", true, false);
     assert!(
         hinted
@@ -575,11 +557,8 @@ fn a_refused_push_names_the_flag_that_gets_past_it() {
         hinted
     );
 
-    // Already forced: failing again is no reason to suggest the flag it was
-    // just given.
     let forced = super::force_hint(refused(), "feature-a", false, true);
     assert_eq!(forced.to_string(), super::PUSH_FAILED);
-    // Nor does anything that was not a refused push.
     let other = super::force_hint(anyhow::anyhow!("Cancelled"), "feature-a", false, false);
     assert_eq!(other.to_string(), "Cancelled");
 }
@@ -593,8 +572,6 @@ fn force_pushes_when_the_lease_check_would_refuse() {
     let tip = test_repo.commit("feature commit", "a.txt");
     crate::git::run_git(&workdir, &["push", "origin", "feature-a"]).unwrap();
 
-    // Someone else moved the remote branch, so our remote-tracking ref is stale
-    // and --force-with-lease refuses the push.
     let remote = test_repo.remote_path().unwrap();
     crate::git::run_git(
         &remote,
@@ -610,8 +587,6 @@ fn force_pushes_when_the_lease_check_would_refuse() {
         crate::git::run_git_stdout(&remote, &["rev-parse", "refs/heads/feature-a"]).unwrap();
     assert_eq!(pushed.trim(), tip.to_string());
 }
-
-// ── stacked branches ─────────────────────────────────────────────────────
 
 use crate::core::repo::{BranchInfo, CommitInfo, RemoteStatus, RepoInfo, UpstreamInfo};
 
@@ -718,7 +693,6 @@ fn plan_push_chains_bases_bottom_up() {
 
 #[test]
 fn plan_push_republishes_stale_upstack_and_hints_the_rest() {
-    // c was pushed and has changed since, d was never pushed.
     let info = stack_info(None, Some(RemoteStatus::Different), None);
     let plan = super::plan_push(&info, "b", "main");
     assert_eq!(plan.layers, vec![layer("a", "main"), layer("b", "a")]);
@@ -732,7 +706,6 @@ fn plan_push_republishes_stale_upstack_and_hints_the_rest() {
 #[test]
 fn hidden_downstack_reports_hidden_layers_bottom_first() {
     let info = stack_info(None, None, None);
-    // The prefix `a` hides only branch `a`.
     assert_eq!(super::hidden_downstack(&info, "c", "a"), vec!["a"]);
     assert_eq!(super::hidden_downstack(&info, "a", "a"), vec!["a"]);
     assert!(super::hidden_downstack(&info, "x", "a").is_empty());
@@ -763,7 +736,6 @@ fn plan_push_skips_synced_and_gone_upstack() {
 
 #[test]
 fn plan_push_drops_a_gone_bottom_layer() {
-    // a's PR merged and the remote branch was deleted: b becomes the bottom.
     let info = with_remote(stack_info(None, None, None), "a", Some(RemoteStatus::Gone));
     let plan = super::plan_push(&info, "c", "main");
     assert_eq!(plan.layers, vec![layer("b", "main"), layer("c", "b")]);
@@ -780,8 +752,6 @@ fn plan_push_drops_a_gone_middle_layer() {
 
 #[test]
 fn plan_push_keeps_the_requested_branch_when_it_is_gone() {
-    // Every layer is gone, the requested one included: it is still pushed,
-    // alone, targeting upstream.
     let info = with_remote(
         stack_info(Some(RemoteStatus::Gone), None, None),
         "a",
@@ -795,8 +765,6 @@ fn plan_push_keeps_the_requested_branch_when_it_is_gone() {
 
 #[test]
 fn plan_push_rebases_a_republished_layer_over_a_gone_one() {
-    // c was merged and its remote branch deleted, d was rewritten above it:
-    // d's PR must target b, not the branch that is no longer on the remote.
     let info = stack_info(
         None,
         Some(RemoteStatus::Gone),
@@ -810,8 +778,6 @@ fn plan_push_rebases_a_republished_layer_over_a_gone_one() {
 
 #[test]
 fn plan_push_republishes_over_a_never_pushed_layer() {
-    // c exists only locally, so it is no PR target: d is still re-published,
-    // over the nearest branch the push leaves on the remote.
     let info = stack_info(None, None, Some(RemoteStatus::Different));
     let plan = super::plan_push(&info, "b", "main");
     assert_eq!(plan.republish, vec![layer("d", "b")]);
@@ -820,8 +786,6 @@ fn plan_push_republishes_over_a_never_pushed_layer() {
 
 #[test]
 fn plan_push_republishes_a_layer_that_only_added_commits() {
-    // c has local commits on top of what is published. It is out of step with
-    // the remote like any other, so it goes out with the push.
     let info = stack_info(None, Some(RemoteStatus::Different), None);
     let plan = super::plan_push(&info, "b", "main");
     assert_eq!(plan.republish, vec![layer("c", "b")]);
@@ -830,8 +794,6 @@ fn plan_push_republishes_a_layer_that_only_added_commits() {
 
 #[test]
 fn plan_push_keeps_a_synced_layer_as_a_republished_base() {
-    // A synced c is still on the remote, so d keeps targeting it (spec 011:
-    // the skipped layer ends the stack run, it does not change the bases).
     let info = stack_info(
         None,
         Some(RemoteStatus::Synced),
@@ -844,8 +806,6 @@ fn plan_push_keeps_a_synced_layer_as_a_republished_base() {
 
 #[test]
 fn plan_push_falls_back_to_upstream_when_everything_below_is_gone() {
-    // Only the requested branch survives the filter, and it is what the
-    // layer above targets.
     let info = with_remote(
         stack_info(
             None,
@@ -878,14 +838,11 @@ Re-pushed above `b`: `c`"
 
 #[test]
 fn is_chain_counts_republished_layers_too() {
-    // A branch of its own, with nothing above it: one PR, no chain.
     let info = stack_info(None, None, None);
     let lone = super::plan_push(&info, "x", "main");
     assert!(!lone.is_stacked());
     assert!(!lone.is_chain());
 
-    // Not stacked on anything, but a re-published branch above it makes the
-    // two PRs a chain: b's PR targets a.
     let info = with_remote(
         stack_info(Some(RemoteStatus::Different), None, None),
         "a",
@@ -897,11 +854,9 @@ fn is_chain_counts_republished_layers_too() {
     assert!(!bottom.is_stacked(), "a has nothing below it");
     assert!(bottom.is_chain(), "a and b form a PR chain");
 
-    // A stacked branch is a chain on its downstack alone.
     let stacked = super::plan_push(&info, "b", "main");
     assert!(stacked.is_chain());
 
-    // The Gerrit/no-PR plan is a single branch.
     assert!(!super::PushPlan::single("x").is_chain());
 }
 
@@ -912,14 +867,12 @@ fn azure_refuses_a_stacked_branch() {
     let err = super::refuse_stacked_azure(&super::RemoteType::AzureDevOps, &stacked)
         .unwrap_err()
         .to_string();
-    // The whole message: a continuation line must not carry the source indent.
     assert_eq!(
         err,
         "`b` is stacked on `a` — Azure DevOps has no stacked pull requests\n\
          Land the branches below it first, or push without a PR (`--no-pr`)"
     );
 
-    // A branch of its own is fine, and every other remote stacks freely.
     let lone = super::plan_push(&info, "x", "main");
     assert!(super::refuse_stacked_azure(&super::RemoteType::AzureDevOps, &lone).is_ok());
     assert!(super::refuse_stacked_azure(&super::RemoteType::GitHub, &stacked).is_ok());
@@ -959,15 +912,11 @@ fn gather_branch_commits_yields_only_the_branch_own_commits() {
     };
 
     assert_eq!(subjects("feature-a", "main"), vec!["A1", "A2"]);
-    // Stacked on feature-a: the PR's diff is B1 alone, and so is its body.
     assert_eq!(subjects("feature-b", "feature-a"), vec!["B1"]);
 }
 
 #[test]
 fn gather_branch_commits_spans_the_stack_when_the_pr_targets_the_trunk() {
-    // A fork's PRs target the trunk, and so does a layer whose base was
-    // dropped: GitHub's diff then covers the branches below too, so the
-    // description has to cover them as well.
     let test_repo = TestRepo::new_with_remote();
     test_repo.commit("A1", "a1.txt");
     test_repo.create_branch("feature-a");
@@ -985,8 +934,6 @@ fn gather_branch_commits_spans_the_stack_when_the_pr_targets_the_trunk() {
 
 #[test]
 fn push_args_make_a_stack_atomic() {
-    // Spec 011 sells the stack push as all-or-nothing: a lease refused on any
-    // branch must leave every branch untouched. `--atomic` is what buys that.
     let stack = super::push_args("origin", &["a", "b"], false);
     assert_eq!(
         stack,
@@ -1001,10 +948,8 @@ fn push_args_make_a_stack_atomic() {
             "b"
         ]
     );
-    // Nothing to be atomic about with one ref.
     let lone = super::push_args("origin", &["a"], false);
     assert!(!lone.contains(&"--atomic"));
-    // `-f` replaces the lease pair, and keeps the guarantee.
     let forced = super::push_args("origin", &["a", "b"], true);
     assert_eq!(
         forced,
@@ -1037,8 +982,6 @@ fn push_plain_sends_the_whole_chain_in_one_push() {
     assert_eq!(rev("refs/heads/feature-b"), b_tip.to_string());
 }
 
-// ── gh parsing ───────────────────────────────────────────────────────────
-
 #[test]
 fn parse_gh_pr_list_reads_number_url_and_base() {
     let json =
@@ -1057,7 +1000,6 @@ fn parse_gh_pr_list_reads_number_url_and_base() {
 
 #[test]
 fn parse_gh_pr_list_picks_the_pr_from_our_repository() {
-    // `--head b` also matches a stranger's fork branch named `b`.
     let json = r#"[
         {"baseRefName":"main","number":9,"url":"https://github.com/o/r/pull/9",
          "headRepositoryOwner":{"login":"stranger"}},
@@ -1083,12 +1025,10 @@ fn stack_pr_numbers_stops_at_a_missing_pr_or_a_gap() {
             .map(|(b, base, n)| (layer(b, base), *n))
             .collect()
     };
-    // Complete chain.
     assert_eq!(
         super::stack_pr_numbers(&chain(&[("a", "main", Some(1)), ("b", "a", Some(2))])),
         vec![1, 2]
     );
-    // A layer without a PR ends the run.
     assert_eq!(
         super::stack_pr_numbers(&chain(&[
             ("a", "main", Some(1)),
@@ -1097,7 +1037,6 @@ fn stack_pr_numbers_stops_at_a_missing_pr_or_a_gap() {
         ])),
         vec![1]
     );
-    // c was in sync and skipped: d targets c, not b, so d cannot join.
     assert_eq!(
         super::stack_pr_numbers(&chain(&[
             ("a", "main", Some(1)),

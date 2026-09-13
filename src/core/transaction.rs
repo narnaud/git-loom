@@ -42,14 +42,8 @@ pub struct Rollback {
 }
 
 impl Rollback {
-    /// Apply the rollback after `git rebase --abort` has run.
-    ///
-    /// Acts on whichever fields are populated:
-    /// - `reset_mixed_to` → `reset --mixed` to undo a pre-rebase commit
-    /// - `reset_hard_to` → `reset --hard` to undo pre-rebase commits (e.g. fixup commits)
-    /// - `delete_branches` → delete temporary branches
-    /// - `saved_staged_patch` → re-stage saved changes
-    /// - `saved_worktree_patch` → re-apply saved working-tree changes
+    /// Apply the rollback after `git rebase --abort` has run, acting on whichever
+    /// fields are populated.
     pub fn apply_abort(&self, workdir: &Path) -> Result<()> {
         if !self.reset_mixed_to.is_empty() {
             git::reset_mixed(workdir, &self.reset_mixed_to)?;
@@ -102,10 +96,9 @@ pub fn save(git_dir: &Path, state: &LoomState) -> Result<()> {
 
     // Write beside the real file and rename over it, so a process killed
     // mid-write leaves either the old state or the new one — never a truncated
-    // file that both `loom continue` and `loom abort` would refuse to read.
-    // The temp file has a random name and is removed on drop, so a crash
-    // between the two steps litters nothing and two loom processes saving at
-    // once cannot overwrite each other's.
+    // file both `loom continue` and `loom abort` would refuse to read. The temp
+    // name is random and removed on drop, so two loom processes saving at once
+    // cannot overwrite each other's.
     let json = serde_json::to_string_pretty(state)?;
     (|| -> std::io::Result<()> {
         use std::io::Write;
@@ -312,12 +305,10 @@ pub fn abort_run() -> Result<()> {
     abort_cmd(&workdir, &git_dir)
 }
 
-/// Implement `loom continue`.
-///
-/// 1. If a rebase is still active, runs `git rebase --continue`.
-/// 2. If `--continue` produces another conflict, keeps the state and reports paused.
-/// 3. Otherwise dispatches to the command-specific `after_continue` handler.
-/// 4. Deletes state only after dispatch succeeds.
+/// Implement `loom continue`: finish an active rebase with
+/// `git rebase --continue`, report paused again on a fresh conflict, and
+/// otherwise dispatch to the command's `after_continue`, deleting the state
+/// only once that succeeds.
 pub fn continue_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
     let Some(state) = load(git_dir)? else {
         return continue_without_state(workdir, git_dir);
@@ -370,15 +361,10 @@ static ABORT_FAILED_HINT: std::sync::LazyLock<String> = std::sync::LazyLock::new
 const ROLLBACK_FAILED_HINT: &str =
     "the rollback is only half-applied — the loom state was kept so `loom abort` can finish it";
 
-/// Implement `loom abort`.
-///
-/// 1. Aborts any active rebase (`git rebase --abort` restores HEAD, branch
-///    refs via `--update-refs`, and any autostashed working-tree changes).
-///    If that fails, stops there and keeps the state file.
-/// 2. Calls `rollback.apply_abort()` for any cleanup `git rebase --abort`
-///    cannot do on its own (un-committing staged changes, deleting temp branches,
-///    restoring saved patches).
-/// 3. Deletes state.
+/// Implement `loom abort`: `git rebase --abort` first — it restores HEAD,
+/// branch refs via `--update-refs`, and any autostash, and the state file is
+/// kept if it fails — then `rollback.apply_abort()` for the cleanup git
+/// cannot do on its own, then delete the state.
 pub fn abort_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
     let Some(state) = load(git_dir)? else {
         return abort_without_state(workdir, git_dir);
@@ -500,7 +486,6 @@ fn abort_without_state(workdir: &Path, git_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Dispatch to the command-specific `after_continue` handler.
 fn dispatch_after_continue(workdir: &Path, state: &LoomState) -> Result<()> {
     match state.command.as_str() {
         "update" => crate::update::after_continue(workdir, &state.context),

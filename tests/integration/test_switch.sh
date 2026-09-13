@@ -3,9 +3,7 @@
 set -euo pipefail
 source "$(dirname "$0")/helpers.sh"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PRECONDITIONS
-# ══════════════════════════════════════════════════════════════════════════════
+# ── PRECONDITIONS ─────────────────────────────────────────────────────────────
 
 describe "precond: staged changes block switch"
 setup_repo_with_remote
@@ -31,9 +29,7 @@ gl_capture switch no-such-branch
 assert_exit_fail "$CODE" "not_found_exit"
 assert_contains "$OUT" "not found" "not_found_msg"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# SWITCHING TO A LOCAL BRANCH
-# ══════════════════════════════════════════════════════════════════════════════
+# ── SWITCHING TO A LOCAL BRANCH ───────────────────────────────────────────────
 
 describe "switch to local branch by name moves HEAD onto that branch"
 setup_repo_with_remote
@@ -63,9 +59,7 @@ out=$(gl switch g-untracked)
 assert_exit_ok $? "untracked_ok"
 assert_contains "$out" "Switched to" "untracked_ok_msg"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# SWITCHING TO A REMOTE-ONLY BRANCH
-# ══════════════════════════════════════════════════════════════════════════════
+# ── SWITCHING TO A REMOTE-ONLY BRANCH ─────────────────────────────────────────
 
 describe "switch to remote-only branch detaches HEAD at the remote ref"
 setup_repo_with_remote
@@ -77,7 +71,6 @@ git -C "$WORK" push -q origin g-remote >/dev/null
 remote_oid=$(git -C "$WORK" rev-parse origin/g-remote)
 git -C "$WORK" checkout -q integration
 git -C "$WORK" branch -D g-remote
-# Now origin/g-remote exists but g-remote local branch does not
 assert_branch_not_exists "g-remote" "remote_only_setup"
 out=$(gl switch origin/g-remote)
 assert_exit_ok $? "remote_only_ok"
@@ -113,9 +106,7 @@ if git -C "$WORK" symbolic-ref HEAD >/dev/null 2>&1; then
     fail "remote_detach_head: HEAD should be detached but is on a branch"
 fi
 
-# ══════════════════════════════════════════════════════════════════════════════
-# SHORT ID RESOLUTION
-# ══════════════════════════════════════════════════════════════════════════════
+# ── SHORT ID RESOLUTION ───────────────────────────────────────────────────────
 
 describe "switch by branch short ID resolves to the correct local branch"
 setup_repo_with_remote
@@ -138,9 +129,7 @@ assert_contains "$out_sid" "g-shortid"    "shortid_sid_name"
 current=$(git -C "$WORK" rev-parse --abbrev-ref HEAD)
 assert_eq "$current" "g-shortid" "shortid_sid_head"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# ALIAS
-# ══════════════════════════════════════════════════════════════════════════════
+# ── ALIAS ─────────────────────────────────────────────────────────────────────
 
 describe "gl sw is an alias for gl switch"
 setup_repo_with_remote

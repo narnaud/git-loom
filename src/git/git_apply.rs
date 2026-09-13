@@ -7,16 +7,12 @@ use anyhow::{Context, Result, bail};
 
 use crate::trace as loom_trace;
 
-/// Apply a patch from stdin.
-///
-/// Wraps `git apply` with the patch passed via stdin.
+/// Apply a patch passed on stdin (`git apply`).
 pub fn apply_patch(workdir: &Path, patch: &str) -> Result<()> {
     apply_patch_with_flags(workdir, patch, &[])
 }
 
-/// Apply a patch in reverse from stdin.
-///
-/// Wraps `git apply --reverse` with the patch passed via stdin.
+/// Apply a patch on stdin in reverse (`git apply --reverse`).
 pub fn apply_patch_reverse(workdir: &Path, patch: &str) -> Result<()> {
     apply_patch_with_flags(workdir, patch, &["--reverse"])
 }
@@ -119,9 +115,8 @@ fn restore_from_index(workdir: &Path, paths: &[String]) {
     }
 }
 
-/// Apply a patch to the index only (not the working tree).
-///
-/// Wraps `git apply --cached` with the patch passed via stdin.
+/// Apply a patch on stdin to the index only, not the working tree
+/// (`git apply --cached`).
 pub fn apply_cached_patch(workdir: &Path, patch: &str) -> Result<()> {
     apply_patch_with_flags(workdir, patch, &["--cached"])
 }

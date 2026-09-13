@@ -45,7 +45,6 @@ pub(crate) fn collect_file_entries(
 ) -> Result<Vec<FileEntry>> {
     let changes = repo::get_working_changes_recurse(repo)?;
 
-    // Filter to requested files if specified.
     let filter_paths: Option<Vec<String>> = if files.is_empty() || files.iter().any(|f| f == "zz") {
         None
     } else {

@@ -48,7 +48,7 @@ const COMMAND: &str = "fold";
 
 /// Fold source(s) into a target.
 ///
-/// Dispatches to the appropriate operation based on argument types:
+/// Forms:
 /// - File(s) + Commit → amend files into the commit
 /// - Commit + Commit  → fixup source into target (source disappears)
 /// - Commit(s) + Branch → move the commit(s) to the branch, oldest-first
@@ -73,7 +73,6 @@ pub fn run(create: bool, patch: bool, args: Vec<String>, theme: &graph::Theme) -
         return run_patch_fold(&repo, &args, theme);
     }
 
-    // Single argument: fold staged files into the target commit
     if args.len() == 1 {
         return run_staged(&repo, &args[0]);
     }
@@ -93,7 +92,6 @@ pub fn run(create: bool, patch: bool, args: Vec<String>, theme: &graph::Theme) -
         source_args.to_vec()
     };
 
-    // Resolve all arguments
     let resolved_sources: Vec<Target> = source_args
         .iter()
         .map(|s| {
@@ -121,7 +119,6 @@ pub fn run(create: bool, patch: bool, args: Vec<String>, theme: &graph::Theme) -
         ],
     )?;
 
-    // Classify and dispatch
     match classify(&resolved_sources, &resolved_target)? {
         FoldOp::FilesIntoCommit { files, commit } => {
             fold_files_into_commit(&repo, &files, &commit, false)
@@ -173,7 +170,6 @@ fn run_create(repo: &Repository, args: &[String]) -> Result<()> {
     let branch_name = &branch_name[0];
     let workdir = repo::require_workdir(repo, COMMAND)?;
 
-    // Resolve sources — all must be commits
     let mut commit_hashes = Vec::new();
     for source_arg in source_args {
         let source = repo::resolve_arg(repo, source_arg, &[TargetKind::Commit])?;
@@ -200,11 +196,10 @@ fn run_create(repo: &Repository, args: &[String]) -> Result<()> {
         );
     }
 
-    // The branch is created at the weave base so it has no commits of its own
-    // yet; move_commits_to_branch adds a section for it in the Weave graph.
-    // One gather serves both that and the ordering below.
-    // Let the real reason through: loom prints only the outermost message, so
-    // wrapping this would hide whether it was a detached HEAD or no upstream.
+    // The branch is created at the weave base so it has no commits of its own;
+    // move_commits_to_branch adds a section for it. Deliberately without a
+    // context: loom prints only the outermost message, which would hide whether
+    // the failure was a detached HEAD or no upstream.
     let info = repo::gather_commit_graph(repo)?;
     // The weave base, which the merge-base only sometimes is. Both the branch
     // and the move scope have to use it: plan_move measures a section-less
@@ -303,9 +298,9 @@ fn ordered_topologically(
 ///
 /// `git rebase --abort` replays its autostash into the working tree, so the
 /// content returns but the staging mostly does not. The snapshot is a
-/// HEAD-to-index diff, so the index has to be back at HEAD for it to apply —
-/// whatever the autostash restored of it. The working tree is untouched by
-/// that reset, and a patch that still will not apply is saved aside.
+/// HEAD-to-index diff, so the index is first reset back to HEAD; the working
+/// tree is untouched by that, and a patch that still will not apply is saved
+/// aside.
 fn restage_after_abort(workdir: &Path, staged: &str) {
     if staged.is_empty() {
         return;
@@ -557,8 +552,7 @@ fn run_patch_fold_commit_to_commit(
     // Snapshot for `rollback_fold`.
     let saved_worktree = WorktreeSnapshot::take(workdir)?;
 
-    // Save and unstage any pre-existing staged changes so they don't accidentally
-    // get included in the amend operations below.
+    // Unstage pre-existing staged changes so the amends below leave them out.
     let saved_staged = staging::save_and_unstage_staged(repo, workdir)?;
 
     // Phase 1: edit source, remove selected hunks.
@@ -683,8 +677,7 @@ fn run_patch_fold_commit_to_unstaged(
     // Snapshot for `rollback_fold`.
     let saved_worktree = WorktreeSnapshot::take(workdir)?;
 
-    // Save and unstage any pre-existing staged changes so they don't accidentally
-    // get included in the amend operation below.
+    // Unstage pre-existing staged changes so the amend below leaves them out.
     let saved_staged = staging::save_and_unstage_staged(repo, workdir)?;
 
     let new_hash;
@@ -768,7 +761,6 @@ fn run_staged(repo: &Repository, target_arg: &str) -> Result<()> {
     fold_files_into_commit(repo, &staged, &commit_hash, true)
 }
 
-/// The classified fold operation.
 #[derive(Debug)]
 enum FoldOp {
     FilesIntoCommit {
@@ -799,16 +791,13 @@ enum FoldOp {
     },
 }
 
-/// Classify resolved arguments into a specific fold operation.
 fn classify(sources: &[Target], target: &Target) -> Result<FoldOp> {
-    // Check for invalid source types
     for source in sources {
         if matches!(source, Target::Branch(_)) {
             bail!("Cannot fold a branch\nUse `git loom branch` for branch operations");
         }
     }
 
-    // Reject CommitFile as target
     if matches!(target, Target::CommitFile { .. }) {
         bail!("Target must be a commit, branch, or unstaged (zz), not a commit file");
     }
@@ -819,7 +808,6 @@ fn classify(sources: &[Target], target: &Target) -> Result<FoldOp> {
         .iter()
         .any(|s| matches!(s, Target::CommitFile { .. }));
 
-    // Reject mixed source types
     if [has_files, has_commits, has_commit_files]
         .iter()
         .filter(|&&x| x)
@@ -829,7 +817,6 @@ fn classify(sources: &[Target], target: &Target) -> Result<FoldOp> {
         bail!("Cannot mix different source types (files, commits, commit files)");
     }
 
-    // Handle CommitFile sources (file within a commit)
     if has_commit_files {
         if sources.len() > 1 {
             bail!("Only one commit file source is allowed");
@@ -857,7 +844,6 @@ fn classify(sources: &[Target], target: &Target) -> Result<FoldOp> {
         };
     }
 
-    // Handle Unstaged target
     if matches!(target, Target::Unstaged) {
         if has_files {
             bail!("Cannot fold files into unstaged — files are already in the working directory");
@@ -978,8 +964,8 @@ fn fold_files_into_commit(
 
     let file_refs: Vec<&str> = files.iter().map(|s| s.as_str()).collect();
 
-    // Save and unstage any pre-existing staged files not in our target list,
-    // so they don't accidentally end up in this commit/amend.
+    // Unstage pre-existing staged files outside the target list, so they do
+    // not end up in this commit/amend.
     let saved_staged = staging::save_and_unstage_other_staged(repo, workdir, &file_refs)?;
 
     let new_hash;
@@ -1298,18 +1284,15 @@ fn plan_move(
 ) -> Result<(Weave, Vec<String>)> {
     let mut graph = Weave::from_repo(repo)?;
 
-    // If the target branch is neither a section nor an inner (stacked) ref in
-    // the Weave graph, create a section for it. This happens when the branch
-    // is at the merge-base (no commits of its own) — either it was never
-    // woven, or a previous rebase dropped the degenerate merge (merging two
-    // identical commits is a no-op for git). Same pattern as commit.rs for
-    // empty branches.
+    // A target branch that is neither a section nor an inner (stacked) ref
+    // gets a section created for it. That happens when the branch sits at the
+    // merge-base with no commits of its own: never woven, or a previous rebase
+    // dropped its degenerate merge. Same pattern as commit.rs.
     let is_woven =
         graph.has_branch_section(branch_name) || graph.inner_branch_section(branch_name).is_some();
     if !is_woven {
-        // Only allow creating a synthetic section for branches that are
-        // at the merge-base (empty) or don't exist yet. Reject branches
-        // that have diverged — they are out of scope.
+        // Only a branch at the merge-base (empty) or not yet existing can get a
+        // synthetic section; a diverged one is out of scope.
         if let Ok(branch) = repo.find_branch(branch_name, git2::BranchType::Local) {
             let branch_oid = branch
                 .get()
@@ -1349,12 +1332,11 @@ fn plan_move(
 /// patches it takes to put it back.
 ///
 /// `worktree` is HEAD → working tree and `staged` is HEAD → index. Neither
-/// contains the other: a change that is staged and then undone in the working
-/// tree is in `staged` alone, which is why both are always taken. A rollback
-/// replays `staged` into the index first and `worktree` over the files after —
-/// the same two patches [`Rollback`] carries, so a rollback and an abort
-/// restore alike. Both hold binary files inline, which is what it costs to be
-/// able to put one back.
+/// contains the other — a change staged then undone in the working tree is in
+/// `staged` alone — which is why both are always taken. A rollback replays
+/// `staged` into the index first and `worktree` over the files after, the same
+/// two patches [`Rollback`] carries, so a rollback and an abort restore alike.
+/// Both hold binary files inline, which is what it costs to restore them.
 struct WorktreeSnapshot {
     worktree: String,
     staged: String,
@@ -1372,13 +1354,12 @@ impl WorktreeSnapshot {
 /// Write a patch that could not be applied under the git dir, so the user can
 /// still get at it. Returns where it landed, if it could be written at all.
 ///
-/// What this saves is the only copy left of that work, so it never writes over
-/// an earlier save: each file is created exclusively and the counter climbs
-/// until a free name turns up — a guarantee a clock reading cannot give.
-///
-/// The git dir is asked for, never assumed: in a linked worktree or a
-/// submodule `.git` is a file, and a hardcoded `.git/loom` would fail to be
-/// created in exactly the case this holds the last copy of the user's work.
+/// This is the only copy left of that work, so it never writes over an earlier
+/// save: each file is created exclusively and the counter climbs until a free
+/// name turns up — a guarantee a clock reading cannot give. The git dir is
+/// asked for, never assumed: in a linked worktree or submodule `.git` is a
+/// file, and a hardcoded `.git/loom` would fail to be created in exactly the
+/// case this holds the last copy of the user's work.
 fn save_patch_aside(workdir: &Path, name: &str, patch: &str) -> Result<PathBuf> {
     let dir = git::git_path(workdir, "loom")?;
     std::fs::create_dir_all(&dir)
@@ -1408,14 +1389,12 @@ fn save_patch_aside(workdir: &Path, name: &str, patch: &str) -> Result<PathBuf> 
 /// Undo a failed fold: history back to `saved_head`, then the user's own
 /// uncommitted changes back on top of it.
 ///
-/// The `reset --hard` is what clears whatever a failed apply left behind,
-/// conflict markers included, so `saved_worktree` — taken before the operation
-/// started — has to be replayed afterwards. Without that, the uncommitted work
-/// is gone for good: by this point a rebase's autostash has put it back in the
-/// working tree — the rebase that completed, or the one `git rebase --abort`
-/// unwound. Should the reset or either replay fail, that half of the snapshot
-/// is saved where the user can still reach it, because the caller is about to
-/// report the operation as rolled back.
+/// The `reset --hard` clears whatever a failed apply left behind, conflict
+/// markers included, so `saved_worktree` — taken before the operation started
+/// — has to be replayed afterwards, or the uncommitted work is gone for good.
+/// Should the reset or either replay fail, that half of the snapshot is saved
+/// where the user can still reach it, because the caller is about to report
+/// the operation as rolled back.
 fn rollback_fold(
     workdir: &Path,
     saved_head: &str,
@@ -1477,11 +1456,8 @@ fn save_or_warn(workdir: &Path, name: &str, patch: &str, cached: bool) {
     }
 }
 
-/// Uncommit a single file from a commit to the working directory.
-///
-/// Removes the file's changes from the commit and places them in the working
-/// directory as unstaged modifications. The commit itself is preserved (minus
-/// the file's changes).
+/// Uncommit a single file from a commit: its changes leave the commit and land
+/// in the working tree as unstaged modifications.
 fn fold_commit_file_to_unstaged(repo: &Repository, commit_hash: &str, path: &str) -> Result<()> {
     let workdir = repo::require_workdir(repo, COMMAND)?;
 
@@ -1535,7 +1511,6 @@ fn fold_commit_file_to_unstaged(repo: &Repository, commit_hash: &str, path: &str
 
         git::continue_rebase_expecting_edit(workdir)?;
 
-        // Re-apply changes to working tree
         if let Err(e) = git::apply_patch_to_worktree(workdir, &file_diff) {
             rollback_fold(workdir, &saved_head, Some(&saved_refs), &saved_worktree);
             return Err(e).context("Failed to uncommit file, operation rolled back");
@@ -1552,10 +1527,7 @@ fn fold_commit_file_to_unstaged(repo: &Repository, commit_hash: &str, path: &str
     Ok(())
 }
 
-/// Move a file's changes from one commit to another.
-///
-/// Removes the file's changes from the source commit and adds them to the
-/// target commit. Both commits are rewritten.
+/// Move a file's changes from one commit to another; both are rewritten.
 fn fold_commit_file_to_commit(
     repo: &Repository,
     source_hash: &str,
@@ -1590,13 +1562,11 @@ fn fold_commit_file_to_commit(
     let new_target_hash;
 
     if source_is_newer {
-        // Two-phase approach with edit+continue and rollback.
-        // When source is newer than target, a single rebase can't do both
-        // edits: adding the file to target (older, picked first) would
-        // conflict when source (newer) is replayed — source still has the file.
-        //   Phase 1: Remove the file from source via edit+continue.
-        //   Phase 2: Add the file to target via edit+continue.
-        // On phase 2 failure, roll back to pre-phase-1 state.
+        // Two-phase edit+continue with rollback. A source newer than its target
+        // cannot be done in one rebase: adding the file to the target (picked
+        // first) conflicts when the source is replayed, since the source still has
+        // the file. Phase 1 removes it from the source, phase 2 adds it to the
+        // target; a phase 2 failure rolls back to the pre-phase-1 state.
         let saved_head = repo::head_oid(repo)?.to_string();
         let saved_refs = repo::snapshot_branch_refs(repo)?;
 
@@ -1718,10 +1688,8 @@ fn fold_commit_file_to_commit(
     Ok(())
 }
 
-/// Uncommit a commit to the working directory (Case 4: Commit + Unstaged).
-///
-/// Removes the commit from history and places its changes in the working
-/// directory as unstaged modifications.
+/// Uncommit a commit to the working directory (Case 4: Commit + Unstaged):
+/// the commit leaves history and its changes land unstaged.
 fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
     let workdir = repo::require_workdir(repo, COMMAND)?;
 
@@ -1860,10 +1828,9 @@ pub fn after_continue(workdir: &Path, context: &serde_json::Value) -> Result<()>
             if !diff.is_empty()
                 && let Err(e) = git::apply_patch_to_worktree(workdir, &diff)
             {
-                // The rebase succeeded (commit is gone) but the diff can't be
-                // re-applied — typically because conflict resolution changed
-                // the surrounding context. Save the diff to a file so the user
-                // can recover it manually.
+                // The rebase succeeded (the commit is gone) but the diff will not
+                // re-apply — usually because conflict resolution changed the surrounding
+                // context. Save it to a file so the user can recover it by hand.
                 let mut warning = format!("Could not re-apply changes to working directory: {e}");
                 match save_patch_aside(workdir, "unapplied", &diff) {
                     Ok(path) => warning.push_str(&format!(

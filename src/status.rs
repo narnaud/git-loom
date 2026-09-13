@@ -130,7 +130,6 @@ fn hide_branches(info: &mut repo::RepoInfo, pattern: &str) {
         return;
     }
 
-    // All branch tip OIDs (including hidden), used as stop points when walking.
     let all_tips: HashSet<git2::Oid> = info.branches.iter().map(|b| b.tip_oid).collect();
 
     // Visible branch tip OIDs: when a hidden branch is co-located with a visible
@@ -142,7 +141,6 @@ fn hide_branches(info: &mut repo::RepoInfo, pattern: &str) {
         .map(|b| b.tip_oid)
         .collect();
 
-    // Build a parent-chain lookup so we can walk ancestry without touching git2.
     let commit_map: HashMap<git2::Oid, Option<git2::Oid>> =
         info.commits.iter().map(|c| (c.oid, c.parent_oid)).collect();
 

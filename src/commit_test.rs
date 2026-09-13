@@ -53,19 +53,16 @@ fn setup_with_two_branches() -> TestRepo {
     let test_repo = TestRepo::new_with_remote();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
-    // Create feature-a at merge-base with one commit
     test_repo.create_branch_at("feature-a", &base_oid.to_string());
     test_repo.switch_branch("feature-a");
     test_repo.commit("A1", "a1.txt");
     test_repo.switch_branch("integration");
 
-    // Create feature-b at merge-base with one commit
     test_repo.create_branch_at("feature-b", &base_oid.to_string());
     test_repo.switch_branch("feature-b");
     test_repo.commit("B1", "b1.txt");
     test_repo.switch_branch("integration");
 
-    // Weave both branches into integration
     test_repo.merge_no_ff("feature-a");
     test_repo.merge_no_ff("feature-b");
 
@@ -91,7 +88,6 @@ fn commit_stages_specific_file() {
 
     assert!(result.is_ok(), "commit failed: {:?}", result);
 
-    // feature-a should have the commit
     assert_eq!(test_repo.branch_commit_summary("feature-a"), "Add new file");
 }
 
@@ -112,7 +108,6 @@ fn commit_stages_zz_all_changes() {
 
     assert!(result.is_ok(), "commit failed: {:?}", result);
 
-    // feature-a should have the commit
     assert_eq!(test_repo.branch_commit_summary("feature-a"), "Add files");
 }
 
@@ -120,7 +115,6 @@ fn commit_stages_zz_all_changes() {
 fn commit_uses_already_staged() {
     let test_repo = setup_with_woven_branch();
 
-    // Stage a file manually
     test_repo.write_file("staged.txt", "content");
     test_repo.stage_files(&["staged.txt"]);
 
@@ -141,7 +135,6 @@ fn commit_uses_already_staged() {
 fn commit_empty_index_fails() {
     let test_repo = setup_with_woven_branch();
 
-    // No files staged, no file args
     let result = test_repo.in_dir(|| {
         run(
             Some("feature-a".to_string()),
@@ -201,7 +194,6 @@ fn commit_to_new_branch_creates_and_weaves() {
     assert!(result.is_ok(), "commit failed: {:?}", result);
     assert!(test_repo.branch_exists("feature-new"));
 
-    // Branch should have the commit
     assert_eq!(test_repo.branch_commit_summary("feature-new"), "Add file");
 
     // Integration HEAD should be a merge commit (proper weave topology)
@@ -235,7 +227,6 @@ fn commit_to_empty_branch_creates_merge_topology() {
 
     assert!(result.is_ok(), "commit failed: {:?}", result);
 
-    // feature-a should have the commit
     let branch_oid = test_repo.get_branch_target("feature-a");
     let commit = test_repo.find_commit(branch_oid);
     assert_eq!(commit.summary().unwrap().unwrap(), "New commit");
@@ -264,13 +255,11 @@ fn setup_with_one_woven_one_empty() -> TestRepo {
     let test_repo = TestRepo::new_with_remote();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
-    // Create feature-a at merge-base with one commit
     test_repo.create_branch_at("feature-a", &base_oid.to_string());
     test_repo.switch_branch("feature-a");
     test_repo.commit("A1", "a1.txt");
     test_repo.switch_branch("integration");
 
-    // Weave feature-a into integration
     test_repo.merge_no_ff("feature-a");
 
     // Create feature-b at merge-base (empty, no commits)
@@ -296,7 +285,6 @@ fn commit_to_second_empty_branch_creates_parallel_topology() {
 
     assert!(result.is_ok(), "commit failed: {:?}", result);
 
-    // feature-b should have the commit
     let branch_b_oid = test_repo.get_branch_target("feature-b");
     let commit_b = test_repo.find_commit(branch_b_oid);
     assert_eq!(commit_b.summary().unwrap().unwrap(), "B1");
@@ -345,7 +333,6 @@ fn commit_moves_to_correct_branch_in_topology() {
 
     assert!(result.is_ok(), "commit failed: {:?}", result);
 
-    // feature-a tip should be "New on A"
     let branch_oid = test_repo.get_branch_target("feature-a");
     let commit = test_repo.find_commit(branch_oid);
     assert_eq!(commit.summary().unwrap().unwrap(), "New on A");
@@ -354,7 +341,6 @@ fn commit_moves_to_correct_branch_in_topology() {
     let parent = commit.parent(0).unwrap();
     assert_eq!(parent.summary().unwrap().unwrap(), "A1");
 
-    // feature-b should still be intact
     assert_eq!(test_repo.branch_commit_summary("feature-b"), "B1");
 }
 
@@ -401,7 +387,6 @@ fn commit_conflict_pauses_operation() {
     let test_repo = TestRepo::new_with_remote();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
-    // Create feat1 branch with a commit that adds feature1
     test_repo.create_branch_at("feat1", &base_oid.to_string());
     test_repo.switch_branch("feat1");
     test_repo.write_file("feature1", "feat 1 content");
@@ -409,7 +394,6 @@ fn commit_conflict_pauses_operation() {
     test_repo.commit_staged("Feature 1");
     test_repo.switch_branch("integration");
 
-    // Weave feat1 into integration
     test_repo.merge_no_ff("feat1");
 
     // Modify feature1 in the working tree (same file as feat1 commit)
@@ -445,7 +429,6 @@ fn commit_conflict_preserves_existing_empty_branch() {
     let test_repo = TestRepo::new_with_remote();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
-    // Create feat1 with a commit (will cause conflict)
     test_repo.create_branch_at("feat1", &base_oid.to_string());
     test_repo.switch_branch("feat1");
     test_repo.write_file("shared.txt", "feat1 content");
@@ -471,7 +454,6 @@ fn commit_conflict_preserves_existing_empty_branch() {
     // The commit should pause (not abort) on conflict
     assert!(result.is_ok(), "commit should pause on conflict, not fail");
 
-    // The state file should exist
     let state_path = test_repo.repo.path().join("loom").join("state.json");
     assert!(
         state_path.exists(),
@@ -590,8 +572,6 @@ fn commit_with_branch_flag_does_not_create_loose() {
 
 #[test]
 fn commit_integration_flag_forces_loose_on_custom_named_branch() {
-    // "integration" tracks "origin/main", so the name does not match the
-    // upstream — without -i this would prompt for a branch.
     let test_repo = TestRepo::new_with_remote();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
@@ -610,8 +590,6 @@ fn commit_integration_flag_forces_loose_on_custom_named_branch() {
 
 #[test]
 fn commit_integration_flag_commits_on_top_of_merges() {
-    // With woven branches, -i must still land the commit on the integration
-    // tip instead of moving it onto a feature branch.
     let test_repo = setup_with_two_branches();
     let old_head = test_repo.head_commit().id();
 
@@ -627,15 +605,12 @@ fn commit_integration_flag_commits_on_top_of_merges() {
     assert_eq!(head.parent_count(), 1);
     assert_eq!(head.parent(0).unwrap().id(), old_head);
 
-    // The feature branches must be untouched.
     assert_eq!(test_repo.branch_commit_summary("feature-a"), "A1");
     assert_eq!(test_repo.branch_commit_summary("feature-b"), "B1");
 }
 
 #[test]
 fn commit_integration_flag_keeps_other_staged_files_staged() {
-    // Committing named files must not sweep up — or unstage — work the user
-    // had already staged for something else.
     let test_repo = TestRepo::new_with_remote();
 
     test_repo.write_file("other.txt", "other content");
@@ -645,13 +620,11 @@ fn commit_integration_flag_keeps_other_staged_files_staged() {
     let result = test_repo.in_dir(|| run_integration("Only mine", vec!["mine.txt".to_string()]));
     assert!(result.is_ok(), "loose commit failed: {:?}", result);
 
-    // The commit holds only the named file.
     assert_eq!(
         test_repo.commit_file_paths(test_repo.head_commit().id()),
         vec!["mine.txt"]
     );
 
-    // other.txt is staged again, with its content intact.
     let status = test_repo.status_porcelain();
     assert!(
         status.lines().any(|l| l == "A  other.txt"),
@@ -660,11 +633,8 @@ fn commit_integration_flag_keeps_other_staged_files_staged() {
     assert_eq!(test_repo.read_file("other.txt"), "other content");
 }
 
-// ── Prerequisites ────────────────────────────────────────────────────────
-
 #[test]
 fn commit_not_on_integration_branch_fails() {
-    // No upstream tracking = not an integration branch
     let test_repo = TestRepo::new();
     test_repo.commit("A1", "a1.txt");
     test_repo.write_file("new.txt", "content");
@@ -686,8 +656,6 @@ fn commit_not_on_integration_branch_fails() {
     );
 }
 
-// ── File resolution ──────────────────────────────────────────────────────
-
 #[test]
 fn commit_nonexistent_file_fails() {
     let test_repo = setup_with_woven_branch();
@@ -701,7 +669,6 @@ fn commit_nonexistent_file_fails() {
     });
 
     assert!(result.is_err());
-    // With the centralized resolver, a nonexistent file produces a "did not resolve to a file" error
     assert!(
         result.unwrap_err().to_string().contains("file"),
         "Error should mention file"
@@ -712,12 +679,10 @@ fn commit_nonexistent_file_fails() {
 fn commit_accepts_staged_rename_only() {
     let test_repo = setup_with_woven_branch();
 
-    // Create and commit a file first
     test_repo.write_file("original.txt", "content");
     test_repo.stage_files(&["original.txt"]);
     test_repo.commit_staged("Add original");
 
-    // Rename via git mv (stages the rename)
     let workdir = test_repo.workdir();
     std::process::Command::new("git")
         .current_dir(&workdir)
@@ -725,7 +690,6 @@ fn commit_accepts_staged_rename_only() {
         .output()
         .unwrap();
 
-    // verify_has_staged_changes should accept a rename-only index
     let result = crate::core::repo::verify_has_staged_changes(&test_repo.repo);
     assert!(
         result.is_ok(),
@@ -733,8 +697,6 @@ fn commit_accepts_staged_rename_only() {
         result.err()
     );
 }
-
-// ── Abort preserves working state ────────────────────────────────────────
 
 /// Regression: loom abort after a commit conflict must preserve staged changes
 /// on other files, unstaged changes, and new untracked files.
@@ -747,7 +709,6 @@ fn commit_abort_preserves_working_state() {
     let test_repo = TestRepo::new_with_remote();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
-    // Create feat1 with a commit that adds shared.txt.
     test_repo.create_branch_at("feat1", &base_oid.to_string());
     test_repo.switch_branch("feat1");
     test_repo.commit("feat1-content", "shared.txt");
@@ -756,13 +717,11 @@ fn commit_abort_preserves_working_state() {
     test_repo.commit("int", "int.txt"); // prevent fast-forward
     test_repo.merge_no_ff("feat1");
 
-    // other-staged.txt is staged — commit.rs will save it aside and restore on abort.
     test_repo.write_file("other-staged.txt", "staged-content");
     test_repo.stage_files(&["other-staged.txt"]);
     test_repo.write_file("other-unstaged.txt", "unstaged-content");
     test_repo.write_file("new-file.txt", "new-content");
 
-    // Write conflicting content to shared.txt (same file as feat1 commit).
     test_repo.write_file("shared.txt", "conflicting-write");
 
     let result = test_repo.in_dir(|| {
@@ -788,9 +747,7 @@ fn commit_abort_preserves_working_state() {
     let git_dir = test_repo.repo.path().to_path_buf();
     crate::core::transaction::abort_cmd(&workdir, &git_dir).unwrap();
 
-    // reset --mixed undoes the pre-rebase commit; shared.txt comes back as unstaged.
     assert_eq!(test_repo.read_file("shared.txt"), "conflicting-write");
-    // saved_staged_patch explicitly re-stages other-staged.txt.
     assert_eq!(test_repo.read_file("other-staged.txt"), "staged-content");
     assert_eq!(
         test_repo.read_file("other-unstaged.txt"),
@@ -802,8 +759,6 @@ fn commit_abort_preserves_working_state() {
     );
     assert_eq!(test_repo.read_file("new-file.txt"), "new-content");
 }
-
-// -- Git argument forwarding (spec 021) --
 
 #[test]
 fn commit_forwards_an_option_after_the_separator() {

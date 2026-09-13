@@ -67,7 +67,7 @@ pub fn run(
         resolve_staging(&repo, &workdir, &files)?
     };
 
-    // Verify index has changes — restore saved staged on failure so pre-existing staged work is not lost.
+    // Restore the saved staged work if the index turns out to be empty.
     if let Err(e) = repo::verify_has_staged_changes(&repo) {
         git::restore_staged_patch(&workdir, &saved_staged)?;
         return Err(e);
@@ -76,11 +76,10 @@ pub fn run(
     let git_opts: Vec<&str> = git_args.iter().map(String::as_str).collect();
     let do_commit = || git::commit_opts(&workdir, message.as_deref(), &git_opts);
 
-    // Loose commit: commit directly on the integration branch without
-    // targeting a feature branch. Happens with -i, or when no -b flag is
-    // given and the local branch name matches the upstream's local
-    // counterpart (e.g. "main" tracking "origin/main"). This works
-    // regardless of whether local commits or woven branches already exist.
+    // Loose commit: commit on the integration branch itself, targeting no
+    // feature branch. Happens with -i, or with no -b when the local branch name
+    // matches the upstream's local counterpart (e.g. "main" tracking
+    // "origin/main").
     let loose = integration
         || (branch.is_none()
             && info.branch_name == repo::upstream_local_branch(&info.upstream.label));
@@ -119,7 +118,6 @@ pub fn run(
     let mut graph = Weave::from_repo_with_info(&repo, &info)?;
 
     if branch_is_empty {
-        // For empty branches, create a new branch section and merge topology
         graph.add_branch_section(
             branch_name.clone(),
             vec![branch_name.clone()],
@@ -197,11 +195,10 @@ fn post_commit(workdir: &Path, branch_name: &str, saved_staged: &str) -> Result<
 
 /// Resolve staging in patch mode: open the interactive hunk picker.
 ///
-/// - If files specified: save and unstage other staged files first (so only
-///   the selected files appear in the picker and don't leak into this commit).
-/// - Opens the hunk picker (filtered to files if provided, or all changes).
-/// - If the user cancels: restores saved staged patch and returns an error.
-/// - Returns the saved staged patch for later restoration after the commit.
+/// With specific files, other staged files are saved aside and unstaged first,
+/// so they neither show in the picker nor leak into this commit. Returns that
+/// saved patch for restoration after the commit; a cancelled picker restores
+/// it and errors.
 fn resolve_staging_patch(
     repo: &Repository,
     workdir: &std::path::Path,
@@ -226,13 +223,10 @@ fn resolve_staging_patch(
     Ok(saved_staged)
 }
 
-/// Resolve staging based on file arguments.
-///
-/// - Empty: use index as-is; returns an empty saved patch.
-/// - Contains "zz": stage all changes; returns an empty saved patch.
-/// - Otherwise: save and unstage any pre-existing staged files NOT in the
-///   target list (so they don't leak into this commit), stage the target
-///   files, and return the saved patch for later restoration.
+/// Resolve staging from the file arguments: an empty list uses the index
+/// as-is, `zz` stages everything, and named files are staged after any other
+/// pre-existing staged file is saved aside and unstaged so it cannot leak into
+/// this commit. Returns that saved patch for later restoration.
 fn resolve_staging(
     repo: &Repository,
     workdir: &std::path::Path,
@@ -299,7 +293,6 @@ fn resolve_explicit_branch(
             }
         }
         Err(_) => {
-            // Treat as new branch name
             let name = branch.trim().to_string();
             if name.is_empty() {
                 bail!("Branch name cannot be empty");

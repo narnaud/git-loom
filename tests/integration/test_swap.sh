@@ -3,9 +3,7 @@
 set -euo pipefail
 source "$(dirname "$0")/helpers.sh"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PRECONDITIONS
-# ══════════════════════════════════════════════════════════════════════════════
+# ── PRECONDITIONS ─────────────────────────────────────────────────────────────
 
 describe "precond: not in a git repository"
 new_tmpdir TMP_NOGIT
@@ -88,9 +86,7 @@ assert_exit_fail "$CODE" "precond_diff_locations"
 assert_contains "$OUT" "Cannot swap commits from different locations" "precond_diff_locations_msg"
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# SWAP TWO COMMITS (LOOSE COMMITS ON INTEGRATION LINE)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── SWAP TWO COMMITS (LOOSE COMMITS ON INTEGRATION LINE) ──────────────────────
 
 describe "swap two loose commits by full hash — order is reversed"
 setup_repo_with_remote
@@ -98,7 +94,6 @@ commit_file "First loose" "first-loose.txt"
 hash_first=$(head_hash)
 commit_file "Second loose" "second-loose.txt"
 hash_second=$(head_hash)
-# Before: HEAD=Second, HEAD~1=First
 assert_msg_at 0 "Second loose" "loose_before_head"
 assert_msg_at 1 "First loose"  "loose_before_head1"
 
@@ -106,7 +101,6 @@ out=$(gl swap "$hash_first" "$hash_second")
 assert_exit_ok $? "loose_swap_ok"
 assert_contains "$out" "Swapped commits" "loose_swap_success_msg"
 
-# After: HEAD=First, HEAD~1=Second
 assert_msg_at 0 "First loose"  "loose_after_head"
 assert_msg_at 1 "Second loose" "loose_after_head1"
 
@@ -128,9 +122,7 @@ assert_contains "$out" "Swapped commits" "sid_loose_swap_msg"
 assert_msg_at 0 "Ping commit" "sid_loose_after_head"
 assert_msg_at 1 "Pong commit" "sid_loose_after_head1"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# SWAP TWO COMMITS (WITHIN A BRANCH SECTION)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── SWAP TWO COMMITS (WITHIN A BRANCH SECTION) ────────────────────────────────
 
 describe "swap two commits within a branch section by full hash — order is reversed"
 setup_repo_with_remote
@@ -198,14 +190,11 @@ weave_branch "g-content"
 out=$(gl swap "$hash_apple" "$hash_banana")
 assert_exit_ok $? "content_swap_ok"
 
-# Files should both still exist with correct content
 assert_file_content "apple.txt"  "content of apple"  "content_apple_preserved"
 assert_file_content "banana.txt" "content of banana" "content_banana_preserved"
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# CONTINUE / ABORT
-# ══════════════════════════════════════════════════════════════════════════════
+# ── CONTINUE / ABORT ──────────────────────────────────────────────────────────
 # Both commits modify the same line of shared.txt, so swapping them causes
 # two consecutive conflicts: first when replaying B (from A→from B) onto
 # base, then when replaying A (base→from A) onto the resolved result.

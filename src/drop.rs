@@ -168,9 +168,6 @@ fn drop_commit(repo: &Repository, commit_hash: &str, skip_confirm: bool) -> Resu
 
     let short_hash = git::short_hash(commit_hash);
     let mut graph = Weave::from_repo_with_info(repo, &info)?;
-    // A branch this is the only commit of survives, parked at the base it
-    // built on, ready for `loom commit -b`. Dropping the branch itself is
-    // `loom drop <branch>`.
     let Some(emptied) = graph.drop_commit(commit_oid, EmptiedRefs::Park) else {
         bail!(
             "Cannot drop commit: {} not found in weave graph",
@@ -244,7 +241,6 @@ fn drop_branch(repo: &Repository, branch_name: &str, skip_confirm: bool) -> Resu
     let workdir = repo::require_workdir(repo, "drop")?;
     let info = &repo::gather_repo_info(repo, false, 1)?;
 
-    // Verify the branch is in the integration range
     let branch_info = info
         .branches
         .iter()
@@ -260,7 +256,6 @@ fn drop_branch(repo: &Repository, branch_name: &str, skip_confirm: bool) -> Resu
     let head_oid = repo::head_oid(repo)?;
     let merge_base_oid = info.upstream.merge_base_oid;
 
-    // Check if branch is at the merge-base with no owned commits
     if branch_info.tip_oid == merge_base_oid {
         confirm_or_bail(
             skip_confirm,
@@ -271,7 +266,6 @@ fn drop_branch(repo: &Repository, branch_name: &str, skip_confirm: bool) -> Resu
         return Ok(());
     }
 
-    // Check if another branch shares the same tip (co-located branches)
     let colocated_branch = info
         .branches
         .iter()
@@ -299,7 +293,6 @@ fn drop_branch(repo: &Repository, branch_name: &str, skip_confirm: bool) -> Resu
         );
     }
 
-    // Count owned commits for the confirmation message and for the non-woven drop path
     let owned = find_owned_commits(
         repo,
         branch_info.tip_oid,
@@ -364,10 +357,9 @@ fn drop_branch(repo: &Repository, branch_name: &str, skip_confirm: bool) -> Resu
 
 /// Find all commits owned by a branch (from tip to next boundary or merge-base).
 ///
-/// `dropping_branch_name` identifies the branch being dropped so that other
-/// branches sharing the same tip are properly excluded. Without this, co-located
-/// branches (same tip) would not be hidden, causing their shared commits to be
-/// incorrectly reported as owned by the dropping branch.
+/// `dropping_branch_name` names the branch being dropped, so branches
+/// co-located at the same tip stay hidden and their shared commits are not
+/// reported as owned by it.
 fn find_owned_commits(
     repo: &Repository,
     branch_tip: git2::Oid,
@@ -399,7 +391,6 @@ fn find_owned_commits(
     for oid_result in revwalk {
         let oid = oid_result?;
         let commit = repo.find_commit(oid)?;
-        // Skip merge commits (same as gather_repo_info)
         if commit.parent_count() > 1 {
             continue;
         }

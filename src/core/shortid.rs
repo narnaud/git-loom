@@ -125,7 +125,6 @@ fn word_candidates(name: &str) -> Vec<String> {
 fn multi_word_candidates(words: &[Vec<char>]) -> Vec<String> {
     let mut candidates = Vec::new();
 
-    // Use first two words (or first word repeated if only one)
     let word1 = &words[0];
     let word2 = if words.len() >= 2 {
         &words[1]
@@ -133,7 +132,6 @@ fn multi_word_candidates(words: &[Vec<char>]) -> Vec<String> {
         &words[0]
     };
 
-    // Generate all combinations of (char from word1, char from word2)
     for &ch1 in word1 {
         for &ch2 in word2 {
             let candidate: String = [ch1, ch2].iter().collect();
@@ -177,7 +175,6 @@ fn single_word_candidates(word: &str) -> Vec<String> {
         return candidates;
     }
 
-    // Generate sliding windows of 2 characters
     for i in 0..chars.len() {
         for j in (i + 1)..chars.len() {
             let candidate: String = [chars[i], chars[j]].iter().collect();
@@ -198,10 +195,9 @@ fn single_word_candidates(word: &str) -> Vec<String> {
     candidates
 }
 
-/// Priority for entity allocation. Lower value = allocated first.
-/// Commits are allocated before branches/files because they have the most
-/// constrained candidate set (hex prefixes only), while branches and files
-/// have rich word-based alternatives.
+/// Priority for entity allocation, lower first. Commits come before
+/// branches/files: their candidate set is the most constrained (hex prefixes
+/// only), while names have rich word-based alternatives.
 fn entity_priority(entity: &Entity) -> u8 {
     match entity {
         Entity::Unstaged => 0,
@@ -210,12 +206,10 @@ fn entity_priority(entity: &Entity) -> u8 {
     }
 }
 
-/// Assign unique IDs using collision-aware candidate selection.
-///
-/// Entities are processed in priority order: Unstaged, then Commits, then
-/// Branches and Files. Within each priority group, the original ordering is
-/// preserved (stable sort). Each entity receives the first candidate that
-/// hasn't already been assigned to another entity.
+/// Assign unique IDs using collision-aware candidate selection: entities are
+/// processed Unstaged, then Commits, then Branches/Files (stable, so the
+/// original order holds within a group), each taking the first candidate not
+/// already assigned.
 fn resolve_collisions(entities: Vec<Entity>) -> HashMap<Entity, String> {
     let mut items: Vec<(Entity, Vec<String>)> = entities
         .into_iter()
