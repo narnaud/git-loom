@@ -552,6 +552,39 @@ fn extract_azure_remote_unrecognized() {
 // ── force tests ──────────────────────────────────────────────────────────
 
 #[test]
+fn a_refused_push_names_the_flag_that_gets_past_it() {
+    // Git's own hint here is to pull, which would only merge back what the
+    // branch already carries, so the way out has to come from loom. Whether
+    // forcing is the right call is left to whoever reads it.
+    let refused = || anyhow::anyhow!("{}", super::PUSH_FAILED);
+
+    let hinted = super::force_hint(refused(), "feature-a", false, false);
+    assert!(
+        hinted.to_string().contains("loom push feature-a -f"),
+        "no way out offered: {}",
+        hinted
+    );
+    // `--no-pr` has to survive it, or the re-run opens a pull request that was
+    // deliberately declined — and on Gerrit pushes a review, not a branch.
+    let hinted = super::force_hint(refused(), "feature-a", true, false);
+    assert!(
+        hinted
+            .to_string()
+            .contains("loom push feature-a --no-pr -f"),
+        "the way out drops --no-pr: {}",
+        hinted
+    );
+
+    // Already forced: failing again is no reason to suggest the flag it was
+    // just given.
+    let forced = super::force_hint(refused(), "feature-a", false, true);
+    assert_eq!(forced.to_string(), super::PUSH_FAILED);
+    // Nor does anything that was not a refused push.
+    let other = super::force_hint(anyhow::anyhow!("Cancelled"), "feature-a", false, false);
+    assert_eq!(other.to_string(), "Cancelled");
+}
+
+#[test]
 fn force_pushes_when_the_lease_check_would_refuse() {
     let test_repo = TestRepo::new_with_remote();
     let workdir = test_repo.workdir();

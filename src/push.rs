@@ -4,7 +4,7 @@ use std::process::Command;
 use std::sync::OnceLock;
 use std::time::Instant;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use git2::Repository;
 
 use crate::core::agent_mode;
@@ -286,17 +286,18 @@ pub fn run(branch: Option<String>, no_pr: bool, force: bool) -> Result<()> {
     let plan = plan_push(&info, &branch_name, &target_branch);
 
     if no_pr {
-        return match remote_type {
+        let pushed = match remote_type {
             RemoteType::Gerrit { .. } => {
                 push_gerrit_no_pr(&workdir, &remote_name, &branch_name, force)
             }
             _ => push_plain(&workdir, &remote_name, &plan, force),
         };
+        return pushed.map_err(|err| force_hint(err, &branch_name, no_pr, force));
     }
 
     refuse_stacked_azure(&remote_type, &plan)?;
 
-    match remote_type {
+    let pushed = match remote_type {
         RemoteType::Plain => push_plain(&workdir, &remote_name, &plan, force),
         RemoteType::GitHub => push_github(
             &repo,
@@ -313,7 +314,8 @@ pub fn run(branch: Option<String>, no_pr: bool, force: bool) -> Result<()> {
         RemoteType::Gerrit { target_branch } => {
             push_gerrit(&workdir, &remote_name, &branch_name, &target_branch)
         }
-    }
+    };
+    pushed.map_err(|err| force_hint(err, &branch_name, no_pr, force))
 }
 
 fn resolve_branch(repo: &Repository, info: &repo::RepoInfo, branch_arg: &str) -> Result<String> {
@@ -593,6 +595,33 @@ pub(crate) fn fork_push_remote(
     (push_remote != extract_remote_name(upstream_label)).then_some(push_remote)
 }
 
+/// What a refused push bails with, and what [`force_hint`] recognises it by.
+const PUSH_FAILED: &str = "git push failed";
+
+/// Add the flag that gets past a refused push.
+///
+/// Woven branches are rewritten constantly, and a forge rebases a stacked
+/// branch for us when the pull request below it lands — after which
+/// `--force-with-lease` and `--force-if-includes` refuse every later push of
+/// it, and nothing done locally makes them stop. Git's own hint for that, to
+/// pull first, only merges back content the branch already carries.
+///
+/// Whether the force is warranted is left to the user, who has to type it:
+/// working out whether the remote really holds nothing of theirs is a job for
+/// someone who can look, and the flag is the part that is hard to guess.
+fn force_hint(err: anyhow::Error, branch: &str, no_pr: bool, force: bool) -> anyhow::Error {
+    if force || err.to_string() != PUSH_FAILED {
+        return err;
+    }
+    anyhow!(
+        "{}\nIf `{}` has diverged on the remote, push again with `loom push {}{} -f`",
+        err,
+        branch,
+        branch,
+        if no_pr { " --no-pr" } else { "" }
+    )
+}
+
 /// Run a `git push …`, trace-log it, bail on failure, and return its stderr.
 ///
 /// stderr carries the server's `remote:` messages — GitLab MR links, Gerrit
@@ -616,7 +645,7 @@ fn run_push_capture(workdir: &Path, args: &[&str]) -> Result<String> {
     );
 
     if !output.status.success() {
-        bail!("git push failed");
+        bail!("{}", PUSH_FAILED);
     }
 
     Ok(stderr)

@@ -113,6 +113,19 @@ git push --force-with-lease --force-if-includes -u <remote> <branch>
 
 Uses `--force-with-lease` because woven branches are frequently rebased. `--force-if-includes` adds extra safety.
 
+#### When the remote rewrote your branch
+
+Landing the pull request below a stacked branch makes the forge rebase that branch for you, server-side. The tip on the remote is then a commit your clone never held, and `--force-if-includes` refuses every later push of that branch — with a hint to `git pull` that does not help, because merging it back only adds content you already have.
+
+loom names the flag that does:
+
+```
+✗ git push failed
+  › If `feature-a` has diverged on the remote, push again with `loom push feature-a -f`
+```
+
+That is the push you ran, forced — `--no-pr` and the branch you named both survive it. loom does not check whether the remote really diverged, or whether what is there is yours: a colleague's commit and a forge's rebase look the same from your clone, and only you can tell them apart. Fetch and look if you are unsure. Typing the flag is what makes it your call.
+
 Pass `-f` / `--force` to push with plain `--force` instead, for when the lease check refuses a push you know is correct. It applies to every remote type except a Gerrit `refs/for/` review push, which never forces. It also applies to every branch the push contains, not only the one named: a stack goes out in a single `git push`, so forcing it overwrites the downstack and re-published upstack branches too.
 
 Any `remote:` lines containing an `http(s)` URL are shown below the success message, so the MR/PR creation link that servers like GitLab print on push is visible even when the remote type was not detected.

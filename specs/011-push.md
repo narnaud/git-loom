@@ -534,6 +534,36 @@ commit). Force pushing is expected, but `--force-with-lease` prevents
 accidentally overwriting changes pushed from another machine. This applies
 to all remote types (plain, GitHub, and Gerrit's underlying push).
 
+### A refused push names the flag
+
+The lease pair refuses a branch the remote has moved, and the forges move one
+routinely: landing the pull request below a stacked branch rebases it
+server-side onto the new base, leaving a tip this clone never held.
+`--force-if-includes` refuses every later push of that branch from then on, and
+no local command makes that tip reachable — git's own hint, to pull first,
+would only merge back content the branch already carries.
+
+So a refused push says which flag gets past it:
+
+```
+✗ git push failed
+  › If `feature-a` has diverged on the remote, push again with `loom push feature-a -f`
+```
+
+The command is the one that was run, forced: `--no-pr` survives it, since
+without it the re-run would open a pull request that was deliberately declined,
+and on Gerrit push a review instead of a branch.
+
+Nothing is checked before saying this. Whether the remote holds anything worth
+keeping is a question only someone who can look at it can answer, and the
+answer is not always "force" — a colleague's commit and a forge's rebase
+leave the branch in the same shape from here. What the user cannot easily guess
+is the flag, so that is what is offered; typing it is the part that makes it
+their decision.
+
+A push that already carried `-f`, and a failure that was not a refused push, are
+left exactly as they were.
+
 ### gh CLI as optional dependency
 
 The `gh` CLI is not required. When absent, the push still succeeds — only
