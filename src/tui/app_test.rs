@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::mpsc::channel;
 
 use crossterm::event::{Event, KeyEvent, MouseEvent};
 use ratatui::style::Style;
@@ -8,6 +9,7 @@ use super::*;
 use crate::core::graph::Section;
 use crate::core::repo::{CommitInfo, FileChange, UpstreamInfo};
 use crate::core::shortid::Entity;
+use crate::core::ui::PromptKind;
 use crate::tui::widgets::common::diff_line_style;
 
 fn oid(hex_char: char) -> git2::Oid {
@@ -65,10 +67,10 @@ fn make_theme() -> TuiTheme {
     TuiTheme::from_graph_theme(&graph::Theme::dark())
 }
 
-fn make_app<'a>(snapshot: &'a Snapshot, theme: &'a TuiTheme) -> App<'a> {
+fn make_app(snapshot: Snapshot, theme: &TuiTheme) -> App<'_> {
     let mut expanded = HashSet::new();
     expanded.insert(LOCAL_CHANGES_KEY.to_string());
-    App::new(snapshot, theme, expanded, None)
+    App::new(snapshot, theme, graph::Theme::dark(), expanded)
 }
 
 fn cursor_key(app: &App) -> String {
@@ -80,19 +82,51 @@ fn move_cursor_to(app: &mut App, key: &str) {
     app.tree.set_cursor(pos);
 }
 
+fn press(app: &mut App, code: KeyCode) -> KeyResult<Outcome> {
+    app.handle_key(PaneId::Left, code, KeyModifiers::NONE)
+}
+
+/// A worker that blocks until `release` is dropped, then ends as cancelled
+/// (so finishing it touches no repository).
+fn blocked_worker(app: &mut App) -> std::sync::mpsc::Sender<()> {
+    let (release, wait) = channel::<()>();
+    let handle = std::thread::spawn(move || {
+        let _ = wait.recv();
+        Err(Cancelled.into())
+    });
+    app.running = Some(Running {
+        handle,
+        command: "loom reword a1".to_string(),
+        spinner: None,
+        ticks: 0,
+        last_success: None,
+    });
+    release
+}
+
+/// Poll until the worker has been reaped.
+fn poll_until_idle(app: &mut App) {
+    for _ in 0..200 {
+        app.poll_background();
+        if app.running.is_none() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("worker never finished");
+}
+
 #[test]
 fn cursor_starts_on_first_focusable_row() {
-    let snapshot = make_snapshot();
     let theme = make_theme();
-    let app = make_app(&snapshot, &theme);
+    let app = make_app(make_snapshot(), &theme);
     assert_eq!(cursor_key(&app), LOCAL_CHANGES_KEY);
 }
 
 #[test]
 fn cursor_skips_spacer_rows() {
-    let snapshot = make_snapshot();
     let theme = make_theme();
-    let mut app = make_app(&snapshot, &theme);
+    let mut app = make_app(make_snapshot(), &theme);
 
     // local changes → a.rs → b.rs → (spacer skipped) → branch name
     app.move_cursor(1);
@@ -103,9 +137,8 @@ fn cursor_skips_spacer_rows() {
 
 #[test]
 fn expand_collapse_commit_keeps_cursor() {
-    let snapshot = make_snapshot();
     let theme = make_theme();
-    let mut app = make_app(&snapshot, &theme);
+    let mut app = make_app(make_snapshot(), &theme);
     let key = oid('a').to_string();
     move_cursor_to(&mut app, &key);
 
@@ -128,9 +161,8 @@ fn expand_collapse_commit_keeps_cursor() {
 
 #[test]
 fn collapse_on_child_row_collapses_parent() {
-    let snapshot = make_snapshot();
     let theme = make_theme();
-    let mut app = make_app(&snapshot, &theme);
+    let mut app = make_app(make_snapshot(), &theme);
     move_cursor_to(&mut app, "wf:b.rs");
 
     app.collapse_current();
@@ -144,9 +176,8 @@ fn collapse_on_child_row_collapses_parent() {
 
 #[test]
 fn space_toggles_selection_and_advances() {
-    let snapshot = make_snapshot();
     let theme = make_theme();
-    let mut app = make_app(&snapshot, &theme);
+    let mut app = make_app(make_snapshot(), &theme);
     move_cursor_to(&mut app, "wf:a.rs");
 
     app.toggle_selection();
@@ -159,9 +190,8 @@ fn space_toggles_selection_and_advances() {
 
 #[test]
 fn escape_clears_selection_before_quitting() {
-    let snapshot = make_snapshot();
     let theme = make_theme();
-    let mut app = make_app(&snapshot, &theme);
+    let mut app = make_app(make_snapshot(), &theme);
     move_cursor_to(&mut app, "wf:a.rs");
     app.toggle_selection();
 
@@ -175,16 +205,14 @@ fn escape_clears_selection_before_quitting() {
 
 #[test]
 fn commit_action_collects_selected_working_files() {
-    let snapshot = make_snapshot();
     let theme = make_theme();
-    let mut app = make_app(&snapshot, &theme);
+    let mut app = make_app(make_snapshot(), &theme);
     move_cursor_to(&mut app, "wf:a.rs");
     app.toggle_selection();
     move_cursor_to(&mut app, "wf:b.rs");
     app.toggle_selection();
 
-    app.action_commit();
-    let Some(Outcome::Run(Action::Commit { files })) = app.outcome.take() else {
+    let Some(Action::Commit { files }) = app.action_commit() else {
         panic!("expected a commit action");
     };
     assert_eq!(files.len(), 2);
@@ -192,12 +220,10 @@ fn commit_action_collects_selected_working_files() {
 
 #[test]
 fn commit_action_without_selection_uses_index_as_is() {
-    let snapshot = make_snapshot();
     let theme = make_theme();
-    let mut app = make_app(&snapshot, &theme);
+    let mut app = make_app(make_snapshot(), &theme);
     // Cursor on the local-changes header → no file args (index as-is).
-    app.action_commit();
-    let Some(Outcome::Run(Action::Commit { files })) = app.outcome.take() else {
+    let Some(Action::Commit { files }) = app.action_commit() else {
         panic!("expected a commit action");
     };
     assert!(files.is_empty());
@@ -205,22 +231,19 @@ fn commit_action_without_selection_uses_index_as_is() {
 
 #[test]
 fn commit_action_rejects_commit_rows_in_selection() {
-    let snapshot = make_snapshot();
     let theme = make_theme();
-    let mut app = make_app(&snapshot, &theme);
+    let mut app = make_app(make_snapshot(), &theme);
     move_cursor_to(&mut app, &oid('a').to_string());
     app.toggle_selection();
 
-    app.action_commit();
-    assert!(app.outcome.is_none());
+    assert!(app.action_commit().is_none());
     assert!(app.notice.is_some());
 }
 
 #[test]
 fn fold_flow_uses_selection_as_sources_and_cursor_as_target() {
-    let snapshot = make_snapshot();
     let theme = make_theme();
-    let mut app = make_app(&snapshot, &theme);
+    let mut app = make_app(make_snapshot(), &theme);
     move_cursor_to(&mut app, "wf:a.rs");
     app.toggle_selection();
 
@@ -228,36 +251,31 @@ fn fold_flow_uses_selection_as_sources_and_cursor_as_target() {
     assert!(matches!(app.mode, Mode::FoldTarget { .. }));
 
     move_cursor_to(&mut app, &oid('a').to_string());
-    app.confirm_fold_target();
-    let Some(Outcome::Run(Action::Fold { sources, target })) = app.outcome.take() else {
+    let Some(Action::Fold { sources, target }) = app.confirm_fold_target() else {
         panic!("expected a fold action");
     };
-    assert_eq!(sources, vec![snapshot.ids.get_file("a.rs").to_string()]);
+    assert_eq!(sources, vec![app.snapshot.ids.get_file("a.rs").to_string()]);
     assert_eq!(target, oid('a').to_string());
     assert!(matches!(app.mode, Mode::Normal));
 }
 
 #[test]
 fn fold_rejects_target_among_sources() {
-    let snapshot = make_snapshot();
     let theme = make_theme();
-    let mut app = make_app(&snapshot, &theme);
+    let mut app = make_app(make_snapshot(), &theme);
     move_cursor_to(&mut app, &oid('a').to_string());
     app.toggle_selection();
 
     app.action_fold_start();
     move_cursor_to(&mut app, &oid('a').to_string());
-    app.confirm_fold_target();
-
-    assert!(app.outcome.is_none());
+    assert!(app.confirm_fold_target().is_none());
     assert!(matches!(app.mode, Mode::FoldTarget { .. }));
 }
 
 #[test]
 fn fold_mode_blocks_action_keys() {
-    let snapshot = make_snapshot();
     let theme = make_theme();
-    let mut app = make_app(&snapshot, &theme);
+    let mut app = make_app(make_snapshot(), &theme);
     move_cursor_to(&mut app, "wf:a.rs");
     app.action_fold_start();
     assert!(matches!(app.mode, Mode::FoldTarget { .. }));
@@ -288,9 +306,8 @@ fn fold_mode_blocks_action_keys() {
 
 #[test]
 fn escape_cancels_fold_mode() {
-    let snapshot = make_snapshot();
     let theme = make_theme();
-    let mut app = make_app(&snapshot, &theme);
+    let mut app = make_app(make_snapshot(), &theme);
     move_cursor_to(&mut app, "wf:a.rs");
     app.action_fold_start();
     assert!(matches!(app.mode, Mode::FoldTarget { .. }));
@@ -302,9 +319,8 @@ fn escape_cancels_fold_mode() {
 
 #[test]
 fn drop_and_reword_require_an_actionable_row() {
-    let snapshot = make_snapshot();
     let theme = make_theme();
-    let mut app = make_app(&snapshot, &theme);
+    let mut app = make_app(make_snapshot(), &theme);
 
     // Upstream row: not actionable.
     let up_key = app
@@ -315,15 +331,12 @@ fn drop_and_reword_require_an_actionable_row() {
         .key
         .clone();
     move_cursor_to(&mut app, &up_key);
-    app.action_drop();
-    assert!(app.outcome.is_none());
-    app.action_reword();
-    assert!(app.outcome.is_none());
+    assert!(app.action_drop().is_none());
+    assert!(app.action_reword().is_none());
 
     // Commit row: actionable.
     move_cursor_to(&mut app, &oid('a').to_string());
-    app.action_reword();
-    let Some(Outcome::Run(Action::Reword { target })) = app.outcome.take() else {
+    let Some(Action::Reword { target }) = app.action_reword() else {
         panic!("expected a reword action");
     };
     assert_eq!(target, oid('a').to_string());
@@ -331,23 +344,260 @@ fn drop_and_reword_require_an_actionable_row() {
 
 #[test]
 fn new_branch_uses_cursor_commit_as_target() {
-    let snapshot = make_snapshot();
     let theme = make_theme();
-    let mut app = make_app(&snapshot, &theme);
+    let mut app = make_app(make_snapshot(), &theme);
     move_cursor_to(&mut app, &oid('a').to_string());
 
-    app.action_new_branch();
-    let Some(Outcome::Run(Action::NewBranch { target })) = app.outcome.take() else {
+    let Some(Action::NewBranch { target }) = app.action_new_branch() else {
         panic!("expected a branch action");
     };
     assert_eq!(target, Some(oid('a').to_string()));
 }
 
 #[test]
-fn render_smoke_test_on_every_focusable_row() {
-    let snapshot = make_snapshot();
+fn command_line_uses_the_short_ids_the_tree_shows() {
     let theme = make_theme();
-    let mut app = make_app(&snapshot, &theme);
+    let app = make_app(make_snapshot(), &theme);
+    let ids = &app.snapshot.ids;
+    let commit = ids.get_commit(oid('a')).to_string();
+    let file = ids.get_file("a.rs").to_string();
+
+    assert_eq!(
+        app.command_line(&Action::Fold {
+            sources: vec![file.clone(), ids.get_unstaged().to_string()],
+            target: oid('a').to_string(),
+        }),
+        format!("loom fold {} {} {}", file, ids.get_unstaged(), commit)
+    );
+    assert_eq!(
+        app.command_line(&Action::Commit { files: vec![] }),
+        "loom commit"
+    );
+    assert_eq!(
+        app.command_line(&Action::NewBranch {
+            target: Some("feature-a".to_string()),
+        }),
+        format!("loom branch new -t {}", ids.get_branch("feature-a"))
+    );
+    assert_eq!(
+        app.command_line(&Action::NewBranch { target: None }),
+        "loom branch new"
+    );
+    assert_eq!(
+        app.command_line(&Action::Drop {
+            target: oid('a').to_string(),
+        }),
+        format!("loom drop {}", commit)
+    );
+    // A target no row shows (rewritten meanwhile) is passed through.
+    assert_eq!(
+        app.command_line(&Action::Reword {
+            target: "deadbeef".to_string(),
+        }),
+        "loom reword deadbeef"
+    );
+}
+
+#[test]
+fn prompt_request_opens_a_popup_that_owns_the_keys_and_replies() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    let (reply, answer) = channel();
+    app.handle_request(Request::Prompt {
+        kind: PromptKind::Input { placeholder: None },
+        prompt: "Branch name".to_string(),
+        error: None,
+        reply,
+    });
+    assert!(app.modal_active());
+    let Some(Popup::Prompt { prompt, .. }) = &app.popup else {
+        panic!("expected a prompt popup");
+    };
+    assert_eq!(prompt.title(), "Branch name");
+
+    // Action keys type into the field instead of firing.
+    for c in ['f', 'd', 'q'] {
+        assert!(matches!(
+            press(&mut app, KeyCode::Char(c)),
+            KeyResult::Handled
+        ));
+    }
+    assert!(app.popup.is_some());
+    press(&mut app, KeyCode::Enter);
+    assert!(app.popup.is_none());
+    assert_eq!(
+        answer.recv().unwrap(),
+        Some(Answer::Text("fdq".to_string()))
+    );
+
+    let (reply, answer) = channel();
+    app.handle_request(Request::Prompt {
+        kind: PromptKind::Confirm,
+        prompt: "Drop?".to_string(),
+        error: None,
+        reply,
+    });
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(answer.recv().unwrap(), None);
+    assert!(app.popup.is_none());
+}
+
+#[test]
+fn finishing_an_action_reports_in_the_status_bar_or_a_popup() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+
+    // Success: the command's last ✓ line becomes the status-bar notice.
+    assert!(app.finish_action(Ok(()), Some("Reworded `a1`".to_string())));
+    assert_eq!(app.notice.as_deref(), Some("✓ Reworded `a1`"));
+    assert!(app.popup.is_none());
+    assert!(app.finish_action(Ok(()), None));
+    assert_eq!(app.notice.as_deref(), Some("✓ done"));
+
+    // Failure: an error popup that only Enter/Esc dismiss.
+    assert!(!app.finish_action(Err(anyhow::anyhow!("Nothing to commit")), None));
+    assert!(matches!(
+        app.popup,
+        Some(Popup::Notice {
+            then: AfterNotice::Reload,
+            ..
+        })
+    ));
+    press(&mut app, KeyCode::Char('x'));
+    assert!(app.popup.is_some(), "only Enter/Esc dismiss a notice");
+
+    // A cancelled prompt is not an error.
+    app.popup = None;
+    assert!(!app.finish_action(Err(Cancelled.into()), None));
+    assert_eq!(app.notice.as_deref(), Some("cancelled"));
+    assert!(app.popup.is_none());
+}
+
+#[test]
+fn success_messages_from_the_worker_feed_the_notice() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    let release = blocked_worker(&mut app);
+    app.handle_request(Request::Message {
+        level: Level::Warn,
+        text: "careful".to_string(),
+    });
+    app.handle_request(Request::Message {
+        level: Level::Success,
+        text: "Reworded `a1`
+next"
+            .to_string(),
+    });
+    assert_eq!(
+        app.running.as_ref().unwrap().last_success.as_deref(),
+        Some("Reworded `a1`")
+    );
+    drop(release);
+    poll_until_idle(&mut app);
+}
+
+#[test]
+fn running_action_blocks_tree_keys_until_it_finishes() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    let release = blocked_worker(&mut app);
+    assert!(app.modal_active());
+
+    press(&mut app, KeyCode::Char('c'));
+    assert!(app.popup.is_none());
+    assert_eq!(app.notice.as_deref(), Some("an action is running…"));
+    assert!(matches!(app.poll_background(), Tick::Redraw));
+    assert!(app.mode_hint().unwrap().contains("loom reword a1"));
+
+    drop(release);
+    poll_until_idle(&mut app);
+    assert!(!app.modal_active());
+    assert_eq!(app.notice.as_deref(), Some("cancelled"));
+    assert!(matches!(app.poll_background(), Tick::Idle));
+}
+
+#[test]
+fn suspend_request_reaches_the_shell_and_resume_ends_the_wait() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    let release = blocked_worker(&mut app);
+    let (ack, acked) = channel();
+    app.request_tx.send(Request::Suspend(ack)).unwrap();
+    let Tick::Suspend(ack) = app.poll_background() else {
+        panic!("expected a suspend tick");
+    };
+    ack.send(()).unwrap();
+    assert!(acked.recv().is_ok());
+
+    app.request_tx.send(Request::Resume).unwrap();
+    app.wait_for_resume();
+
+    // A worker gone without a Resume ends the wait too.
+    drop(release);
+    app.wait_for_resume();
+    poll_until_idle(&mut app);
+}
+
+#[test]
+fn apply_snapshot_keeps_cursor_and_expansion_but_drops_selection() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    let key = oid('a').to_string();
+    move_cursor_to(&mut app, &key);
+    app.expand_current();
+    move_cursor_to(&mut app, "wf:a.rs");
+    app.toggle_selection();
+    move_cursor_to(&mut app, &key);
+
+    app.apply_snapshot(make_snapshot());
+    assert_eq!(cursor_key(&app), key);
+    assert!(
+        app.rows
+            .iter()
+            .any(|r| matches!(r.kind, RowKind::CommitFile { .. }))
+    );
+    assert!(app.selected.is_empty());
+    assert!(
+        app.diff_cache.len() <= 1,
+        "cache holds at most the cursor row"
+    );
+}
+
+#[test]
+fn popups_render_over_the_panes() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    let (reply, _answer) = channel();
+    app.handle_request(Request::Prompt {
+        kind: PromptKind::Select {
+            items: vec!["feature-a".to_string()],
+            allow_other: true,
+        },
+        prompt: "Target branch".to_string(),
+        error: None,
+        reply,
+    });
+    let mut shell = Shell::new(app);
+    let backend = ratatui::backend::TestBackend::new(100, 30);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    terminal.draw(|f| shell.render(f)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let text: String = (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains(" Target branch "));
+    assert!(text.contains("feature-a"));
+}
+
+#[test]
+fn render_smoke_test_on_every_focusable_row() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
     // Expand everything so file rows render too.
     app.expanded.insert(oid('a').to_string());
     app.rebuild_rows(LOCAL_CHANGES_KEY);
@@ -365,9 +615,8 @@ fn render_smoke_test_on_every_focusable_row() {
 
 #[test]
 fn mouse_click_on_tree_bottom_border_is_ignored() {
-    let snapshot = make_snapshot();
     let theme = make_theme();
-    let mut shell = Shell::new(make_app(&snapshot, &theme));
+    let mut shell = Shell::new(make_app(make_snapshot(), &theme));
 
     // Small terminal so rows exist below the visible tree area.
     let backend = ratatui::backend::TestBackend::new(80, 8);
@@ -387,21 +636,11 @@ fn mouse_click_on_tree_bottom_border_is_ignored() {
     assert_eq!(shell.app.tree.cursor(), 0);
 }
 
-#[test]
-fn refresh_key_returns_refresh_outcome() {
-    let snapshot = make_snapshot();
-    let theme = make_theme();
-    let mut app = make_app(&snapshot, &theme);
-    let result = app.handle_key(PaneId::Left, KeyCode::Char('R'), KeyModifiers::NONE);
-    assert!(matches!(result, KeyResult::Exit(Outcome::Refresh)));
-}
-
 /// The composed status bar must match the string pinned in specs/020-tui.md.
 #[test]
 fn status_bar_matches_spec() {
-    let snapshot = make_snapshot();
     let theme = make_theme();
-    let mut shell = Shell::new(make_app(&snapshot, &theme));
+    let mut shell = Shell::new(make_app(make_snapshot(), &theme));
 
     let backend = ratatui::backend::TestBackend::new(150, 12);
     let mut terminal = ratatui::Terminal::new(backend).unwrap();
@@ -422,9 +661,8 @@ fn status_bar_matches_spec() {
 
 #[test]
 fn ctrl_c_quits_via_shell() {
-    let snapshot = make_snapshot();
     let theme = make_theme();
-    let mut shell = Shell::new(make_app(&snapshot, &theme));
+    let mut shell = Shell::new(make_app(make_snapshot(), &theme));
     let exit = shell.handle_event(Event::Key(KeyEvent::new(
         KeyCode::Char('c'),
         KeyModifiers::CONTROL,

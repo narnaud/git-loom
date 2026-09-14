@@ -1,14 +1,17 @@
 //! Interactive status TUI (`loom tui`): the status tree on the left, the diff
 //! of the item under the cursor on the right.
 //!
-//! Actions (commit, fold, branch, drop, reword) suspend the TUI, run the
-//! regular loom command — prompts and editors work as usual — then reload the
-//! tree. Fold picks its target in a second step inside the tree itself.
+//! Actions (commit, fold, branch, drop, reword) run the regular loom command
+//! on a worker thread while the TUI stays up: the command's prompts become
+//! popups (`core::ui`), and only an editor takes the terminal over. Fold
+//! picks its target in a second step inside the tree.
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
-use std::io::Write as _;
 use std::path::PathBuf;
+use std::sync::mpsc::{Receiver, Sender, channel};
+use std::thread::JoinHandle;
+use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEventKind};
@@ -23,14 +26,16 @@ use ratatui::{
 use crate::core::graph::{self, Section};
 use crate::core::repo::{self, RemoteStatus};
 use crate::core::shortid::IdAllocator;
-use crate::core::{msg, transaction};
+use crate::core::transaction;
+use crate::core::ui::{self, Answer, Cancelled, Level, Request};
 use crate::git;
-use crate::tui::shell::{KeyResult, PaneId, Shell, ShellApp, ShellConfig};
+use crate::tui::shell::{KeyResult, PaneId, Shell, ShellApp, ShellConfig, Tick};
 use crate::tui::status_tree::{self, LOCAL_CHANGES_KEY, Row, RowKind};
 use crate::tui::theme::TuiTheme;
 use crate::tui::widgets::common::{colorize_diff, pane_block};
 use crate::tui::widgets::diff_pane::DiffPane;
 use crate::tui::widgets::list_pane::ListPane;
+use crate::tui::widgets::popup::{Notice, Prompt, PromptOutcome};
 use crate::{branch, commit, drop, fold, reword};
 
 // ── Data model ───────────────────────────────────────────────────────────
@@ -44,7 +49,8 @@ struct Snapshot {
     ids: IdAllocator,
 }
 
-/// A loom command to run once the TUI is suspended.
+/// A loom command to run on the worker thread.
+#[derive(Debug, PartialEq, Eq)]
 enum Action {
     /// `loom commit [files...]` — empty means all tracked changes.
     Commit { files: Vec<String> },
@@ -64,8 +70,6 @@ enum Action {
 /// Why the event loop returned.
 enum Outcome {
     Quit,
-    Refresh,
-    Run(Action),
 }
 
 /// Input mode: normal, or picking the target of a pending fold.
@@ -73,6 +77,39 @@ enum Mode {
     Normal,
     FoldTarget { sources: Vec<String> },
 }
+
+/// The action currently running on its worker thread.
+struct Running {
+    handle: JoinHandle<Result<()>>,
+    command: String,
+    /// Text of the command's active spinner, if any.
+    spinner: Option<String>,
+    /// Ticks so far, for the status-bar animation.
+    ticks: usize,
+    /// First line of the command's latest `✓` message, for the status bar.
+    last_success: Option<String>,
+}
+
+/// What is drawn over the panes and owns the keyboard.
+enum Popup {
+    /// A prompt from the running command; the answer goes back on `reply`.
+    Prompt {
+        prompt: Prompt,
+        reply: Sender<Option<Answer>>,
+    },
+    /// A message to dismiss; `then` runs on dismissal.
+    Notice { notice: Notice, then: AfterNotice },
+}
+
+enum AfterNotice {
+    Nothing,
+    /// The action failed: reload the tree to show whatever it left.
+    Reload,
+    /// The action paused on conflicts: nothing else can run, so leave.
+    Quit,
+}
+
+const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 // ── Entry point ──────────────────────────────────────────────────────────
 
@@ -88,42 +125,30 @@ pub fn run(theme: graph::Theme) -> Result<()> {
     }
 
     let tui_theme = TuiTheme::from_graph_theme(&theme);
+    let snapshot = load_snapshot()?;
+    let git_dir = snapshot.git_dir.clone();
 
-    // Expansion state survives reloads; local changes start expanded.
+    // Local changes start expanded.
     let mut expanded: HashSet<String> = HashSet::new();
     expanded.insert(LOCAL_CHANGES_KEY.to_string());
-    let mut cursor_key: Option<String> = None;
 
-    loop {
-        let snapshot = load_snapshot()?;
-        let git_dir = snapshot.git_dir.clone();
+    let app = App::new(snapshot, &tui_theme, theme, expanded);
+    let (_, Outcome::Quit) = Shell::new(app).run()?;
 
-        let (outcome, last_key) =
-            run_tui_once(&snapshot, &tui_theme, &mut expanded, cursor_key.take())?;
-        cursor_key = last_key;
-
-        match outcome {
-            Outcome::Quit => return Ok(()),
-            Outcome::Refresh => continue,
-            Outcome::Run(action) => {
-                if let Err(e) = execute_action(action, &git_dir, &theme) {
-                    msg::error(&e.to_string());
-                }
-                // A conflict pauses the operation; the TUI cannot continue
-                // because every other command is blocked until it's resolved.
-                if let Ok(Some(state)) = transaction::load(&git_dir) {
-                    println!(
-                        "\nA `loom {}` is paused due to conflicts.\n\
-                         Resolve them, then run `loom continue` to resume, \
-                         or `loom abort` to cancel.",
-                        state.command
-                    );
-                    return Ok(());
-                }
-                wait_for_enter();
-            }
-        }
+    // The TUI leaves on a conflict pause; repeat the popup's guidance where
+    // it stays readable.
+    if let Ok(Some(state)) = transaction::load(&git_dir) {
+        println!("{}", paused_message(&state.command));
     }
+    Ok(())
+}
+
+fn paused_message(command: &str) -> String {
+    format!(
+        "A `loom {}` is paused due to conflicts.\n\
+         Resolve them, then run `loom continue` to resume, or `loom abort` to cancel.",
+        command
+    )
 }
 
 /// Gather repo info and build the graph sections, exactly like `loom status`
@@ -148,19 +173,17 @@ fn load_snapshot() -> Result<Snapshot> {
     })
 }
 
-/// Run the loom command for `action` while the terminal is in normal mode.
-fn execute_action(action: Action, git_dir: &std::path::Path, theme: &graph::Theme) -> Result<()> {
-    // Browsing isn't trace-logged (`tui` is excluded in main); actions are.
-    // A second action in the same session appends to the same log.
-    let name = match &action {
-        Action::Commit { .. } => "commit",
-        Action::Fold { .. } => "fold",
-        Action::NewBranch { .. } => "branch new",
-        Action::Drop { .. } => "drop",
-        Action::Reword { .. } => "reword",
-    };
-    crate::trace::init(git_dir, &format!("loom tui: {}", name));
-    match action {
+/// Run the loom command for `action`. Runs on the worker thread: the trace
+/// logger is thread-local, so each action gets its own log file, named after
+/// the command line the status bar shows.
+fn execute_action(
+    action: Action,
+    command: &str,
+    git_dir: &std::path::Path,
+    theme: &graph::Theme,
+) -> Result<()> {
+    crate::trace::init(git_dir, &format!("loom tui: {}", command));
+    let result = match action {
         Action::Commit { files } => commit::run(None, false, None, false, files, vec![], theme),
         Action::Fold { sources, target } => {
             let mut args = sources;
@@ -170,38 +193,18 @@ fn execute_action(action: Action, git_dir: &std::path::Path, theme: &graph::Them
         Action::NewBranch { target } => branch::new::run(None, target),
         Action::Drop { target } => drop::run(target, false),
         Action::Reword { target } => reword::run(target, None),
-    }
-}
-
-/// Let the user read the command output before the TUI redraws over it.
-fn wait_for_enter() {
-    print!("\nPress Enter to return to loom tui...");
-    let _ = std::io::stdout().flush();
-    let mut line = String::new();
-    let _ = std::io::stdin().read_line(&mut line);
-}
-
-/// Run the app inside the shell (terminal setup, event loop, restore).
-/// Returns the outcome and the key of the row the cursor was on.
-fn run_tui_once(
-    snapshot: &Snapshot,
-    theme: &TuiTheme,
-    expanded: &mut HashSet<String>,
-    cursor_key: Option<String>,
-) -> Result<(Outcome, Option<String>)> {
-    let app = App::new(snapshot, theme, expanded.clone(), cursor_key);
-    let (app, outcome) = Shell::new(app).run()?;
-
-    *expanded = app.expanded;
-    let key = app.rows.get(app.tree.cursor()).map(|r| r.key.clone());
-    Ok((outcome, key))
+    };
+    crate::trace::finalize();
+    result
 }
 
 // ── App state ────────────────────────────────────────────────────────────
 
 struct App<'a> {
-    snapshot: &'a Snapshot,
+    snapshot: Snapshot,
     theme: &'a TuiTheme,
+    /// Handed to each action's worker (the hunk pickers take it).
+    graph_theme: graph::Theme,
     rows: Vec<Row>,
     /// Tree pane cursor and view state.
     tree: ListPane,
@@ -217,23 +220,28 @@ struct App<'a> {
     notice: Option<String>,
     /// Exit value set by deep handlers, drained after each key.
     outcome: Option<Outcome>,
+    /// Requests from the running action (`core::ui`); `request_tx` is what
+    /// each worker gets a clone of.
+    requests: Receiver<Request>,
+    request_tx: Sender<Request>,
+    running: Option<Running>,
+    popup: Option<Popup>,
 }
 
 impl<'a> App<'a> {
     fn new(
-        snapshot: &'a Snapshot,
+        snapshot: Snapshot,
         theme: &'a TuiTheme,
+        graph_theme: graph::Theme,
         expanded: HashSet<String>,
-        cursor_key: Option<String>,
     ) -> Self {
         let rows = status_tree::build_rows(&snapshot.sections, &snapshot.ids, &expanded);
-        let cursor = cursor_key
-            .and_then(|key| rows.iter().position(|r| r.focusable && r.key == key))
-            .or_else(|| rows.iter().position(|r| r.focusable))
-            .unwrap_or(0);
+        let cursor = rows.iter().position(|r| r.focusable).unwrap_or(0);
+        let (request_tx, requests) = channel();
         let mut app = App {
             snapshot,
             theme,
+            graph_theme,
             rows,
             tree: ListPane::new(cursor),
             selected: HashSet::new(),
@@ -243,6 +251,10 @@ impl<'a> App<'a> {
             diff_cache: HashMap::new(),
             notice: None,
             outcome: None,
+            requests,
+            request_tx,
+            running: None,
+            popup: None,
         };
         // Prime the diff for the initial cursor row so the first render
         // doesn't have to.
@@ -252,6 +264,199 @@ impl<'a> App<'a> {
 
     fn current_row(&self) -> Option<&Row> {
         self.rows.get(self.tree.cursor())
+    }
+
+    /// Replace the repo state, keeping the cursor on the same row when it
+    /// still exists. Selection and the diff cache are tied to the old rows.
+    fn apply_snapshot(&mut self, snapshot: Snapshot) {
+        let key = self.current_row().map(|r| r.key.clone());
+        self.snapshot = snapshot;
+        self.selected.clear();
+        self.diff_cache.clear();
+        self.rows =
+            status_tree::build_rows(&self.snapshot.sections, &self.snapshot.ids, &self.expanded);
+        let cursor = key
+            .and_then(|key| self.rows.iter().position(|r| r.focusable && r.key == key))
+            .or_else(|| self.rows.iter().position(|r| r.focusable))
+            .unwrap_or(0);
+        self.tree.set_cursor(cursor);
+        self.diff.reset();
+        self.ensure_diff_cached();
+    }
+
+    /// Reload the tree from the repo; a failure is shown, the old tree kept.
+    fn reload(&mut self) {
+        match load_snapshot() {
+            Ok(snapshot) => self.apply_snapshot(snapshot),
+            Err(e) => self.show_error(&e.to_string(), AfterNotice::Nothing),
+        }
+    }
+
+    fn show_error(&mut self, text: &str, then: AfterNotice) {
+        self.popup = Some(Popup::Notice {
+            notice: Notice::new("Error", Level::Error, text),
+            then,
+        });
+    }
+
+    // -- running an action ------------------------------------------------------
+
+    /// The CLI line equivalent to `action`, with the short IDs the tree
+    /// shows, for the status bar and the trace log.
+    fn command_line(&self, action: &Action) -> String {
+        let sid = |target: &str| -> String {
+            self.rows
+                .iter()
+                .find(|r| r.target.as_deref() == Some(target) && !r.sid.is_empty())
+                .map(|r| r.sid.clone())
+                .unwrap_or_else(|| target.to_string())
+        };
+        let mut words = vec!["loom".to_string()];
+        match action {
+            Action::Commit { files } => {
+                words.push("commit".into());
+                words.extend(files.iter().map(|f| sid(f)));
+            }
+            Action::Fold { sources, target } => {
+                words.push("fold".into());
+                words.extend(sources.iter().map(|s| sid(s)));
+                words.push(sid(target));
+            }
+            Action::NewBranch { target } => {
+                words.extend(["branch".into(), "new".into()]);
+                if let Some(target) = target {
+                    words.extend(["-t".into(), sid(target)]);
+                }
+            }
+            Action::Drop { target } => words.extend(["drop".into(), sid(target)]),
+            Action::Reword { target } => words.extend(["reword".into(), sid(target)]),
+        }
+        words.join(" ")
+    }
+
+    /// Run `action` on a worker thread; the TUI keeps going and answers its
+    /// prompts.
+    fn start_action(&mut self, action: Action) {
+        let command = self.command_line(&action);
+        self.selected.clear();
+        self.mode = Mode::Normal;
+        self.notice = None;
+
+        let tx = self.request_tx.clone();
+        let git_dir = self.snapshot.git_dir.clone();
+        let theme = self.graph_theme.clone();
+        let trace_name = command.clone();
+        let handle = std::thread::spawn(move || {
+            ui::install(tx);
+            let result = execute_action(action, &trace_name, &git_dir, &theme);
+            ui::uninstall();
+            result
+        });
+        self.running = Some(Running {
+            handle,
+            command,
+            spinner: None,
+            ticks: 0,
+            last_success: None,
+        });
+    }
+
+    /// One request from the running action. `Suspend` is the shell's to
+    /// handle and never reaches here.
+    fn handle_request(&mut self, request: Request) {
+        match request {
+            Request::Prompt {
+                kind,
+                prompt,
+                error,
+                reply,
+            } => {
+                self.popup = Some(Popup::Prompt {
+                    prompt: Prompt::new(kind, prompt, error),
+                    reply,
+                });
+            }
+            Request::Message { level, text } => {
+                if level == Level::Success
+                    && let Some(running) = &mut self.running
+                {
+                    running.last_success = text.lines().next().map(str::to_string);
+                }
+            }
+            Request::Spinner(text) => {
+                if let Some(running) = &mut self.running {
+                    running.spinner = text;
+                }
+            }
+            Request::Suspend(_) | Request::Resume => {}
+        }
+    }
+
+    /// The worker is done: report in the status bar (success), a popup
+    /// (failure), or nothing (cancelled prompt). Returns whether the repo may
+    /// have changed, so the caller runs [`App::after_action`].
+    fn finish_action(&mut self, result: Result<()>, last_success: Option<String>) -> bool {
+        match result {
+            Ok(()) => {
+                self.notice = Some(format!("✓ {}", last_success.as_deref().unwrap_or("done")));
+                true
+            }
+            Err(e) if e.downcast_ref::<Cancelled>().is_some() => {
+                self.notice = Some("cancelled".to_string());
+                false
+            }
+            Err(e) => {
+                self.show_error(&e.to_string(), AfterNotice::Reload);
+                false
+            }
+        }
+    }
+
+    /// After an action changed the repo: a conflict pause ends the session
+    /// (every other command is blocked until it's resolved), otherwise the
+    /// tree reloads.
+    fn after_action(&mut self) {
+        match transaction::load(&self.snapshot.git_dir) {
+            Ok(Some(state)) => {
+                self.popup = Some(Popup::Notice {
+                    notice: Notice::new("Paused", Level::Warn, &paused_message(&state.command)),
+                    then: AfterNotice::Quit,
+                });
+            }
+            _ => self.reload(),
+        }
+    }
+
+    fn dismiss_notice(&mut self, then: AfterNotice) {
+        match then {
+            AfterNotice::Nothing => {}
+            AfterNotice::Reload => self.after_action(),
+            AfterNotice::Quit => self.outcome = Some(Outcome::Quit),
+        }
+    }
+
+    fn handle_popup_key(&mut self, code: KeyCode, modifiers: KeyModifiers) {
+        let Some(popup) = self.popup.take() else {
+            return;
+        };
+        match popup {
+            Popup::Prompt { mut prompt, reply } => match prompt.handle_key(code, modifiers) {
+                PromptOutcome::Pending => self.popup = Some(Popup::Prompt { prompt, reply }),
+                PromptOutcome::Answer(answer) => {
+                    let _ = reply.send(Some(answer));
+                }
+                PromptOutcome::Cancel => {
+                    let _ = reply.send(None);
+                }
+            },
+            Popup::Notice { notice, then } => {
+                if Notice::dismisses(code) {
+                    self.dismiss_notice(then);
+                } else {
+                    self.popup = Some(Popup::Notice { notice, then });
+                }
+            }
+        }
     }
 
     /// Rebuild rows after an expansion change, keeping the cursor on `key`.
@@ -266,6 +471,81 @@ impl<'a> App<'a> {
     }
 
     // -- keyboard handling ----------------------------------------------------
+
+    /// A key with no popup open and no action running.
+    fn handle_tree_key(&mut self, focused: PaneId, code: KeyCode) {
+        let action = match code {
+            KeyCode::Esc => {
+                self.handle_escape();
+                None
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                match focused {
+                    PaneId::Left => self.move_cursor(-1),
+                    PaneId::Right => self.diff.scroll_by(-1),
+                }
+                None
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                match focused {
+                    PaneId::Left => self.move_cursor(1),
+                    PaneId::Right => self.diff.scroll_by(1),
+                }
+                None
+            }
+            KeyCode::PageUp => {
+                self.diff.scroll_page(-1);
+                None
+            }
+            KeyCode::PageDown => {
+                self.diff.scroll_page(1);
+                None
+            }
+            KeyCode::Right | KeyCode::Char('l') => {
+                self.expand_current();
+                None
+            }
+            KeyCode::Left | KeyCode::Char('h') => {
+                self.collapse_current();
+                None
+            }
+            KeyCode::Enter => match &self.mode {
+                Mode::FoldTarget { .. } => self.confirm_fold_target(),
+                Mode::Normal => {
+                    self.toggle_current();
+                    None
+                }
+            },
+            // While picking a fold target only navigation, Enter, and Esc
+            // apply — action keys must not fire and discard the pending fold.
+            KeyCode::Char(' ' | 'c' | 'f' | 'b' | 'd' | 'r' | 'R') | KeyCode::F(5)
+                if matches!(self.mode, Mode::FoldTarget { .. }) =>
+            {
+                self.notice = Some("fold: Enter to confirm, Esc to cancel".to_string());
+                None
+            }
+            KeyCode::Char(' ') => {
+                self.toggle_selection();
+                None
+            }
+            KeyCode::Char('c') => self.action_commit(),
+            KeyCode::Char('f') => {
+                self.action_fold_start();
+                None
+            }
+            KeyCode::Char('b') => self.action_new_branch(),
+            KeyCode::Char('d') => self.action_drop(),
+            KeyCode::Char('r') => self.action_reword(),
+            KeyCode::Char('R') | KeyCode::F(5) => {
+                self.reload();
+                None
+            }
+            _ => None,
+        };
+        if let Some(action) = action {
+            self.start_action(action);
+        }
+    }
 
     /// Esc: cancel fold-target mode, else clear the selection, else quit.
     fn handle_escape(&mut self) {
@@ -377,7 +657,7 @@ impl<'a> App<'a> {
 
     /// `c`: commit the selected working-tree files (the index as-is when
     /// nothing relevant is selected).
-    fn action_commit(&mut self) {
+    fn action_commit(&mut self) -> Option<Action> {
         let mut files: Vec<String> = Vec::new();
         if self.selected.is_empty() {
             if let Some(row) = self.current_row()
@@ -399,10 +679,10 @@ impl<'a> App<'a> {
             }
             if non_working {
                 self.notice = Some("commit acts on local changes only".to_string());
-                return;
+                return None;
             }
         }
-        self.outcome = Some(Outcome::Run(Action::Commit { files }));
+        Some(Action::Commit { files })
     }
 
     /// `f`: remember the sources, then let the user pick the target in the tree.
@@ -415,58 +695,56 @@ impl<'a> App<'a> {
         self.mode = Mode::FoldTarget { sources };
     }
 
-    fn confirm_fold_target(&mut self) {
-        let Some(row) = self.current_row() else {
-            return;
-        };
+    fn confirm_fold_target(&mut self) -> Option<Action> {
+        let row = self.current_row()?;
         let Some(target) = row.target.clone() else {
             self.notice = Some("fold: this row cannot be a target".to_string());
-            return;
+            return None;
         };
         let Mode::FoldTarget { sources } = std::mem::replace(&mut self.mode, Mode::Normal) else {
-            return;
+            return None;
         };
         if sources.contains(&target) {
             self.mode = Mode::FoldTarget { sources };
             self.notice = Some("fold: target is one of the sources".to_string());
-            return;
+            return None;
         }
-        self.outcome = Some(Outcome::Run(Action::Fold { sources, target }));
+        Some(Action::Fold { sources, target })
     }
 
     /// `b`: new branch, using the cursor commit/branch as target when on one.
-    fn action_new_branch(&mut self) {
+    fn action_new_branch(&mut self) -> Option<Action> {
         let target = self.current_row().and_then(|row| match row.kind {
             RowKind::Commit { .. } | RowKind::BranchName { .. } => row.target.clone(),
             _ => None,
         });
-        self.outcome = Some(Outcome::Run(Action::NewBranch { target }));
+        Some(Action::NewBranch { target })
     }
 
     /// `d`: drop the row under the cursor (commit, branch, or local change).
-    fn action_drop(&mut self) {
+    fn action_drop(&mut self) -> Option<Action> {
         let target = self.current_row().and_then(|row| match row.kind {
             RowKind::Commit { .. } | RowKind::BranchName { .. } | RowKind::WorkingFile { .. } => {
                 row.target.clone()
             }
             _ => None,
         });
-        match target {
-            Some(target) => self.outcome = Some(Outcome::Run(Action::Drop { target })),
-            None => self.notice = Some("drop: move to a commit, branch, or file".to_string()),
+        if target.is_none() {
+            self.notice = Some("drop: move to a commit, branch, or file".to_string());
         }
+        target.map(|target| Action::Drop { target })
     }
 
     /// `r`: reword the commit or rename the branch under the cursor.
-    fn action_reword(&mut self) {
+    fn action_reword(&mut self) -> Option<Action> {
         let target = self.current_row().and_then(|row| match row.kind {
             RowKind::Commit { .. } | RowKind::BranchName { .. } => row.target.clone(),
             _ => None,
         });
-        match target {
-            Some(target) => self.outcome = Some(Outcome::Run(Action::Reword { target })),
-            None => self.notice = Some("reword: move to a commit or branch".to_string()),
+        if target.is_none() {
+            self.notice = Some("reword: move to a commit or branch".to_string());
         }
+        target.map(|target| Action::Reword { target })
     }
 
     // -- rendering ----------------------------------------------------------------
@@ -516,7 +794,7 @@ impl<'a> App<'a> {
         };
         if !self.diff_cache.contains_key(&key) {
             let lines = match self.rows.get(self.tree.cursor()) {
-                Some(row) => colorize_diff(&diff_text(self.snapshot, row), self.theme),
+                Some(row) => colorize_diff(&diff_text(&self.snapshot, row), self.theme),
                 None => vec![Line::from("")],
             };
             self.diff_cache.insert(key.clone(), lines);
@@ -562,43 +840,16 @@ impl ShellApp for App<'_> {
         &mut self,
         focused: PaneId,
         code: KeyCode,
-        _modifiers: KeyModifiers,
+        modifiers: KeyModifiers,
     ) -> KeyResult<Outcome> {
-        match code {
-            KeyCode::Esc => self.handle_escape(),
-            KeyCode::Up | KeyCode::Char('k') => match focused {
-                PaneId::Left => self.move_cursor(-1),
-                PaneId::Right => self.diff.scroll_by(-1),
-            },
-            KeyCode::Down | KeyCode::Char('j') => match focused {
-                PaneId::Left => self.move_cursor(1),
-                PaneId::Right => self.diff.scroll_by(1),
-            },
-            KeyCode::PageUp => self.diff.scroll_page(-1),
-            KeyCode::PageDown => self.diff.scroll_page(1),
-            KeyCode::Right | KeyCode::Char('l') => self.expand_current(),
-            KeyCode::Left | KeyCode::Char('h') => self.collapse_current(),
-            KeyCode::Enter => match &self.mode {
-                Mode::FoldTarget { .. } => self.confirm_fold_target(),
-                Mode::Normal => self.toggle_current(),
-            },
-            // While picking a fold target only navigation, Enter, and Esc
-            // apply — action keys must not fire and discard the pending fold.
-            KeyCode::Char(' ' | 'c' | 'f' | 'b' | 'd' | 'r' | 'R') | KeyCode::F(5)
-                if matches!(self.mode, Mode::FoldTarget { .. }) =>
-            {
-                self.notice = Some("fold: Enter to confirm, Esc to cancel".to_string());
-            }
-            KeyCode::Char(' ') => self.toggle_selection(),
-            KeyCode::Char('c') => self.action_commit(),
-            KeyCode::Char('f') => self.action_fold_start(),
-            KeyCode::Char('b') => self.action_new_branch(),
-            KeyCode::Char('d') => self.action_drop(),
-            KeyCode::Char('r') => self.action_reword(),
-            KeyCode::Char('R') | KeyCode::F(5) => self.outcome = Some(Outcome::Refresh),
-            _ => {}
+        if self.popup.is_some() {
+            self.handle_popup_key(code, modifiers);
+        } else if self.running.is_some() {
+            self.notice = Some("an action is running…".to_string());
+        } else {
+            self.handle_tree_key(focused, code);
         }
-        // Deep handlers (actions, Esc, fold confirm) report exits through the
+        // Deep handlers (Esc, notice dismissal) report exits through the
         // outcome field.
         match self.outcome.take() {
             Some(outcome) => KeyResult::Exit(outcome),
@@ -641,6 +892,69 @@ impl ShellApp for App<'_> {
         }
     }
 
+    fn render_overlay(&mut self, frame: &mut Frame, area: Rect) {
+        match &mut self.popup {
+            Some(Popup::Prompt { prompt, .. }) => prompt.render(frame, area, self.theme),
+            Some(Popup::Notice { notice, .. }) => notice.render(frame, area, self.theme),
+            None => {}
+        }
+    }
+
+    fn modal_active(&self) -> bool {
+        self.popup.is_some() || self.running.is_some()
+    }
+
+    fn poll_background(&mut self) -> Tick<Outcome> {
+        let mut changed = false;
+        loop {
+            match self.requests.try_recv() {
+                Ok(Request::Suspend(ack)) => return Tick::Suspend(ack),
+                Ok(request) => {
+                    self.handle_request(request);
+                    changed = true;
+                }
+                Err(_) => break,
+            }
+        }
+        if let Some(running) = &mut self.running {
+            running.ticks += 1;
+            if running.handle.is_finished() {
+                let running = self.running.take().expect("checked above");
+                let result = running.handle.join().unwrap_or_else(|_| {
+                    Err(anyhow::anyhow!(
+                        "the action crashed — run `loom trace` for what it did"
+                    ))
+                });
+                if self.finish_action(result, running.last_success) {
+                    self.after_action();
+                }
+            }
+            changed = true;
+        }
+        if let Some(outcome) = self.outcome.take() {
+            return Tick::Exit(outcome);
+        }
+        if changed { Tick::Redraw } else { Tick::Idle }
+    }
+
+    /// The worker holds the terminal (an editor); its `Resume` ends the wait.
+    /// A worker that dies without one ends it too.
+    fn wait_for_resume(&mut self) {
+        loop {
+            match self.requests.recv_timeout(Duration::from_millis(100)) {
+                Ok(Request::Resume) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    return;
+                }
+                Ok(request) => self.handle_request(request),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    if self.running.as_ref().is_none_or(|r| r.handle.is_finished()) {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
     fn notice(&self) -> Option<&str> {
         self.notice.as_deref()
     }
@@ -650,6 +964,15 @@ impl ShellApp for App<'_> {
     }
 
     fn mode_hint(&self) -> Option<String> {
+        if let Some(running) = &self.running {
+            let frame = SPINNER_FRAMES[(running.ticks / 2) % SPINNER_FRAMES.len()];
+            let detail = running
+                .spinner
+                .as_deref()
+                .map(|s| format!(" — {}", s))
+                .unwrap_or_default();
+            return Some(format!(" {} {}{}", frame, running.command, detail));
+        }
         match &self.mode {
             Mode::FoldTarget { .. } => {
                 Some(" fold: move to the target, Enter to confirm, Esc to cancel".to_string())

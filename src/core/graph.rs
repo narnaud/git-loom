@@ -10,6 +10,7 @@ use terminal_size::{Width, terminal_size};
 // ── Theme ────────────────────────────────────────────────────────────────
 
 /// Color palette for graph output. Use [`Theme::dark`] or [`Theme::light`].
+#[derive(Clone)]
 pub struct Theme {
     /// Graph structure: lines, connectors, dots on the integration line.
     pub graph: Color,
