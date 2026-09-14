@@ -110,6 +110,9 @@ The **second** commit keeps the original commit message in both modes.
 
 - Binary files and deleted files are handled at file granularity within the
   hunk picker (the entire file is included or excluded together).
+- A submodule is one whole entry too, moved by the commit's own whole-file diff
+  applied with `--cached` (Spec 007). Staging it by path would record whatever
+  its checkout holds instead of what the commit being split recorded.
 - The `-p` mode does not save `LoomState` and does not support `loom continue`;
   any conflict causes an immediate auto-abort.
 

@@ -288,6 +288,15 @@ fn perform_head_split_by_hunks(
     msg1: Option<&str>,
     msg2: &str,
 ) -> Result<(String, String)> {
+    // Captured before the reset moves HEAD off the commit being split. A
+    // submodule has to move by this diff: `git add` would stage whatever its
+    // checkout holds, not what the commit recorded.
+    let mut gitlinks = std::collections::HashMap::new();
+    for path in git::commit_gitlinks(workdir, "HEAD")?.into_keys() {
+        let diff = git::diff_commit_file(workdir, "HEAD", &path)?;
+        gitlinks.insert(path, diff);
+    }
+
     git::reset_mixed(workdir, "HEAD~1")?;
 
     let mut selected_patch = String::new();
@@ -301,7 +310,9 @@ fn perform_head_split_by_hunks(
         if selected.is_empty() {
             continue;
         }
-        if file.binary || file.index_status == 'D' {
+        if let Some(diff) = gitlinks.get(&file.path) {
+            git::apply_cached_patch(workdir, diff)?;
+        } else if file.binary || file.index_status == 'D' {
             git::stage_path(workdir, &file.path)?;
         } else {
             selected_patch.push_str(&diff::build_hunk_patch(&file.path, &selected));
@@ -315,7 +326,11 @@ fn perform_head_split_by_hunks(
 
     for file in selections {
         if file.hunks.iter().any(|h| !h.selected) {
-            git::stage_path(workdir, &file.path)?;
+            if let Some(diff) = gitlinks.get(&file.path) {
+                git::apply_cached_patch(workdir, diff)?;
+            } else {
+                git::stage_path(workdir, &file.path)?;
+            }
         }
     }
     git::commit(workdir, msg2)?;

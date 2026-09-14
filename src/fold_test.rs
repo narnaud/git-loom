@@ -1220,6 +1220,287 @@ fn fold_commit_file_to_unstaged_non_head() {
     assert_eq!(test_repo.read_file("file2.txt"), "content2");
 }
 
+/// A submodule bump is a gitlink: `git apply` cannot write one in the working
+/// tree and `git add` restages the submodule at its current HEAD, so the bump
+/// used to survive the amend and only the commit hash changed.
+#[test]
+fn fold_commit_file_to_unstaged_submodule() {
+    let test_repo = TestRepo::new();
+    let (first, second) = test_repo.add_submodule("Data");
+    test_repo.commit_staged("Add submodule");
+
+    test_repo.checkout_submodule("Data", second);
+    test_repo.write_file("other.txt", "other");
+    test_repo.stage_files(&["Data", "other.txt"]);
+    test_repo.commit_staged("Bump submodule");
+    let head_oid = test_repo.head_oid();
+
+    super::fold_commit_file_to_unstaged(&test_repo.repo, &head_oid.to_string(), "Data").unwrap();
+
+    let new_head = test_repo.head_oid();
+    assert_eq!(test_repo.commit_file_paths(new_head), ["other.txt"]);
+    assert_eq!(test_repo.submodule_oid(new_head, "Data"), first);
+    assert_eq!(test_repo.status_porcelain().trim(), "M Data");
+}
+
+#[test]
+fn fold_commit_file_to_unstaged_submodule_non_head() {
+    let test_repo = TestRepo::new_with_remote();
+    let (first, second) = test_repo.add_submodule("Data");
+    test_repo.commit_staged("Add submodule");
+
+    test_repo.checkout_submodule("Data", second);
+    test_repo.write_file("other.txt", "other");
+    test_repo.stage_files(&["Data", "other.txt"]);
+    test_repo.commit_staged("Bump submodule");
+    let bump_oid = test_repo.head_oid();
+
+    test_repo.write_file("later.txt", "later");
+    test_repo.stage_files(&["later.txt"]);
+    test_repo.commit_staged("Later");
+
+    super::fold_commit_file_to_unstaged(&test_repo.repo, &bump_oid.to_string(), "Data").unwrap();
+
+    assert_eq!(
+        test_repo.commit_file_paths(test_repo.get_oid(1)),
+        ["other.txt"]
+    );
+    assert_eq!(test_repo.submodule_oid(test_repo.head_oid(), "Data"), first);
+    assert_eq!(test_repo.status_porcelain().trim(), "M Data");
+}
+
+/// Uncommitting the commit that *adds* a submodule reverse-applies a
+/// `new file mode 160000` patch, which only `--cached` can turn back into no
+/// index entry at all.
+#[test]
+fn fold_commit_file_to_unstaged_submodule_add() {
+    let test_repo = TestRepo::new();
+    test_repo.add_submodule("Data");
+    test_repo.write_file("other.txt", "other");
+    test_repo.stage_files(&["other.txt"]);
+    test_repo.commit_staged("Add submodule");
+    let head_oid = test_repo.head_oid();
+
+    super::fold_commit_file_to_unstaged(&test_repo.repo, &head_oid.to_string(), "Data").unwrap();
+
+    let new_head = test_repo.head_oid();
+    assert!(!test_repo.commit_has_file(new_head, "Data"));
+    assert!(test_repo.commit_has_file(new_head, "other.txt"));
+    assert_eq!(test_repo.status_porcelain().trim(), "?? Data/");
+}
+
+/// A submodule cannot ride in a hunk patch, so a `-p` selection carries it as
+/// the commit's own whole-file diff instead. Picking it must move the entry and
+/// leave the mode alone; not picking it must leave the entry untouched.
+#[test]
+fn picked_gitlinks_carries_the_commit_diff() {
+    use crate::tui::hunk_selector::{FileEntry, HunkEntry, HunkOrigin};
+
+    let test_repo = TestRepo::new();
+    let (_first, second) = test_repo.add_submodule("Data");
+    test_repo.commit_staged("Add submodule");
+    test_repo.checkout_submodule("Data", second);
+    test_repo.write_file("other.txt", "other");
+    test_repo.stage_files(&["Data", "other.txt"]);
+    test_repo.commit_staged("Bump submodule");
+
+    let workdir = test_repo.workdir();
+    let head = test_repo.head_oid().to_string();
+    let entry = |path: &str, selected: bool| FileEntry {
+        path: path.to_string(),
+        hunks: vec![HunkEntry {
+            hunk: crate::core::diff::DiffHunk {
+                text: String::from("(submodule)"),
+                modified_lines: vec![],
+            },
+            selected,
+            origin: HunkOrigin::Commit,
+        }],
+        index_status: 'M',
+        worktree_status: ' ',
+        binary: true,
+    };
+
+    let picked = [entry("other.txt", true), entry("Data", true)];
+    let gitlinks = super::picked_gitlinks(&workdir, &head, &picked).unwrap();
+    assert_eq!(gitlinks.len(), 1);
+    assert_eq!(gitlinks[0].path, "Data");
+    assert!(!gitlinks[0].removed);
+    // The whole-file diff carries the mode a hunk patch cannot.
+    assert!(gitlinks[0].diff.contains("160000"));
+
+    let untouched = [entry("other.txt", true), entry("Data", false)];
+    assert!(
+        super::picked_gitlinks(&workdir, &head, &untouched)
+            .unwrap()
+            .is_empty()
+    );
+}
+/// A submodule that is still checked out cannot show as deleted in the working
+/// tree: the restored index entry matches the directory on disk. The removal
+/// has to land staged, or it is simply gone.
+#[test]
+fn fold_commit_file_to_unstaged_submodule_remove_keeps_the_checkout() {
+    let test_repo = TestRepo::new();
+    let (first, _second) = test_repo.add_submodule("Data");
+    test_repo.commit_staged("Add submodule");
+
+    // `--cached` leaves the checkout behind, unlike a plain `git rm`.
+    crate::git::run_git(
+        &test_repo.workdir(),
+        &["rm", "-r", "-q", "--cached", "Data"],
+    )
+    .unwrap();
+    test_repo.write_file("other.txt", "other");
+    test_repo.stage_files(&["other.txt"]);
+    test_repo.commit_staged("Remove submodule");
+    let head_oid = test_repo.head_oid();
+
+    super::fold_commit_file_to_unstaged(&test_repo.repo, &head_oid.to_string(), "Data").unwrap();
+
+    let new_head = test_repo.head_oid();
+    assert_eq!(test_repo.submodule_oid(new_head, "Data"), first);
+    // The checkout is left on disk, untracked, rather than deleted.
+    assert_eq!(
+        test_repo.status_porcelain().trim(),
+        "D  Data
+?? Data/"
+    );
+}
+
+/// With the checkout gone too, the removal is an ordinary unstaged deletion.
+#[test]
+fn fold_commit_file_to_unstaged_submodule_remove_drops_the_checkout() {
+    let test_repo = TestRepo::new();
+    let (first, _second) = test_repo.add_submodule("Data");
+    test_repo.commit_staged("Add submodule");
+
+    crate::git::run_git(&test_repo.workdir(), &["rm", "-r", "-q", "Data"]).unwrap();
+    test_repo.commit_staged("Remove submodule");
+    let head_oid = test_repo.head_oid();
+
+    super::fold_commit_file_to_unstaged(&test_repo.repo, &head_oid.to_string(), "Data").unwrap();
+
+    let new_head = test_repo.head_oid();
+    assert_eq!(test_repo.submodule_oid(new_head, "Data"), first);
+    assert_eq!(test_repo.status_porcelain().trim(), "D Data");
+}
+
+/// Below HEAD the removal is staged after a rebase has already landed, where a
+/// miss cannot be rolled back.
+#[test]
+fn fold_commit_file_to_unstaged_submodule_remove_non_head() {
+    let test_repo = TestRepo::new_with_remote();
+    let (first, _second) = test_repo.add_submodule("Data");
+    test_repo.commit_staged("Add submodule");
+
+    crate::git::run_git(
+        &test_repo.workdir(),
+        &["rm", "-r", "-q", "--cached", "Data"],
+    )
+    .unwrap();
+    test_repo.write_file("other.txt", "other");
+    test_repo.stage_files(&["other.txt"]);
+    test_repo.commit_staged("Remove submodule");
+    let remove_oid = test_repo.head_oid();
+
+    test_repo.write_file("later.txt", "later");
+    test_repo.stage_files(&["later.txt"]);
+    test_repo.commit_staged("Later");
+
+    super::fold_commit_file_to_unstaged(&test_repo.repo, &remove_oid.to_string(), "Data").unwrap();
+
+    assert_eq!(test_repo.submodule_oid(test_repo.head_oid(), "Data"), first);
+    assert_eq!(
+        test_repo.status_porcelain().trim(),
+        "D  Data
+?? Data/"
+    );
+}
+
+/// The whole-commit uncommit loses a removal the same way, and needs the same
+/// treatment.
+#[test]
+fn fold_commit_to_unstaged_submodule_remove() {
+    let test_repo = TestRepo::new();
+    let (first, _second) = test_repo.add_submodule("Data");
+    test_repo.commit_staged("Add submodule");
+
+    crate::git::run_git(
+        &test_repo.workdir(),
+        &["rm", "-r", "-q", "--cached", "Data"],
+    )
+    .unwrap();
+    test_repo.commit_staged("Remove submodule");
+    let head_oid = test_repo.head_oid();
+
+    super::fold_commit_to_unstaged(&test_repo.repo, &head_oid.to_string()).unwrap();
+
+    assert_eq!(test_repo.submodule_oid(test_repo.head_oid(), "Data"), first);
+    // The checkout is left on disk, untracked, rather than deleted.
+    assert_eq!(
+        test_repo.status_porcelain().trim(),
+        "D  Data
+?? Data/"
+    );
+}
+
+/// Uncommitting a whole commit below HEAD goes through the weave rebase, which
+/// must leave the submodule checkout alone for the bump to land unstaged —
+/// `submodule.recurse` set or not, since `git rebase` does not honour it.
+#[test]
+fn fold_commit_to_unstaged_submodule_non_head() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.set_config("submodule.recurse", "true");
+    let (first, second) = test_repo.add_submodule("Data");
+    test_repo.commit_staged("Add submodule");
+
+    test_repo.checkout_submodule("Data", second);
+    test_repo.stage_files(&["Data"]);
+    test_repo.commit_staged("Bump submodule");
+    let bump_oid = test_repo.head_oid();
+
+    test_repo.write_file("later.txt", "later");
+    test_repo.stage_files(&["later.txt"]);
+    test_repo.commit_staged("Later");
+
+    super::fold_commit_to_unstaged(&test_repo.repo, &bump_oid.to_string()).unwrap();
+
+    assert_eq!(test_repo.submodule_oid(test_repo.head_oid(), "Data"), first);
+    assert_eq!(test_repo.status_porcelain().trim(), "M Data");
+}
+
+/// `core.quotePath` is on by default, so git writes a non-ASCII path into the
+/// diff header escaped and quoted. Nothing may decide a submodule's fate by
+/// reading a path back out of patch text.
+#[test]
+fn fold_commit_file_to_unstaged_submodule_non_ascii_path() {
+    let test_repo = TestRepo::new();
+    let (first, second) = test_repo.add_submodule("Dätä");
+    test_repo.commit_staged("Add submodule");
+
+    test_repo.checkout_submodule("Dätä", second);
+    test_repo.write_file("other.txt", "other");
+    test_repo.stage_files(&["Dätä", "other.txt"]);
+    test_repo.commit_staged("Bump submodule");
+    let head_oid = test_repo.head_oid();
+
+    super::fold_commit_file_to_unstaged(&test_repo.repo, &head_oid.to_string(), "Dätä").unwrap();
+
+    let new_head = test_repo.head_oid();
+    assert_eq!(test_repo.commit_file_paths(new_head), ["other.txt"]);
+    assert_eq!(test_repo.submodule_oid(new_head, "Dätä"), first);
+    // git2 reports the real path; `git status` would quote and escape it.
+    let changed: Vec<String> = test_repo
+        .repo
+        .statuses(None)
+        .unwrap()
+        .iter()
+        .filter_map(|e| e.path().map(str::to_string).ok())
+        .collect();
+    assert_eq!(changed, ["Dätä"]);
+}
+
 /// A change that is staged and then undone in the working tree is in
 /// `git diff --cached` and nowhere else, so the rollback has to carry the index
 /// separately from the files.
@@ -1401,6 +1682,74 @@ fn fold_commit_file_to_commit() {
 
     assert_eq!(test_repo.read_file("file1.txt"), "content1");
     assert_eq!(test_repo.read_file("file2.txt"), "content2");
+}
+
+#[test]
+fn fold_commit_file_to_commit_submodule() {
+    let test_repo = TestRepo::new_with_remote();
+    let (first, second) = test_repo.add_submodule("Data");
+    test_repo.commit_staged("Add submodule");
+
+    test_repo.checkout_submodule("Data", second);
+    test_repo.write_file("other.txt", "other");
+    test_repo.stage_files(&["Data", "other.txt"]);
+    test_repo.commit_staged("Bump submodule");
+    let source_oid = test_repo.head_oid();
+
+    test_repo.write_file("later.txt", "later");
+    test_repo.stage_files(&["later.txt"]);
+    test_repo.commit_staged("Later");
+    let target_oid = test_repo.head_oid();
+
+    super::fold_commit_file_to_commit(
+        &test_repo.repo,
+        &source_oid.to_string(),
+        "Data",
+        &target_oid.to_string(),
+    )
+    .unwrap();
+
+    let source = test_repo.get_oid(1);
+    let target = test_repo.head_oid();
+    assert_eq!(test_repo.commit_file_paths(source), ["other.txt"]);
+    assert_eq!(test_repo.submodule_oid(source, "Data"), first);
+    assert_eq!(test_repo.submodule_oid(target, "Data"), second);
+    test_repo.assert_working_tree_clean();
+}
+
+/// The source-newer branch runs two rebase phases through `_loom-track`; a
+/// gitlink has to survive both.
+#[test]
+fn fold_commit_file_to_commit_submodule_source_newer() {
+    let test_repo = TestRepo::new_with_remote();
+    let (first, second) = test_repo.add_submodule("Data");
+    test_repo.commit_staged("Add submodule");
+
+    test_repo.write_file("target.txt", "target");
+    test_repo.stage_files(&["target.txt"]);
+    test_repo.commit_staged("Target commit");
+    let target_oid = test_repo.head_oid();
+
+    test_repo.checkout_submodule("Data", second);
+    test_repo.write_file("other.txt", "other");
+    test_repo.stage_files(&["Data", "other.txt"]);
+    test_repo.commit_staged("Source commit");
+    let source_oid = test_repo.head_oid();
+
+    super::fold_commit_file_to_commit(
+        &test_repo.repo,
+        &source_oid.to_string(),
+        "Data",
+        &target_oid.to_string(),
+    )
+    .unwrap();
+
+    let source = test_repo.head_oid();
+    let target = test_repo.get_oid(1);
+    assert_eq!(test_repo.commit_file_paths(source), ["other.txt"]);
+    assert_eq!(test_repo.submodule_oid(target, "Data"), second);
+    assert_ne!(test_repo.submodule_oid(target, "Data"), first);
+    test_repo.assert_working_tree_clean();
 }
 
 /// Moving a file backwards onto an older commit replays its diff where the
@@ -2782,4 +3131,45 @@ fn rollback_fold_parks_both_patches_when_the_reset_fails() {
         std::fs::read_to_string(loom_dir.join("unrestored-staged-0.patch")).unwrap(),
         "staged half"
     );
+}
+
+/// The `-p` uncommit of a picked submodule: the entry leaves the commit through
+/// the index, and the checkout stays where the user put it, so the bump shows up
+/// as an unstaged change exactly like the whole-file form.
+#[test]
+fn apply_and_amend_uncommits_a_picked_submodule() {
+    use crate::tui::hunk_selector::{FileEntry, HunkEntry, HunkOrigin};
+
+    let test_repo = TestRepo::new();
+    let (first, second) = test_repo.add_submodule("Data");
+    test_repo.commit_staged("Add submodule");
+    test_repo.checkout_submodule("Data", second);
+    test_repo.write_file("other.txt", "other");
+    test_repo.stage_files(&["Data", "other.txt"]);
+    test_repo.commit_staged("Bump submodule");
+
+    let workdir = test_repo.workdir();
+    let head = test_repo.head_oid().to_string();
+    let selections = [FileEntry {
+        path: String::from("Data"),
+        hunks: vec![HunkEntry {
+            hunk: crate::core::diff::DiffHunk {
+                text: String::from("(submodule)"),
+                modified_lines: vec![],
+            },
+            selected: true,
+            origin: HunkOrigin::Commit,
+        }],
+        index_status: 'M',
+        worktree_status: ' ',
+        binary: true,
+    }];
+    let gitlinks = super::picked_gitlinks(&workdir, &head, &selections).unwrap();
+
+    super::apply_and_amend(&workdir, &selections, "", &gitlinks, true).unwrap();
+
+    let new_head = test_repo.head_oid();
+    assert_eq!(test_repo.commit_file_paths(new_head), ["other.txt"]);
+    assert_eq!(test_repo.submodule_oid(new_head, "Data"), first);
+    assert_eq!(test_repo.status_porcelain().trim(), "M Data");
 }

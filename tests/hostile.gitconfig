@@ -71,6 +71,11 @@
 	updateRefs = true
 	missingCommitsCheck = error
 
+[submodule]
+	# Makes checkout, reset and switch update the submodule working trees
+	# along with the branch.
+	recurse = true
+
 [pull]
 	rebase = true
 

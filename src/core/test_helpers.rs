@@ -673,6 +673,71 @@ impl TestRepo {
         }
     }
 
+    /// Create a real submodule checkout at `path`, with two commits of its own,
+    /// and stage the first of them as the gitlink.
+    ///
+    /// Hand-built rather than `git submodule add`, which wants a clone and
+    /// `protocol.file.allow`. Returns the nested repository's two commits.
+    pub fn add_submodule(&self, path: &str) -> (git2::Oid, git2::Oid) {
+        let sub = Repository::init(self.workdir().join(path)).unwrap();
+        Self::configure_identity(&sub);
+        let first = Self::commit_in(&sub, "sub one");
+        let second = Self::commit_in(&sub, "sub two");
+        Self::detach(&sub, first);
+        // Without the `.gitmodules` entry `git add` only warns about an
+        // embedded repository; with it the path is a submodule to every command.
+        self.write_file(
+            ".gitmodules",
+            &format!("[submodule \"{path}\"]\n\tpath = {path}\n\turl = ./{path}\n"),
+        );
+        self.stage_files(&[".gitmodules", path]);
+        (first, second)
+    }
+
+    /// Check the submodule at `path` out at `oid`, the way a user bumping a
+    /// submodule pointer does.
+    pub fn checkout_submodule(&self, path: &str, oid: git2::Oid) {
+        Self::detach(&Repository::open(self.workdir().join(path)).unwrap(), oid);
+    }
+
+    /// The commit a submodule is pinned to in `oid`'s tree.
+    pub fn submodule_oid(&self, oid: git2::Oid, path: &str) -> git2::Oid {
+        self.find_commit(oid)
+            .tree()
+            .unwrap()
+            .get_path(Path::new(path))
+            .unwrap()
+            .id()
+    }
+
+    /// Commit `message` in `repo`, as a file of its own.
+    fn commit_in(repo: &Repository, message: &str) -> git2::Oid {
+        let name = format!("{}.txt", message.replace(' ', "-"));
+        fs::write(repo.workdir().unwrap().join(&name), message).unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new(&name)).unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let sig = Self::sig();
+        let parents: Vec<git2::Commit> = repo
+            .head()
+            .ok()
+            .and_then(|head| head.target())
+            .map(|oid| repo.find_commit(oid).unwrap())
+            .into_iter()
+            .collect();
+        let parents: Vec<&git2::Commit> = parents.iter().collect();
+        repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &parents)
+            .unwrap()
+    }
+
+    /// Detach `repo`'s HEAD at `oid` and check it out.
+    fn detach(repo: &Repository, oid: git2::Oid) {
+        repo.set_head_detached(oid).unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+    }
+
     /// Assert that the working tree is clean (no diff from HEAD).
     pub fn assert_working_tree_clean(&self) {
         let diff = self.diff_head_name_only();

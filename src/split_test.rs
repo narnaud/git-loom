@@ -280,3 +280,48 @@ fn split_head_commit_with_a_deletion() {
     );
     test_repo.assert_working_tree_clean();
 }
+
+/// A submodule has to be split by the commit's own diff: `git add` would stage
+/// whatever its checkout currently holds. Here the checkout deliberately holds
+/// the *pre-image*, so staging by path would drop the bump from history.
+#[test]
+fn split_by_hunks_takes_a_submodule_from_the_commit() {
+    use crate::tui::hunk_selector::{FileEntry, HunkEntry, HunkOrigin};
+
+    let test_repo = TestRepo::new();
+    let (first, second) = test_repo.add_submodule("Data");
+    test_repo.commit_staged("Add submodule");
+
+    test_repo.checkout_submodule("Data", second);
+    test_repo.write_file("other.txt", "other");
+    test_repo.stage_files(&["Data", "other.txt"]);
+    test_repo.commit_staged("Bump and add");
+
+    // An uncommitted downgrade sitting in the checkout.
+    test_repo.checkout_submodule("Data", first);
+
+    let entry = |path: &str, selected: bool, binary: bool| FileEntry {
+        path: path.to_string(),
+        hunks: vec![HunkEntry {
+            hunk: crate::core::diff::DiffHunk {
+                text: String::from("(submodule)"),
+                modified_lines: vec![],
+            },
+            selected,
+            origin: HunkOrigin::Commit,
+        }],
+        index_status: 'M',
+        worktree_status: ' ',
+        binary,
+    };
+    let selections = [entry("Data", true, true), entry("other.txt", false, false)];
+
+    let workdir = test_repo.workdir();
+    let (hash1, _hash2) =
+        super::perform_head_split_by_hunks(&workdir, &selections, Some("first"), "second").unwrap();
+
+    let split_off = git2::Oid::from_str(&hash1).unwrap();
+    assert_eq!(test_repo.submodule_oid(split_off, "Data"), second);
+    assert_eq!(test_repo.get_message(1), "first");
+    assert_eq!(test_repo.get_message(0), "second");
+}

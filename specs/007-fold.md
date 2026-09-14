@@ -148,6 +148,8 @@ When both resolve to commits, show source's commit diff. Source and target must 
 
 Binary/deleted files cannot supply patch hunks. If no text selection is possible, error exactly `No text hunks selected — binary and deleted files are not supported with -p`.
 
+A submodule is one whole entry in the picker, taken or left entire. It travels as the commit's own whole-file diff, applied with `--cached`: a picked hunk carries no file mode and would land the entry as a plain blob. `split -p` does the same (Spec 013).
+
 This move uses two edit-and-continue phases: first remove hunks from source, then add them to target. Target's new OID is unknown until phase one, so `_loom-track` carries its pre-phase-one OID into phase two.
 
 ### Commit hunks to working tree
@@ -184,6 +186,7 @@ Multiple moves, all `-c` moves, all `-p` forms, and CommitFile move failures sav
 - Require Git 2.38+ and a non-bare repository working tree.
 - Short-ID arguments require upstream tracking.
 - Preserve uncommitted/index changes except where the requested operation intentionally consumes them; restore them exactly on abort/hard-fail.
+- Move submodule entries (gitlinks) through the index alone, in every form including `-p`: apply their whole-file diff with `--cached`, never stage them by path, and never move a submodule checkout. Uncommitting to `zz` then needs no working-tree replay: a bump is unstaged as soon as the index entry moves, and an addition becomes an untracked directory. A removal is the exception — while its checkout is still on disk the restored entry matches it and nothing would show, so stage that deletion rather than lose it.
 - Successful fold operations retain messages and unaffected content unless a rule above explicitly removes/moves that content.
 
 Minimal examples:

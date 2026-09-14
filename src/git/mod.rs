@@ -256,6 +256,61 @@ pub fn ls_files(workdir: &Path, files: &[&str]) -> Result<Vec<String>> {
         .collect())
 }
 
+/// Every path the index records as a submodule (gitlink, mode 160000).
+///
+/// Lists the whole index rather than passing the caller's paths as pathspecs:
+/// submodules number in the single digits, and a pathspec per changed file
+/// would build an argv no platform accepts on a large change set.
+pub fn index_gitlinks(workdir: &Path) -> Result<std::collections::HashSet<String>> {
+    let out = run_git_stdout(workdir, &["ls-files", "-s", "-z"])?;
+    // Entries are `<mode> <object> <stage>\t<path>`.
+    Ok(out
+        .split('\0')
+        .filter_map(|entry| entry.strip_prefix("160000 "))
+        .filter_map(|entry| entry.split_once('\t'))
+        .map(|(_, path)| path.to_string())
+        .collect())
+}
+
+/// The submodule entries (gitlink, mode 160000) `oid`'s own diff touches, each
+/// mapped to whether the commit removes it.
+///
+/// Reads the raw modes from `git diff-tree -r -z` rather than the patch text,
+/// which `core.quotePath` escapes and quotes for any non-ASCII path, and in one
+/// call rather than one per file. Compares against the first parent, like every
+/// other `<oid>^..<oid>` reader here, so `oid` must have one.
+pub fn commit_gitlinks(
+    workdir: &Path,
+    oid: &str,
+) -> Result<std::collections::HashMap<String, bool>> {
+    let parent = format!("{oid}^");
+    let out = run_git_stdout(workdir, &["diff-tree", "-r", "-z", &parent, oid])?;
+    let mut gitlinks = std::collections::HashMap::new();
+    // Records are `:<srcmode> <dstmode> <srcsha> <dstsha> <status>` then the
+    // path, exactly one: only `-M`/`-C`, deliberately not passed, make
+    // diff-tree print a rename's two paths and desync every later record.
+    let mut fields = out.split('\0').filter(|f| !f.is_empty());
+    while let Some(field) = fields.next() {
+        let Some(meta) = field.strip_prefix(':') else {
+            continue;
+        };
+        let Some(path) = fields.next() else { break };
+        let mut modes = meta.split(' ');
+        let src = modes.next().unwrap_or("");
+        let dst = modes.next().unwrap_or("");
+        if src == "160000" || dst == "160000" {
+            gitlinks.insert(path.to_string(), src == "160000" && dst == "000000");
+        }
+    }
+    Ok(gitlinks)
+}
+
+/// Drop `path` from the index, whatever its mode, without touching the working
+/// tree (`git update-index --force-remove`).
+pub fn remove_from_index(workdir: &Path, path: &str) -> Result<()> {
+    run_git(workdir, &["update-index", "--force-remove", "--", path])
+}
+
 /// Every path whose working-tree content differs from the index, untracked
 /// files included — but not ignored ones.
 ///

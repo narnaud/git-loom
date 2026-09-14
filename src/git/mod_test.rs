@@ -53,3 +53,48 @@ fn a_path_with_no_directory_above_it_resolves_to_itself() {
         assert_eq!(resolve_loom_exe(exe).unwrap(), exe, "for {}", exe.display());
     }
 }
+
+/// Both sides of the record count, so the commits that add and remove a
+/// submodule are recognised as well as the one that bumps it.
+#[test]
+fn commit_gitlinks_covers_add_bump_and_remove() {
+    use crate::core::test_helpers::TestRepo;
+
+    let test_repo = TestRepo::new();
+    let (_first, second) = test_repo.add_submodule("Data");
+    test_repo.write_file("plain.txt", "plain");
+    test_repo.stage_files(&["plain.txt"]);
+    test_repo.commit_staged("Add submodule");
+    let added = test_repo.head_oid().to_string();
+
+    test_repo.checkout_submodule("Data", second);
+    test_repo.stage_files(&["Data"]);
+    test_repo.commit_staged("Bump submodule");
+    let bumped = test_repo.head_oid().to_string();
+
+    crate::git::run_git(
+        &test_repo.workdir(),
+        &["rm", "-r", "-q", "--cached", "Data"],
+    )
+    .unwrap();
+    test_repo.commit_staged("Remove submodule");
+    let removed = test_repo.head_oid().to_string();
+
+    let workdir = test_repo.workdir();
+    for (label, oid, removes) in [
+        ("added", &added, false),
+        ("bumped", &bumped, false),
+        ("removed", &removed, true),
+    ] {
+        let gitlinks = super::commit_gitlinks(&workdir, oid).unwrap();
+        assert_eq!(
+            gitlinks.get("Data"),
+            Some(&removes),
+            "{label} commit read the gitlink wrong"
+        );
+        assert!(
+            !gitlinks.contains_key("plain.txt"),
+            "{label} commit took a file"
+        );
+    }
+}

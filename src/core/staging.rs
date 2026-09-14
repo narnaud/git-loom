@@ -59,6 +59,7 @@ pub(crate) fn collect_file_entries(
     };
 
     let mut entries = Vec::new();
+    let gitlinks = git::index_gitlinks(workdir)?;
 
     for change in &changes {
         if let Some(ref filter) = filter_paths
@@ -77,13 +78,26 @@ pub(crate) fn collect_file_entries(
         let mut hunks = Vec::new();
         let mut is_binary = false;
 
-        if has_staged {
-            is_binary |= collect_staged_hunks(workdir, &change.path, change.index, &mut hunks)?;
-        }
+        // A submodule is one object id, not text: it has no hunks to choose
+        // between, so both halves of its state are one whole entry. Staging by
+        // path is right here — the working tree is where this change comes from.
+        if gitlinks.contains(&change.path) {
+            if has_staged {
+                hunks.push(submodule_entry(true, HunkOrigin::Staged));
+            }
+            if has_unstaged {
+                hunks.push(submodule_entry(false, HunkOrigin::Unstaged));
+            }
+            is_binary = true;
+        } else {
+            if has_staged {
+                is_binary |= collect_staged_hunks(workdir, &change.path, change.index, &mut hunks)?;
+            }
 
-        if has_unstaged {
-            is_binary |=
-                collect_unstaged_hunks(workdir, &change.path, change.worktree, &mut hunks)?;
+            if has_unstaged {
+                is_binary |=
+                    collect_unstaged_hunks(workdir, &change.path, change.worktree, &mut hunks)?;
+            }
         }
 
         if hunks.is_empty() {
@@ -372,6 +386,7 @@ pub(crate) fn collect_commit_hunks(
     files: &[String],
 ) -> Result<Vec<FileEntry>> {
     let changed_files = git::diff_commit_name_status(workdir, oid)?;
+    let gitlinks = git::commit_gitlinks(workdir, oid)?;
 
     let mut entries = Vec::new();
 
@@ -392,6 +407,9 @@ pub(crate) fn collect_commit_hunks(
                 selected: false,
                 origin: HunkOrigin::Commit,
             });
+        } else if gitlinks.contains_key(path) {
+            hunks.push(submodule_entry(false, HunkOrigin::Commit));
+            is_binary = true;
         } else if git::diff_commit_file_is_binary(workdir, oid, path)? {
             hunks.push(HunkEntry {
                 hunk: diff::DiffHunk {
@@ -468,6 +486,20 @@ pub(crate) fn save_and_unstage_other_staged(
     let patch = git::diff_cached_files(workdir, &other)?;
     git::unstage_files(workdir, &other)?;
     Ok(patch)
+}
+
+/// The single entry a submodule contributes to a picker: one object id, with no
+/// hunks to choose between. `binary` is the flag every caller already reads as
+/// "take or leave this one whole".
+fn submodule_entry(selected: bool, origin: HunkOrigin) -> HunkEntry {
+    HunkEntry {
+        hunk: diff::DiffHunk {
+            text: String::from("(submodule)"),
+            modified_lines: vec![],
+        },
+        selected,
+        origin,
+    }
 }
 
 fn hunk_sort_key(hunk: &diff::DiffHunk) -> usize {

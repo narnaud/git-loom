@@ -104,7 +104,7 @@ git loom fold -p c2 c1
 # Selected hunks are removed from c2 and added to c1
 ```
 
-The source (`c2`) must be newer than the target (`c1`). Binary and deleted files are not supported.
+The source (`c2`) must be newer than the target (`c1`). Binary and deleted files are not supported; a submodule moves whole.
 
 **Form 3 — pick hunks from a commit → uncommit to working tree:**
 
@@ -219,6 +219,17 @@ Removes one file's changes from a commit, preserving the rest of the commit.
 git loom fold ab:1 zz
 # Removes the second file from commit ab to the working directory
 ```
+
+### Submodules
+
+A submodule pointer moves through the index, and your submodule checkout is
+never touched. Uncommitting a bump leaves it as an unstaged change; uncommitting
+the commit that added a submodule leaves the directory untracked. Uncommitting a
+*removal* stages the deletion instead, because a submodule that is still checked
+out cannot show as deleted in the working tree.
+
+`-p` shows a submodule as a single `(submodule)` entry: take it or leave it,
+there is nothing inside to pick apart.
 
 ### Move a file between commits
 

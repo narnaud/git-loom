@@ -481,30 +481,92 @@ fn build_selected_patch(selections: &[FileEntry]) -> String {
 }
 
 /// At a rebase edit pause: apply (or reverse-apply) a single-file patch, stage the path, amend.
-fn apply_and_amend_path(workdir: &Path, patch: &str, path: &str, reverse: bool) -> Result<()> {
-    if reverse {
-        git::apply_patch_reverse(workdir, patch)?;
-    } else {
-        git::apply_patch(workdir, patch)?;
+///
+/// A `gitlink` patch goes to the index instead and its path is never staged
+/// (Spec 007). The whole-file diff carries the 160000 mode, so `--cached`
+/// recreates or drops the entry as a submodule.
+fn apply_and_amend_path(
+    workdir: &Path,
+    patch: &str,
+    path: &str,
+    gitlink: bool,
+    reverse: bool,
+) -> Result<()> {
+    match (gitlink, reverse) {
+        (true, true) => git::apply_cached_patch_reverse(workdir, patch)?,
+        (true, false) => git::apply_cached_patch(workdir, patch)?,
+        (false, true) => {
+            git::apply_patch_reverse(workdir, patch)?;
+            git::stage_path(workdir, path)?;
+        }
+        (false, false) => {
+            git::apply_patch(workdir, patch)?;
+            git::stage_path(workdir, path)?;
+        }
     }
-    git::stage_path(workdir, path)?;
     git::commit_amend_no_edit(workdir)
 }
 
+/// A submodule a `-p` selection picked, carried by the commit's own diff.
+struct PickedGitlink {
+    path: String,
+    /// The commit's whole-file diff for it, which carries the 160000 mode that
+    /// [`diff::build_hunk_patch`] cannot write into a hunk patch.
+    diff: String,
+    /// Whether the commit removes the entry; see [`keep_submodule_removal`].
+    removed: bool,
+}
+
+/// The submodules a `-p` selection picked, with the diffs that can move them.
+fn picked_gitlinks(
+    workdir: &Path,
+    commit: &str,
+    selections: &[FileEntry],
+) -> Result<Vec<PickedGitlink>> {
+    let gitlinks = git::commit_gitlinks(workdir, commit)?;
+    let mut picked = Vec::new();
+    for file in selections {
+        if let Some(&removed) = gitlinks.get(&file.path)
+            && file.hunks.iter().any(|h| h.selected)
+        {
+            picked.push(PickedGitlink {
+                path: file.path.clone(),
+                diff: git::diff_commit_file(workdir, commit, &file.path)?,
+                removed,
+            });
+        }
+    }
+    Ok(picked)
+}
+
 /// At a rebase edit pause: apply (or reverse-apply) patch, stage affected files, amend.
+///
+/// Picked submodules go to the index instead of being staged by path: `git add`
+/// on one stages whatever its checkout currently holds, which is not what the
+/// commit this selection came from recorded.
 fn apply_and_amend(
     workdir: &Path,
     selections: &[FileEntry],
     patch: &str,
+    gitlinks: &[PickedGitlink],
     reverse: bool,
 ) -> Result<()> {
-    if reverse {
-        git::apply_patch_reverse(workdir, patch)?;
-    } else {
-        git::apply_patch(workdir, patch)?;
+    if !patch.is_empty() {
+        if reverse {
+            git::apply_patch_reverse(workdir, patch)?;
+        } else {
+            git::apply_patch(workdir, patch)?;
+        }
+    }
+    for gitlink in gitlinks {
+        if reverse {
+            git::apply_cached_patch_reverse(workdir, &gitlink.diff)?;
+        } else {
+            git::apply_cached_patch(workdir, &gitlink.diff)?;
+        }
     }
     for file in selections {
-        if file.hunks.iter().any(|h| h.selected) {
+        if file.hunks.iter().any(|h| h.selected) && !gitlinks.iter().any(|g| g.path == file.path) {
             git::stage_path(workdir, &file.path)?;
         }
     }
@@ -542,8 +604,10 @@ fn run_patch_fold_commit_to_commit(
         bail!("No hunks selected");
     }
 
+    let gitlinks = picked_gitlinks(workdir, source_hash, &selections)?;
+
     let selected_patch = build_selected_patch(&selections);
-    if selected_patch.is_empty() {
+    if selected_patch.is_empty() && gitlinks.is_empty() {
         bail!("No text hunks selected — binary and deleted files are not supported with -p");
     }
 
@@ -569,7 +633,7 @@ fn run_patch_fold_commit_to_commit(
         return Err(e);
     }
 
-    if let Err(e) = apply_and_amend(workdir, &selections, &selected_patch, true) {
+    if let Err(e) = apply_and_amend(workdir, &selections, &selected_patch, &gitlinks, true) {
         return Err(git::rebase_abort_then_cleanup(workdir, e, || {
             let _ = git::branch_delete(workdir, TRACK_BRANCH);
             let _ = git::restore_staged_patch(workdir, &saved_staged);
@@ -607,7 +671,7 @@ fn run_patch_fold_commit_to_commit(
         return Err(e);
     }
 
-    if let Err(e) = apply_and_amend(workdir, &selections, &selected_patch, false) {
+    if let Err(e) = apply_and_amend(workdir, &selections, &selected_patch, &gitlinks, false) {
         return Err(git::rebase_abort_then_cleanup(workdir, e, rollback));
     }
 
@@ -631,21 +695,6 @@ fn run_patch_fold_commit_to_commit(
     Ok(())
 }
 
-/// Reverse-apply the selected hunks out of HEAD and amend it.
-fn amend_head_without_hunks(
-    workdir: &Path,
-    selections: &[FileEntry],
-    selected_patch: &str,
-) -> Result<()> {
-    git::apply_patch_reverse(workdir, selected_patch)?;
-    for file in selections {
-        if file.hunks.iter().any(|h| h.selected) {
-            git::stage_path(workdir, &file.path)?;
-        }
-    }
-    git::commit_amend_no_edit(workdir)
-}
-
 /// Pick hunks from `commit_hash` to uncommit back into the working tree.
 ///
 /// Selected hunks are removed from the commit and left unstaged.
@@ -665,8 +714,10 @@ fn run_patch_fold_commit_to_unstaged(
         bail!("No hunks selected");
     }
 
+    let gitlinks = picked_gitlinks(workdir, commit_hash, &selections)?;
+
     let selected_patch = build_selected_patch(&selections);
-    if selected_patch.is_empty() {
+    if selected_patch.is_empty() && gitlinks.is_empty() {
         bail!("No text hunks selected — binary and deleted files are not supported with -p");
     }
 
@@ -686,12 +737,14 @@ fn run_patch_fold_commit_to_unstaged(
         let pre_amend_hash = head_oid.to_string();
         // Same rollback as below: a failure part-way through leaves the hunks
         // reverse-applied in the working tree, and `saved_staged` unstaged.
-        if let Err(e) = amend_head_without_hunks(workdir, &selections, &selected_patch) {
+        if let Err(e) = apply_and_amend(workdir, &selections, &selected_patch, &gitlinks, true) {
             rollback_fold(workdir, &pre_amend_hash, None, &saved_worktree);
             return Err(e).context("Failed to remove hunks from the commit, operation rolled back");
         }
         new_hash = git::rev_parse(workdir, "HEAD")?;
-        if let Err(e) = git::apply_patch_to_worktree(workdir, &selected_patch) {
+        if !selected_patch.is_empty()
+            && let Err(e) = git::apply_patch_to_worktree(workdir, &selected_patch)
+        {
             // The snapshot predates `save_and_unstage_staged`, so the rollback
             // puts `saved_staged` back along with the rest.
             rollback_fold(workdir, &pre_amend_hash, None, &saved_worktree);
@@ -712,7 +765,7 @@ fn run_patch_fold_commit_to_unstaged(
             return Err(e);
         }
 
-        if let Err(e) = apply_and_amend(workdir, &selections, &selected_patch, true) {
+        if let Err(e) = apply_and_amend(workdir, &selections, &selected_patch, &gitlinks, true) {
             return Err(git::rebase_abort_then_cleanup(workdir, e, || {
                 let _ = git::restore_staged_patch(workdir, &saved_staged);
             }));
@@ -725,7 +778,9 @@ fn run_patch_fold_commit_to_unstaged(
             }));
         }
 
-        if let Err(e) = git::apply_patch_to_worktree(workdir, &selected_patch) {
+        if !selected_patch.is_empty()
+            && let Err(e) = git::apply_patch_to_worktree(workdir, &selected_patch)
+        {
             rollback_fold(workdir, &saved_head, Some(&saved_refs), &saved_worktree);
             return Err(e)
                 .context("Failed to apply changes to working directory, operation rolled back");
@@ -734,11 +789,26 @@ fn run_patch_fold_commit_to_unstaged(
 
     git::restore_staged_patch(workdir, &saved_staged)?;
 
-    msg::success(&format!(
+    let mut staged: Vec<String> = gitlinks
+        .iter()
+        .filter(|g| g.removed && keep_submodule_removal(workdir, &g.path))
+        .map(|g| g.path.clone())
+        .collect();
+    staged.sort();
+
+    let mut message = format!(
         "Uncommitted hunk(s) from `{}` (now `{}`) to working directory",
         git::short_hash(commit_hash),
         git::short_hash(&new_hash)
-    ));
+    );
+    if !staged.is_empty() {
+        let names: Vec<String> = staged.iter().map(|p| format!("`{p}`")).collect();
+        message.push_str(&format!(
+            "\nThe removal of {} is staged — the checkout is still on disk",
+            names.join(", ")
+        ));
+    }
+    msg::success(&message);
 
     Ok(())
 }
@@ -1456,6 +1526,46 @@ fn save_or_warn(workdir: &Path, name: &str, patch: &str, cached: bool) {
     }
 }
 
+/// Stage a submodule's removal once it is out of the commit (Spec 007): with
+/// the checkout still on disk nothing would show it, and deleting a checkout
+/// that may hold the user's own work is not loom's to do.
+///
+/// Only warns on failure. The history rewrite has already landed by the time
+/// this runs, so bailing would strand the user with no rollback.
+fn keep_submodule_removal(workdir: &Path, path: &str) -> bool {
+    // `try_exists`, because `exists` answers an IO error with "gone" — the one
+    // answer that drops the removal.
+    if !workdir.join(path).try_exists().unwrap_or(true) {
+        return false;
+    }
+    if let Err(e) = git::remove_from_index(workdir, path) {
+        msg::warn(&format!(
+            "could not stage the removal of submodule `{path}`: {e}\n\
+             Record it with `git rm --cached {path}`"
+        ));
+        return false;
+    }
+    true
+}
+
+/// Apply [`keep_submodule_removal`] to every submodule `commit` removes, and
+/// name the ones it staged, so the caller can say where they went.
+fn keep_submodule_removals(workdir: &Path, commit: &str) -> Vec<String> {
+    let mut staged = Vec::new();
+    match git::commit_gitlinks(workdir, commit) {
+        Ok(gitlinks) => {
+            for (path, removed) in gitlinks {
+                if removed && keep_submodule_removal(workdir, &path) {
+                    staged.push(path);
+                }
+            }
+        }
+        Err(e) => msg::warn(&format!("could not read the submodules of `{commit}`: {e}")),
+    }
+    staged.sort();
+    staged
+}
+
 /// Uncommit a single file from a commit: its changes leave the commit and land
 /// in the working tree as unstaged modifications.
 fn fold_commit_file_to_unstaged(repo: &Repository, commit_hash: &str, path: &str) -> Result<()> {
@@ -1474,6 +1584,11 @@ fn fold_commit_file_to_unstaged(repo: &Repository, commit_hash: &str, path: &str
         );
     }
 
+    // A submodule needs no replay: moving the index entry back is itself the
+    // unstaged change, because nothing here ever moves the submodule checkout.
+    let gitlinks = git::commit_gitlinks(workdir, commit_hash)?;
+    let gitlink = gitlinks.contains_key(path);
+
     // Snapshot for `rollback_fold`.
     let saved_worktree = WorktreeSnapshot::take(workdir)?;
 
@@ -1483,12 +1598,12 @@ fn fold_commit_file_to_unstaged(repo: &Repository, commit_hash: &str, path: &str
         let saved_head = head_oid.to_string();
         // A failure part-way through leaves the file reverse-applied in the
         // working tree, so this rolls back like the re-apply below does.
-        if let Err(e) = apply_and_amend_path(workdir, &file_diff, path, true) {
+        if let Err(e) = apply_and_amend_path(workdir, &file_diff, path, gitlink, true) {
             rollback_fold(workdir, &saved_head, None, &saved_worktree);
             return Err(e).context("Failed to uncommit file, operation rolled back");
         }
         new_hash = git::rev_parse(workdir, "HEAD")?;
-        if let Err(e) = git::apply_patch_to_worktree(workdir, &file_diff) {
+        if !gitlink && let Err(e) = git::apply_patch_to_worktree(workdir, &file_diff) {
             rollback_fold(workdir, &saved_head, None, &saved_worktree);
             return Err(e).context("Failed to uncommit file, operation rolled back");
         }
@@ -1503,7 +1618,7 @@ fn fold_commit_file_to_unstaged(repo: &Repository, commit_hash: &str, path: &str
         let todo = graph.to_todo();
         weave::run_rebase_expecting_edit(workdir, Some(&graph.base_oid.to_string()), &todo)?;
 
-        if let Err(e) = apply_and_amend_path(workdir, &file_diff, path, true) {
+        if let Err(e) = apply_and_amend_path(workdir, &file_diff, path, gitlink, true) {
             return Err(git::rebase_abort_then_cleanup(workdir, e, || {}));
         }
 
@@ -1511,17 +1626,27 @@ fn fold_commit_file_to_unstaged(repo: &Repository, commit_hash: &str, path: &str
 
         git::continue_rebase_expecting_edit(workdir)?;
 
-        if let Err(e) = git::apply_patch_to_worktree(workdir, &file_diff) {
+        if !gitlink && let Err(e) = git::apply_patch_to_worktree(workdir, &file_diff) {
             rollback_fold(workdir, &saved_head, Some(&saved_refs), &saved_worktree);
             return Err(e).context("Failed to uncommit file, operation rolled back");
         }
     }
 
+    let mut staged_removal = false;
+    if gitlinks.get(path).copied().unwrap_or(false) {
+        staged_removal = keep_submodule_removal(workdir, path);
+    }
+
     msg::success(&format!(
-        "Uncommitted `{}` from `{}` (now `{}`) to working directory",
+        "Uncommitted `{}` from `{}` (now `{}`) {}",
         path,
         git::short_hash(commit_hash),
-        git::short_hash(&new_hash)
+        git::short_hash(&new_hash),
+        if staged_removal {
+            "as a staged deletion"
+        } else {
+            "to working directory"
+        }
     ));
 
     Ok(())
@@ -1551,6 +1676,8 @@ fn fold_commit_file_to_commit(
             git::short_hash(source_hash)
         );
     }
+
+    let gitlink = git::commit_gitlinks(workdir, source_hash)?.contains_key(path);
 
     let source_is_newer = repo.graph_descendant_of(source_oid, target_oid)?;
 
@@ -1590,7 +1717,7 @@ fn fold_commit_file_to_commit(
             return Err(e);
         }
 
-        if let Err(e) = apply_and_amend_path(workdir, &file_diff, path, true) {
+        if let Err(e) = apply_and_amend_path(workdir, &file_diff, path, gitlink, true) {
             return Err(git::rebase_abort_then_cleanup(workdir, e, || {
                 let _ = git::branch_delete(workdir, TRACK_BRANCH);
             }));
@@ -1630,7 +1757,7 @@ fn fold_commit_file_to_commit(
             return Err(e);
         }
 
-        if let Err(e) = apply_and_amend_path(workdir, &file_diff, path, false) {
+        if let Err(e) = apply_and_amend_path(workdir, &file_diff, path, gitlink, false) {
             return Err(git::rebase_abort_then_cleanup(workdir, e, rollback));
         }
 
@@ -1657,7 +1784,7 @@ fn fold_commit_file_to_commit(
         let todo = graph.to_todo();
         weave::run_rebase_expecting_edit(workdir, Some(&graph.base_oid.to_string()), &todo)?;
 
-        if let Err(e) = apply_and_amend_path(workdir, &file_diff, path, true) {
+        if let Err(e) = apply_and_amend_path(workdir, &file_diff, path, gitlink, true) {
             return Err(git::rebase_abort_then_cleanup(workdir, e, || {}));
         }
 
@@ -1665,7 +1792,7 @@ fn fold_commit_file_to_commit(
 
         git::continue_rebase_expecting_edit(workdir)?;
 
-        if let Err(e) = apply_and_amend_path(workdir, &file_diff, path, false) {
+        if let Err(e) = apply_and_amend_path(workdir, &file_diff, path, gitlink, false) {
             return Err(git::rebase_abort_then_cleanup(workdir, e, || {
                 rollback_fold(workdir, &saved_head, Some(&saved_refs), &saved_worktree);
             }));
@@ -1699,6 +1826,9 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
 
     if is_head {
         git::reset_mixed(workdir, "HEAD~1")?;
+        let staged = keep_submodule_removals(workdir, commit_hash);
+        report_uncommitted(commit_hash, &[], &staged);
+        return Ok(());
     } else {
         // Non-HEAD: drop the commit from the weave, then apply its diff
         let mut graph = Weave::from_repo(repo)?;
@@ -1734,7 +1864,7 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
         let todo = graph.to_todo();
         let outcome = weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)
             .map_err(|e| transaction::discard_state_after(workdir, &git_dir, e))?;
-        match outcome {
+        let staged = match outcome {
             RebaseOutcome::Completed => {
                 transaction::delete(&git_dir)?;
                 if !diff.is_empty()
@@ -1745,6 +1875,7 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
                         "Failed to apply changes to working directory, operation rolled back",
                     );
                 }
+                keep_submodule_removals(workdir, commit_hash)
             }
             RebaseOutcome::Paused => {
                 transaction::warn_paused_at_edit(Some(COMMAND));
@@ -1754,21 +1885,26 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
                 transaction::warn_paused(workdir, COMMAND);
                 return Ok(());
             }
-        }
-        report_uncommitted(commit_hash, &emptied);
-        return Ok(());
+        };
+        report_uncommitted(commit_hash, &emptied, &staged);
     }
 
-    report_uncommitted(commit_hash, &[]);
     Ok(())
 }
 
 /// Success message for an uncommit, noting the branches it left empty.
-fn report_uncommitted(commit_hash: &str, emptied: &[String]) {
+fn report_uncommitted(commit_hash: &str, emptied: &[String], staged: &[String]) {
     let mut message = format!(
         "Uncommitted `{}` to working directory",
         git::short_hash(commit_hash)
     );
+    if !staged.is_empty() {
+        let names: Vec<String> = staged.iter().map(|p| format!("`{p}`")).collect();
+        message.push_str(&format!(
+            "\nThe removal of {} is staged — the checkout is still on disk",
+            names.join(", ")
+        ));
+    }
     if !emptied.is_empty() {
         message.push_str(&format!(
             "\n{} now empty, at the base",
@@ -1844,7 +1980,8 @@ pub fn after_continue(workdir: &Path, context: &serde_json::Value) -> Result<()>
                 }
                 msg::warn(&warning);
             }
-            report_uncommitted(&commit_hash, &emptied);
+            let staged = keep_submodule_removals(workdir, &commit_hash);
+            report_uncommitted(&commit_hash, &emptied, &staged);
         }
     }
 
