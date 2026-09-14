@@ -450,7 +450,7 @@ fn run_patch_fold(repo: &Repository, args: &[String], theme: &graph::Theme) -> R
 
     let confirmed = staging::run_hunk_picker(repo, workdir, source_args, theme)?;
     if !confirmed {
-        bail!("Cancelled");
+        return Err(msg::cancelled());
     }
 
     let staged = repo::get_staged_files(repo)?;
@@ -595,7 +595,7 @@ fn run_patch_fold_commit_to_commit(
     }
 
     let selections = staging::run_commit_hunk_picker(workdir, source_hash, &[], theme)?
-        .ok_or_else(|| anyhow::anyhow!("Cancelled"))?;
+        .ok_or_else(msg::cancelled)?;
 
     if !selections
         .iter()
@@ -705,7 +705,7 @@ fn run_patch_fold_commit_to_unstaged(
     theme: &graph::Theme,
 ) -> Result<()> {
     let selections = staging::run_commit_hunk_picker(workdir, commit_hash, &[], theme)?
-        .ok_or_else(|| anyhow::anyhow!("Cancelled"))?;
+        .ok_or_else(msg::cancelled)?;
 
     if !selections
         .iter()

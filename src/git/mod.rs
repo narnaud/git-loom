@@ -184,6 +184,7 @@ fn parse_git_version(version_str: &str) -> Option<(u32, u32)> {
 
 /// Run a git command with inherited stdio (for interactive commands / pager).
 /// stderr is not captured, so the trace log records it empty for these calls.
+/// In TUI mode the terminal is handed back to the user for the duration.
 pub fn run_git_interactive(workdir: &Path, args: &[&str]) -> Result<()> {
     // A pty-hosted agent must never hang inside `less` — disable the pager.
     let mut full_args: Vec<&str> = Vec::new();
@@ -193,10 +194,12 @@ pub fn run_git_interactive(workdir: &Path, args: &[&str]) -> Result<()> {
     full_args.extend(args);
 
     let start = Instant::now();
+    let terminal = crate::core::ui::suspend()?;
     let status = Command::new("git")
         .current_dir(workdir)
         .args(&full_args)
         .status()?;
+    drop(terminal);
 
     let duration_ms = start.elapsed().as_millis();
     let cmd = args.join(" ");

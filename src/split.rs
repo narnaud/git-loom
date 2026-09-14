@@ -75,7 +75,7 @@ fn split_commit(
     if patch {
         let oid_str = commit_oid.to_string();
         let selections = staging::run_commit_hunk_picker(workdir, &oid_str, &files, theme)?
-            .ok_or_else(|| anyhow::anyhow!("Cancelled"))?;
+            .ok_or_else(msg::cancelled)?;
 
         let has_selected = selections
             .iter()

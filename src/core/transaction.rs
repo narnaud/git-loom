@@ -68,7 +68,7 @@ impl Rollback {
         if !self.saved_worktree_patch.is_empty()
             && let Err(e) = git::apply_patch(workdir, &self.saved_worktree_patch)
         {
-            eprintln!("Warning: could not re-apply working-tree changes: {}", e);
+            crate::core::msg::warn(&format!("Could not re-apply working-tree changes: {}", e));
         }
         Ok(())
     }

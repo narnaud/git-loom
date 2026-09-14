@@ -6,7 +6,8 @@ integration branch and rewrites/manages them without leaving that branch.
 ## Code Map
 
 - `src/main.rs`: clap CLI/dispatch; command modules are `src/<command>.rs`.
-- `src/core/`: graph, short IDs, repository, transaction, agent mode, weave.
+- `src/core/`: graph, short IDs, repository, transaction, agent mode, TUI
+  mode (`ui.rs`: `msg` prompts/messages redirected to `loom tui`), weave.
 - `src/git/`: low-level Git operations; `src/branch/`: new/merge/unmerge.
 - `src/tui/`: status tree, shell, hunk selector, widgets, theme.
 - `src/agent/`: `agent init`; embedded source is `skills/git-loom/SKILL.md`.

@@ -100,8 +100,15 @@ pub fn run(
     // Resolve branch target (may create a new branch at merge-base).
     // Returns whether the branch was newly created — only newly-created
     // branches are deleted on rollback (not pre-existing empty ones).
+    // A cancelled prompt here must put the saved-aside files back in the index.
     let (branch_name, branch_is_new) =
-        resolve_branch_target(&repo, &info, &workdir, branch.as_deref())?;
+        match resolve_branch_target(&repo, &info, &workdir, branch.as_deref()) {
+            Ok(resolved) => resolved,
+            Err(e) => {
+                git::restore_staged_patch(&workdir, &saved_staged)?;
+                return Err(e);
+            }
+        };
 
     // Empty branches (pointing at merge-base) need a branch section and
     // merge entry created in the Weave before moving the commit there.
@@ -217,7 +224,7 @@ fn resolve_staging_patch(
     let confirmed = staging::run_hunk_picker(repo, workdir, files, theme)?;
     if !confirmed {
         git::restore_staged_patch(workdir, &saved_staged)?;
-        anyhow::bail!("Cancelled");
+        return Err(msg::cancelled());
     }
 
     Ok(saved_staged)

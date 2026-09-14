@@ -1608,7 +1608,7 @@ fn push_gerrit_no_pr(workdir: &Path, remote: &str, branch: &str, force: bool) ->
         ));
         Ok(())
     } else {
-        bail!("Cancelled")
+        Err(msg::cancelled())
     }
 }
 

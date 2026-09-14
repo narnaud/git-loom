@@ -11,6 +11,7 @@ use colored::{ColoredString, Colorize};
 use inquire::validator::Validation;
 
 use crate::core::agent_mode::{self, InputKind};
+use crate::core::ui::{self, Answer, Level, PromptKind};
 
 const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -32,8 +33,13 @@ impl Spinner {
     /// Start the spinner with the given message.
     ///
     /// The animation only runs when stdout is a terminal — in a pipeline or in
-    /// agent mode only the final line from `stop`/`error` is printed.
+    /// agent mode only the final line from `stop`/`error` is printed; in TUI
+    /// mode the status bar animates instead.
     pub fn start(&self, msg: &str) {
+        if ui::active() {
+            ui::spinner(Some(msg));
+            return;
+        }
         if !io::stdout().is_terminal() || agent_mode::enabled() {
             return;
         }
@@ -56,7 +62,12 @@ impl Spinner {
         *self.thread.lock().unwrap() = Some(handle);
     }
 
-    fn finish(&self, symbol: ColoredString, msg: &str) {
+    fn finish(&self, symbol: ColoredString, msg: &str, level: Level) {
+        if ui::active() {
+            ui::spinner(None);
+            ui::message(level, msg);
+            return;
+        }
         self.running.store(false, Ordering::SeqCst);
         let animated = self.thread.lock().unwrap().take();
         if let Some(handle) = animated {
@@ -73,12 +84,12 @@ impl Spinner {
     /// Stop the spinner with a success message.
     pub fn stop(&self, msg: &str) {
         agent_mode::record_message(msg);
-        self.finish("✓".green(), msg);
+        self.finish("✓".green(), msg, Level::Success);
     }
 
     /// Stop the spinner with an error message.
     pub fn error(&self, msg: &str) {
-        self.finish("✗".red(), msg);
+        self.finish("✗".red(), msg, Level::Error);
     }
 }
 
@@ -104,8 +115,13 @@ fn colorize_backticks(message: &str) -> String {
 /// Print a symbol-prefixed message; hint lines get the blue arrow prefix.
 ///
 /// In agent mode everything goes to stderr so stdout stays pure payload and
-/// the final JSON status is the last line of stderr (see spec 019).
-fn print_message(symbol: ColoredString, message: &str, to_stderr: bool) {
+/// the final JSON status is the last line of stderr (see spec 019). In TUI
+/// mode the line goes to the TUI log instead.
+fn print_message(symbol: ColoredString, message: &str, to_stderr: bool, level: Level) {
+    if ui::active() {
+        ui::message(level, message);
+        return;
+    }
     let to_stderr = to_stderr || agent_mode::enabled();
     let mut lines = message.lines();
     if let Some(first) = lines.next() {
@@ -131,7 +147,7 @@ fn print_message(symbol: ColoredString, message: &str, to_stderr: bool) {
 /// Text between backticks is highlighted in yellow.
 pub fn success(message: &str) {
     agent_mode::record_message(message);
-    print_message("✓".green(), message, false);
+    print_message("✓".green(), message, false, Level::Success);
 }
 
 /// Print a warning message with a yellow exclamation mark.
@@ -139,7 +155,7 @@ pub fn success(message: &str) {
 /// Text between backticks is highlighted in yellow.
 pub fn warn(message: &str) {
     agent_mode::record_message(message);
-    print_message("!".yellow(), message, false);
+    print_message("!".yellow(), message, false, Level::Warn);
 }
 
 /// Print a warning that is *not* collected into the agent `messages` list.
@@ -147,14 +163,14 @@ pub fn warn(message: &str) {
 /// For warnings agent mode already reports structurally — the conflict pause
 /// becomes a `paused` status — so the JSON does not repeat itself.
 pub fn warn_reported(message: &str) {
-    print_message("!".yellow(), message, false);
+    print_message("!".yellow(), message, false, Level::Warn);
 }
 
 /// Print an error message with a red cross to stderr.
 /// Additional lines are treated as hints and prefixed with a blue arrow.
 /// Text between backticks is highlighted in yellow.
 pub fn error(message: &str) {
-    print_message("✗".red(), message, true);
+    print_message("✗".red(), message, true, Level::Error);
 }
 
 // --- Interactive prompts ---
@@ -162,12 +178,43 @@ pub fn error(message: &str) {
 // Every prompt takes an `agent_hint`: the command to re-run with the answer
 // supplied. In agent mode the prompt is not rendered — the choices and the
 // hint are returned as a structured `needs_input`/`needs_confirmation`
-// response instead (see spec 019).
+// response instead (see spec 019). In TUI mode the prompt is a popup asked
+// through `core::ui`, and validation re-asks with the failure shown.
+
+/// The error for a cancelled operation: declining a `confirm`, choosing a
+/// "Cancel" entry, or quitting a picker. Same marker a dismissed prompt
+/// raises, so TUI mode reports all of them as a cancel, not a failure.
+pub fn cancelled() -> anyhow::Error {
+    ui::Cancelled.into()
+}
+
+/// TUI-mode text prompt: re-ask until the validator accepts the answer.
+fn tui_text<F>(kind: PromptKind, prompt: &str, validator: F) -> Result<String>
+where
+    F: Fn(&str) -> std::result::Result<(), &'static str>,
+{
+    let mut error = None;
+    loop {
+        let Answer::Text(text) = ui::prompt(kind.clone(), prompt, error.take())? else {
+            return Err(ui::Cancelled.into());
+        };
+        match validator(&text) {
+            Ok(()) => return Ok(text),
+            Err(e) => error = Some(e.to_string()),
+        }
+    }
+}
 
 /// Prompt the user for a yes/no confirmation. Returns `true` if confirmed.
 pub fn confirm(prompt: &str, agent_hint: &str) -> Result<bool> {
     if agent_mode::enabled() {
         return Err(agent_mode::respond_needs_confirmation(prompt, agent_hint));
+    }
+    if ui::active() {
+        return match ui::prompt(PromptKind::Confirm, prompt, None)? {
+            Answer::Bool(yes) => Ok(yes),
+            _ => Err(ui::Cancelled.into()),
+        };
     }
     let answer = inquire::Confirm::new(prompt).with_default(false).prompt()?;
     Ok(answer)
@@ -189,6 +236,9 @@ where
             false,
             agent_hint,
         ));
+    }
+    if ui::active() {
+        return tui_text(PromptKind::Input { placeholder: None }, prompt, validator);
     }
     let answer = inquire::Text::new(prompt)
         .with_validator(move |input: &str| match validator(input) {
@@ -220,6 +270,12 @@ where
             agent_hint,
         ));
     }
+    if ui::active() {
+        let kind = PromptKind::Input {
+            placeholder: Some(placeholder.to_string()),
+        };
+        return tui_text(kind, prompt, validator);
+    }
     let answer = inquire::Text::new(prompt)
         .with_default(placeholder)
         .with_validator(move |input: &str| match validator(input) {
@@ -240,6 +296,13 @@ pub fn select(prompt: &str, items: Vec<String>, agent_hint: &str) -> Result<Stri
             false,
             agent_hint,
         ));
+    }
+    if ui::active() {
+        let kind = PromptKind::Select {
+            items,
+            allow_other: false,
+        };
+        return tui_text(kind, prompt, |_| Ok(()));
     }
     let answer = inquire::Select::new(prompt, items).prompt()?;
     Ok(answer)
@@ -268,6 +331,13 @@ where
             agent_hint,
         ));
     }
+    if ui::active() {
+        let kind = PromptKind::Select {
+            items: suggestions,
+            allow_other: true,
+        };
+        return tui_text(kind, prompt, validator);
+    }
     let answer = inquire::Text::new(prompt)
         .with_autocomplete(SuggestionsHelper(suggestions))
         .with_validator(move |input: &str| match validator(input) {
@@ -290,6 +360,12 @@ pub fn multi_select(prompt: &str, items: Vec<String>, agent_hint: &str) -> Resul
             false,
             agent_hint,
         ));
+    }
+    if ui::active() {
+        return match ui::prompt(PromptKind::MultiSelect { items }, prompt, None)? {
+            Answer::Many(selected) => Ok(selected),
+            _ => Err(ui::Cancelled.into()),
+        };
     }
     let selected = inquire::MultiSelect::new(prompt, items)
         .with_validator(|selection: &[inquire::list_option::ListOption<&String>]| {

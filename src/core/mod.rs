@@ -6,6 +6,7 @@ pub mod repo;
 pub mod shortid;
 pub mod staging;
 pub mod transaction;
+pub mod ui;
 pub mod weave;
 
 #[cfg(test)]

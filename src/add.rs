@@ -72,7 +72,7 @@ fn run_patch(files: Vec<String>, theme: &graph::Theme) -> Result<()> {
 
     let confirmed = staging::run_hunk_picker(&repo, &workdir, &files, theme)?;
     if !confirmed {
-        bail!("Cancelled");
+        return Err(msg::cancelled());
     }
     Ok(())
 }

@@ -1,4 +1,5 @@
 use crate::core::test_helpers::TestRepo;
+use crate::core::ui;
 
 // ── Helper: create a woven branch with commits ─────────────────────────
 
@@ -896,4 +897,28 @@ fn drop_abort_preserves_working_state() {
         "new untracked file must survive abort"
     );
     assert_eq!(test_repo.read_file("new-file.txt"), "new-content");
+}
+
+// ── Confirmation ─────────────────────────────────────────────────────────
+
+/// Declining must raise the marker a dismissed prompt raises, or the TUI
+/// reports a routine "no" as a failed command.
+#[test]
+fn declining_the_confirm_is_cancelled() {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        ui::install(tx);
+        let result = super::confirm_or_bail(false, "Drop commit `a1`?");
+        ui::uninstall();
+        result
+    });
+
+    let ui::Request::Prompt { reply, .. } = rx.recv().unwrap() else {
+        panic!("expected a prompt");
+    };
+    reply.send(Some(ui::Answer::Bool(false))).unwrap();
+
+    let err = worker.join().unwrap().unwrap_err();
+    assert!(err.downcast_ref::<ui::Cancelled>().is_some());
+    assert_eq!(err.to_string(), "Cancelled");
 }

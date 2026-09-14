@@ -11,7 +11,7 @@ use crate::git;
 
 fn confirm_or_bail(skip: bool, prompt: &str) -> Result<()> {
     if !skip && !msg::confirm(prompt, "re-run with: loom drop <target> -y")? {
-        bail!("Cancelled");
+        return Err(msg::cancelled());
     }
     Ok(())
 }
@@ -345,10 +345,10 @@ fn drop_branch(repo: &Repository, branch_name: &str, skip_confirm: bool) -> Resu
 
     // Delete the branch ref (warn on failure — extremely unlikely)
     if let Err(e) = git::branch_delete(workdir, branch_name) {
-        eprintln!(
-            "warning: Could not delete branch ref '{}': {} (may have been cleaned up automatically)",
+        msg::warn(&format!(
+            "Could not delete branch ref '{}': {} (may have been cleaned up automatically)",
             branch_name, e
-        );
+        ));
     }
 
     msg::success(&format!("Dropped branch `{}`", branch_name));
