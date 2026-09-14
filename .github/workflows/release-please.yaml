@@ -15,7 +15,7 @@ jobs:
         id: release
         with:
           token: ${{ secrets.RELEASE_TOKEN }}
-      - name: Append contributors to the release notes
+      - name: Credit commit authors in the release notes
         if: ${{ steps.release.outputs.release_created == 'true' }}
         shell: bash
         env:
@@ -29,15 +29,18 @@ jobs:
             echo "No previous release to compare against, skipping."
             exit 0
           fi
-          contributors=$(gh api --paginate "repos/$REPO/compare/$previous...$TAG" \
+          gh api --paginate "repos/$REPO/compare/$previous...$TAG" \
             --jq '.commits[]
-                  | select((.author.type // "") != "Bot")
-                  | if .author.login then "@" + .author.login else .commit.author.name end' \
-            | sort -u | awk 'NR>1{printf ", "}{printf "%s", $0} END{if (NR) print ""}')
-          if [ -z "$contributors" ]; then
-            echo "No contributors found, skipping."
-            exit 0
-          fi
+                  | [.sha, (if .author.login then "@" + .author.login else .commit.author.name end)]
+                  | @tsv' > authors.tsv
           gh release view "$TAG" --repo "$REPO" --json body --jq .body > notes.md
-          grep -q '^### Contributors' notes.md || printf '\n### Contributors\n\n%s\n' "$contributors" >> notes.md
-          gh release edit "$TAG" --repo "$REPO" --notes-file notes.md
+          awk -F'\t' '
+            NR == FNR { author[$1] = $2; next }
+            {
+              if (match($0, /\/commit\/[0-9a-f]+\)\)$/)) {
+                sha = substr($0, RSTART + 8, RLENGTH - 10)
+                if (sha in author) $0 = $0 " by " author[sha]
+              }
+              print
+            }' authors.tsv notes.md > credited.md
+          gh release edit "$TAG" --repo "$REPO" --notes-file credited.md
