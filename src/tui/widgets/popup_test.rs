@@ -228,7 +228,7 @@ fn message_lines_follow_the_cli_shape() {
 }
 
 #[test]
-fn notice_renders() {
+fn notice_and_log_render() {
     let theme = theme();
     let notice = Notice::new("Error", Level::Error, "Nothing to commit\nstage something");
     let text = render_text(|f, area| notice.render(f, area, &theme));
@@ -236,4 +236,17 @@ fn notice_renders() {
     assert!(text.contains("› stage something"));
     assert!(Notice::dismisses(KeyCode::Enter));
     assert!(!Notice::dismisses(KeyCode::Char('x')));
+
+    let entries = vec![LogEntry {
+        command: "loom reword a1".into(),
+        lines: vec![(Level::Success, "Reworded `a1`".into())],
+    }];
+    let mut scroll = DiffPane::new();
+    let text = render_text(|f, area| render_log(f, area, &entries, &mut scroll, &theme));
+    assert!(text.contains("$ loom reword a1"));
+    assert!(text.contains("✓ Reworded a1"));
+
+    let mut scroll = DiffPane::new();
+    let text = render_text(|f, area| render_log(f, area, &[], &mut scroll, &theme));
+    assert!(text.contains("no actions yet"));
 }

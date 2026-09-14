@@ -99,7 +99,6 @@ fn blocked_worker(app: &mut App) -> std::sync::mpsc::Sender<()> {
         command: "loom reword a1".to_string(),
         spinner: None,
         ticks: 0,
-        last_success: None,
     });
     release
 }
@@ -443,19 +442,29 @@ fn prompt_request_opens_a_popup_that_owns_the_keys_and_replies() {
 }
 
 #[test]
-fn finishing_an_action_reports_in_the_status_bar_or_a_popup() {
+fn messages_land_in_the_current_log_entry() {
     let theme = make_theme();
     let mut app = make_app(make_snapshot(), &theme);
+    app.log.push(LogEntry {
+        command: "loom reword a1".to_string(),
+        lines: Vec::new(),
+    });
+    app.handle_request(Request::Message {
+        level: Level::Success,
+        text: "Reworded `a1`".to_string(),
+    });
+    assert_eq!(
+        app.log[0].lines,
+        vec![(Level::Success, "Reworded `a1`".to_string())]
+    );
 
-    // Success: the command's last ✓ line becomes the status-bar notice.
-    assert!(app.finish_action(Ok(()), Some("Reworded `a1`".to_string())));
+    // Success: the last ✓ line becomes the status-bar notice.
+    assert!(app.finish_action(Ok(())));
     assert_eq!(app.notice.as_deref(), Some("✓ Reworded `a1`"));
     assert!(app.popup.is_none());
-    assert!(app.finish_action(Ok(()), None));
-    assert_eq!(app.notice.as_deref(), Some("✓ done"));
 
-    // Failure: an error popup that only Enter/Esc dismiss.
-    assert!(!app.finish_action(Err(anyhow::anyhow!("Nothing to commit")), None));
+    // Failure: an error popup, and the line is logged.
+    assert!(!app.finish_action(Err(anyhow::anyhow!("Nothing to commit"))));
     assert!(matches!(
         app.popup,
         Some(Popup::Notice {
@@ -463,37 +472,38 @@ fn finishing_an_action_reports_in_the_status_bar_or_a_popup() {
             ..
         })
     ));
+    assert_eq!(
+        app.log[0].lines.last(),
+        Some(&(Level::Error, "Nothing to commit".to_string()))
+    );
     press(&mut app, KeyCode::Char('x'));
     assert!(app.popup.is_some(), "only Enter/Esc dismiss a notice");
 
     // A cancelled prompt is not an error.
     app.popup = None;
-    assert!(!app.finish_action(Err(Cancelled.into()), None));
+    assert!(!app.finish_action(Err(Cancelled.into())));
     assert_eq!(app.notice.as_deref(), Some("cancelled"));
     assert!(app.popup.is_none());
 }
 
+/// A failure while the log is open must not yank the log out from under the
+/// reader; the reload happens behind it instead.
 #[test]
-fn success_messages_from_the_worker_feed_the_notice() {
+fn a_failure_keeps_an_open_log() {
     let theme = make_theme();
     let mut app = make_app(make_snapshot(), &theme);
-    let release = blocked_worker(&mut app);
-    app.handle_request(Request::Message {
-        level: Level::Warn,
-        text: "careful".to_string(),
+    app.log.push(LogEntry {
+        command: "loom drop a1".to_string(),
+        lines: Vec::new(),
     });
-    app.handle_request(Request::Message {
-        level: Level::Success,
-        text: "Reworded `a1`
-next"
-            .to_string(),
-    });
+    app.open_log();
+
+    assert!(app.finish_action(Err(anyhow::anyhow!("Nothing to commit"))));
+    assert!(matches!(app.popup, Some(Popup::Log { .. })));
     assert_eq!(
-        app.running.as_ref().unwrap().last_success.as_deref(),
-        Some("Reworded `a1`")
+        app.log[0].lines.last(),
+        Some(&(Level::Error, "Nothing to commit".to_string()))
     );
-    drop(release);
-    poll_until_idle(&mut app);
 }
 
 #[test]
@@ -508,6 +518,12 @@ fn running_action_blocks_tree_keys_until_it_finishes() {
     assert_eq!(app.notice.as_deref(), Some("an action is running…"));
     assert!(matches!(app.poll_background(), Tick::Redraw));
     assert!(app.mode_hint().unwrap().contains("loom reword a1"));
+
+    // The log stays reachable while waiting.
+    press(&mut app, KeyCode::Char('L'));
+    assert!(matches!(app.popup, Some(Popup::Log { .. })));
+    press(&mut app, KeyCode::Esc);
+    assert!(app.popup.is_none());
 
     drop(release);
     poll_until_idle(&mut app);
@@ -536,6 +552,18 @@ fn suspend_request_reaches_the_shell_and_resume_ends_the_wait() {
     drop(release);
     app.wait_for_resume();
     poll_until_idle(&mut app);
+}
+
+#[test]
+fn log_popup_toggles_and_scrolls() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    press(&mut app, KeyCode::Char('L'));
+    assert!(matches!(app.popup, Some(Popup::Log { .. })));
+    press(&mut app, KeyCode::Down);
+    assert!(matches!(app.popup, Some(Popup::Log { .. })));
+    press(&mut app, KeyCode::Char('L'));
+    assert!(app.popup.is_none());
 }
 
 #[test]
@@ -652,7 +680,7 @@ fn status_bar_matches_spec() {
     assert!(
         last_row.starts_with(
             " Navigate: ↑/↓ | Fold/unfold: ←/→ | Select: space | Commit: c | Fold: f \
-             | Branch: b | Drop: d | Reword: r | Refresh: R | Quit: q"
+             | Branch: b | Drop: d | Reword: r | Log: L | Refresh: R | Quit: q"
         ),
         "got: {:?}",
         last_row

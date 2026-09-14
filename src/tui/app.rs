@@ -3,8 +3,8 @@
 //!
 //! Actions (commit, fold, branch, drop, reword) run the regular loom command
 //! on a worker thread while the TUI stays up: the command's prompts become
-//! popups (`core::ui`), and only an editor takes the terminal over. Fold
-//! picks its target in a second step inside the tree.
+//! popups and its messages a log (`core::ui`), and only an editor takes the
+//! terminal over. Fold picks its target in a second step inside the tree.
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -35,7 +35,7 @@ use crate::tui::theme::TuiTheme;
 use crate::tui::widgets::common::{colorize_diff, pane_block};
 use crate::tui::widgets::diff_pane::DiffPane;
 use crate::tui::widgets::list_pane::ListPane;
-use crate::tui::widgets::popup::{Notice, Prompt, PromptOutcome};
+use crate::tui::widgets::popup::{self, LogEntry, Notice, Prompt, PromptOutcome};
 use crate::{branch, commit, drop, fold, reword};
 
 // ── Data model ───────────────────────────────────────────────────────────
@@ -86,8 +86,6 @@ struct Running {
     spinner: Option<String>,
     /// Ticks so far, for the status-bar animation.
     ticks: usize,
-    /// First line of the command's latest `✓` message, for the status bar.
-    last_success: Option<String>,
 }
 
 /// What is drawn over the panes and owns the keyboard.
@@ -98,7 +96,13 @@ enum Popup {
         reply: Sender<Option<Answer>>,
     },
     /// A message to dismiss; `then` runs on dismissal.
-    Notice { notice: Notice, then: AfterNotice },
+    Notice {
+        notice: Notice,
+        then: AfterNotice,
+    },
+    Log {
+        scroll: DiffPane,
+    },
 }
 
 enum AfterNotice {
@@ -175,7 +179,7 @@ fn load_snapshot() -> Result<Snapshot> {
 
 /// Run the loom command for `action`. Runs on the worker thread: the trace
 /// logger is thread-local, so each action gets its own log file, named after
-/// the command line the status bar shows.
+/// the command line the log shows.
 fn execute_action(
     action: Action,
     command: &str,
@@ -226,6 +230,7 @@ struct App<'a> {
     request_tx: Sender<Request>,
     running: Option<Running>,
     popup: Option<Popup>,
+    log: Vec<LogEntry>,
 }
 
 impl<'a> App<'a> {
@@ -255,6 +260,7 @@ impl<'a> App<'a> {
             request_tx,
             running: None,
             popup: None,
+            log: Vec::new(),
         };
         // Prime the diff for the initial cursor row so the first render
         // doesn't have to.
@@ -302,7 +308,7 @@ impl<'a> App<'a> {
     // -- running an action ------------------------------------------------------
 
     /// The CLI line equivalent to `action`, with the short IDs the tree
-    /// shows, for the status bar and the trace log.
+    /// shows, for the log.
     fn command_line(&self, action: &Action) -> String {
         let sid = |target: &str| -> String {
             self.rows
@@ -338,6 +344,10 @@ impl<'a> App<'a> {
     /// prompts.
     fn start_action(&mut self, action: Action) {
         let command = self.command_line(&action);
+        self.log.push(LogEntry {
+            command: command.clone(),
+            lines: Vec::new(),
+        });
         self.selected.clear();
         self.mode = Mode::Normal;
         self.notice = None;
@@ -357,7 +367,6 @@ impl<'a> App<'a> {
             command,
             spinner: None,
             ticks: 0,
-            last_success: None,
         });
     }
 
@@ -377,10 +386,8 @@ impl<'a> App<'a> {
                 });
             }
             Request::Message { level, text } => {
-                if level == Level::Success
-                    && let Some(running) = &mut self.running
-                {
-                    running.last_success = text.lines().next().map(str::to_string);
+                if let Some(entry) = self.log.last_mut() {
+                    entry.lines.push((level, text));
                 }
             }
             Request::Spinner(text) => {
@@ -395,20 +402,43 @@ impl<'a> App<'a> {
     /// The worker is done: report in the status bar (success), a popup
     /// (failure), or nothing (cancelled prompt). Returns whether the repo may
     /// have changed, so the caller runs [`App::after_action`].
-    fn finish_action(&mut self, result: Result<()>, last_success: Option<String>) -> bool {
+    fn finish_action(&mut self, result: Result<()>) -> bool {
         match result {
             Ok(()) => {
+                let last_success = self.log.last().and_then(|entry| {
+                    entry
+                        .lines
+                        .iter()
+                        .rev()
+                        .find(|(level, _)| *level == Level::Success)
+                        .and_then(|(_, text)| text.lines().next())
+                        .map(str::to_string)
+                });
                 self.notice = Some(format!("✓ {}", last_success.as_deref().unwrap_or("done")));
                 true
             }
             Err(e) if e.downcast_ref::<Cancelled>().is_some() => {
+                self.log_line(Level::Warn, "Cancelled");
                 self.notice = Some("cancelled".to_string());
                 false
             }
             Err(e) => {
-                self.show_error(&e.to_string(), AfterNotice::Reload);
+                let text = e.to_string();
+                self.log_line(Level::Error, &text);
+                // An open log already shows the error line, so reload behind
+                // it instead of replacing what the reader is looking at.
+                if matches!(self.popup, Some(Popup::Log { .. })) {
+                    return true;
+                }
+                self.show_error(&text, AfterNotice::Reload);
                 false
             }
+        }
+    }
+
+    fn log_line(&mut self, level: Level, text: &str) {
+        if let Some(entry) = self.log.last_mut() {
+            entry.lines.push((level, text.to_string()));
         }
     }
 
@@ -456,7 +486,27 @@ impl<'a> App<'a> {
                     self.popup = Some(Popup::Notice { notice, then });
                 }
             }
+            Popup::Log { mut scroll } => match code {
+                KeyCode::Esc | KeyCode::Char('q' | 'L') => {}
+                _ => {
+                    match code {
+                        KeyCode::Up | KeyCode::Char('k') => scroll.scroll_by(-1),
+                        KeyCode::Down | KeyCode::Char('j') => scroll.scroll_by(1),
+                        KeyCode::PageUp => scroll.scroll_page(-1),
+                        KeyCode::PageDown => scroll.scroll_page(1),
+                        _ => {}
+                    }
+                    self.popup = Some(Popup::Log { scroll });
+                }
+            },
         }
+    }
+
+    fn open_log(&mut self) {
+        let mut scroll = DiffPane::new();
+        // Start at the newest entry; the render clamps to the content.
+        scroll.set_scroll(u16::MAX);
+        self.popup = Some(Popup::Log { scroll });
     }
 
     /// Rebuild rows after an expansion change, keeping the cursor on `key`.
@@ -516,6 +566,10 @@ impl<'a> App<'a> {
                     None
                 }
             },
+            KeyCode::Char('L') => {
+                self.open_log();
+                None
+            }
             // While picking a fold target only navigation, Enter, and Esc
             // apply — action keys must not fire and discard the pending fold.
             KeyCode::Char(' ' | 'c' | 'f' | 'b' | 'd' | 'r' | 'R') | KeyCode::F(5)
@@ -845,7 +899,11 @@ impl ShellApp for App<'_> {
         if self.popup.is_some() {
             self.handle_popup_key(code, modifiers);
         } else if self.running.is_some() {
-            self.notice = Some("an action is running…".to_string());
+            // The log is read-only; everything else waits for the action.
+            match code {
+                KeyCode::Char('L') => self.open_log(),
+                _ => self.notice = Some("an action is running…".to_string()),
+            }
         } else {
             self.handle_tree_key(focused, code);
         }
@@ -896,6 +954,9 @@ impl ShellApp for App<'_> {
         match &mut self.popup {
             Some(Popup::Prompt { prompt, .. }) => prompt.render(frame, area, self.theme),
             Some(Popup::Notice { notice, .. }) => notice.render(frame, area, self.theme),
+            Some(Popup::Log { scroll }) => {
+                popup::render_log(frame, area, &self.log, scroll, self.theme)
+            }
             None => {}
         }
     }
@@ -925,7 +986,7 @@ impl ShellApp for App<'_> {
                         "the action crashed — run `loom trace` for what it did"
                     ))
                 });
-                if self.finish_action(result, running.last_success) {
+                if self.finish_action(result) {
                     self.after_action();
                 }
             }
@@ -991,6 +1052,7 @@ impl ShellApp for App<'_> {
             "Branch: b".into(),
             "Drop: d".into(),
             "Reword: r".into(),
+            "Log: L".into(),
             "Refresh: R".into(),
             "Quit: q".into(),
         ]

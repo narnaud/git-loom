@@ -1,17 +1,18 @@
 //! Modal popups for `loom tui`: the prompts a running command asks through
-//! `core::ui`, and error/pause notices.
+//! `core::ui`, error/pause notices, and the action log.
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
     Frame,
     layout::Rect,
-    style::Style,
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
 };
 
 use crate::core::ui::{Answer, Level, PromptKind};
 use crate::tui::theme::TuiTheme;
+use crate::tui::widgets::diff_pane::DiffPane;
 
 /// Centered rect of at most `width`×`height` inside `area`.
 pub(crate) fn centered(area: Rect, width: u16, height: u16) -> Rect {
@@ -468,6 +469,51 @@ impl Notice {
         lines.push(hint_line("Enter: dismiss", theme));
         draw_box(frame, area, &self.title, lines, theme);
     }
+}
+
+// ── Log ──────────────────────────────────────────────────────────────────
+
+/// One action in the TUI log: the equivalent command line and the message
+/// lines it produced.
+pub(crate) struct LogEntry {
+    pub command: String,
+    pub lines: Vec<(Level, String)>,
+}
+
+/// Draw the log over `area`; `scroll` persists across frames.
+pub(crate) fn render_log(
+    frame: &mut Frame,
+    area: Rect,
+    entries: &[LogEntry],
+    scroll: &mut DiffPane,
+    theme: &TuiTheme,
+) {
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    for (i, entry) in entries.iter().enumerate() {
+        if i > 0 {
+            lines.push(Line::from(""));
+        }
+        lines.push(Line::from(vec![
+            Span::styled("$ ", theme.hint),
+            Span::styled(
+                entry.command.clone(),
+                theme.message.add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        for (level, text) in &entry.lines {
+            lines.extend(message_lines(*level, text, theme));
+        }
+    }
+    if lines.is_empty() {
+        lines.push(hint_line("no actions yet", theme));
+    }
+    let rect = centered(area, area.width * 4 / 5, area.height * 4 / 5);
+    frame.render_widget(Clear, rect);
+    let block = Block::default()
+        .title(" Log — L or Esc to close ")
+        .borders(Borders::ALL)
+        .border_style(theme.border_active);
+    scroll.render(frame, rect, lines, block);
 }
 
 #[cfg(test)]
