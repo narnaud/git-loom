@@ -59,6 +59,18 @@ pub struct TuiTheme {
     pub selection: Style,
     /// Rotating colors for commit dots on feature branches.
     pub branch_dots: Vec<Style>,
+    /// `✓` success lines in the log and popups.
+    pub ok: Style,
+    /// `!` warning lines.
+    pub warn: Style,
+    /// `✗` error lines and prompt validation failures.
+    pub err: Style,
+    /// `›` hint continuation lines.
+    pub hint: Style,
+    /// Backtick-quoted words in messages, like the CLI's yellow.
+    pub highlight: Style,
+    /// Text cursor inside a popup input field.
+    pub cursor: Style,
 }
 
 impl TuiTheme {
@@ -104,6 +116,12 @@ impl TuiTheme {
                 .iter()
                 .map(|c| Style::default().fg(map_color(*c)))
                 .collect(),
+            ok: Style::default().fg(Color::Green),
+            warn: Style::default().fg(Color::Yellow),
+            err: Style::default().fg(Color::Red),
+            hint: Style::default().fg(Color::Blue),
+            highlight: Style::default().fg(Color::Yellow),
+            cursor: Style::default().add_modifier(Modifier::REVERSED),
         }
     }
 }
