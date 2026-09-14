@@ -19,6 +19,7 @@ struct StubApp {
     notice: Option<String>,
     mode_hint: Option<String>,
     cleared: usize,
+    modal: bool,
 }
 
 #[derive(Debug, PartialEq)]
@@ -36,6 +37,7 @@ impl StubApp {
             notice: None,
             mode_hint: None,
             cleared: 0,
+            modal: false,
         }
     }
 }
@@ -92,6 +94,10 @@ impl ShellApp for StubApp {
 
     fn status_hints(&self, _focused: PaneId) -> Vec<Cow<'static, str>> {
         vec!["a hint".into(), "another".into()]
+    }
+
+    fn modal_active(&self) -> bool {
+        self.modal
     }
 }
 
@@ -177,6 +183,36 @@ fn q_and_ctrl_c_quit() {
         ))),
         Some(StubExit::Quit)
     );
+}
+
+#[test]
+fn modal_gets_every_key_and_swallows_the_mouse() {
+    let mut shell = Shell::new(StubApp::new());
+    shell.app.modal = true;
+    render(&mut shell, 80, 12);
+
+    assert!(shell.handle_event(key(KeyCode::Char('q'))).is_none());
+    assert!(shell.handle_event(key(KeyCode::Tab)).is_none());
+    assert_eq!(shell.focus(), PaneId::Left);
+    assert!(shell.handle_event(ctrl(KeyCode::Char('c'))).is_none());
+    assert_eq!(
+        shell.app.keys,
+        vec![
+            (PaneId::Left, KeyCode::Char('q')),
+            (PaneId::Left, KeyCode::Tab),
+            (PaneId::Left, KeyCode::Char('c')),
+        ]
+    );
+
+    let right = shell.areas()[1];
+    shell.handle_event(Event::Mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: right.x + 1,
+        row: right.y + 1,
+        modifiers: KeyModifiers::NONE,
+    }));
+    assert_eq!(shell.focus(), PaneId::Left);
+    assert!(shell.app.mouse.is_empty());
 }
 
 #[test]

@@ -6,22 +6,50 @@
 //! shell owns everything the TUIs would otherwise duplicate. The shell
 //! consumes `q`/Ctrl-C (via [`ShellApp::quit_exit`]), Tab/BackTab (focus) and
 //! Ctrl-Left/Ctrl-Right (split width), and moves focus to a pane on
-//! mouse-down inside it.
+//! mouse-down inside it — unless the app reports a modal, which then gets
+//! every key.
+//!
+//! The shell sets up the terminal itself rather than through `ratatui::init`,
+//! whose panic hook restores the terminal from any thread: an app's worker
+//! thread panicking must not tear down the TUI that is about to report it.
 
 use std::borrow::Cow;
+use std::io::stdout;
+use std::sync::Mutex;
+use std::sync::mpsc::Sender;
+use std::thread::ThreadId;
+use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
     MouseButton, MouseEventKind,
 };
+use crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+};
 use ratatui::{
-    Frame,
+    Frame, Terminal,
+    backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Position, Rect},
     widgets::Paragraph,
 };
 
 use crate::tui::theme::TuiTheme;
+
+/// How long the event loop waits for a terminal event before giving the app a
+/// [`ShellApp::poll_background`] turn.
+const POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+/// What [`ShellApp::poll_background`] asks of the shell.
+pub(crate) enum Tick<E> {
+    Idle,
+    Redraw,
+    /// Restore the terminal for a subprocess, ack on the sender, then block
+    /// in [`ShellApp::wait_for_resume`] until the app says it is back.
+    Suspend(Sender<()>),
+    Exit(E),
+}
 
 /// The two panes of the shell layout.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -97,11 +125,32 @@ pub(crate) trait ShellApp {
     }
     /// Status-bar hint segments, joined with " | ".
     fn status_hints(&self, focused: PaneId) -> Vec<Cow<'static, str>>;
+
+    /// Whether a modal (popup, running action) owns the keyboard: the shell
+    /// then forwards every key, its own included, to `handle_key`, and drops
+    /// mouse events.
+    fn modal_active(&self) -> bool {
+        false
+    }
+    /// Background work between terminal events, every [`POLL_INTERVAL`].
+    fn poll_background(&mut self) -> Tick<Self::Exit> {
+        Tick::Idle
+    }
+    /// After a [`Tick::Suspend`]: block until the subprocess is done with the
+    /// terminal. Must not read terminal events.
+    fn wait_for_resume(&mut self) {}
+    /// Drawn last, over the panes and the status bar (popups).
+    fn render_overlay(&mut self, _frame: &mut Frame, _area: Rect) {}
 }
 
-/// Whether a shell event loop is currently running, so the panic hook only
-/// restores the terminal while a TUI is actually up.
-static TUI_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The thread running a shell event loop, so the panic hook only restores
+/// the terminal for a panic of the TUI itself — an app's worker thread
+/// panicking is reported by the app, not by tearing the TUI down.
+static TUI_THREAD: Mutex<Option<ThreadId>> = Mutex::new(None);
+
+fn set_tui_thread(id: Option<ThreadId>) {
+    *TUI_THREAD.lock().unwrap_or_else(|e| e.into_inner()) = id;
+}
 
 /// Install the terminal-restoring panic hook, once per process.
 fn install_panic_hook() {
@@ -109,13 +158,38 @@ fn install_panic_hook() {
     ONCE.call_once(|| {
         let prev = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
-            if TUI_ACTIVE.load(std::sync::atomic::Ordering::SeqCst) {
-                let _ = crossterm::execute!(std::io::stdout(), DisableMouseCapture);
-                ratatui::restore();
+            let tui_thread = *TUI_THREAD.lock().unwrap_or_else(|e| e.into_inner());
+            match tui_thread {
+                Some(id) if id == std::thread::current().id() => {
+                    leave_terminal();
+                    prev(info);
+                }
+                // A worker's panic would print into the alternate screen, which
+                // is discarded on exit: unreadable, and it corrupts the frame
+                // ratatui still believes it drew. The join reports it instead.
+                Some(_) => {}
+                None => prev(info),
             }
-            prev(info);
         }));
     });
+}
+
+/// Raw mode, alternate screen, mouse capture; a cleared terminal to draw on.
+fn enter_terminal() -> Result<ratatui::DefaultTerminal> {
+    enable_raw_mode()?;
+    // Without the alternate screen the clear below wipes the user's own
+    // terminal, so only mouse capture is best-effort: the TUIs work without it.
+    crossterm::execute!(stdout(), EnterAlternateScreen)?;
+    let _ = crossterm::execute!(stdout(), EnableMouseCapture);
+    let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
+    terminal.clear()?;
+    Ok(terminal)
+}
+
+/// Undo [`enter_terminal`]; best-effort, there is nothing to do on failure.
+fn leave_terminal() {
+    let _ = crossterm::execute!(stdout(), DisableMouseCapture, LeaveAlternateScreen);
+    let _ = disable_raw_mode();
 }
 
 /// Hosts a [`ShellApp`]: layout, focus, event loop, terminal lifecycle.
@@ -142,31 +216,44 @@ impl<A: ShellApp> Shell<A> {
     /// Set up the terminal, run the event loop, restore the terminal.
     /// Returns the app so callers can extract state from it.
     pub fn run(mut self) -> Result<(A, A::Exit)> {
-        let mut terminal = ratatui::init();
-        // Best-effort: a failure must not leave the terminal raw without
-        // running the restore below, and the TUIs work without the mouse.
-        let _ = crossterm::execute!(std::io::stdout(), EnableMouseCapture);
-
         // Panic-safe cleanup: restore the terminal before the previous
         // handler. The hook is installed once per process and is inert
         // between shell runs, so repeated runs don't nest wrappers.
         install_panic_hook();
-        TUI_ACTIVE.store(true, std::sync::atomic::Ordering::SeqCst);
+        set_tui_thread(Some(std::thread::current().id()));
 
-        let result = self.event_loop(&mut terminal);
+        let result = enter_terminal().and_then(|mut terminal| self.event_loop(&mut terminal));
 
-        TUI_ACTIVE.store(false, std::sync::atomic::Ordering::SeqCst);
-        let _ = crossterm::execute!(std::io::stdout(), DisableMouseCapture);
-        ratatui::restore();
+        set_tui_thread(None);
+        leave_terminal();
 
         result.map(|exit| (self.app, exit))
     }
 
     fn event_loop(&mut self, terminal: &mut ratatui::DefaultTerminal) -> Result<A::Exit> {
+        let mut dirty = true;
         loop {
-            terminal.draw(|frame| self.render(frame))?;
-            if let Some(exit) = self.handle_event(event::read()?) {
-                return Ok(exit);
+            if dirty {
+                terminal.draw(|frame| self.render(frame))?;
+                dirty = false;
+            }
+            match self.app.poll_background() {
+                Tick::Idle => {}
+                Tick::Redraw => dirty = true,
+                Tick::Suspend(ack) => {
+                    leave_terminal();
+                    let _ = ack.send(());
+                    self.app.wait_for_resume();
+                    *terminal = enter_terminal()?;
+                    dirty = true;
+                }
+                Tick::Exit(exit) => return Ok(exit),
+            }
+            if event::poll(POLL_INTERVAL)? {
+                if let Some(exit) = self.handle_event(event::read()?) {
+                    return Ok(exit);
+                }
+                dirty = true;
             }
         }
     }
@@ -201,6 +288,7 @@ impl<A: ShellApp> Shell<A> {
         self.app
             .render_pane(frame, PaneId::Right, panes[1], self.focus == PaneId::Right);
         self.render_status_bar(frame, outer[1]);
+        self.app.render_overlay(frame, frame.area());
     }
 
     /// Status bar priority: notice, then mode hint, then the hint segments.
@@ -229,6 +317,12 @@ impl<A: ShellApp> Shell<A> {
                     return None;
                 }
                 self.app.clear_notice();
+                if self.app.modal_active() {
+                    return match self.app.handle_key(self.focus, key.code, key.modifiers) {
+                        KeyResult::Handled => None,
+                        KeyResult::Exit(exit) => Some(exit),
+                    };
+                }
                 if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
                     return Some(self.app.quit_exit());
                 }
@@ -254,6 +348,7 @@ impl<A: ShellApp> Shell<A> {
                     },
                 }
             }
+            Event::Mouse(_) if self.app.modal_active() => None,
             Event::Mouse(mouse) => {
                 let pos = Position {
                     x: mouse.column,
