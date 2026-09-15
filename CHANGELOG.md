@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.24.0](https://github.com/narnaud/git-loom/compare/v0.23.0...v0.24.0) (2026-09-15)
+
+
+### Features ✨
+
+* **core:** add a TUI mode redirecting msg prompts and messages ([db54b32](https://github.com/narnaud/git-loom/commit/db54b32cd8dd8c5ea30c0c6723a456f60393e3d4))
+* **drop:** say how many commits a branch drop removes ([d0a256f](https://github.com/narnaud/git-loom/commit/d0a256f445085dd212921ad4fb2b6e4b4102e283))
+* **tui:** add prompt and notice popups ([44cc61c](https://github.com/narnaud/git-loom/commit/44cc61c3780bc10e38cb8f95fe3270a0d155df68))
+* **tui:** let the shell host modals and background work ([76f9780](https://github.com/narnaud/git-loom/commit/76f9780cdbb6fcf1ec5ab450c5a3b6b97979b57f))
+* **tui:** log actions with their equivalent command line ([6c8347b](https://github.com/narnaud/git-loom/commit/6c8347bd7dd3f06289f3d80a277a2db9c5b23abd))
+* **tui:** run actions without leaving the TUI ([17d3196](https://github.com/narnaud/git-loom/commit/17d3196756c8be995a1043633afd6bc0152e4aa7))
+
+
+### Bug Fixes 🐞
+
+* **fold:** move submodule entries through the index ([d13f46b](https://github.com/narnaud/git-loom/commit/d13f46b92deca00b68a5d81d44410f1699bca251))
+
+
+### Documentation
+
+* compress code comments to reduce token usage ([e75d3a2](https://github.com/narnaud/git-loom/commit/e75d3a2706a3efda256e2474293aa860787c8a27))
+
+
+### Other
+
+* **release:** credit commit authors in the release notes ([8f27389](https://github.com/narnaud/git-loom/commit/8f2738915a7d17524e4a2c3dd8de7f479bc4fb14))
+
 ## [0.23.0](https://github.com/narnaud/git-loom/compare/v0.22.0...v0.23.0) (2026-09-13)
 
 
