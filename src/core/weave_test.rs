@@ -1683,3 +1683,436 @@ fn move_sole_colocated_commit_parks_the_other_branch() {
         IntegrationEntry::Merge { label, .. } if label == "feature-b"
     ));
 }
+
+// ── Relative moves (--above / --below) ─────────────────────────────────
+
+fn two_sections() -> Weave {
+    Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![
+            BranchSection {
+                reset_target: "onto".to_string(),
+                commits: vec![
+                    make_commit_with_refs(OID_A1, "A1", vec!["inner", "twin"]),
+                    make_commit(OID_A2, "A2"),
+                ],
+                label: "feature-a".to_string(),
+                branch_names: vec!["feature-a".to_string()],
+            },
+            BranchSection {
+                reset_target: "onto".to_string(),
+                commits: vec![make_commit(OID_B1, "B1")],
+                label: "feature-b".to_string(),
+                branch_names: vec!["feature-b".to_string()],
+            },
+        ],
+        integration_line: vec![
+            IntegrationEntry::Merge {
+                original_oid: Some(oid(OID_MERGE1)),
+                label: "feature-a".to_string(),
+            },
+            IntegrationEntry::Merge {
+                original_oid: Some(oid(OID_MERGE2)),
+                label: "feature-b".to_string(),
+            },
+        ],
+        base_refs: vec![],
+    }
+}
+
+fn messages(commits: &[CommitEntry]) -> Vec<&str> {
+    commits.iter().map(|c| c.message.as_str()).collect()
+}
+
+#[test]
+fn move_commit_above_within_section_reorders() {
+    let mut graph = Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![BranchSection {
+            reset_target: "onto".to_string(),
+            commits: vec![
+                make_commit(OID_A1, "A1"),
+                make_commit(OID_A2, "A2"),
+                make_commit(OID_B1, "B1"),
+            ],
+            label: "feature-a".to_string(),
+            branch_names: vec!["feature-a".to_string()],
+        }],
+        integration_line: vec![IntegrationEntry::Merge {
+            original_oid: Some(oid(OID_MERGE1)),
+            label: "feature-a".to_string(),
+        }],
+        base_refs: vec![],
+    };
+
+    let parked = graph
+        .move_commits_relative(&[oid(OID_B1)], oid(OID_A1), Position::Above)
+        .unwrap();
+    assert!(parked.is_empty());
+    assert_eq!(
+        messages(&graph.branch_sections[0].commits),
+        vec!["A1", "B1", "A2"]
+    );
+
+    let parked = graph
+        .move_commits_relative(&[oid(OID_A2)], oid(OID_A1), Position::Below)
+        .unwrap();
+    assert!(parked.is_empty());
+    assert_eq!(
+        messages(&graph.branch_sections[0].commits),
+        vec!["A2", "A1", "B1"]
+    );
+}
+
+/// `--above` hands the anchor's branches to the moved commit; `--below`
+/// leaves them on the anchor. Either way the emptied source section goes
+/// with its merge and its branch is parked.
+#[test]
+fn move_commit_above_takes_the_anchor_refs_below_leaves_them() {
+    let mut graph = two_sections();
+    let parked = graph
+        .move_commits_relative(&[oid(OID_B1)], oid(OID_A1), Position::Above)
+        .unwrap();
+    assert_eq!(parked, vec!["feature-b".to_string()]);
+    assert_eq!(graph.base_refs, vec!["feature-b".to_string()]);
+    assert_eq!(graph.branch_sections.len(), 1);
+    assert_eq!(graph.integration_line.len(), 1);
+    let commits = &graph.branch_sections[0].commits;
+    assert_eq!(messages(commits), vec!["A1", "B1", "A2"]);
+    assert!(commits[0].update_refs.is_empty());
+    assert_eq!(
+        commits[1].update_refs,
+        vec!["inner".to_string(), "twin".to_string()]
+    );
+
+    let mut graph = two_sections();
+    graph
+        .move_commits_relative(&[oid(OID_B1)], oid(OID_A1), Position::Below)
+        .unwrap();
+    let commits = &graph.branch_sections[0].commits;
+    assert_eq!(messages(commits), vec!["B1", "A1", "A2"]);
+    assert!(commits[0].update_refs.is_empty());
+    assert_eq!(
+        commits[1].update_refs,
+        vec!["inner".to_string(), "twin".to_string()]
+    );
+}
+
+/// `--above <section tip>` is the same todo as a move onto that branch.
+#[test]
+fn move_commit_above_section_tip_equals_move_to_branch() {
+    let build = || Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![BranchSection {
+            reset_target: "onto".to_string(),
+            commits: vec![make_commit(OID_A1, "A1")],
+            label: "feature-a".to_string(),
+            branch_names: vec!["feature-a".to_string()],
+        }],
+        integration_line: vec![
+            IntegrationEntry::Pick(make_commit(OID_C1, "C1")),
+            IntegrationEntry::Merge {
+                original_oid: Some(oid(OID_MERGE1)),
+                label: "feature-a".to_string(),
+            },
+        ],
+        base_refs: vec![],
+    };
+
+    let mut by_branch = build();
+    by_branch.move_commit(oid(OID_C1), "feature-a").unwrap();
+    let mut by_anchor = build();
+    by_anchor
+        .move_commits_relative(&[oid(OID_C1)], oid(OID_A1), Position::Above)
+        .unwrap();
+    assert_eq!(by_anchor.to_todo(), by_branch.to_todo());
+}
+
+/// A branch parked onto the anchor by the removal stays there: it does not
+/// follow its former commit up. Same result as `fold S1 outer`.
+#[test]
+fn move_commit_above_leaves_refs_parked_on_the_anchor() {
+    let build = || Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![
+            BranchSection {
+                reset_target: "onto".to_string(),
+                commits: vec![make_commit(OID_A1, "A1"), make_commit(OID_A2, "A2")],
+                label: "outer".to_string(),
+                branch_names: vec!["outer".to_string()],
+            },
+            BranchSection {
+                reset_target: "outer".to_string(),
+                commits: vec![make_commit(OID_B1, "S1")],
+                label: "stacked".to_string(),
+                branch_names: vec!["stacked".to_string()],
+            },
+        ],
+        integration_line: vec![IntegrationEntry::Merge {
+            original_oid: Some(oid(OID_MERGE1)),
+            label: "stacked".to_string(),
+        }],
+        base_refs: vec![],
+    };
+
+    let mut by_anchor = build();
+    let parked = by_anchor
+        .move_commits_relative(&[oid(OID_B1)], oid(OID_A2), Position::Above)
+        .unwrap();
+    assert_eq!(parked, vec!["stacked".to_string()]);
+    let commits = &by_anchor.branch_sections[0].commits;
+    assert_eq!(messages(commits), vec!["A1", "A2", "S1"]);
+    assert_eq!(commits[1].update_refs, vec!["stacked".to_string()]);
+    assert!(commits[2].update_refs.is_empty());
+
+    let mut by_branch = build();
+    by_branch.move_commit(oid(OID_B1), "outer").unwrap();
+    assert_eq!(by_anchor.to_todo(), by_branch.to_todo());
+}
+
+#[test]
+fn move_commits_relative_keeps_the_block_order() {
+    let build = || Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![BranchSection {
+            reset_target: "onto".to_string(),
+            commits: vec![make_commit(OID_A1, "A1"), make_commit(OID_A2, "A2")],
+            label: "feature-a".to_string(),
+            branch_names: vec!["feature-a".to_string()],
+        }],
+        integration_line: vec![
+            IntegrationEntry::Pick(make_commit(OID_C1, "C1")),
+            IntegrationEntry::Pick(make_commit(OID_C2, "C2")),
+            IntegrationEntry::Merge {
+                original_oid: Some(oid(OID_MERGE1)),
+                label: "feature-a".to_string(),
+            },
+        ],
+        base_refs: vec![],
+    };
+
+    let mut graph = build();
+    graph
+        .move_commits_relative(&[oid(OID_C1), oid(OID_C2)], oid(OID_A1), Position::Above)
+        .unwrap();
+    assert_eq!(
+        messages(&graph.branch_sections[0].commits),
+        vec!["A1", "C1", "C2", "A2"]
+    );
+    assert_eq!(graph.integration_line.len(), 1);
+
+    let mut graph = build();
+    graph
+        .move_commits_relative(&[oid(OID_C1), oid(OID_C2)], oid(OID_A1), Position::Below)
+        .unwrap();
+    assert_eq!(
+        messages(&graph.branch_sections[0].commits),
+        vec!["C1", "C2", "A1", "A2"]
+    );
+}
+
+#[test]
+fn move_commit_relative_onto_the_integration_line() {
+    let mut graph = Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![BranchSection {
+            reset_target: "onto".to_string(),
+            commits: vec![make_commit(OID_A1, "A1")],
+            label: "feature-a".to_string(),
+            branch_names: vec!["feature-a".to_string()],
+        }],
+        integration_line: vec![
+            IntegrationEntry::Pick(make_commit_with_refs(OID_C1, "C1", vec!["loose"])),
+            IntegrationEntry::Merge {
+                original_oid: Some(oid(OID_MERGE1)),
+                label: "feature-a".to_string(),
+            },
+        ],
+        base_refs: vec![],
+    };
+
+    let parked = graph
+        .move_commits_relative(&[oid(OID_A1)], oid(OID_C1), Position::Above)
+        .unwrap();
+    assert_eq!(parked, vec!["feature-a".to_string()]);
+    assert!(graph.branch_sections.is_empty());
+    assert_eq!(graph.base_refs, vec!["feature-a".to_string()]);
+    let picks: Vec<(&str, &[String])> = graph
+        .integration_line
+        .iter()
+        .map(|e| match e {
+            IntegrationEntry::Pick(c) => (c.message.as_str(), c.update_refs.as_slice()),
+            IntegrationEntry::Merge { .. } => panic!("the merge must be gone"),
+        })
+        .collect();
+    assert_eq!(picks[0].0, "C1");
+    assert!(picks[0].1.is_empty());
+    assert_eq!(picks[1].0, "A1");
+    assert_eq!(picks[1].1, &["loose".to_string()]);
+}
+
+#[test]
+fn move_commit_relative_rejects_self_missing_and_in_place() {
+    let mut graph = two_sections();
+    let err = graph
+        .move_commits_relative(&[oid(OID_A1)], oid(OID_A1), Position::Above)
+        .unwrap_err();
+    assert_eq!(err.to_string(), "Source and target are the same commit");
+
+    let err = graph
+        .move_commits_relative(&[oid(OID_FIX)], oid(OID_A1), Position::Above)
+        .unwrap_err();
+    assert!(err.to_string().contains("not in the weave graph"), "{err}");
+
+    let before = graph.to_todo();
+    let err = graph
+        .move_commits_relative(&[oid(OID_A2)], oid(OID_A1), Position::Above)
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        format!("Commit `{}` is already directly above `{}`", OID_A2, OID_A1)
+    );
+    let err = graph
+        .move_commits_relative(&[oid(OID_A1)], oid(OID_A2), Position::Below)
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        format!("Commit `{}` is already directly below `{}`", OID_A1, OID_A2)
+    );
+    assert_eq!(graph.to_todo(), before, "a refused move changes nothing");
+}
+
+/// The duplicate check has to run before the first removal: a second pass over
+/// the same commit finds it already gone.
+#[test]
+fn move_commit_relative_rejects_a_source_listed_twice() {
+    let mut graph = two_sections();
+    let before = graph.to_todo();
+    let err = graph
+        .move_commits_relative(&[oid(OID_B1), oid(OID_B1)], oid(OID_A1), Position::Above)
+        .unwrap_err();
+    assert!(err.to_string().contains("is listed twice"), "{err}");
+    assert_eq!(graph.to_todo(), before);
+}
+
+/// Spec 007 fixes the wording of the multi-source refusal.
+#[test]
+fn move_commits_relative_rejects_a_block_already_in_place() {
+    let mut graph = Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![BranchSection {
+            reset_target: "onto".to_string(),
+            commits: vec![
+                make_commit(OID_C1, "C1"),
+                make_commit(OID_C2, "C2"),
+                make_commit(OID_A2, "A2"),
+            ],
+            label: "feature-c".to_string(),
+            branch_names: vec!["feature-c".to_string()],
+        }],
+        integration_line: vec![],
+        base_refs: vec![],
+    };
+    let before = graph.to_todo();
+    let err = graph
+        .move_commits_relative(&[oid(OID_C2), oid(OID_A2)], oid(OID_C1), Position::Above)
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        format!("Commits are already in place above `{OID_C1}`")
+    );
+    let err = graph
+        .move_commits_relative(&[oid(OID_C1), oid(OID_C2)], oid(OID_A2), Position::Below)
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        format!("Commits are already in place below `{OID_A2}`")
+    );
+    assert_eq!(graph.to_todo(), before);
+}
+
+/// Picks separated by a merge entry are not adjacent, so the move goes ahead
+/// and pulls the pick right after the anchor.
+#[test]
+fn move_commit_above_across_a_merge_entry_is_not_in_place() {
+    let mut graph = Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![BranchSection {
+            reset_target: "onto".to_string(),
+            commits: vec![make_commit(OID_A1, "A1")],
+            label: "feature-a".to_string(),
+            branch_names: vec!["feature-a".to_string()],
+        }],
+        integration_line: vec![
+            IntegrationEntry::Pick(make_commit(OID_C1, "C1")),
+            IntegrationEntry::Merge {
+                original_oid: Some(oid(OID_MERGE1)),
+                label: "feature-a".to_string(),
+            },
+            IntegrationEntry::Pick(make_commit(OID_C2, "C2")),
+        ],
+        base_refs: vec![],
+    };
+
+    graph
+        .move_commits_relative(&[oid(OID_C2)], oid(OID_C1), Position::Above)
+        .unwrap();
+    assert!(matches!(&graph.integration_line[0], IntegrationEntry::Pick(c) if c.message == "C1"));
+    assert!(matches!(&graph.integration_line[1], IntegrationEntry::Pick(c) if c.message == "C2"));
+    assert!(matches!(
+        &graph.integration_line[2],
+        IntegrationEntry::Merge { .. }
+    ));
+}
+
+/// `--above` a co-located tip advances every branch sharing it, because the
+/// whole section tip moves; `move_commit` splits the section so only the one
+/// named advances (Spec 007).
+#[test]
+fn move_commit_above_a_colocated_tip_advances_every_branch() {
+    let build = || Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![BranchSection {
+            reset_target: "onto".to_string(),
+            commits: vec![make_commit(OID_A1, "A1")],
+            label: "feature-a".to_string(),
+            branch_names: vec!["feature-a".to_string(), "feature-b".to_string()],
+        }],
+        integration_line: vec![
+            IntegrationEntry::Pick(make_commit(OID_C1, "C1")),
+            IntegrationEntry::Merge {
+                original_oid: Some(oid(OID_MERGE1)),
+                label: "feature-a".to_string(),
+            },
+        ],
+        base_refs: vec![],
+    };
+
+    let mut by_anchor = build();
+    by_anchor
+        .move_commits_relative(&[oid(OID_C1)], oid(OID_A1), Position::Above)
+        .unwrap();
+    assert_eq!(
+        by_anchor.branch_sections.len(),
+        1,
+        "the section is not split"
+    );
+    assert_eq!(
+        messages(&by_anchor.branch_sections[0].commits),
+        vec!["A1", "C1"]
+    );
+    assert_eq!(
+        by_anchor.branch_sections[0].branch_names,
+        vec!["feature-a".to_string(), "feature-b".to_string()],
+        "both co-located branches end at the moved commit"
+    );
+
+    let mut by_branch = build();
+    by_branch.move_commit(oid(OID_C1), "feature-a").unwrap();
+    assert_eq!(
+        by_branch.branch_sections.len(),
+        2,
+        "a branch move splits instead, leaving feature-b at A1"
+    );
+    assert_ne!(by_anchor.to_todo(), by_branch.to_todo());
+}

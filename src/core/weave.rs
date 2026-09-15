@@ -73,6 +73,29 @@ pub struct Weave {
     pub base_refs: Vec<String>,
 }
 
+/// Side of the anchor commit a relative move lands on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Position {
+    Above,
+    Below,
+}
+
+impl Position {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Position::Above => "above",
+            Position::Below => "below",
+        }
+    }
+}
+
+/// Where a commit sits in the graph: section index and position within it, or
+/// an index into the integration line.
+enum Slot {
+    Section(usize, usize),
+    Integration(usize),
+}
+
 /// What becomes of a branch ref left without a commit when its last commit
 /// is removed from the graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -681,6 +704,189 @@ impl Weave {
             self.branch_sections[section_idx].commits.push(commit);
         }
         Ok(parked)
+    }
+
+    /// Move commits next to `anchor`, keeping their given order (Spec 007).
+    ///
+    /// `Above` puts the block right after the anchor and carries the inner
+    /// (stacked) refs that ended there up to its top. A section tip's own
+    /// branches advance with the section instead, so `--above <tip>` moves
+    /// every branch co-located there, where `move_commit` splits the section
+    /// and advances only the one named. `Below` inserts right before and
+    /// leaves the anchor's refs alone. Refs the removals park onto the anchor
+    /// stay there, and branches ending at a moved commit stay behind as in
+    /// `move_commit`. Errors when the block already sits there.
+    ///
+    /// `oids` must be deduplicated and oldest-first: a removal hands the
+    /// commit's refs to the one below it, so any other order parks refs on
+    /// commits that are themselves leaving.
+    ///
+    /// Returns the branches left without a commit, parked at their base.
+    pub fn move_commits_relative(
+        &mut self,
+        oids: &[Oid],
+        anchor: Oid,
+        position: Position,
+    ) -> anyhow::Result<Vec<String>> {
+        if oids.contains(&anchor) {
+            anyhow::bail!("Source and target are the same commit");
+        }
+        for (i, oid) in oids.iter().enumerate() {
+            self.require_commit(*oid)?;
+            // Before any removal: a second pass over the same commit would
+            // find it gone, and every other error here leaves the graph whole.
+            if oids[..i].contains(oid) {
+                anyhow::bail!(
+                    "Cannot move commit: source commit {} is listed twice",
+                    crate::git::short_hash(&oid.to_string())
+                );
+            }
+        }
+        self.require_commit(anchor)?;
+        if self.block_sits_at(oids, anchor, position) {
+            let anchor_hex = anchor.to_string();
+            let anchor_short = crate::git::short_hash(&anchor_hex);
+            match oids {
+                [only] => anyhow::bail!(
+                    "Commit `{}` is already directly {} `{}`",
+                    crate::git::short_hash(&only.to_string()),
+                    position.as_str(),
+                    anchor_short
+                ),
+                _ => anyhow::bail!(
+                    "Commits are already in place {} `{}`",
+                    position.as_str(),
+                    anchor_short
+                ),
+            }
+        }
+
+        let anchor_refs = self
+            .find_commit(anchor)
+            .map(|c| c.update_refs.clone())
+            .unwrap_or_default();
+
+        let mut parked = Vec::new();
+        let mut block = Vec::with_capacity(oids.len());
+        for oid in oids {
+            // Unreachable: the sources are checked present and distinct
+            // above. Bail rather than panic so a graph bug cannot abort loom
+            // mid-plan.
+            let Some((mut commit, names, section)) = self.remove_commit(*oid, EmptiedRefs::Park)
+            else {
+                anyhow::bail!(
+                    "Cannot move commit: source commit {} is not in the weave graph",
+                    crate::git::short_hash(&oid.to_string())
+                );
+            };
+            commit.command = Command::Pick;
+            parked.extend(names);
+            if let Some(i) = section
+                && self.branch_sections[i].commits.is_empty()
+            {
+                parked.extend(self.remove_empty_section(i, EmptiedRefs::Park));
+            }
+            block.push(commit);
+        }
+
+        if position == Position::Above
+            && let Some(top) = block.last_mut()
+        {
+            top.update_refs.extend(anchor_refs.iter().cloned());
+        }
+
+        // Unreachable: the anchor is never one of the removed commits. Bail
+        // rather than panic, as the removals above do.
+        let Some(slot) = self.locate(anchor) else {
+            anyhow::bail!(
+                "Cannot move commit: target commit {} left the weave graph",
+                crate::git::short_hash(&anchor.to_string())
+            );
+        };
+        match slot {
+            Slot::Section(s, pos) => {
+                let commits = &mut self.branch_sections[s].commits;
+                let at = match position {
+                    Position::Above => {
+                        commits[pos]
+                            .update_refs
+                            .retain(|r| !anchor_refs.contains(r));
+                        pos + 1
+                    }
+                    Position::Below => pos,
+                };
+                commits.splice(at..at, block);
+            }
+            Slot::Integration(i) => {
+                let at = match position {
+                    Position::Above => {
+                        if let IntegrationEntry::Pick(c) = &mut self.integration_line[i] {
+                            c.update_refs.retain(|r| !anchor_refs.contains(r));
+                        }
+                        i + 1
+                    }
+                    Position::Below => i,
+                };
+                self.integration_line
+                    .splice(at..at, block.into_iter().map(IntegrationEntry::Pick));
+            }
+        }
+        Ok(parked)
+    }
+
+    /// Whether `oids`, in order, are the entries right `position` of `anchor`.
+    /// A merge entry on the integration line breaks the adjacency.
+    fn block_sits_at(&self, oids: &[Oid], anchor: Oid, position: Position) -> bool {
+        let Some(slot) = self.locate(anchor) else {
+            return false;
+        };
+        let neighbours: Vec<Option<Oid>> = match slot {
+            Slot::Section(s, pos) => {
+                let commits = &self.branch_sections[s].commits;
+                let range = match position {
+                    Position::Above => pos + 1..(pos + 1 + oids.len()).min(commits.len()),
+                    Position::Below => pos.saturating_sub(oids.len())..pos,
+                };
+                commits[range].iter().map(|c| Some(c.oid)).collect()
+            }
+            Slot::Integration(i) => {
+                let entries = &self.integration_line;
+                let range = match position {
+                    Position::Above => i + 1..(i + 1 + oids.len()).min(entries.len()),
+                    Position::Below => i.saturating_sub(oids.len())..i,
+                };
+                entries[range]
+                    .iter()
+                    .map(|e| match e {
+                        IntegrationEntry::Pick(c) => Some(c.oid),
+                        IntegrationEntry::Merge { .. } => None,
+                    })
+                    .collect()
+            }
+        };
+        neighbours == oids.iter().map(|o| Some(*o)).collect::<Vec<_>>()
+    }
+
+    fn locate(&self, oid: Oid) -> Option<Slot> {
+        for (s, section) in self.branch_sections.iter().enumerate() {
+            if let Some(pos) = section.commits.iter().position(|c| c.oid == oid) {
+                return Some(Slot::Section(s, pos));
+            }
+        }
+        self.integration_line
+            .iter()
+            .position(|e| matches!(e, IntegrationEntry::Pick(c) if c.oid == oid))
+            .map(Slot::Integration)
+    }
+
+    fn find_commit(&self, oid: Oid) -> Option<&CommitEntry> {
+        match self.locate(oid)? {
+            Slot::Section(s, pos) => Some(&self.branch_sections[s].commits[pos]),
+            Slot::Integration(i) => match &self.integration_line[i] {
+                IntegrationEntry::Pick(c) => Some(c),
+                IntegrationEntry::Merge { .. } => None,
+            },
+        }
     }
 
     /// Whether the weave holds `oid` as a commit it can rewrite.

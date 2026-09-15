@@ -8,14 +8,17 @@
 git-loom fold <target>
 git-loom fold <source>... <target>
 git-loom fold --create <commit>... <new-branch>
+git-loom fold <commit>... --above <commit>
+git-loom fold <commit>... --below <commit>
 git-loom fold -p [<files>...] <commit>
 git-loom fold -p <commit1> <commit2>
 git-loom fold -p <commit> zz
 ```
 
-With one argument, fold the current index into that target. With two or more, the final argument is the target and all preceding arguments are sources.
+With one argument, fold the current index into that target. With two or more, the final argument is the target and all preceding arguments are sources. With `--above`/`--below`, the option value is the target and every positional is a source.
 
 - `-c, --create`: create a new branch at the resolved Weave base and move one or more source commits into it. The target name MUST NOT exist. Sources may be loose or already branch-owned. Order commits oldest-first (ancestors before descendants; unrelated lines by committer date), independent of input order.
+- `--above <commit>` / `--below <commit>`: move one or more source commits directly above or below the target commit, per [Commit move next to a commit](#commit-move-next-to-a-commit). The two are mutually exclusive and exclude `-c` and `-p`.
 - `-p, --patch`: select hunks interactively according to [Patch mode](#patch-mode--p).
 - `zz`: reserved `Unstaged` target/source representing the working directory/all its changes.
 - `commit_sid:index` (for example `fa:0`): `CommitFile` shown by `git loom status -f`.
@@ -35,6 +38,7 @@ Arguments use shared resolution (Spec 002) and `resolve_arg()` with accepted kin
 | CommitFile | `zz` | remove one file's commit changes to working tree | no |
 | CommitFile | Commit | move one file's changes between commits | no |
 | Commit | new branch with `-c` | create branch and move commits | yes |
+| Commit | Commit via `--above`/`--below` | move commits next to target commit | yes |
 
 ### Required diagnostics
 
@@ -55,6 +59,10 @@ Errors are verbatim; `⏎` marks a line break within a message.
 | Multiple commits into Commit or `zz` | `Only one commit source is allowed` |
 | Multiple commit-file sources | `Only one commit file source is allowed` |
 | CommitFile into Branch | ``Cannot fold a commit file into a branch⏎Target a specific commit or use `zz` to uncommit`` |
+| `--above`/`--below` source or target not a commit | ``'<arg>' did not resolve to a commit`` |
+| `--above`/`--below` target among the sources | `Source and target are the same commit` |
+| Single source already directly above/below target | ``Commit `<hash>` is already directly above `<hash>` `` (or `below`) |
+| Several sources already in place | ``Commits are already in place above `<hash>` `` (or `below`) |
 
 ## File/current-change amendments
 
@@ -88,6 +96,19 @@ Topology rules:
 - Any branch ending at the moved source stays behind. Move it to the preceding commit, or, if the source was its sole commit, park it at the base it built on: upstream for its own section or the parent branch tip for a stacked section. It MUST NOT follow the moved commit into a branch whose history it did not contain.
 - Remove any source section/merge entry left empty.
 - Name every parked branch in success output: ``branch `<name>` now empty, at the base``.
+
+## Commit move next to a commit
+
+`fold <commit>... --above <target>` and `fold <commit>... --below <target>` remove each source from its old position and reinsert them as one block directly above (newer than) or below (older than) the target commit, in one rebase. Sources and target resolve with `accept = [Commit]` only. The target may sit in any branch section or on the integration line; sources may come from anywhere in scope, so the move may cross sections or reorder within one (the case Spec 015 refuses). Order and de-duplicate sources as for a branch move; `--above` places the block's oldest commit right after the target.
+
+Ref rules:
+
+- `--above`: every branch that ended at the target now ends at the block's newest commit. Hence `--above <tip>` equals `fold <commit>... <branch>` for a section tip, except that co-located branches all advance (a branch move splits the section instead). Refs that the removals park onto the target stay on the target.
+- `--below`: the target keeps every branch ending at it.
+- Branches ending at a moved source stay behind and emptied sections go, as in the topology rules above; report parked branches with the same success line.
+- Refuse a move that changes nothing: the sources, in order, already occupy the positions directly above/below the target. A merge entry between two integration-line picks breaks that adjacency. The test is positional only — an `--above` that would merely advance the target's refs is still refused.
+
+A single-source move is resumable on conflict; the moved commit is tracked through `_loom-track` so success can name its new hash: ``Moved `<hash>` above `<hash>` (now `<hash>`)`` (or `below`). A multi-source move hard-fails: abort the rebase and restore staged changes as staged; success prints ``Moved <n> commit(s) above `<hash>` `` (or `below`).
 
 ## Commit to working tree
 
@@ -176,10 +197,11 @@ These operations pause on rebase conflict and save the listed `LoomState.context
 | Commit fixup | `op: "CommitIntoCommit"`; source and target hashes |
 | Single commit move | `op: "CommitToBranch"`; commit hash and branch name |
 | Commit to worktree | `op: "CommitToUnstaged"`; commit hash and captured diff |
+| Single commit next to a commit | `op: "CommitRelative"`; commit hash, target hash, `above` flag, parked branches |
 
 `loom continue` dispatches `after_continue`, removes `_loom-track`, and prints the operation's success message. `loom abort` restores original history, staged state, and working-tree state (Spec 014). The post-continue unapplied-patch exception is defined above.
 
-Multiple moves, all `-c` moves, all `-p` forms, and CommitFile move failures save no resumable state and auto-rollback as specified in their sections.
+Multiple moves (to a branch or next to a commit), all `-c` moves, all `-p` forms, and CommitFile move failures save no resumable state and auto-rollback as specified in their sections.
 
 ## General invariants and prerequisites
 
@@ -197,6 +219,7 @@ git-loom fold src/main.rs HEAD           # file changes -> commit
 git-loom fold fix target                 # commit fixup
 git-loom fold c1 c2 feature-b            # ordered multi-move
 git-loom fold --create c1 c2 feature-new # create at base and move
+git-loom fold c1 --below c2                # reorder: c1 right under c2
 git-loom fold ab:0 zz                    # one committed file -> worktree
 git-loom fold -p source target           # selected commit hunks -> commit
 ```

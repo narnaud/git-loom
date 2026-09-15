@@ -1,6 +1,6 @@
 use crate::core::repo;
 use crate::core::test_helpers::TestRepo;
-use crate::core::weave::Weave;
+use crate::core::weave::{Position, Weave};
 
 // ── Case 1: File(s) + Commit (Amend) ────────────────────────────────────
 
@@ -459,6 +459,7 @@ fn fold_commit_to_branch_via_short_ids() {
         super::run(
             false,
             false,
+            None,
             vec![commit_sid.clone(), branch_sid.clone()],
             &crate::core::graph::Theme::dark(),
         )
@@ -1123,6 +1124,7 @@ fn fold_unstaged_into_commit() {
         super::run(
             false,
             false,
+            None,
             vec!["zz".into(), "HEAD".into()],
             &crate::core::graph::Theme::dark(),
         )
@@ -1143,6 +1145,7 @@ fn fold_unstaged_clean_tree_fails() {
         super::run(
             false,
             false,
+            None,
             vec!["zz".into(), "HEAD".into()],
             &crate::core::graph::Theme::dark(),
         )
@@ -2792,6 +2795,7 @@ fn fold_moves_several_commits_to_a_branch() {
         super::run(
             false,
             false,
+            None,
             vec![m2.to_string(), m1.to_string(), "feature-a".to_string()],
             &crate::core::graph::Theme::dark(),
         )
@@ -3172,4 +3176,129 @@ fn apply_and_amend_uncommits_a_picked_submodule() {
     assert_eq!(test_repo.commit_file_paths(new_head), ["other.txt"]);
     assert_eq!(test_repo.submodule_oid(new_head, "Data"), first);
     assert_eq!(test_repo.status_porcelain().trim(), "M Data");
+}
+
+// ── Relative moves (--above / --below) ─────────────────────────────────
+
+/// Summaries of `branch`, tip first, down to (excluding) `base`.
+fn branch_log(test_repo: &TestRepo, branch: &str, base: git2::Oid) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut commit = test_repo.find_commit(test_repo.get_branch_target(branch));
+    while commit.id() != base {
+        out.push(commit.summary().unwrap().unwrap().to_string());
+        commit = commit.parent(0).unwrap();
+    }
+    out
+}
+
+#[test]
+fn fold_commit_below_reorders_within_its_branch() {
+    let test_repo = TestRepo::new_with_remote();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    test_repo.create_branch_at("feature-a", &base_oid.to_string());
+    test_repo.switch_branch("feature-a");
+    let a1_oid = test_repo.commit("A1", "a1.txt");
+    test_repo.commit("A2", "a2.txt");
+    let a3_oid = test_repo.commit("A3", "a3.txt");
+    test_repo.switch_branch("integration");
+    test_repo.merge_no_ff("feature-a");
+
+    super::fold_commit_relative(
+        &test_repo.repo,
+        &a3_oid.to_string(),
+        &a1_oid.to_string(),
+        Position::Below,
+    )
+    .expect("moving A3 below A1");
+
+    assert_eq!(
+        branch_log(&test_repo, "feature-a", base_oid),
+        ["A2", "A1", "A3"]
+    );
+    let tip = test_repo.get_branch_target("feature-a");
+    assert!(test_repo.commit_has_file(tip, "a3.txt"));
+    assert!(
+        !test_repo.branch_exists("_loom-track"),
+        "the tracking branch is cleaned up"
+    );
+}
+
+/// Moving into another branch below one of its commits parks the emptied
+/// source branch, and the target branch keeps its tip commit.
+#[test]
+fn fold_commit_below_across_branches_parks_the_emptied_source() {
+    let test_repo = TestRepo::new_with_remote();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    test_repo.create_branch_at("feature-a", &base_oid.to_string());
+    test_repo.switch_branch("feature-a");
+    test_repo.commit("A1", "a1.txt");
+    let a2_oid = test_repo.commit("A2", "a2.txt");
+
+    test_repo.create_branch_at("feature-b", &base_oid.to_string());
+    test_repo.switch_branch("feature-b");
+    let b1_oid = test_repo.commit("B1", "b1.txt");
+
+    test_repo.switch_branch("integration");
+    test_repo.merge_no_ff("feature-a");
+    test_repo.merge_no_ff("feature-b");
+
+    let (_, parked) = super::plan_relative(
+        &test_repo.repo,
+        &[b1_oid.to_string()],
+        &a2_oid.to_string(),
+        Position::Below,
+    )
+    .expect("planning B1 below A2");
+    assert_eq!(parked, vec!["feature-b".to_string()]);
+
+    super::fold_commit_relative(
+        &test_repo.repo,
+        &b1_oid.to_string(),
+        &a2_oid.to_string(),
+        Position::Below,
+    )
+    .expect("moving B1 below A2");
+
+    assert_eq!(
+        branch_log(&test_repo, "feature-a", base_oid),
+        ["A2", "B1", "A1"]
+    );
+    assert_eq!(test_repo.get_branch_target("feature-b"), base_oid);
+}
+
+/// `--above` the tip of a branch is the branch move: the branch advances.
+#[test]
+fn fold_commits_above_a_branch_tip_advance_the_branch_in_order() {
+    let test_repo = TestRepo::new_with_remote();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    test_repo.create_branch_at("feature-a", &base_oid.to_string());
+    test_repo.switch_branch("feature-a");
+    let a1_oid = test_repo.commit("A1", "a1.txt");
+    test_repo.switch_branch("integration");
+    // Loose commits go before the merge: a libgit2 commit right after a CLI
+    // merge works from a stale index and drops the merged files.
+    let c1_oid = test_repo.commit("C1", "c1.txt");
+    let c2_oid = test_repo.commit("C2", "c2.txt");
+    test_repo.merge_no_ff("feature-a");
+
+    super::move_commits_relative_and_report(
+        &test_repo.repo,
+        &[c1_oid.to_string(), c2_oid.to_string()],
+        &a1_oid.to_string(),
+        Position::Above,
+    )
+    .expect("moving C1 and C2 above A1");
+
+    assert_eq!(
+        branch_log(&test_repo, "feature-a", base_oid),
+        ["C2", "C1", "A1"]
+    );
+    assert_eq!(
+        test_repo.head_commit().parent_count(),
+        2,
+        "HEAD is the merge again"
+    );
 }

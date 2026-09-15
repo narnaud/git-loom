@@ -53,7 +53,7 @@ and hashes also work. `status -a` includes hidden branches.
 | Commit | `git loom commit -b <branch> -m "<msg>" <files...>`; a new branch name creates it. Use `-i` for integration. Name files, or omit them to commit exactly the staged set; never `zz`. |
 | Amend/fixup | `git loom fold <files...> <commit>`; for staged changes, `git loom fold <commit>`. |
 | Auto-fixup | `git loom absorb`; `-n` dry-runs. |
-| Move commits | `git loom fold <commit>... <branch>`; `-c` creates a new branch and rejects an existing name. |
+| Move commits | `git loom fold <commit>... <branch>`; `-c` creates a new branch and rejects an existing name. `--above <commit>` / `--below <commit>` moves next to a commit, in any branch or the same one. |
 | Uncommit | `git loom fold <commit> zz`. |
 | Split | `git loom split <commit> -m "<msg>" <files...>`. |
 | Edit message | `git loom reword <commit> -m "<msg>"`. |

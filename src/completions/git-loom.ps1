@@ -144,7 +144,9 @@ $_gitLoomCompleter = {
                 @{ Name = '-c'; Description = 'Create a new branch from the source commit(s)' },
                 @{ Name = '--create'; Description = 'Create a new branch from the source commit(s)' },
                 @{ Name = '-p'; Description = 'Interactively select hunks to fold' },
-                @{ Name = '--patch'; Description = 'Interactively select hunks to fold' }
+                @{ Name = '--patch'; Description = 'Interactively select hunks to fold' },
+                @{ Name = '--above'; Description = 'Move the source commit(s) above this commit' },
+                @{ Name = '--below'; Description = 'Move the source commit(s) below this commit' }
             )
         }
         'absorb' {

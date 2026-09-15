@@ -375,6 +375,243 @@ assert_eq "$(git -C "$WORK" log -1 --format=%s m-multi-dst)" "Second loose" "mov
 assert_eq "$(git -C "$WORK" log -1 --format=%s m-multi-dst~1)" "First loose" "move_multi_mid"
 assert_eq "$(git -C "$WORK" log -1 --format=%s m-multi-dst~2)" "Dst base" "move_multi_base"
 
+describe "move --below: commit reordered within its branch"
+setup_repo_with_remote
+create_feature_branch "r-order"
+switch_to r-order
+commit_file "R one" "r-one.txt"
+commit_file "R two" "r-two.txt"
+commit_file "R three" "r-three.txt"
+switch_to integration
+weave_branch "r-order"
+one_sid=$(commit_sid_from_status "R one")
+three_sid=$(commit_sid_from_status "R three")
+gl_capture fold "$three_sid" --below "$one_sid"
+assert_exit_ok "$CODE" "move_below_ok"
+assert_contains "$OUT" "below" "move_below_msg"
+assert_eq "$(git -C "$WORK" log -1 --format=%s r-order)" "R two" "move_below_tip"
+assert_eq "$(git -C "$WORK" log -1 --format=%s r-order~1)" "R one" "move_below_mid"
+assert_eq "$(git -C "$WORK" log -1 --format=%s r-order~2)" "R three" "move_below_bottom"
+assert_no_state_file "move_below_no_state"
+
+describe "move --below: commit crosses into another branch, source parked"
+setup_repo_with_remote
+create_feature_branch "s-src"
+switch_to s-src
+commit_file "S move" "s-move.txt"
+switch_to integration
+weave_branch "s-src"
+create_feature_branch "s-dst"
+switch_to s-dst
+commit_file "D one" "d-one.txt"
+commit_file "D two" "d-two.txt"
+switch_to integration
+weave_branch "s-dst"
+move_sid=$(commit_sid_from_status "S move")
+two_sid=$(commit_sid_from_status "D two")
+gl_capture fold "$move_sid" --below "$two_sid"
+assert_exit_ok "$CODE" "move_below_cross_ok"
+assert_contains "$OUT" "now empty, at the base" "move_below_cross_parked_msg"
+assert_eq "$(git -C "$WORK" log -1 --format=%s s-dst)" "D two" "move_below_cross_tip"
+assert_eq "$(git -C "$WORK" log -1 --format=%s s-dst~1)" "S move" "move_below_cross_mid"
+assert_eq "$(git -C "$WORK" log -1 --format=%s s-dst~2)" "D one" "move_below_cross_bottom"
+assert_eq "$(branch_oid s-src)" "$(upstream_oid)" "move_below_cross_src_parked"
+
+describe "move --above: several commits land above a branch tip in history order"
+setup_repo_with_remote
+create_feature_branch "t-dst"
+switch_to t-dst
+commit_file "T base" "t-base.txt"
+switch_to integration
+weave_branch "t-dst"
+commit_file "First loose" "first-loose.txt"
+commit_file "Second loose" "second-loose.txt"
+first_sid=$(commit_sid_from_status "First loose")
+second_sid=$(commit_sid_from_status "Second loose")
+base_sid=$(commit_sid_from_status "T base")
+gl_capture fold "$second_sid" "$first_sid" --above "$base_sid"
+assert_exit_ok "$CODE" "move_above_multi_ok"
+assert_contains "$OUT" "Moved 2 commit(s) above" "move_above_multi_msg"
+assert_eq "$(git -C "$WORK" log -1 --format=%s t-dst)" "Second loose" "move_above_multi_tip"
+assert_eq "$(git -C "$WORK" log -1 --format=%s t-dst~1)" "First loose" "move_above_multi_mid"
+assert_eq "$(git -C "$WORK" log -1 --format=%s t-dst~2)" "T base" "move_above_multi_base"
+
+describe "move --above/--below: refused when already in place or not a commit"
+setup_repo_with_remote
+create_feature_branch "u-place"
+switch_to u-place
+commit_file "U one" "u-one.txt"
+commit_file "U two" "u-two.txt"
+switch_to integration
+weave_branch "u-place"
+one_sid=$(commit_sid_from_status "U one")
+two_sid=$(commit_sid_from_status "U two")
+old_head=$(head_hash)
+gl_capture fold "$two_sid" --above "$one_sid"
+assert_exit_fail "$CODE" "move_above_in_place_fails"
+assert_contains "$OUT" "is already directly above" "move_above_in_place_msg"
+gl_capture fold "$one_sid" --below "$two_sid"
+assert_exit_fail "$CODE" "move_below_in_place_fails"
+assert_contains "$OUT" "is already directly below" "move_below_in_place_msg"
+gl_capture fold "$one_sid" --above u-place
+assert_exit_fail "$CODE" "move_above_branch_fails"
+assert_contains "$OUT" "did not resolve to a commit" "move_above_branch_msg"
+gl_capture fold "$one_sid" --above "$one_sid"
+assert_exit_fail "$CODE" "move_above_self_fails"
+assert_contains "$OUT" "Source and target are the same commit" "move_above_self_msg"
+assert_eq "$old_head" "$(head_hash)" "move_relative_refused_head_unchanged"
+
+describe "move --above: several commits that conflict — rolled back, staged work kept"
+setup_repo_with_remote
+create_feature_branch "y-roll-dst"
+switch_to y-roll-dst
+commit_file "Y dst base" "y-dst.txt"
+switch_to integration
+weave_branch "y-roll-dst"
+create_feature_branch "y-roll-other"
+switch_to y-roll-other
+commit_file "Y other one" "y-other.txt"
+switch_to integration
+weave_branch "y-roll-other"
+# Both loose commits need y-other.txt, which y-roll-dst's section has not got,
+# so replaying them above its commit fails.
+commit_file "Y first loose" "y-other.txt"
+commit_file "Y second loose" "y-second.txt"
+write_file ".gitkeep" "staged work"
+git -C "$WORK" add .gitkeep
+write_file "y-added.txt" "brand new"
+git -C "$WORK" add y-added.txt
+echo "and more on top" >> "$WORK/.gitkeep"
+porcelain_before="$(git -C "$WORK" status --porcelain | sort)"
+assert_contains "$porcelain_before" "MM .gitkeep" "move_rel_rollback_is_staged"
+assert_contains "$porcelain_before" "A  y-added.txt" "move_rel_rollback_has_added"
+head_before="$(head_hash)"
+dst_before="$(branch_oid y-roll-dst)"
+base_sid=$(commit_sid_from_status "Y dst base")
+first_sid=$(commit_sid_from_status "Y first loose")
+second_sid=$(commit_sid_from_status "Y second loose")
+gl_capture fold "$first_sid" "$second_sid" --above "$base_sid"
+assert_exit_fail "$CODE" "move_rel_rollback_fails"
+assert_contains "$OUT" "conflicts" "move_rel_rollback_reason"
+assert_eq "$(head_hash)" "$head_before" "move_rel_rollback_head"
+assert_eq "$(branch_oid y-roll-dst)" "$dst_before" "move_rel_rollback_dst"
+assert_eq "$(git -C "$WORK" status --porcelain | sort)" "$porcelain_before" "move_rel_rollback_index"
+assert_no_state_file "move_rel_rollback_no_state"
+assert_branch_not_exists "_loom-track" "move_rel_rollback_track_gone"
+
+describe "move --below: conflict → continue → commit reordered"
+setup_repo_with_remote
+create_feature_branch "w-cont"
+switch_to w-cont
+printf "A\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "W one"
+printf "B\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "W two"
+printf "C\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "W three"
+switch_to integration
+weave_branch "w-cont"
+one_sid=$(commit_sid_from_status "W one")
+three_sid=$(commit_sid_from_status "W three")
+gl_capture fold "$three_sid" --below "$one_sid"
+assert_state_file "move_relative_cont_state"
+assert_contains "$OUT" "loom continue" "move_relative_cont_hint"
+# Sending one commit under the two that rewrote the same file conflicts at
+# each replayed step; resolve with distinct content so none becomes empty.
+cont_round=0
+while [[ -f "$WORK/.git/loom/state.json" && $cont_round -lt 6 ]]; do
+    cont_round=$((cont_round + 1))
+    printf "resolved %s\n" "$cont_round" > "$WORK/shared.txt"
+    git -C "$WORK" add shared.txt
+    gl_capture continue
+done
+assert_exit_ok "$CODE" "move_relative_cont_ok"
+assert_no_state_file "move_relative_cont_state_removed"
+assert_contains "$OUT" "below" "move_relative_cont_msg"
+assert_branch_not_exists "_loom-track" "move_relative_cont_track_gone"
+assert_eq "$(git -C "$WORK" log -1 --format=%s w-cont~2)" "W three" "move_relative_cont_bottom"
+assert_log_contains "W one" "move_relative_cont_one_kept"
+assert_log_contains "W two" "move_relative_cont_two_kept"
+
+describe "move --below: rebase refused up front leaves no temp branch"
+setup_repo_with_remote
+create_feature_branch "x-wt"
+switch_to x-wt
+commit_file "X one" "x-one.txt"
+commit_file "X two" "x-two.txt"
+switch_to integration
+weave_branch "x-wt"
+git -C "$WORK" worktree add -q "$WORK/../x-wt-co" x-wt
+one_sid=$(commit_sid_from_status "X one")
+two_sid=$(commit_sid_from_status "X two")
+gl_capture fold "$two_sid" --below "$one_sid"
+assert_exit_fail "$CODE" "move_relative_refused_fails"
+assert_branch_not_exists "_loom-track" "move_relative_refused_track_gone"
+assert_no_state_file "move_relative_refused_state_gone"
+
+describe "move --above: conflict → abort restores history"
+setup_repo_with_remote
+create_feature_branch "v-conf"
+switch_to v-conf
+printf "A\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "V one"
+printf "B\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "V two"
+printf "C\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "V three"
+switch_to integration
+weave_branch "v-conf"
+one_sid=$(commit_sid_from_status "V one")
+three_sid=$(commit_sid_from_status "V three")
+old_head=$(head_hash)
+# The abort replays the autostash unstaged, so only `saved_staged_patch` can
+# bring the index back; an untracked file would pass without it.
+write_file ".gitkeep" "staged work"
+git -C "$WORK" add .gitkeep
+porcelain_before="$(git -C "$WORK" status --porcelain | sort)"
+assert_contains "$porcelain_before" "M  .gitkeep" "move_relative_abort_is_staged"
+gl_capture fold "$three_sid" --below "$one_sid"
+assert_state_file "move_relative_conflict_state"
+assert_contains "$OUT" "loom continue" "move_relative_conflict_hint"
+gl_capture abort
+assert_exit_ok "$CODE" "move_relative_abort_ok"
+assert_no_state_file "move_relative_abort_state_removed"
+assert_eq "$old_head" "$(head_hash)" "move_relative_abort_head_restored"
+assert_branch_not_exists "_loom-track" "move_relative_abort_track_gone"
+assert_eq "$(git -C "$WORK" status --porcelain | sort)" "$porcelain_before" "move_relative_abort_index"
+
+describe "move --below: several commits that conflict — rolled back, index kept"
+setup_repo_with_remote
+create_feature_branch "y-roll"
+switch_to y-roll
+printf "A\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "Y one"
+printf "B\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "Y two"
+printf "C\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "Y three"
+printf "D\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "Y four"
+switch_to integration
+weave_branch "y-roll"
+# Staged-and-modified-again, and newly added: the two shapes the autostash
+# restores differently from a plain staged edit.
+write_file ".gitkeep" "staged work"
+git -C "$WORK" add .gitkeep
+write_file "added-yroll.txt" "brand new"
+git -C "$WORK" add added-yroll.txt
+echo "and more on top" >> "$WORK/.gitkeep"
+porcelain_before="$(git -C "$WORK" status --porcelain | sort)"
+assert_contains "$porcelain_before" "MM .gitkeep" "move_relative_rollback_is_staged"
+assert_contains "$porcelain_before" "A  added-yroll.txt" "move_relative_rollback_has_added"
+head_before="$(head_hash)"
+branch_before="$(git -C "$WORK" rev-parse y-roll)"
+one_sid=$(commit_sid_from_status "Y one")
+three_sid=$(commit_sid_from_status "Y three")
+four_sid=$(commit_sid_from_status "Y four")
+# Y three and Y four rewrite shared.txt from the content Y one and Y two put
+# there, so replaying them under Y one conflicts.
+gl_capture fold "$three_sid" "$four_sid" --below "$one_sid"
+assert_exit_fail "$CODE" "move_relative_rollback_fails"
+# It must fail on the replay, not for some setup reason that would leave the
+# refs untouched anyway and pass the checks below for free.
+assert_contains "$OUT" "conflicts" "move_relative_rollback_reason"
+assert_eq "$(head_hash)" "$head_before" "move_relative_rollback_head"
+assert_eq "$(git -C "$WORK" rev-parse y-roll)" "$branch_before" "move_relative_rollback_branch"
+assert_eq "$(git -C "$WORK" status --porcelain | sort)" "$porcelain_before" "move_relative_rollback_index"
+assert_no_state_file "move_relative_rollback_no_state"
+assert_branch_not_exists "_loom-track" "move_relative_rollback_track_gone"
+
 describe "move: one commit, conflict → abort keeps staged changes"
 setup_repo_with_remote
 create_feature_branch "s-abort-dst"
