@@ -41,7 +41,7 @@ The following messages are required:
 | One commit is in a branch section and one is on the integration line | `Cannot swap commits from different locations (branch section vs integration line)` |
 | A resolved commit is outside the weave graph | `Commit <oid> not found in weave graph` |
 
-Cross-section relocation is not a swap; use `loom fold --move`.
+Cross-section relocation and arbitrary reordering are not swaps; use `loom fold <commit> --above|--below <commit>` (Spec 007).
 
 ## Conflict, Continue, and Abort
 

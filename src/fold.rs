@@ -10,7 +10,7 @@ use crate::core::msg;
 use crate::core::repo::{self, Target, TargetKind};
 use crate::core::staging;
 use crate::core::transaction::{self, LoomState, Rollback};
-use crate::core::weave::{self, EmptiedRefs, RebaseOutcome, Weave};
+use crate::core::weave::{self, EmptiedRefs, Position, RebaseOutcome, Weave};
 use crate::git;
 use crate::tui::hunk_selector::FileEntry;
 
@@ -40,11 +40,26 @@ enum FoldVariant {
         #[serde(default)]
         emptied: Vec<String>,
     },
+    CommitRelative {
+        commit_hash: String,
+        target_hash: String,
+        above: bool,
+        /// Branches the commit was the only commit of, now parked at their base.
+        #[serde(default)]
+        parked: Vec<String>,
+    },
 }
 
 /// Temporary branch used to track a commit's new OID through a rebase.
 const TRACK_BRANCH: &str = "_loom-track";
 const COMMAND: &str = "fold";
+
+/// `--above <commit>` / `--below <commit>`: the commit the sources land next to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Anchor {
+    Above(String),
+    Below(String),
+}
 
 /// Fold source(s) into a target.
 ///
@@ -52,10 +67,17 @@ const COMMAND: &str = "fold";
 /// - File(s) + Commit → amend files into the commit
 /// - Commit + Commit  → fixup source into target (source disappears)
 /// - Commit(s) + Branch → move the commit(s) to the branch, oldest-first
+/// - Commit(s) + `--above`/`--below <commit>` → move next to that commit
 ///
 /// With `--create` (`-c`): create a new branch and move the source commit(s)
 /// into it. The name must not be taken.
-pub fn run(create: bool, patch: bool, args: Vec<String>, theme: &graph::Theme) -> Result<()> {
+pub fn run(
+    create: bool,
+    patch: bool,
+    anchor: Option<Anchor>,
+    args: Vec<String>,
+    theme: &graph::Theme,
+) -> Result<()> {
     if args.is_empty() {
         bail!(
             "At least one argument required\n\
@@ -64,6 +86,10 @@ pub fn run(create: bool, patch: bool, args: Vec<String>, theme: &graph::Theme) -
     }
 
     let repo = repo::open_repo()?;
+
+    if let Some(anchor) = anchor {
+        return run_relative(&repo, &args, anchor);
+    }
 
     if create {
         return run_create(&repo, &args);
@@ -337,19 +363,11 @@ fn move_commits_and_report(
     let parked = match move_commits_to_branch(repo, commit_hashes, branch_name) {
         Ok((RebaseOutcome::Completed, parked)) => parked,
         Ok((RebaseOutcome::Stopped | RebaseOutcome::Paused, _)) => {
-            let err = git::abort_after_failure(workdir);
-            // Only once the rebase is really gone: while it is still on disk
-            // HEAD sits detached mid-pick, so resetting the index there would
-            // clobber it, and the branch may be the checked-out ref.
-            if git::rebase_is_in_progress(repo.path()) {
-                // The abort failed too, so the index is not ours to touch.
-                // Park the staging rather than let it go with the error.
-                save_or_warn(workdir, "unrestored-staged", &saved_staged, true);
-            } else {
-                restage_after_abort(workdir, &saved_staged);
-                if created {
-                    let _ = git::branch_delete(workdir, branch_name);
-                }
+            let err = abort_and_restage(workdir, repo, &saved_staged);
+            // The branch may be the checked-out ref while a failed abort
+            // leaves the rebase on disk.
+            if created && !git::rebase_is_in_progress(repo.path()) {
+                let _ = git::branch_delete(workdir, branch_name);
             }
             return Err(err);
         }
@@ -386,6 +404,193 @@ fn move_commits_and_report(
     msg::success(&message);
 
     Ok(())
+}
+
+/// Abort a stopped non-resumable rebase and put the staged changes back.
+///
+/// `git rebase --abort` replays the autostash into the working tree only.
+/// Only once the rebase is really gone is the index ours to touch: while it
+/// is still on disk HEAD sits detached mid-pick, so the staging is parked in
+/// a patch file instead of going with the error.
+fn abort_and_restage(workdir: &Path, repo: &Repository, saved_staged: &str) -> anyhow::Error {
+    let err = git::abort_after_failure(workdir);
+    if git::rebase_is_in_progress(repo.path()) {
+        save_or_warn(workdir, "unrestored-staged", saved_staged, true);
+    } else {
+        restage_after_abort(workdir, saved_staged);
+    }
+    err
+}
+
+/// `fold <commit>... --above|--below <commit>`: move commits next to another.
+fn run_relative(repo: &Repository, args: &[String], anchor: Anchor) -> Result<()> {
+    let (position, target_arg) = match &anchor {
+        Anchor::Above(target) => (Position::Above, target),
+        Anchor::Below(target) => (Position::Below, target),
+    };
+
+    let mut commit_hashes = Vec::new();
+    for arg in args {
+        match repo::resolve_arg(repo, arg, &[TargetKind::Commit])? {
+            Target::Commit(hash) => commit_hashes.push(hash),
+            _ => unreachable!(),
+        }
+    }
+    let target_hash = match repo::resolve_arg(repo, target_arg, &[TargetKind::Commit])? {
+        Target::Commit(hash) => hash,
+        _ => unreachable!(),
+    };
+
+    let info = repo::gather_commit_graph(repo)?;
+    let commit_hashes = commits_to_move(repo, commit_hashes, weave::base_oid(repo, &info)?)?;
+
+    if commit_hashes.len() == 1 {
+        fold_commit_relative(repo, &commit_hashes[0], &target_hash, position)
+    } else {
+        move_commits_relative_and_report(repo, &commit_hashes, &target_hash, position)
+    }
+}
+
+/// Build the weave with `commit_hashes` moved next to `target_hash`.
+fn plan_relative(
+    repo: &Repository,
+    commit_hashes: &[String],
+    target_hash: &str,
+    position: Position,
+) -> Result<(Weave, Vec<String>)> {
+    let mut graph = Weave::from_repo(repo)?;
+    let oids = commit_hashes
+        .iter()
+        .map(|h| git2::Oid::from_str(h))
+        .collect::<Result<Vec<_>, _>>()?;
+    let parked = graph.move_commits_relative(&oids, git2::Oid::from_str(target_hash)?, position)?;
+    Ok((graph, parked))
+}
+
+/// Resumable single-commit relative move; the moved commit is tracked
+/// through `_loom-track` so the result can name its new hash.
+fn fold_commit_relative(
+    repo: &Repository,
+    commit_hash: &str,
+    target_hash: &str,
+    position: Position,
+) -> Result<()> {
+    let workdir = repo::require_workdir(repo, COMMAND)?;
+    let git_dir = repo.path().to_path_buf();
+
+    let (mut graph, parked) = plan_relative(
+        repo,
+        std::slice::from_ref(&commit_hash.to_string()),
+        target_hash,
+        position,
+    )?;
+    git::branch_force_create(workdir, TRACK_BRANCH, commit_hash)?;
+    graph.track_commit(git2::Oid::from_str(commit_hash)?, TRACK_BRANCH);
+
+    let ctx = serde_json::to_value(FoldVariant::CommitRelative {
+        commit_hash: commit_hash.to_string(),
+        target_hash: target_hash.to_string(),
+        above: position == Position::Above,
+        parked: parked.clone(),
+    })?;
+    let state = LoomState {
+        command: COMMAND.to_string(),
+        rollback: Rollback {
+            delete_branches: vec![TRACK_BRANCH.to_string()],
+            // Same as the branch move: the autostash comes back unstaged.
+            saved_staged_patch: git::diff_cached(workdir)?,
+            ..Default::default()
+        },
+        context: ctx,
+    };
+    transaction::save(&git_dir, &state)?;
+
+    let todo = graph.to_todo();
+    // Not `discard_state_after`: it leaves the temp branch, so a rebase
+    // refused before it starts (a branch checked out elsewhere) would leave
+    // `_loom-track` behind as a branch `status` then lists.
+    let outcome =
+        weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo).map_err(|e| {
+            git::rebase_abort_then_cleanup(workdir, e, || {
+                let _ = git::branch_delete(workdir, TRACK_BRANCH);
+                let _ = transaction::delete(&git_dir);
+            })
+        })?;
+    match outcome {
+        RebaseOutcome::Completed => {
+            transaction::delete(&git_dir)?;
+            let new_hash = git::rev_parse(workdir, TRACK_BRANCH)?;
+            let _ = git::branch_delete(workdir, TRACK_BRANCH);
+            report_moved_relative(commit_hash, position, target_hash, &new_hash, &parked);
+        }
+        RebaseOutcome::Paused => {
+            transaction::warn_paused_at_edit(Some(COMMAND));
+        }
+        RebaseOutcome::Stopped => {
+            transaction::warn_paused(workdir, COMMAND);
+        }
+    }
+
+    Ok(())
+}
+
+/// Non-resumable relative move of several commits: on conflict the rebase
+/// is aborted and the staged changes restored.
+fn move_commits_relative_and_report(
+    repo: &Repository,
+    commit_hashes: &[String],
+    target_hash: &str,
+    position: Position,
+) -> Result<()> {
+    let workdir = repo::require_workdir(repo, COMMAND)?;
+    let (graph, parked) = plan_relative(repo, commit_hashes, target_hash, position)?;
+
+    let saved_staged = git::diff_cached(workdir)?;
+    let todo = graph.to_todo();
+    match weave::run_rebase(workdir, Some(&graph.base_oid.to_string()), &todo)? {
+        RebaseOutcome::Completed => {}
+        RebaseOutcome::Stopped | RebaseOutcome::Paused => {
+            return Err(abort_and_restage(workdir, repo, &saved_staged));
+        }
+    }
+
+    let mut message = format!(
+        "Moved {} commit(s) {} `{}`",
+        commit_hashes.len(),
+        position.as_str(),
+        git::short_hash(target_hash)
+    );
+    if !parked.is_empty() {
+        message.push_str(&format!(
+            "\n{} now empty, at the base",
+            weave::describe_branches(&parked)
+        ));
+    }
+    msg::success(&message);
+    Ok(())
+}
+
+fn report_moved_relative(
+    commit_hash: &str,
+    position: Position,
+    target_hash: &str,
+    new_hash: &str,
+    parked: &[String],
+) {
+    let mut message = format!(
+        "Moved `{}` {} `{}` (now `{}`)",
+        git::short_hash(commit_hash),
+        position.as_str(),
+        git::short_hash(target_hash),
+        git::short_hash(new_hash)
+    );
+    if !parked.is_empty() {
+        message.push_str(&format!(
+            "\n{} now empty, at the base",
+            weave::describe_branches(parked)
+        ));
+    }
+    msg::success(&message);
 }
 
 /// Fold interactively-selected hunks into a target commit, or move/uncommit
@@ -1982,6 +2187,21 @@ pub fn after_continue(workdir: &Path, context: &serde_json::Value) -> Result<()>
             }
             let staged = keep_submodule_removals(workdir, &commit_hash);
             report_uncommitted(&commit_hash, &emptied, &staged);
+        }
+        FoldVariant::CommitRelative {
+            commit_hash,
+            target_hash,
+            above,
+            parked,
+        } => {
+            let new_hash = git::rev_parse(workdir, TRACK_BRANCH)?;
+            let _ = git::branch_delete(workdir, TRACK_BRANCH);
+            let position = if above {
+                Position::Above
+            } else {
+                Position::Below
+            };
+            report_moved_relative(&commit_hash, position, &target_hash, &new_hash, &parked);
         }
     }
 

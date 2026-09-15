@@ -192,7 +192,7 @@ fn execute_action(
         Action::Fold { sources, target } => {
             let mut args = sources;
             args.push(target);
-            fold::run(false, false, args, theme)
+            fold::run(false, false, None, args, theme)
         }
         Action::NewBranch { target } => branch::new::run(None, target),
         Action::Drop { target } => drop::run(target, false),

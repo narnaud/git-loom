@@ -229,7 +229,13 @@ enum Command {
         /// Interactively select hunks to stage before folding
         #[arg(short = 'p', long = "patch")]
         patch: bool,
-        /// Source(s) and target: files, commits, or branches (last arg is the target)
+        /// Move the source commit(s) directly above this commit
+        #[arg(long, value_name = "COMMIT", conflicts_with_all = ["below", "create", "patch"])]
+        above: Option<String>,
+        /// Move the source commit(s) directly below this commit
+        #[arg(long, value_name = "COMMIT", conflicts_with_all = ["create", "patch"])]
+        below: Option<String>,
+        /// Source(s) and target: files, commits, or branches (last arg is the target, unless --above/--below names it)
         #[arg(required = true, num_args = 1..)]
         args: Vec<String>,
     },
@@ -629,8 +635,15 @@ fn main() {
         Some(Command::Fold {
             create,
             patch,
+            above,
+            below,
             args,
-        }) => fold::run(create, patch, args, &theme),
+        }) => {
+            let anchor = above
+                .map(fold::Anchor::Above)
+                .or(below.map(fold::Anchor::Below));
+            fold::run(create, patch, anchor, args, &theme)
+        }
         Some(Command::Trace) => trace::run(),
         Some(Command::Continue) => transaction::continue_run(),
         Some(Command::Abort) => transaction::abort_run(),

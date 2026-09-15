@@ -23,7 +23,7 @@ local commit_matcher = clink.argmatcher()
     :addflags("-b", "--branch", "-m", "--message", "-p", "--patch", "--help", "-h")
 
 local fold_matcher = clink.argmatcher()
-    :addflags("-c", "--create", "-p", "--patch", "--help", "-h")
+    :addflags("-c", "--create", "-p", "--patch", "--above", "--below", "--help", "-h")
 
 local absorb_matcher = clink.argmatcher()
     :addflags("-n", "--dry-run", "--help", "-h")

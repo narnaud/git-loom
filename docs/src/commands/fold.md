@@ -11,9 +11,11 @@ git loom fold -p [<files>...] <target>
 git loom fold -p <commit1> <commit2>
 git loom fold -p <commit> zz
 git loom fold --create <commit>... <new-branch>
+git loom fold <commit>... --above <commit>
+git loom fold <commit>... --below <commit>
 ```
 
-When only a target is given, currently staged files are folded into the target commit. When two or more arguments are provided, the last argument is the target and all preceding arguments are sources.
+When only a target is given, currently staged files are folded into the target commit. When two or more arguments are provided, the last argument is the target and all preceding arguments are sources. With `--above` or `--below`, the option names the target and every positional argument is a source commit.
 
 ### Options
 
@@ -21,6 +23,8 @@ When only a target is given, currently staged files are folded into the target c
 |--------|-------------|
 | `-p, --patch` | Interactively select hunks before folding. Three forms depending on argument types (see below). |
 | `-c, --create` | Create a new branch and move the source commit(s) into it. |
+| `--above <commit>` | Move the source commit(s) directly above (newer than) this commit. |
+| `--below <commit>` | Move the source commit(s) directly below (older than) this commit. |
 
 ## Type Dispatch
 
@@ -37,6 +41,7 @@ The action depends on the types of the arguments, detected automatically:
 | CommitFile | `zz` | **Uncommit file**: remove one file from a commit to working directory |
 | CommitFile | Commit | **Move file**: move one file's changes between commits |
 | Commit | New branch (`-c`) | **Create**: make a new branch and move the commit(s) into it |
+| Commit | Commit (`--above` / `--below`) | **Move next to**: reorder or relocate commit(s) right above or below another commit |
 
 CommitFile sources use the `commit_sid:index` format shown by `git loom status -f` (e.g. `fa:0` for the first file in commit `fa`).
 
@@ -161,6 +166,36 @@ git loom fold d0 feature-a
 # feature-c's commits now build on d0
 ```
 
+### Move a commit next to another commit
+
+`--above` and `--below` place the commit relative to another commit instead of at a branch tip. The target can be in the same branch (a reorder), in another branch, or on the integration line. "Above" and "below" read as in `git loom status`, where newer commits are drawn higher.
+
+```bash
+git loom fold d2 --below d0
+# d2 is pulled down to sit right under d0
+
+git loom fold d0 --above c1
+# d0 leaves its branch and lands right after c1, in c1's branch
+```
+
+Several commits move as one block, in history order, and land together:
+
+```bash
+git loom fold d0 d1 --above c1
+# c1, d0, d1
+```
+
+A branch whose tip was the target follows an `--above` move: the moved commit becomes its new tip, so `--above` a branch tip is the same as moving onto that branch — except when several branches share that tip, where all of them advance, while moving onto a named branch splits the section and advances only that one. With `--below`, the target keeps its branches. As with any move, a branch that ended at the moved commit stays behind, and a branch left empty is parked at its base and named in the result.
+
+A move that would change nothing is refused:
+
+```bash
+git loom fold d1 --above d0
+# ✗ Commit `d1` is already directly above `d0`
+```
+
+A single commit can be resumed with `git loom continue` if it conflicts. A move of several rolls back instead.
+
 ### Create a new branch and move a commit into it
 
 Use `--create` (`-c`) to create a new branch and move the commit in one step. Works whether the commit is a loose commit on the integration line or already on an existing branch.
@@ -258,6 +293,7 @@ The following fold operations support conflict recovery (pause/resume):
 - Amend files into a non-HEAD commit
 - Fixup a commit into another
 - Move a commit to a branch
+- Move a commit above or below another commit
 - Uncommit a commit to the working directory (non-HEAD)
 
 If a supported fold hits a conflict, the operation is paused:
@@ -280,6 +316,7 @@ The following fold operations **do not** support pause/resume and abort immediat
 - Uncommit a single file (`CommitFile → zz`)
 - Move a file between commits (`CommitFile → Commit`)
 - Create a new branch and move a commit (`--create`)
+- Any move of several commits, to a branch or with `--above`/`--below`
 
 See [`continue`](continue.md) and [`abort`](abort.md) for details.
 
