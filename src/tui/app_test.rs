@@ -6,9 +6,7 @@ use crossterm::event::{Event, KeyEvent, MouseEvent};
 use ratatui::style::Style;
 
 use super::*;
-use crate::core::graph::Section;
-use crate::core::repo::{CommitInfo, FileChange, UpstreamInfo};
-use crate::core::shortid::Entity;
+use crate::core::repo::{BranchInfo, CommitInfo, FileChange, UpstreamInfo};
 use crate::core::ui::PromptKind;
 use crate::tui::widgets::common::diff_line_style;
 
@@ -24,43 +22,57 @@ fn file(path: &str, index: char, worktree: char) -> FileChange {
     }
 }
 
-fn make_snapshot() -> Snapshot {
-    let sections = vec![
-        Section::WorkingChanges(vec![file("a.rs", 'M', ' '), file("b.rs", ' ', 'M')]),
-        Section::Branch {
-            names: vec![("feature-a".to_string(), None)],
-            commits: vec![CommitInfo {
-                oid: oid('a'),
-                short_id: "aaaaaaa".to_string(),
-                message: "Add parser".to_string(),
-                parent_oid: Some(oid('9')),
-                files: vec![file("src/parser.rs", 'M', ' ')],
-            }],
-        },
-        Section::Upstream(UpstreamInfo {
-            label: "origin/main".to_string(),
-            tip_oid: oid('9'),
-            merge_base_oid: oid('9'),
-            base_short_id: "9999999".to_string(),
-            base_message: "base".to_string(),
-            base_date: "2026-01-01".to_string(),
-            commits_ahead: 0,
-        }),
-    ];
-    let ids = IdAllocator::new(vec![
-        Entity::Unstaged,
-        Entity::Branch("feature-a".to_string()),
-        Entity::Commit(oid('a')),
-        Entity::File("a.rs".to_string()),
-        Entity::File("b.rs".to_string()),
-    ]);
+fn commit(c: char, parent: char, message: &str) -> CommitInfo {
+    CommitInfo {
+        oid: oid(c),
+        short_id: c.to_string().repeat(7),
+        message: message.to_string(),
+        parent_oid: Some(oid(parent)),
+        files: vec![file("src/parser.rs", 'M', ' ')],
+    }
+}
+
+fn upstream() -> UpstreamInfo {
+    UpstreamInfo {
+        label: "origin/main".to_string(),
+        tip_oid: oid('9'),
+        merge_base_oid: oid('9'),
+        base_short_id: "9999999".to_string(),
+        base_message: "base".to_string(),
+        base_date: "2026-01-01".to_string(),
+        commits_ahead: 0,
+    }
+}
+
+/// `feature-a` owning one commit `a` on base `9`, two local changes.
+fn make_info() -> RepoInfo {
+    RepoInfo {
+        branch_name: "integration".to_string(),
+        upstream: upstream(),
+        commits: vec![commit('a', '9', "Add parser")],
+        branches: vec![BranchInfo {
+            name: "feature-a".to_string(),
+            tip_oid: oid('a'),
+            remote: None,
+        }],
+        working_changes: vec![file("a.rs", 'M', ' '), file("b.rs", ' ', 'M')],
+        context_commits: Vec::new(),
+    }
+}
+
+fn snapshot_of(info: RepoInfo) -> Snapshot {
+    let ids = IdAllocator::new(info.collect_entities());
     Snapshot {
         workdir: PathBuf::from("."),
         git_dir: PathBuf::from("."),
         cwd_prefix: String::new(),
-        sections,
+        info,
         ids,
     }
+}
+
+fn make_snapshot() -> Snapshot {
+    snapshot_of(make_info())
 }
 
 fn make_theme() -> TuiTheme {
@@ -428,16 +440,250 @@ fn rename_is_cancelled_by_escape_and_by_an_unchanged_name() {
     assert!(matches!(app.mode, Mode::RenameBranch { .. }));
 }
 
+/// Key of the fake branch drawn while a new branch is being named.
+fn pending_key() -> String {
+    branch_key(NEW_BRANCH_NAME)
+}
+
 #[test]
-fn new_branch_uses_cursor_commit_as_target() {
+fn new_branch_on_a_tip_commit_is_drawn_co_located_with_its_branch() {
     let theme = make_theme();
     let mut app = make_app(make_snapshot(), &theme);
     move_cursor_to(&mut app, &oid('a').to_string());
 
-    let Some(Action::NewBranch { target }) = app.action_new_branch() else {
+    press(&mut app, KeyCode::Char('b'));
+    let Mode::NewBranch {
+        target,
+        tip,
+        origin,
+        ..
+    } = &app.mode
+    else {
+        panic!("expected new-branch mode");
+    };
+    assert_eq!(target.as_deref(), Some(oid('a').to_string().as_str()));
+    assert_eq!(*tip, oid('a'));
+    assert_eq!(origin, &oid('a').to_string());
+    assert_eq!(
+        cursor_key(&app),
+        pending_key(),
+        "the field takes the cursor"
+    );
+    assert!(app.modal_active(), "the field must own every key");
+
+    // Same tip as feature-a: one co-located group. The placeholder is drawn
+    // on top because the name that will order the group is not typed yet.
+    let at = app.tree.cursor();
+    assert_eq!(app.rows[at + 1].key, "br:feature-a");
+    assert_eq!(app.rows[at + 2].key, oid('a').to_string());
+    let RowKind::BranchName {
+        connector, range, ..
+    } = &app.rows[at + 1].kind
+    else {
+        panic!("expected a branch row");
+    };
+    assert_eq!(*connector, "│├─", "feature-a hangs under the placeholder");
+    assert!(range.is_some(), "drawn as owning `a`");
+    assert_eq!(
+        diff_text(&app.snapshot, &app.rows[at]),
+        "branch not created yet",
+        "but nothing to diff until it exists"
+    );
+
+    // Action and quit keys type into the field instead of firing.
+    for c in "qb".chars() {
+        press(&mut app, KeyCode::Char(c));
+    }
+    let Some(Action::NewBranch { name, target }) =
+        app.handle_name_key(KeyCode::Enter, KeyModifiers::NONE)
+    else {
         panic!("expected a branch action");
     };
+    assert_eq!(name, "qb");
     assert_eq!(target, Some(oid('a').to_string()));
+    assert!(matches!(app.mode, Mode::Normal));
+    assert_eq!(app.next_cursor.as_deref(), Some("br:qb"));
+    // The row keeps the typed name while the command runs.
+    let RowKind::BranchName { name, .. } = &app.rows[at].kind else {
+        panic!("expected a branch row");
+    };
+    assert_eq!(name, "qb");
+
+    // A failed create has no `qb` row to land on and the fake row is gone
+    // too: go back to where `b` was pressed.
+    app.finish_action(Err(anyhow::anyhow!("boom")));
+    assert_eq!(
+        app.next_cursor.as_deref(),
+        Some(oid('a').to_string().as_str())
+    );
+    assert_eq!(app.fallback_cursor, None);
+}
+
+/// feature-a owns `a` and `b`; branching at `b` splits it into a stack.
+#[test]
+fn new_branch_inside_a_branch_splits_it_into_a_stack() {
+    let mut info = make_info();
+    info.commits = vec![
+        commit('a', 'b', "Add parser"),
+        commit('b', '9', "Add lexer"),
+    ];
+    let theme = make_theme();
+    let mut app = make_app(snapshot_of(info), &theme);
+    move_cursor_to(&mut app, &oid('b').to_string());
+
+    press(&mut app, KeyCode::Char('b'));
+    let at = app.tree.cursor();
+    assert_eq!(cursor_key(&app), pending_key());
+    assert_eq!(app.rows[at + 1].key, oid('b').to_string());
+    assert!(
+        matches!(app.rows[at - 1].kind, RowKind::Spacer("││")),
+        "stacked under feature-a"
+    );
+    assert_eq!(app.rows[at - 2].key, oid('a').to_string());
+}
+
+#[test]
+fn new_branch_on_a_branch_row_targets_that_branch() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, "br:feature-a");
+
+    press(&mut app, KeyCode::Char('b'));
+    let Mode::NewBranch { target, tip, .. } = &app.mode else {
+        panic!("expected new-branch mode");
+    };
+    assert_eq!(target.as_deref(), Some("feature-a"));
+    assert_eq!(*tip, oid('a'), "a branch target means its tip");
+    let at = app.tree.cursor();
+    assert_eq!(cursor_key(&app), pending_key());
+    assert_eq!(app.rows[at + 1].key, "br:feature-a");
+
+    for c in "fb".chars() {
+        press(&mut app, KeyCode::Char(c));
+    }
+    assert!(
+        app.handle_name_key(KeyCode::Enter, KeyModifiers::NONE)
+            .is_some()
+    );
+    // Success follows the new branch; the fallback is not used.
+    app.finish_action(Ok(()));
+    assert_eq!(app.next_cursor.as_deref(), Some("br:fb"));
+    assert_eq!(app.fallback_cursor, None);
+}
+
+/// `c` is loose on the integration line; `-t` on it weaves it onto the new
+/// branch (Spec 005), so the preview must already draw it there.
+#[test]
+fn new_branch_on_a_loose_commit_pulls_it_off_the_integration_line() {
+    let mut info = make_info();
+    info.commits = vec![commit('c', 'a', "Tweak"), commit('a', '9', "Add parser")];
+    let theme = make_theme();
+    let mut app = make_app(snapshot_of(info), &theme);
+    move_cursor_to(&mut app, &oid('c').to_string());
+    assert!(
+        matches!(
+            app.rows[app.tree.cursor()].kind,
+            RowKind::Commit {
+                dot_color: None,
+                ..
+            }
+        ),
+        "loose until `b`"
+    );
+
+    press(&mut app, KeyCode::Char('b'));
+    let Mode::NewBranch { target, tip, .. } = &app.mode else {
+        panic!("expected new-branch mode");
+    };
+    assert_eq!(target.as_deref(), Some(oid('c').to_string().as_str()));
+    assert_eq!(*tip, oid('c'));
+
+    let at = app.tree.cursor();
+    assert_eq!(cursor_key(&app), pending_key());
+    let RowKind::BranchName { range, .. } = &app.rows[at].kind else {
+        panic!("expected a branch row");
+    };
+    assert_eq!(
+        range.clone(),
+        Some((oid('a').to_string(), oid('c').to_string())),
+        "owning `c` alone: feature-a's tip stops the walk"
+    );
+    assert_eq!(app.rows[at + 1].key, oid('c').to_string());
+    assert!(
+        matches!(
+            app.rows[at + 1].kind,
+            RowKind::Commit {
+                dot_color: Some(_),
+                ..
+            }
+        ),
+        "drawn on the branch, not the integration line"
+    );
+    let next = app.rows[at + 2..]
+        .iter()
+        .find(|r| r.focusable)
+        .expect("a row after the commit");
+    assert_eq!(next.key, "br:feature-a", "stacked on feature-a");
+}
+
+#[test]
+fn new_branch_off_a_commit_or_branch_lands_at_the_base() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, "wf:a.rs");
+
+    press(&mut app, KeyCode::Char('b'));
+    let Mode::NewBranch { target, tip, .. } = &app.mode else {
+        panic!("expected new-branch mode");
+    };
+    assert_eq!(*target, None, "no -t: the branch is created at the base");
+    assert_eq!(*tip, oid('9'));
+    let at = app.tree.cursor();
+    assert_eq!(cursor_key(&app), pending_key());
+    let RowKind::BranchName { range, .. } = &app.rows[at].kind else {
+        panic!("expected a branch row");
+    };
+    assert!(range.is_none(), "an empty branch owns nothing");
+    let next = app.rows[at + 1..]
+        .iter()
+        .find(|r| r.focusable)
+        .expect("a row after the new branch");
+    assert!(
+        matches!(next.kind, RowKind::Upstream { .. }),
+        "an empty branch is the last section before the upstream marker"
+    );
+}
+
+#[test]
+fn new_branch_is_cancelled_by_escape_and_by_an_empty_name() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, &oid('a').to_string());
+    let rows_before = app.rows.len();
+
+    press(&mut app, KeyCode::Char('b'));
+    assert!(
+        app.handle_name_key(KeyCode::Esc, KeyModifiers::NONE)
+            .is_none()
+    );
+    assert!(matches!(app.mode, Mode::Normal));
+    assert_eq!(app.rows.len(), rows_before, "the fake branch is gone");
+    assert_eq!(cursor_key(&app), oid('a').to_string());
+
+    // Enter with nothing typed stops the creation, like Esc.
+    press(&mut app, KeyCode::Char('b'));
+    assert!(
+        app.handle_name_key(KeyCode::Enter, KeyModifiers::NONE)
+            .is_none()
+    );
+    assert!(matches!(app.mode, Mode::Normal));
+    assert_eq!(app.rows.len(), rows_before);
+
+    // A chord is not text: Ctrl-C cancels instead of typing a `c`.
+    press(&mut app, KeyCode::Char('b'));
+    app.handle_key(PaneId::Left, KeyCode::Char('c'), KeyModifiers::CONTROL);
+    assert!(matches!(app.mode, Mode::Normal));
+    assert_eq!(app.rows.len(), rows_before);
 }
 
 #[test]
@@ -461,13 +707,20 @@ fn command_line_uses_the_short_ids_the_tree_shows() {
     );
     assert_eq!(
         app.command_line(&Action::NewBranch {
+            name: "feature-b".to_string(),
             target: Some("feature-a".to_string()),
         }),
-        format!("loom branch new -t {}", ids.get_branch("feature-a"))
+        format!(
+            "loom branch new feature-b -t {}",
+            ids.get_branch("feature-a")
+        )
     );
     assert_eq!(
-        app.command_line(&Action::NewBranch { target: None }),
-        "loom branch new"
+        app.command_line(&Action::NewBranch {
+            name: "feature-b".to_string(),
+            target: None,
+        }),
+        "loom branch new feature-b"
     );
     assert_eq!(
         app.command_line(&Action::Drop {
@@ -765,6 +1018,39 @@ fn rename_draws_the_edited_name_on_the_branch_row() {
 }
 
 #[test]
+fn new_branch_draws_the_field_on_the_fake_branch_row() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, &oid('a').to_string());
+    press(&mut app, KeyCode::Char('b'));
+    for c in "fix".chars() {
+        press(&mut app, KeyCode::Char(c));
+    }
+
+    let mut shell = Shell::new(app);
+    let backend = ratatui::backend::TestBackend::new(100, 30);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    terminal.draw(|f| shell.render(f)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let lines: Vec<String> = (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect();
+    let at = lines
+        .iter()
+        // The trailing space of the field carries the cursor cell.
+        .position(|line| line.contains("│╭─ ·· [fix ]"))
+        .expect("no fake branch row");
+    assert!(lines[at + 1].contains("│├─ fa [feature-a]"), "{lines:#?}");
+    assert!(lines[at + 2].contains("Add parser"), "{lines:#?}");
+    assert!(lines.iter().any(|line| line.contains(" New branch ")));
+    assert!(lines.iter().any(|line| line.contains("Enter to create")));
+}
+
+#[test]
 fn render_smoke_test_on_every_focusable_row() {
     let theme = make_theme();
     let mut app = make_app(make_snapshot(), &theme);
@@ -846,9 +1132,7 @@ fn repo_snapshot(repo: &crate::core::test_helpers::TestRepo) -> Snapshot {
     Snapshot {
         workdir: repo.workdir(),
         git_dir: repo.repo.path().to_path_buf(),
-        cwd_prefix: String::new(),
-        sections: Vec::new(),
-        ids: IdAllocator::new(Vec::new()),
+        ..make_snapshot()
     }
 }
 

@@ -24,7 +24,7 @@ use ratatui::{
 };
 
 use crate::core::graph::{self, Section};
-use crate::core::repo::{self, RemoteStatus};
+use crate::core::repo::{self, BranchInfo, RemoteStatus, RepoInfo};
 use crate::core::shortid::IdAllocator;
 use crate::core::transaction;
 use crate::core::ui::{self, Answer, Cancelled, Level, Request};
@@ -45,8 +45,26 @@ struct Snapshot {
     workdir: PathBuf,
     git_dir: PathBuf,
     cwd_prefix: String,
-    sections: Vec<Section>,
+    /// Kept as gathered (hidden branches removed) so the graph can be rebuilt
+    /// with a branch that does not exist yet.
+    info: RepoInfo,
     ids: IdAllocator,
+}
+
+/// Placeholder name of a branch being created. Git rejects a ref component
+/// starting with a dot, so it clashes with no real branch; keeping it
+/// non-empty keeps it distinct from "no branch here" sentinels in `graph`.
+const NEW_BRANCH_NAME: &str = ".new";
+
+impl Snapshot {
+    /// The graph sections, with `pending` faked in as a branch at its tip so
+    /// the tree shows where a new branch will land — split ownership,
+    /// co-located names, stacking and all — before it exists.
+    fn sections(&self, pending: Option<&BranchInfo>) -> Vec<Section> {
+        let mut info = self.info.clone();
+        info.branches.extend(pending.cloned());
+        graph::build_sections(info)
+    }
 }
 
 /// A loom command to run on the worker thread.
@@ -59,8 +77,11 @@ enum Action {
         sources: Vec<String>,
         target: String,
     },
-    /// `loom branch new [-t target]`.
-    NewBranch { target: Option<String> },
+    /// `loom branch new <name> [-t target]`.
+    NewBranch {
+        name: String,
+        target: Option<String>,
+    },
     /// `loom drop <target>`.
     Drop { target: String },
     /// `loom reword <target>`; `name` is the new branch name typed in the
@@ -77,11 +98,25 @@ enum Outcome {
 }
 
 /// Input mode: normal, picking the target of a pending fold, or typing a
-/// branch's new name over its row.
+/// branch name over its row (an existing branch's, or a placeholder row for
+/// a branch about to be created).
 enum Mode {
     Normal,
-    FoldTarget { sources: Vec<String> },
-    RenameBranch { branch: String, field: TextField },
+    FoldTarget {
+        sources: Vec<String>,
+    },
+    RenameBranch {
+        branch: String,
+        field: TextField,
+    },
+    NewBranch {
+        target: Option<String>,
+        /// Commit the branch will point at; the fake branch is drawn there.
+        tip: git2::Oid,
+        /// Key of the row `b` was pressed on, to go back to on cancel.
+        origin: String,
+        field: TextField,
+    },
 }
 
 /// The action currently running on its worker thread.
@@ -161,8 +196,7 @@ fn paused_message(command: &str) -> String {
     )
 }
 
-/// Gather repo info and build the graph sections, exactly like `loom status`
-/// with files enabled.
+/// Gather repo info, exactly like `loom status` with files enabled.
 fn load_snapshot() -> Result<Snapshot> {
     let repo = repo::open_repo()?;
     let workdir = repo::require_workdir(&repo, "display status")?.to_path_buf();
@@ -178,7 +212,7 @@ fn load_snapshot() -> Result<Snapshot> {
         workdir,
         git_dir,
         cwd_prefix,
-        sections: graph::build_sections(info),
+        info,
         ids,
     })
 }
@@ -200,7 +234,7 @@ fn execute_action(
             args.push(target);
             fold::run(false, false, None, args, theme)
         }
-        Action::NewBranch { target } => branch::new::run(None, target),
+        Action::NewBranch { name, target } => branch::new::run(Some(name), target),
         Action::Drop { target } => drop::run(target, false),
         Action::Reword { target, name } => reword::run(target, name),
     };
@@ -229,6 +263,9 @@ struct App<'a> {
     /// Row key to put the cursor on after the next reload, for an action that
     /// renames the row it acts on.
     next_cursor: Option<String>,
+    /// Row key to fall back to when the action fails and the row it ran from
+    /// was only a preview (`b`), so no longer exists after the reload.
+    fallback_cursor: Option<String>,
     /// Transient message shown in the status bar until the next key.
     notice: Option<String>,
     /// Exit value set by deep handlers, drained after each key.
@@ -249,21 +286,20 @@ impl<'a> App<'a> {
         graph_theme: graph::Theme,
         expanded: HashSet<String>,
     ) -> Self {
-        let rows = status_tree::build_rows(&snapshot.sections, &snapshot.ids, &expanded);
-        let cursor = rows.iter().position(|r| r.focusable).unwrap_or(0);
         let (request_tx, requests) = channel();
         let mut app = App {
             snapshot,
             theme,
             graph_theme,
-            rows,
-            tree: ListPane::new(cursor),
+            rows: Vec::new(),
+            tree: ListPane::new(0),
             selected: HashSet::new(),
             expanded,
             mode: Mode::Normal,
             diff: DiffPane::new(),
             diff_cache: HashMap::new(),
             next_cursor: None,
+            fallback_cursor: None,
             notice: None,
             outcome: None,
             requests,
@@ -272,10 +308,28 @@ impl<'a> App<'a> {
             popup: None,
             log: Vec::new(),
         };
+        app.rows = app.build_rows();
+        let cursor = app.rows.iter().position(|r| r.focusable).unwrap_or(0);
+        app.tree.set_cursor(cursor);
         // Prime the diff for the initial cursor row so the first render
         // doesn't have to.
         app.ensure_diff_cached();
         app
+    }
+
+    /// The tree rows for the current snapshot, expansion state, and — while
+    /// a new branch is being named — the fake branch at its tip.
+    fn build_rows(&self) -> Vec<Row> {
+        let pending = match &self.mode {
+            Mode::NewBranch { tip, .. } => Some(BranchInfo {
+                name: NEW_BRANCH_NAME.to_string(),
+                tip_oid: *tip,
+                remote: None,
+            }),
+            _ => None,
+        };
+        let sections = self.snapshot.sections(pending.as_ref());
+        status_tree::build_rows(&sections, &self.snapshot.ids, &self.expanded)
     }
 
     fn current_row(&self) -> Option<&Row> {
@@ -292,8 +346,7 @@ impl<'a> App<'a> {
         self.snapshot = snapshot;
         self.selected.clear();
         self.diff_cache.clear();
-        self.rows =
-            status_tree::build_rows(&self.snapshot.sections, &self.snapshot.ids, &self.expanded);
+        self.rows = self.build_rows();
         let cursor = key
             .and_then(|key| self.rows.iter().position(|r| r.focusable && r.key == key))
             .or_else(|| self.rows.iter().position(|r| r.focusable))
@@ -344,8 +397,8 @@ impl<'a> App<'a> {
                 words.extend(sources.iter().map(|s| sid(s)));
                 words.push(sid(target));
             }
-            Action::NewBranch { target } => {
-                words.extend(["branch".into(), "new".into()]);
+            Action::NewBranch { name, target } => {
+                words.extend(["branch".into(), "new".into(), name.clone()]);
                 if let Some(target) = target {
                     words.extend(["-t".into(), sid(target)]);
                 }
@@ -425,9 +478,11 @@ impl<'a> App<'a> {
     /// have changed, so the caller runs [`App::after_action`].
     fn finish_action(&mut self, result: Result<()>) -> bool {
         if result.is_err() {
-            // The row the action would have renamed still has its old key.
-            self.next_cursor = None;
+            // Nothing was renamed or created: aim at the preview's origin row,
+            // or at nothing, since the old key is still the live one.
+            self.next_cursor = self.fallback_cursor.take();
         }
+        self.fallback_cursor = None;
         match result {
             Ok(()) => {
                 let last_success = self.log.last().and_then(|entry| {
@@ -536,8 +591,7 @@ impl<'a> App<'a> {
 
     /// Rebuild rows after an expansion change, keeping the cursor on `key`.
     fn rebuild_rows(&mut self, key: &str) {
-        self.rows =
-            status_tree::build_rows(&self.snapshot.sections, &self.snapshot.ids, &self.expanded);
+        self.rows = self.build_rows();
         if let Some(pos) = self.rows.iter().position(|r| r.key == key) {
             self.tree.set_cursor(pos);
         } else if self.tree.cursor() >= self.rows.len() {
@@ -613,7 +667,10 @@ impl<'a> App<'a> {
                 self.action_fold_start();
                 None
             }
-            KeyCode::Char('b') => self.action_new_branch(),
+            KeyCode::Char('b') => {
+                self.action_new_branch();
+                None
+            }
             KeyCode::Char('d') => self.action_drop(),
             KeyCode::Char('r') => self.action_reword(),
             KeyCode::Char('R') | KeyCode::F(5) => {
@@ -792,13 +849,94 @@ impl<'a> App<'a> {
         Some(Action::Fold { sources, target })
     }
 
-    /// `b`: new branch, using the cursor commit/branch as target when on one.
-    fn action_new_branch(&mut self) -> Option<Action> {
-        let target = self.current_row().and_then(|row| match row.kind {
-            RowKind::Commit { .. } | RowKind::BranchName { .. } => row.target.clone(),
+    /// `b`: start naming a new branch, drawn in the tree as if it already
+    /// existed at the cursor commit or branch tip (its `-t` target), else at
+    /// the base. Nothing runs until the name is confirmed.
+    fn action_new_branch(&mut self) {
+        let Some(row) = self.current_row() else {
+            return;
+        };
+        let origin = row.key.clone();
+        let info = &self.snapshot.info;
+        let (target, tip) = match &row.kind {
+            RowKind::Commit { oid, .. } => (row.target.clone(), *oid),
+            RowKind::BranchName { name, .. } => {
+                let tip = info
+                    .branches
+                    .iter()
+                    .find(|b| b.name == *name)
+                    .map_or(info.upstream.merge_base_oid, |b| b.tip_oid);
+                (row.target.clone(), tip)
+            }
+            _ => (None, info.upstream.merge_base_oid),
+        };
+        self.mode = Mode::NewBranch {
+            target,
+            tip,
+            origin,
+            field: TextField::new(""),
+        };
+        self.rebuild_rows(&branch_key(NEW_BRANCH_NAME));
+        self.diff.reset();
+    }
+
+    /// Whether a branch name is being typed over a row in the tree.
+    fn editing_name(&self) -> bool {
+        matches!(
+            self.mode,
+            Mode::RenameBranch { .. } | Mode::NewBranch { .. }
+        )
+    }
+
+    /// Route a key to whichever branch-name field is open.
+    fn handle_name_key(&mut self, code: KeyCode, modifiers: KeyModifiers) -> Option<Action> {
+        match self.mode {
+            Mode::RenameBranch { .. } => self.handle_rename_key(code, modifiers),
+            Mode::NewBranch { .. } => self.handle_new_branch_key(code, modifiers),
             _ => None,
-        });
-        Some(Action::NewBranch { target })
+        }
+    }
+
+    /// A key while a new branch's name is being typed on its placeholder row.
+    /// Enter creates it; Esc, Ctrl-C, or an empty name drop the row again.
+    fn handle_new_branch_key(&mut self, code: KeyCode, modifiers: KeyModifiers) -> Option<Action> {
+        let Mode::NewBranch {
+            target,
+            origin,
+            field,
+            ..
+        } = &mut self.mode
+        else {
+            return None;
+        };
+        let cancelled = code == KeyCode::Esc
+            || (code == KeyCode::Char('c') && modifiers.contains(KeyModifiers::CONTROL));
+        if !cancelled && code != KeyCode::Enter {
+            field.handle_key(code, modifiers);
+            return None;
+        }
+        let name = field.value().trim().to_string();
+        if cancelled || name.is_empty() {
+            let origin = origin.clone();
+            self.mode = Mode::Normal;
+            self.rebuild_rows(&origin);
+            self.diff.reset();
+            self.notice = Some("branch cancelled".to_string());
+            return None;
+        }
+        let target = target.clone();
+        self.fallback_cursor = Some(origin.clone());
+        self.mode = Mode::Normal;
+        // Keep the row readable while the command runs, then follow the
+        // branch to its real row once the tree reloads.
+        let key = branch_key(NEW_BRANCH_NAME);
+        if let Some(row) = self.rows.iter_mut().find(|r| r.key == key)
+            && let RowKind::BranchName { name: shown, .. } = &mut row.kind
+        {
+            *shown = name.clone();
+        }
+        self.next_cursor = Some(branch_key(&name));
+        Some(Action::NewBranch { name, target })
     }
 
     /// `d`: drop the row under the cursor (commit, branch, or local change).
@@ -887,6 +1025,7 @@ impl<'a> App<'a> {
         let cursor = self.tree.cursor();
         let editing = match &self.mode {
             Mode::RenameBranch { branch, field } => Some((branch_key(branch), field)),
+            Mode::NewBranch { field, .. } => Some((branch_key(NEW_BRANCH_NAME), field)),
             _ => None,
         };
         let items: Vec<ListItem> = self
@@ -914,6 +1053,7 @@ impl<'a> App<'a> {
                 format!(" Fold {} item(s) into... ", sources.len())
             }
             Mode::RenameBranch { .. } => " Rename branch ".to_string(),
+            Mode::NewBranch { .. } => " New branch ".to_string(),
         };
         let block = pane_block(&title, self.theme, focused);
         self.tree
@@ -987,8 +1127,8 @@ impl ShellApp for App<'_> {
     ) -> KeyResult<Outcome> {
         if self.popup.is_some() {
             self.handle_popup_key(code, modifiers);
-        } else if matches!(self.mode, Mode::RenameBranch { .. }) {
-            if let Some(action) = self.handle_rename_key(code, modifiers) {
+        } else if self.editing_name() {
+            if let Some(action) = self.handle_name_key(code, modifiers) {
                 self.start_action(action);
             }
         } else if self.running.is_some() {
@@ -1055,10 +1195,8 @@ impl ShellApp for App<'_> {
     }
 
     fn modal_active(&self) -> bool {
-        // Renaming owns the keyboard too: `q` and Tab must reach the field.
-        self.popup.is_some()
-            || self.running.is_some()
-            || matches!(self.mode, Mode::RenameBranch { .. })
+        // A name field owns the keyboard too: `q` and Tab must reach it.
+        self.popup.is_some() || self.running.is_some() || self.editing_name()
     }
 
     fn poll_background(&mut self) -> Tick<Outcome> {
@@ -1136,6 +1274,9 @@ impl ShellApp for App<'_> {
             }
             Mode::RenameBranch { .. } => Some(
                 " rename: type the new branch name, Enter to confirm, Esc to cancel".to_string(),
+            ),
+            Mode::NewBranch { .. } => Some(
+                " branch: type the new branch name, Enter to create, Esc to cancel".to_string(),
             ),
             Mode::Normal => None,
         }
@@ -1226,7 +1367,12 @@ fn row_line(
             ..
         } => {
             spans.push(Span::styled(format!("{} ", connector), theme.graph));
-            spans.push(Span::styled(row.sid.clone(), theme.shortid));
+            if row.key == branch_key(NEW_BRANCH_NAME) {
+                // A branch being created has no short ID yet; keep the column.
+                spans.push(Span::styled("··", dim));
+            } else {
+                spans.push(Span::styled(row.sid.clone(), theme.shortid));
+            }
             spans.push(Span::styled(" [", dim));
             match editing {
                 Some(field) => spans.extend(field.spans(theme)),
@@ -1331,6 +1477,10 @@ fn row_line(
 /// Produce the raw diff text for a row by shelling out to git.
 fn diff_text(snapshot: &Snapshot, row: &Row) -> String {
     let workdir = &snapshot.workdir;
+    // The branch being named owns commits only on paper until it is created.
+    if row.key == branch_key(NEW_BRANCH_NAME) {
+        return "branch not created yet".to_string();
+    }
     let result = match &row.kind {
         RowKind::LocalChanges { count } => {
             if *count == 0 {

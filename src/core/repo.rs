@@ -456,7 +456,7 @@ pub fn cwd_relative_path(repo_path: &str, cwd_prefix: &str) -> String {
 }
 
 /// Info about the upstream tracking branch and the merge-base with HEAD.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UpstreamInfo {
     /// Full name of the upstream ref (e.g. "origin/main").
     pub label: String,
@@ -474,7 +474,7 @@ pub struct UpstreamInfo {
 
 /// All data needed to render the status: commits between HEAD and the upstream
 /// tracking branch, detected feature branches, and working tree status.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RepoInfo {
     /// Name of the current (integration) branch.
     pub branch_name: String,
@@ -515,7 +515,7 @@ impl RepoInfo {
 }
 
 /// A single non-merge commit in the range upstream..HEAD.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CommitInfo {
     pub oid: git2::Oid,
     /// Abbreviated hash respecting the repo's core.abbrev setting.
@@ -544,7 +544,7 @@ pub enum RemoteStatus {
 }
 
 /// A local branch whose tip falls within the upstream..HEAD range.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BranchInfo {
     pub name: String,
     pub tip_oid: git2::Oid,
@@ -553,7 +553,7 @@ pub struct BranchInfo {
 
 /// A context commit shown below the upstream base for history context.
 /// These are display-only (no short ID, not actionable).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ContextCommit {
     pub short_hash: String,
     pub message: String,
@@ -561,7 +561,7 @@ pub struct ContextCommit {
 }
 
 /// A file with staged or unstaged changes in the working tree.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FileChange {
     pub path: String,
     /// Index (staged) status: ' ', 'A', 'M', 'D', 'R', or '?'

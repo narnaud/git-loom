@@ -40,7 +40,7 @@ Short IDs are displayed like in `git loom status`, so the tree doubles as a chea
 | `PgUp`/`PgDn` | Scroll the diff by a page |
 | Mouse click / wheel | Focus, move, scroll |
 | `R` / `F5` | Reload the tree from the repo |
-| `Esc` | Cancel fold or rename mode → clear selection → quit (first that applies) |
+| `Esc` | Cancel fold, rename, or new-branch mode → clear selection → quit (first that applies) |
 | `q` / `Ctrl-C` | Quit |
 
 Commits are collapsed by default; unfolding reveals one row per changed file. Local changes start expanded. Expansion state survives reloads.
@@ -57,7 +57,7 @@ Every action suspends the TUI, runs the regular loom command — prompts and edi
 |-----|---------|-----------|
 | `c` | [`commit`](commit.md) | Selected working files; nothing relevant selected → the index as-is. Branch and message are prompted as usual. |
 | `f` | [`fold`](fold.md) | Two-step: `f` captures the selection (or cursor row) as sources; move the cursor to the target and press `Enter` (`Esc` cancels). While picking a target, other action keys are inactive. |
-| `b` | [`branch new`](branch.md) | Cursor commit or branch as the `-t` target when on one; name is prompted. |
+| `b` | [`branch new`](branch.md) | The branch appears in the tree where it will land once created — at the cursor commit or branch tip (its `-t` target), else at the base — and you type its name right there. `Enter` creates it, `Esc` or an empty name cancels. |
 | `d` | [`drop`](drop.md) | Cursor commit, branch, or working file; confirmation prompt as usual. |
 | `r` | [`reword`](reword.md) | Cursor commit: opens the editor. Cursor branch: edit the name in place on its row — `Enter` renames, `Esc` cancels. |
 
@@ -67,7 +67,7 @@ Every action suspends the TUI, runs the regular loom command — prompts and edi
 |-----|------------|
 | `[local changes]` | Staged + unstaged changes (`git diff HEAD`) |
 | Working file | That file's diff; untracked files show their content as added lines |
-| Branch name | Everything the branch owns |
+| Branch name | Everything the branch owns (nothing while a new branch is still being named) |
 | Commit | `git show` with stats and patch |
 | Commit file | That file's change within the commit |
 
