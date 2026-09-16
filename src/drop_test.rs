@@ -1,5 +1,6 @@
 use crate::core::test_helpers::TestRepo;
 use crate::core::ui;
+use crate::core::weave::Weave;
 
 // ── Helper: create a woven branch with commits ─────────────────────────
 
@@ -299,6 +300,19 @@ fn messages_name_the_sibling_that_keeps_the_commits() {
 }
 
 #[test]
+fn messages_claim_no_keeper_when_no_ref_names_the_section() {
+    use super::DropScope::KeptInHistory;
+    assert_eq!(
+        super::drop_prompt("feat", &KeptInHistory),
+        "Drop branch `feat`, keeping its commits in history?"
+    );
+    assert_eq!(
+        super::dropped_message("feat", &KeptInHistory),
+        "Dropped branch `feat`, its commits stay in history"
+    );
+}
+
+#[test]
 fn drop_non_woven_branch_removes_commits_and_ref() {
     let test_repo = TestRepo::new_with_remote();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
@@ -554,9 +568,8 @@ fn drop_sole_commit_shared_by_two_branches_leaves_them_empty() {
 }
 
 #[test]
-fn drop_stacked_inner_branch_is_refused() {
-    // Same topology as above: feat2 is stacked on feat1.
-    // Dropping feat1 (the inner branch) is refused — it would rewrite feat2.
+fn drop_stacked_inner_branch_deletes_only_the_ref() {
+    // base -> A1 (feat1) -> A2 (feat2), woven in: feat1 is inside feat2's section.
     let test_repo = TestRepo::new_with_remote();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
@@ -572,20 +585,121 @@ fn drop_stacked_inner_branch_is_refused() {
 
     test_repo.commit("Int", "int.txt");
     test_repo.merge_no_ff("feat2");
+    let head_before = test_repo.head_oid();
+    let feat2_before = test_repo.get_branch_target("feat2");
 
-    let result = super::drop_branch(&test_repo.repo, "feat1", true);
-    let err = result.expect_err("dropping an inner branch should be refused");
-    assert!(
-        err.to_string().contains("stacked inside 'feat2'"),
-        "unexpected error: {err}"
-    );
+    super::drop_branch(&test_repo.repo, "feat1", true).expect("dropping an inner branch");
 
-    // Nothing was changed
-    assert!(test_repo.branch_exists("feat1"), "feat1 should still exist");
+    assert!(!test_repo.branch_exists("feat1"), "feat1 should be deleted");
     assert!(test_repo.branch_exists("feat2"), "feat2 should still exist");
+    assert_eq!(test_repo.head_oid(), head_before, "no history rewritten");
+    assert_eq!(test_repo.get_branch_target("feat2"), feat2_before);
     let messages = test_repo.commit_messages();
     assert!(messages.contains(&"A1".to_string()));
     assert!(messages.contains(&"A2".to_string()));
+}
+
+/// Deleting the outer ref leaves a section carrying a generated `section-<hash>`
+/// label; the drop must not offer that label as the branch keeping the commits.
+#[test]
+fn drop_inner_branch_of_an_unnamed_section_names_no_keeper() {
+    // base -> A1 (feat1) -> A2, merged in, then the outer ref is deleted.
+    let test_repo = TestRepo::new_with_remote();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    test_repo.create_branch_at("feat1", &base_oid.to_string());
+    test_repo.switch_branch("feat1");
+    test_repo.commit("A1", "a1.txt");
+    let feat1_tip = test_repo.head_oid();
+
+    test_repo.create_branch_at("feat2", &feat1_tip.to_string());
+    test_repo.switch_branch("feat2");
+    test_repo.commit("A2", "a2.txt");
+    test_repo.switch_branch("integration");
+    test_repo.merge_no_ff("feat2");
+    test_repo.delete_branch("feat2");
+    let head_before = test_repo.head_oid();
+
+    let graph = Weave::from_repo(&test_repo.repo).expect("weave graph");
+    assert_eq!(
+        graph.inner_branch_keeper("feat1"),
+        None,
+        "no ref names the section, so it has no keeper to show"
+    );
+
+    super::drop_branch(&test_repo.repo, "feat1", true).expect("dropping an inner branch");
+
+    assert!(!test_repo.branch_exists("feat1"), "feat1 should be deleted");
+    assert_eq!(test_repo.head_oid(), head_before, "no history rewritten");
+    let messages = test_repo.commit_messages();
+    assert!(messages.contains(&"A1".to_string()));
+    assert!(messages.contains(&"A2".to_string()));
+}
+
+/// Guards the inner-branch shortcut against a branch on the integration line
+/// that a later section's commits also cover: only the `assigned_branches`
+/// ordering in `Weave::from_repo_with_info` keeps it off the shortcut, so a
+/// reorder there would silently turn this drop into a bare ref delete.
+#[test]
+fn non_woven_branch_covered_by_a_woven_section_is_not_inner() {
+    // base -> I1 (old) on the line; feat forks at I1 and is woven, so feat's
+    // section walks back over I1 too.
+    let test_repo = TestRepo::new_with_remote();
+
+    let i1_oid = test_repo.commit("I1", "i1.txt");
+    test_repo.create_branch_at("old", &i1_oid.to_string());
+    test_repo.create_branch_at("feat", &i1_oid.to_string());
+    test_repo.switch_branch("feat");
+    test_repo.commit("F1", "f1.txt");
+    test_repo.switch_branch("integration");
+    test_repo.merge_no_ff("feat");
+    let head_before = test_repo.head_oid();
+
+    let graph = Weave::from_repo(&test_repo.repo).expect("weave graph");
+    assert!(
+        !graph.is_inner_branch("old"),
+        "the Pick owns the ref, not feat"
+    );
+    assert_eq!(graph.inner_branch_keeper("old"), None);
+
+    super::drop_branch(&test_repo.repo, "old", true).expect("dropping a non-woven branch");
+
+    assert!(!test_repo.branch_exists("old"), "old should be deleted");
+    assert_ne!(
+        test_repo.head_oid(),
+        head_before,
+        "the non-woven path rebases; the inner shortcut would not"
+    );
+}
+
+/// Guards the inner-branch shortcut against a stack left on the integration
+/// line: no weave section covers it, so it takes the non-woven path and its
+/// commits do go, rewriting the branch stacked on top.
+#[test]
+fn drop_non_woven_stacked_inner_branch_drops_its_commits() {
+    // base -> A1 (feat1) -> A2 (feat2), never woven: both tips are on the
+    // integration first-parent line.
+    let test_repo = TestRepo::new_with_remote();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    let a1_oid = test_repo.commit("A1", "a1.txt");
+    test_repo.create_branch_at("feat1", &a1_oid.to_string());
+    let a2_oid = test_repo.commit("A2", "a2.txt");
+    test_repo.create_branch_at("feat2", &a2_oid.to_string());
+
+    super::drop_branch(&test_repo.repo, "feat1", true).expect("dropping a non-woven inner branch");
+
+    assert!(!test_repo.branch_exists("feat1"), "feat1 should be deleted");
+    assert!(test_repo.branch_exists("feat2"), "feat2 should still exist");
+    let messages = test_repo.commit_messages();
+    assert!(!messages.contains(&"A1".to_string()), "A1 should be gone");
+    assert!(messages.contains(&"A2".to_string()), "A2 should survive");
+    let feat2 = test_repo.find_commit(test_repo.get_branch_target("feat2"));
+    assert_eq!(
+        feat2.parent_id(0).unwrap(),
+        base_oid,
+        "feat2 replayed on base"
+    );
 }
 
 /// Aborting a drop that conflicted puts the branch it would have emptied back

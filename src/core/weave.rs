@@ -468,11 +468,21 @@ impl Weave {
         self.section_index(branch_name).is_some()
     }
 
-    /// Label of the section containing `branch_name` as an inner (stacked) ref,
-    /// i.e. a branch whose tip is a commit inside another branch's section.
-    pub fn inner_branch_section(&self, branch_name: &str) -> Option<&str> {
-        self.inner_ref_position(branch_name)
-            .map(|(s, _)| self.branch_sections[s].label.as_str())
+    /// Whether `branch_name` is an inner (stacked) ref, i.e. a branch whose tip
+    /// is a commit inside another branch's section.
+    pub fn is_inner_branch(&self, branch_name: &str) -> bool {
+        self.inner_ref_position(branch_name).is_some()
+    }
+
+    /// Branch keeping an inner (stacked) branch's commits. `None` when no ref
+    /// sits at its section's tip: the section label is generated there, so it
+    /// must never be shown as a branch name.
+    pub fn inner_branch_keeper(&self, branch_name: &str) -> Option<&str> {
+        let (s, _) = self.inner_ref_position(branch_name)?;
+        self.branch_sections[s]
+            .branch_names
+            .first()
+            .map(String::as_str)
     }
 
     /// Section and commit indices of the commit carrying `branch_name` as an

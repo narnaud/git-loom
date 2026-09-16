@@ -274,20 +274,20 @@ fn drop_branch(repo: &Repository, branch_name: &str, skip_confirm: bool) -> Resu
 
     let mut graph = Weave::from_repo_with_info(repo, info)?;
 
-    // An inner (stacked) branch has no section of its own in the weave graph;
-    // dropping it would rewrite the branch stacked on top of it. Refuse
-    // before prompting.
-    if is_woven
-        && !graph.has_branch_section(branch_name)
-        && let Some(outer) = graph.inner_branch_section(branch_name)
-    {
-        bail!(
-            "Cannot drop branch: '{}' is stacked inside '{}'\n\
-             Drop individual commits with `loom drop <id>`, or delete just the ref with `git branch -D {}`",
-            branch_name,
-            outer,
-            branch_name
-        );
+    // An inner (stacked) branch has no section of its own: its commits belong
+    // to the outer branch's section, so only the ref goes and nothing rewrites.
+    // A non-woven branch never matches, even though a later section's commits
+    // do cover the integration line: its Pick is built first and claims the ref
+    // (`assigned_branches`), so no section lists it. It takes the path below.
+    if !graph.has_branch_section(branch_name) && graph.is_inner_branch(branch_name) {
+        let scope = match graph.inner_branch_keeper(branch_name) {
+            Some(outer) => DropScope::KeptBy(outer),
+            None => DropScope::KeptInHistory,
+        };
+        confirm_or_bail(skip_confirm, &drop_prompt(branch_name, &scope))?;
+        git::branch_delete(workdir, branch_name)?;
+        msg::success(&dropped_message(branch_name, &scope));
+        return Ok(());
     }
 
     let owned = if is_woven {
@@ -373,8 +373,12 @@ fn drop_branch(repo: &Repository, branch_name: &str, skip_confirm: bool) -> Resu
 enum DropScope<'a> {
     /// Commits removed from history.
     Commits(usize),
-    /// Nothing removed: a co-located sibling at the same tip keeps them.
+    /// Nothing removed: a co-located sibling at the same tip, or the outer
+    /// branch of a stacked one, keeps them.
     KeptBy(&'a str),
+    /// Nothing removed, and no branch to name: the commits stay in the
+    /// integration history, inside a section no ref sits at.
+    KeptInHistory,
     /// Nothing to remove: the branch sits at the merge-base.
     Empty,
 }
@@ -391,6 +395,12 @@ fn drop_prompt(branch_name: &str, scope: &DropScope) -> String {
             "Drop branch `{}`, keeping its commits on `{}`?",
             branch_name, keep
         ),
+        DropScope::KeptInHistory => {
+            format!(
+                "Drop branch `{}`, keeping its commits in history?",
+                branch_name
+            )
+        }
         // An empty branch is dropped without confirmation, so `Empty` only
         // reaches here if that ever changes.
         DropScope::Empty | DropScope::Commits(0) => format!("Drop branch `{}`?", branch_name),
@@ -410,6 +420,12 @@ fn dropped_message(branch_name: &str, scope: &DropScope) -> String {
             "Dropped branch `{}`, its commits stay on `{}`",
             branch_name, keep
         ),
+        DropScope::KeptInHistory => {
+            format!(
+                "Dropped branch `{}`, its commits stay in history",
+                branch_name
+            )
+        }
         DropScope::Commits(0) => format!("Dropped branch `{}`", branch_name),
         DropScope::Commits(n) => format!(
             "Dropped branch `{}` and its {}",

@@ -1563,8 +1563,7 @@ fn plan_move(
     // gets a section created for it. That happens when the branch sits at the
     // merge-base with no commits of its own: never woven, or a previous rebase
     // dropped its degenerate merge. Same pattern as commit.rs.
-    let is_woven =
-        graph.has_branch_section(branch_name) || graph.inner_branch_section(branch_name).is_some();
+    let is_woven = graph.has_branch_section(branch_name) || graph.is_inner_branch(branch_name);
     if !is_woven {
         // Only a branch at the merge-base (empty) or not yet existing can get a
         // synthetic section; a diverged one is out of scope.

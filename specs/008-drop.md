@@ -57,7 +57,8 @@ repository rather than leaving resumable state.
 | Non-woven (tip is on the first-parent line) | Drop its owned commits from the integration line and delete its ref. |
 | Co-located woven | Preserve shared commits and merge topology, assign the section to the first surviving sibling in branch order, and delete only the target ref. |
 | Co-located non-woven | Preserve shared commits and delete only the target ref. |
-| Inner/stacked | Refuse before confirmation because removing it would rewrite the outer branch. |
+| Inner/stacked woven (tip inside another branch's section) | Delete only the ref; the outer branch keeps every commit and nothing is rewritten. Use the sibling-keeping messages with the outer branch as the sibling. |
+| Inner/stacked non-woven (tip on the first-parent line) | Follow the non-woven rule: its owned commits leave the integration line and the branches stacked on it are rewritten. |
 
 Confirmation and success must both state how much is removed, so `-y` users
 still learn the size of the drop. The count is the branch's own commits, not
@@ -69,23 +70,18 @@ picks too. The merge entry the drop also removes is not counted. With a zero cou
 `Dropped branch <name> and its <n> commits` (singular `1 commit`). When the
 branch owns no commit of its own, name the sibling keeping them instead, in
 both messages: `Drop branch <name>, keeping its commits on <sibling>?` and
-`Dropped branch <name>, its commits stay on <sibling>`.
+`Dropped branch <name>, its commits stay on <sibling>`. When no ref names the
+section keeping them, say `in history` in place of the sibling; never show a
+generated section label as a branch.
 
 A woven or non-woven branch must be between merge-base and `HEAD`. Otherwise
 error `Branch '<name>' is not woven into the integration branch` and hint to
 use `git branch -d <name>` directly.
 
-For an inner branch, print:
-
-```text
-Cannot drop branch: 'feat1' is stacked inside 'feat2'
-Drop individual commits with `loom drop <id>`, or delete just the ref with `git branch -D feat1`
-```
-
-Dropping the outer branch is allowed and preserves an inner branch. Preserve
-commits and refs on other branches and direct integration commits; rewrite
-only affected descendants and refs. Automatically preserve uncommitted
-changes. The merge-base-only case works with any working-tree state.
+Dropping the outer branch preserves an inner branch. Preserve commits and refs
+on other branches and direct integration commits; rewrite only affected
+descendants and refs. Automatically preserve uncommitted changes. The
+merge-base-only case works with any working-tree state.
 
 ## File and `zz` Targets
 

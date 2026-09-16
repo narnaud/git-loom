@@ -68,6 +68,14 @@ git loom drop feature-b
 
 **Co-located branches** (sharing the same tip commit with another branch): only the branch ref is deleted. Commits are preserved for the surviving sibling branch, and the merge topology is reassigned.
 
+**Stacked branches**: dropping the inner branch of a woven stack only deletes its ref, since the outer branch already carries its commits. Dropping the outer branch removes its own commits and keeps the inner branch. A stack that is not woven sits on the integration line, so dropping its inner branch removes that branch's commits like any other non-woven branch.
+
+```bash
+git loom drop feat1
+# Drop branch `feat1`, keeping its commits on `feat2`? (y/n)
+# ✓ Dropped branch `feat1`, its commits stay on `feat2`
+```
+
 ### When Target is a File
 
 Behavior depends on the file's status:

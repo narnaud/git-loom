@@ -273,6 +273,27 @@ assert_branch_not_exists "g-coloc-nw-a"    "drop_coloc_nw_a_gone"
 assert_branch_exists     "h-coloc-nw-b"    "drop_coloc_nw_b_survives"
 assert_log_contains      "Coloc NW commit" "drop_coloc_nw_commits_preserved"
 
+# ── DROP STACKED INNER BRANCH ─────────────────────────────────────────────────
+
+describe "drop stacked inner branch only deletes ref"
+setup_repo_with_remote
+create_feature_branch "g-stack-inner"
+switch_to g-stack-inner
+commit_file "Stack inner commit" "stack-inner.txt"
+git -C "$WORK" branch h-stack-outer g-stack-inner
+switch_to h-stack-outer
+commit_file "Stack outer commit" "stack-outer.txt"
+switch_to integration
+weave_branch "h-stack-outer"
+head_before=$(head_hash)
+out=$(gl drop g-stack-inner --yes)
+assert_exit_ok $? "drop_stack_inner_ok"
+assert_contains "$out" "its commits stay on h-stack-outer" "drop_stack_inner_keeper_msg"
+assert_branch_not_exists "g-stack-inner"  "drop_stack_inner_gone"
+assert_branch_exists     "h-stack-outer"  "drop_stack_inner_outer_survives"
+assert_eq "$(head_hash)" "$head_before" "drop_stack_inner_no_rewrite"
+assert_log_contains      "Stack inner commit" "drop_stack_inner_commit_preserved"
+
 # ── DROP BRANCH AT MERGE-BASE (NO COMMITS) ────────────────────────────────────
 
 describe "drop branch at merge-base deletes ref, no rebase needed"
