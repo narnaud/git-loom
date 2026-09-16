@@ -40,7 +40,7 @@ Short IDs are displayed like in `git loom status`, so the tree doubles as a chea
 | `PgUp`/`PgDn` | Scroll the diff by a page |
 | Mouse click / wheel | Focus, move, scroll |
 | `R` / `F5` | Reload the tree from the repo |
-| `Esc` | Cancel fold mode → clear selection → quit (first that applies) |
+| `Esc` | Cancel fold or rename mode → clear selection → quit (first that applies) |
 | `q` / `Ctrl-C` | Quit |
 
 Commits are collapsed by default; unfolding reveals one row per changed file. Local changes start expanded. Expansion state survives reloads.
@@ -59,7 +59,7 @@ Every action suspends the TUI, runs the regular loom command — prompts and edi
 | `f` | [`fold`](fold.md) | Two-step: `f` captures the selection (or cursor row) as sources; move the cursor to the target and press `Enter` (`Esc` cancels). While picking a target, other action keys are inactive. |
 | `b` | [`branch new`](branch.md) | Cursor commit or branch as the `-t` target when on one; name is prompted. |
 | `d` | [`drop`](drop.md) | Cursor commit, branch, or working file; confirmation prompt as usual. |
-| `r` | [`reword`](reword.md) | Cursor commit (opens editor) or branch (prompts rename). |
+| `r` | [`reword`](reword.md) | Cursor commit: opens the editor. Cursor branch: edit the name in place on its row — `Enter` renames, `Esc` cancels. |
 
 ### Diff Pane
 

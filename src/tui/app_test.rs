@@ -335,10 +335,97 @@ fn drop_and_reword_require_an_actionable_row() {
 
     // Commit row: actionable.
     move_cursor_to(&mut app, &oid('a').to_string());
-    let Some(Action::Reword { target }) = app.action_reword() else {
+    let Some(Action::Reword { target, name }) = app.action_reword() else {
         panic!("expected a reword action");
     };
     assert_eq!(target, oid('a').to_string());
+    assert_eq!(name, None);
+}
+
+#[test]
+fn reword_on_a_branch_renames_it_in_the_tree() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, "br:feature-a");
+
+    assert!(matches!(
+        press(&mut app, KeyCode::Char('r')),
+        KeyResult::Handled
+    ));
+    let Mode::RenameBranch { branch, field } = &app.mode else {
+        panic!("expected rename mode");
+    };
+    assert_eq!(branch, "feature-a");
+    assert_eq!(
+        field.value(),
+        "feature-a",
+        "the field starts at the old name"
+    );
+    assert!(app.modal_active(), "the field must own every key");
+
+    // Action and quit keys type into the field instead of firing.
+    for code in [KeyCode::Backspace, KeyCode::Char('q')] {
+        assert!(matches!(press(&mut app, code), KeyResult::Handled));
+    }
+    // A chord is not text: Ctrl-U must not rename the branch to `feature-qu`.
+    app.handle_key(PaneId::Left, KeyCode::Char('u'), KeyModifiers::CONTROL);
+    let Mode::RenameBranch { field, .. } = &app.mode else {
+        panic!("expected rename mode");
+    };
+    assert_eq!(field.value(), "feature-q");
+    assert!(
+        app.handle_rename_key(KeyCode::Backspace, KeyModifiers::NONE)
+            .is_none()
+    );
+    assert!(
+        app.handle_rename_key(KeyCode::Char('b'), KeyModifiers::NONE)
+            .is_none()
+    );
+    let Some(Action::Reword { target, name }) =
+        app.handle_rename_key(KeyCode::Enter, KeyModifiers::NONE)
+    else {
+        panic!("expected a reword action");
+    };
+    assert_eq!(target, "feature-a");
+    assert_eq!(name.as_deref(), Some("feature-b"));
+    assert!(matches!(app.mode, Mode::Normal));
+    assert_eq!(app.next_cursor.as_deref(), Some("br:feature-b"));
+
+    // A failed rename leaves the cursor on the row that kept its name.
+    app.finish_action(Err(anyhow::anyhow!("boom")));
+    assert_eq!(app.next_cursor, None);
+}
+
+#[test]
+fn rename_is_cancelled_by_escape_and_by_an_unchanged_name() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, "br:feature-a");
+
+    app.action_reword();
+    assert!(
+        app.handle_rename_key(KeyCode::Esc, KeyModifiers::NONE)
+            .is_none()
+    );
+    assert!(matches!(app.mode, Mode::Normal));
+
+    app.action_reword();
+    assert!(
+        app.handle_rename_key(KeyCode::Enter, KeyModifiers::NONE)
+            .is_none()
+    );
+    assert!(matches!(app.mode, Mode::Normal));
+
+    // An empty name keeps the field open rather than renaming to nothing.
+    app.action_reword();
+    for _ in 0.."feature-a".len() {
+        app.handle_rename_key(KeyCode::Backspace, KeyModifiers::NONE);
+    }
+    assert!(
+        app.handle_rename_key(KeyCode::Enter, KeyModifiers::NONE)
+            .is_none()
+    );
+    assert!(matches!(app.mode, Mode::RenameBranch { .. }));
 }
 
 #[test]
@@ -392,8 +479,16 @@ fn command_line_uses_the_short_ids_the_tree_shows() {
     assert_eq!(
         app.command_line(&Action::Reword {
             target: "deadbeef".to_string(),
+            name: None,
         }),
         "loom reword deadbeef"
+    );
+    assert_eq!(
+        app.command_line(&Action::Reword {
+            target: "feature-a".to_string(),
+            name: Some("feature-b".to_string()),
+        }),
+        format!("loom reword {} -m feature-b", ids.get_branch("feature-a"))
     );
 }
 
@@ -620,6 +715,53 @@ fn popups_render_over_the_panes() {
         .join("\n");
     assert!(text.contains(" Target branch "));
     assert!(text.contains("feature-a"));
+}
+
+#[test]
+fn rename_draws_the_edited_name_on_the_branch_row() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, "br:feature-a");
+    press(&mut app, KeyCode::Char('r'));
+    for code in [KeyCode::Backspace, KeyCode::Char('z')] {
+        press(&mut app, code);
+    }
+
+    let mut shell = Shell::new(app);
+    let backend = ratatui::backend::TestBackend::new(100, 30);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    terminal.draw(|f| shell.render(f)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let text: String = (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    // The trailing space of the field carries the cursor cell.
+    assert!(
+        text.contains("[feature-z ]"),
+        "field drawn in place: {text}"
+    );
+    assert!(text.contains(" Rename branch "));
+    assert!(text.contains("Esc to cancel"));
+
+    let (x, y) = (0..buffer.area.height)
+        .flat_map(|y| (0..buffer.area.width).map(move |x| (x, y)))
+        .find(|&(x, y)| {
+            buffer[(x, y)]
+                .style()
+                .add_modifier
+                .contains(Modifier::REVERSED)
+        })
+        .expect("no cursor cell");
+    assert_eq!(
+        buffer[(x - 1, y)].symbol(),
+        "z",
+        "cursor sits after the name"
+    );
 }
 
 #[test]

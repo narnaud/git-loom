@@ -13,6 +13,11 @@ use crate::core::shortid::IdAllocator;
 /// Key of the local-changes section in the expansion set.
 pub(crate) const LOCAL_CHANGES_KEY: &str = "local";
 
+/// [`Row::key`] of the row naming branch `name`.
+pub(crate) fn branch_key(name: &str) -> String {
+    format!("br:{}", name)
+}
+
 /// What a tree row represents, with the data needed to render it.
 pub(crate) enum RowKind {
     /// The `[local changes]` header. Expandable to its files.
@@ -193,7 +198,7 @@ pub(crate) fn build_rows(
                         },
                         sid: ids.get_branch(name).to_string(),
                         target: Some(name.clone()),
-                        key: format!("br:{}", name),
+                        key: branch_key(name),
                         focusable: true,
                         selectable: true,
                         expandable: false,

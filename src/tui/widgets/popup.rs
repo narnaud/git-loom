@@ -121,9 +121,14 @@ impl TextField {
         self.chars.is_empty()
     }
 
-    /// Apply an editing key; `false` when the key is not an editing key.
-    pub fn handle_key(&mut self, code: KeyCode) -> bool {
+    /// Apply an editing key; `false` when the key is not an editing key. A
+    /// chord (Ctrl-U, Alt-B, ...) is not one: typing its letter would silently
+    /// turn an editing shortcut into text.
+    pub fn handle_key(&mut self, code: KeyCode, modifiers: KeyModifiers) -> bool {
         match code {
+            KeyCode::Char(_) if modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => {
+                return false;
+            }
             KeyCode::Char(c) => {
                 self.chars.insert(self.cursor, c);
                 self.cursor += 1;
@@ -268,7 +273,7 @@ impl Prompt {
                 if code == KeyCode::Enter {
                     return PromptOutcome::Answer(Answer::Text(field.value()));
                 }
-                field.handle_key(code);
+                field.handle_key(code, modifiers);
                 PromptOutcome::Pending
             }
             PromptState::Select { items, cursor } => {
@@ -314,7 +319,7 @@ impl Prompt {
                         }
                     }
                     _ => {
-                        if field.handle_key(code) {
+                        if field.handle_key(code, modifiers) {
                             *highlight = None;
                         }
                     }

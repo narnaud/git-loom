@@ -69,7 +69,8 @@ pub struct TuiTheme {
     pub hint: Style,
     /// Backtick-quoted words in messages, like the CLI's yellow.
     pub highlight: Style,
-    /// Text cursor inside a popup input field.
+    /// Text cursor inside an input field (popup prompts, the in-tree branch
+    /// rename).
     pub cursor: Style,
 }
 

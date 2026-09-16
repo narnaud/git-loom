@@ -30,12 +30,12 @@ use crate::core::transaction;
 use crate::core::ui::{self, Answer, Cancelled, Level, Request};
 use crate::git;
 use crate::tui::shell::{KeyResult, PaneId, Shell, ShellApp, ShellConfig, Tick};
-use crate::tui::status_tree::{self, LOCAL_CHANGES_KEY, Row, RowKind};
+use crate::tui::status_tree::{self, LOCAL_CHANGES_KEY, Row, RowKind, branch_key};
 use crate::tui::theme::TuiTheme;
 use crate::tui::widgets::common::{colorize_diff, pane_block};
 use crate::tui::widgets::diff_pane::DiffPane;
 use crate::tui::widgets::list_pane::ListPane;
-use crate::tui::widgets::popup::{self, LogEntry, Notice, Prompt, PromptOutcome};
+use crate::tui::widgets::popup::{self, LogEntry, Notice, Prompt, PromptOutcome, TextField};
 use crate::{branch, commit, drop, fold, reword};
 
 // ── Data model ───────────────────────────────────────────────────────────
@@ -63,8 +63,12 @@ enum Action {
     NewBranch { target: Option<String> },
     /// `loom drop <target>`.
     Drop { target: String },
-    /// `loom reword <target>`.
-    Reword { target: String },
+    /// `loom reword <target>`; `name` is the new branch name typed in the
+    /// tree, `None` for a commit (the editor asks for the message).
+    Reword {
+        target: String,
+        name: Option<String>,
+    },
 }
 
 /// Why the event loop returned.
@@ -72,10 +76,12 @@ enum Outcome {
     Quit,
 }
 
-/// Input mode: normal, or picking the target of a pending fold.
+/// Input mode: normal, picking the target of a pending fold, or typing a
+/// branch's new name over its row.
 enum Mode {
     Normal,
     FoldTarget { sources: Vec<String> },
+    RenameBranch { branch: String, field: TextField },
 }
 
 /// The action currently running on its worker thread.
@@ -196,7 +202,7 @@ fn execute_action(
         }
         Action::NewBranch { target } => branch::new::run(None, target),
         Action::Drop { target } => drop::run(target, false),
-        Action::Reword { target } => reword::run(target, None),
+        Action::Reword { target, name } => reword::run(target, name),
     };
     crate::trace::finalize();
     result
@@ -220,6 +226,9 @@ struct App<'a> {
     diff: DiffPane,
     /// Diff lines cached per row key.
     diff_cache: HashMap<String, Vec<Line<'static>>>,
+    /// Row key to put the cursor on after the next reload, for an action that
+    /// renames the row it acts on.
+    next_cursor: Option<String>,
     /// Transient message shown in the status bar until the next key.
     notice: Option<String>,
     /// Exit value set by deep handlers, drained after each key.
@@ -254,6 +263,7 @@ impl<'a> App<'a> {
             mode: Mode::Normal,
             diff: DiffPane::new(),
             diff_cache: HashMap::new(),
+            next_cursor: None,
             notice: None,
             outcome: None,
             requests,
@@ -275,7 +285,10 @@ impl<'a> App<'a> {
     /// Replace the repo state, keeping the cursor on the same row when it
     /// still exists. Selection and the diff cache are tied to the old rows.
     fn apply_snapshot(&mut self, snapshot: Snapshot) {
-        let key = self.current_row().map(|r| r.key.clone());
+        let key = self
+            .next_cursor
+            .take()
+            .or_else(|| self.current_row().map(|r| r.key.clone()));
         self.snapshot = snapshot;
         self.selected.clear();
         self.diff_cache.clear();
@@ -294,7 +307,10 @@ impl<'a> App<'a> {
     fn reload(&mut self) {
         match load_snapshot() {
             Ok(snapshot) => self.apply_snapshot(snapshot),
-            Err(e) => self.show_error(&e.to_string(), AfterNotice::Nothing),
+            Err(e) => {
+                self.next_cursor = None;
+                self.show_error(&e.to_string(), AfterNotice::Nothing);
+            }
         }
     }
 
@@ -335,7 +351,12 @@ impl<'a> App<'a> {
                 }
             }
             Action::Drop { target } => words.extend(["drop".into(), sid(target)]),
-            Action::Reword { target } => words.extend(["reword".into(), sid(target)]),
+            Action::Reword { target, name } => {
+                words.extend(["reword".into(), sid(target)]);
+                if let Some(name) = name {
+                    words.extend(["-m".into(), name.clone()]);
+                }
+            }
         }
         words.join(" ")
     }
@@ -403,6 +424,10 @@ impl<'a> App<'a> {
     /// (failure), or nothing (cancelled prompt). Returns whether the repo may
     /// have changed, so the caller runs [`App::after_action`].
     fn finish_action(&mut self, result: Result<()>) -> bool {
+        if result.is_err() {
+            // The row the action would have renamed still has its old key.
+            self.next_cursor = None;
+        }
         match result {
             Ok(()) => {
                 let last_success = self.log.last().and_then(|entry| {
@@ -561,7 +586,8 @@ impl<'a> App<'a> {
             }
             KeyCode::Enter => match &self.mode {
                 Mode::FoldTarget { .. } => self.confirm_fold_target(),
-                Mode::Normal => {
+                // Rename mode never gets here: it is handled above.
+                _ => {
                     self.toggle_current();
                     None
                 }
@@ -789,22 +815,80 @@ impl<'a> App<'a> {
         target.map(|target| Action::Drop { target })
     }
 
-    /// `r`: reword the commit or rename the branch under the cursor.
+    /// `r`: reword the commit under the cursor, or start editing the branch
+    /// name in place.
     fn action_reword(&mut self) -> Option<Action> {
-        let target = self.current_row().and_then(|row| match row.kind {
-            RowKind::Commit { .. } | RowKind::BranchName { .. } => row.target.clone(),
-            _ => None,
-        });
-        if target.is_none() {
-            self.notice = Some("reword: move to a commit or branch".to_string());
+        let row = self.current_row()?;
+        let target = row.target.clone();
+        match (&row.kind, target) {
+            (RowKind::Commit { .. }, Some(target)) => Some(Action::Reword { target, name: None }),
+            (RowKind::BranchName { name, .. }, Some(target)) => {
+                let field = TextField::new(name);
+                self.mode = Mode::RenameBranch {
+                    branch: target,
+                    field,
+                };
+                None
+            }
+            _ => {
+                self.notice = Some("reword: move to a commit or branch".to_string());
+                None
+            }
         }
-        target.map(|target| Action::Reword { target })
+    }
+
+    /// A key while the branch name is being edited in the tree. Enter runs
+    /// the rename, Esc cancels, everything else edits the field.
+    fn handle_rename_key(&mut self, code: KeyCode, modifiers: KeyModifiers) -> Option<Action> {
+        let Mode::RenameBranch { branch, field } = &mut self.mode else {
+            return None;
+        };
+        if code == KeyCode::Char('c') && modifiers.contains(KeyModifiers::CONTROL) {
+            self.mode = Mode::Normal;
+            self.notice = Some("rename cancelled".to_string());
+            return None;
+        }
+        match code {
+            KeyCode::Enter => {
+                let name = field.value().trim().to_string();
+                let branch = branch.clone();
+                if name.is_empty() {
+                    self.notice = Some("rename: the name cannot be empty".to_string());
+                    return None;
+                }
+                self.mode = Mode::Normal;
+                if name == branch {
+                    self.notice = Some("rename: name unchanged".to_string());
+                    return None;
+                }
+                // Follow the branch to its new row rather than reloading to
+                // the top of the tree.
+                self.next_cursor = Some(branch_key(&name));
+                Some(Action::Reword {
+                    target: branch,
+                    name: Some(name),
+                })
+            }
+            KeyCode::Esc => {
+                self.mode = Mode::Normal;
+                self.notice = Some("rename cancelled".to_string());
+                None
+            }
+            _ => {
+                field.handle_key(code, modifiers);
+                None
+            }
+        }
     }
 
     // -- rendering ----------------------------------------------------------------
 
     fn render_tree(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
         let cursor = self.tree.cursor();
+        let editing = match &self.mode {
+            Mode::RenameBranch { branch, field } => Some((branch_key(branch), field)),
+            _ => None,
+        };
         let items: Vec<ListItem> = self
             .rows
             .iter()
@@ -816,6 +900,10 @@ impl<'a> App<'a> {
                     &self.snapshot.cwd_prefix,
                     self.selected.contains(&row.key),
                     i == cursor,
+                    editing
+                        .as_ref()
+                        .filter(|(key, _)| *key == row.key)
+                        .map(|(_, f)| *f),
                 ))
             })
             .collect();
@@ -825,6 +913,7 @@ impl<'a> App<'a> {
             Mode::FoldTarget { sources } => {
                 format!(" Fold {} item(s) into... ", sources.len())
             }
+            Mode::RenameBranch { .. } => " Rename branch ".to_string(),
         };
         let block = pane_block(&title, self.theme, focused);
         self.tree
@@ -898,6 +987,10 @@ impl ShellApp for App<'_> {
     ) -> KeyResult<Outcome> {
         if self.popup.is_some() {
             self.handle_popup_key(code, modifiers);
+        } else if matches!(self.mode, Mode::RenameBranch { .. }) {
+            if let Some(action) = self.handle_rename_key(code, modifiers) {
+                self.start_action(action);
+            }
         } else if self.running.is_some() {
             // The log is read-only; everything else waits for the action.
             match code {
@@ -962,7 +1055,10 @@ impl ShellApp for App<'_> {
     }
 
     fn modal_active(&self) -> bool {
-        self.popup.is_some() || self.running.is_some()
+        // Renaming owns the keyboard too: `q` and Tab must reach the field.
+        self.popup.is_some()
+            || self.running.is_some()
+            || matches!(self.mode, Mode::RenameBranch { .. })
     }
 
     fn poll_background(&mut self) -> Tick<Outcome> {
@@ -1038,6 +1134,9 @@ impl ShellApp for App<'_> {
             Mode::FoldTarget { .. } => {
                 Some(" fold: move to the target, Enter to confirm, Esc to cancel".to_string())
             }
+            Mode::RenameBranch { .. } => Some(
+                " rename: type the new branch name, Enter to confirm, Esc to cancel".to_string(),
+            ),
             Mode::Normal => None,
         }
     }
@@ -1061,14 +1160,15 @@ impl ShellApp for App<'_> {
 
 // ── Row rendering ────────────────────────────────────────────────────────
 
-/// Render one tree row as a styled line. The first span is the multi-select
-/// gutter.
+/// Render one tree row as a styled line; `editing` replaces the branch name
+/// with the field being typed. The first span is the multi-select gutter.
 fn row_line(
     row: &Row,
     theme: &TuiTheme,
     cwd_prefix: &str,
     selected: bool,
     is_cursor: bool,
+    editing: Option<&TextField>,
 ) -> Line<'static> {
     // On the cursor row the selection background swallows regular dim text.
     let dim = if is_cursor {
@@ -1128,7 +1228,10 @@ fn row_line(
             spans.push(Span::styled(format!("{} ", connector), theme.graph));
             spans.push(Span::styled(row.sid.clone(), theme.shortid));
             spans.push(Span::styled(" [", dim));
-            spans.push(Span::styled(name.clone(), theme.branch));
+            match editing {
+                Some(field) => spans.extend(field.spans(theme)),
+                None => spans.push(Span::styled(name.clone(), theme.branch)),
+            }
             spans.push(Span::styled("]", dim));
             match remote {
                 Some(RemoteStatus::Synced) => spans.push(Span::styled(" ✓", theme.remote_synced)),

@@ -39,17 +39,25 @@ fn render_text(mut f: impl FnMut(&mut Frame, Rect)) -> String {
 
 #[test]
 fn text_field_edits_around_the_cursor() {
+    let none = KeyModifiers::NONE;
     let mut field = TextField::new("ac");
-    field.handle_key(KeyCode::Left);
-    field.handle_key(KeyCode::Char('b'));
+    field.handle_key(KeyCode::Left, none);
+    field.handle_key(KeyCode::Char('b'), none);
     assert_eq!(field.value(), "abc");
-    field.handle_key(KeyCode::Home);
-    field.handle_key(KeyCode::Delete);
+    field.handle_key(KeyCode::Home, none);
+    field.handle_key(KeyCode::Delete, none);
     assert_eq!(field.value(), "bc");
-    field.handle_key(KeyCode::End);
-    field.handle_key(KeyCode::Backspace);
+    field.handle_key(KeyCode::End, none);
+    field.handle_key(KeyCode::Backspace, none);
     assert_eq!(field.value(), "b");
-    assert!(!field.handle_key(KeyCode::Enter));
+    assert!(!field.handle_key(KeyCode::Enter, none));
+
+    // A chord is an editing shortcut, not the letter it carries.
+    assert!(!field.handle_key(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    assert!(!field.handle_key(KeyCode::Char('b'), KeyModifiers::ALT));
+    assert_eq!(field.value(), "b");
+    field.handle_key(KeyCode::Char('B'), KeyModifiers::SHIFT);
+    assert_eq!(field.value(), "bB", "Shift still types");
 }
 
 #[test]
