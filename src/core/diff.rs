@@ -8,6 +8,12 @@ pub(crate) const EMPTY_ENTRY: &str = "(empty file)";
 /// What every real hunk starts with, and no whole-file placeholder does.
 const HUNK_HEADER: &str = "@@ -";
 
+/// What a hunk with an empty pre-image starts with, so it is a whole new file
+/// rather than a change within one. Both git's forms continue it: `+1,N @@`
+/// and, for a one-line file, `+1 @@`. `collect_unstaged_hunks` builds its
+/// synthesized header from this so the two cannot drift apart.
+pub(crate) const NEW_FILE_HEADER: &str = "@@ -0,0 ";
+
 /// A single hunk extracted from a unified diff.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DiffHunk {
@@ -24,6 +30,11 @@ impl DiffHunk {
     /// Those are text too, so the `@@` header is what separates them.
     pub(crate) fn is_text(&self) -> bool {
         self.text.starts_with(HUNK_HEADER)
+    }
+
+    /// Whether this hunk is a whole new file rather than a change within one.
+    pub(crate) fn is_whole_new_file(&self) -> bool {
+        self.text.starts_with(NEW_FILE_HEADER)
     }
 
     /// Post-image line numbers of the lines this hunk adds; empty for a

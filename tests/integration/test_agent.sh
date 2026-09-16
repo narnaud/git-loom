@@ -729,6 +729,95 @@ assert_exit_ok "$CODE" "worktree_patch_folded_exit"
 assert_contains "$(show_patch HEAD)" "+FIVE" "worktree_patch_folded_hunk"
 assert_contains "$(diff_patch)" "+THIRTYFIVE" "worktree_patch_left_the_rest"
 
+# A new file is taken whole, so the listing names its size rather than carrying
+# a copy of it — both before and after it is staged.
+describe "agent mode: a new file is listed by size, not by content"
+setup_repo_with_remote
+echo "UNIQUEMARKER" > "$WORK/new.txt"
+seq 1 200 | sed 's/^/line /' >> "$WORK/new.txt"
+
+gl_capture add -p new.txt --agent
+assert_eq "10" "$CODE" "untracked_listed_exit"
+assert_contains "$OUT" '"diff":"(new file, 201 line(s))"' "untracked_listed_summary"
+assert_not_contains "$OUT" "UNIQUEMARKER" "untracked_listed_no_content"
+FP="$(json_fingerprint)"
+
+# Once the file is in the index its text is git's diff of the indexed content,
+# which a filter can make something else than the file on disk, so there is no
+# summary from there on.
+git -C "$WORK" add -N new.txt
+gl_capture add -p new.txt --agent
+assert_eq "10" "$CODE" "intent_to_add_listed_exit"
+assert_not_contains "$OUT" "new file, " "intent_to_add_no_summary"
+assert_contains "$OUT" "UNIQUEMARKER" "intent_to_add_verbatim"
+git -C "$WORK" reset -q
+
+gl_capture add -p new.txt --hunks new.txt:1 --hunks-from "$FP" --agent
+assert_exit_ok "$CODE" "untracked_staged_exit"
+assert_contains "$(git -C "$WORK" diff --cached --name-only)" "new.txt" "untracked_staged"
+
+# Listing it again now that it is staged: verbatim, for the same reason.
+gl_capture add -p new.txt --agent
+assert_eq "10" "$CODE" "staged_new_listed_exit"
+assert_not_contains "$OUT" "new file, " "staged_new_listed_no_summary"
+assert_contains "$OUT" "UNIQUEMARKER" "staged_new_listed_verbatim"
+
+# Edited again in the worktree, the file on disk is no longer the staged entry:
+# UNIQUEMARKER is staged and gone from disk, so summarizing it would point at a
+# file that has lost it. Both hunks stay verbatim.
+perl -pi -e 's/^UNIQUEMARKER$/REWRITTEN/' "$WORK/new.txt"
+echo "TAILMARKER" >> "$WORK/new.txt"
+gl_capture add -p new.txt --agent
+assert_eq "10" "$CODE" "staged_new_edited_exit"
+assert_not_contains "$OUT" "new file, " "staged_new_edited_no_summary"
+assert_contains "$OUT" "UNIQUEMARKER" "staged_new_edited_staged_verbatim"
+assert_contains "$OUT" "TAILMARKER" "staged_new_edited_hunk_verbatim"
+
+# Deleted from the worktree, the staged content is all the agent has left to
+# decide on, so it stays in the listing too.
+rm -f "$WORK/new.txt"
+gl_capture add -p new.txt --agent
+assert_eq "10" "$CODE" "staged_new_gone_exit"
+assert_not_contains "$OUT" "new file, " "staged_new_gone_no_summary"
+assert_contains "$OUT" "UNIQUEMARKER" "staged_new_gone_verbatim"
+assert_contains "$OUT" "(file deleted)" "staged_new_gone_deletion_entry"
+git -C "$WORK" reset -q
+
+# Back to untracked, an edit the summary cannot see still invalidates the ids:
+# the file is rebuilt at the same 201 lines with one of them changed, so only
+# the fingerprint notices. The reset above is what makes this the untracked
+# listing's fingerprint again.
+echo "UNIQUEMARKER" > "$WORK/new.txt"
+seq 1 200 | sed 's/^/line /' >> "$WORK/new.txt"
+perl -pi -e 's/^line 100$/line ONEHUNDRED/' "$WORK/new.txt"
+assert_eq "201" "$(wc -l < "$WORK/new.txt")" "untracked_edited_same_line_count"
+gl_capture add -p new.txt --hunks new.txt:1 --hunks-from "$FP" --agent
+assert_eq "1" "$CODE" "untracked_edited_exit"
+assert_contains "$OUT" "The hunks changed since the listing" "untracked_edited_msg"
+
+# A clean filter makes the indexed content something else than the file on
+# disk. Summarizing it would send the agent to a 200-line file to read what the
+# listing called one line.
+describe "agent mode: a filtered new file is never summarized"
+setup_repo_with_remote
+git -C "$WORK" config filter.fake.clean 'sh -c "cat >/dev/null; echo POINTER"'
+echo "big.bin filter=fake" > "$WORK/.gitattributes"
+git -C "$WORK" add .gitattributes
+git -C "$WORK" commit -q -m "add filter attrs"
+seq 1 200 | sed 's/^/line /' > "$WORK/big.bin"
+
+# Untracked, loom reads the bytes off disk, so the summary is the real file.
+gl_capture add -p big.bin --agent
+assert_contains "$OUT" '"diff":"(new file, 200 line(s))"' "filtered_untracked_summary"
+
+# Staged, the entry is the one-line pointer and the disk holds 200 lines.
+git -C "$WORK" add big.bin
+assert_eq "POINTER" "$(git -C "$WORK" cat-file -p :big.bin)" "filtered_blob_is_a_pointer"
+gl_capture add -p big.bin --agent
+assert_eq "10" "$CODE" "filtered_staged_exit"
+assert_not_contains "$OUT" "new file, " "filtered_staged_no_summary"
+assert_contains "$OUT" "POINTER" "filtered_staged_verbatim"
+
 # A staged change with no hunk to show — a mode-only one — is not in the
 # listing either, so it is not the picker's to fold.
 describe "agent mode: fold -p leaves a staged change its picker could not show"

@@ -51,6 +51,11 @@ pub(crate) struct FileEntry {
 }
 
 impl FileEntry {
+    /// Whether the file is not in the index at all.
+    pub(crate) fn is_untracked(&self) -> bool {
+        self.index_status == '?' && self.worktree_status == '?'
+    }
+
     /// Compute the effective status characters based on current hunk selections.
     ///
     /// Returns `(index_char, worktree_char)` reflecting what `git status` would
@@ -59,9 +64,7 @@ impl FileEntry {
         let will_have_staged = self.hunks.iter().any(|h| h.selected);
         let will_have_unstaged = self.hunks.iter().any(|h| !h.selected);
 
-        let is_untracked = self.index_status == '?' && self.worktree_status == '?';
-
-        if is_untracked {
+        if self.is_untracked() {
             return if will_have_staged {
                 ('A', ' ')
             } else {

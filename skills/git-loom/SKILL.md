@@ -123,6 +123,11 @@ the `hint` gives, adding `--hunks <id>` once per id, plus
   keep it — and kept staged but out of the result by `commit -p` and `fold -p`.
   `add -p` refuses to leave one out when the working tree changed its lines
   again.
+- An **untracked** file is listed as `(new file, <n> line(s))` rather than its
+  content: there is nothing to pick between, and reading the file (the `path`
+  is repo-relative) gives exactly that content. Everything else is verbatim,
+  including the same file once staged or `git add -N` — from there the entry is
+  the indexed content, which a filter can make something else than the file.
 - `selectable: false` marks an entry this command cannot take: only a binary
   file, under a commit-source `fold`. That `fold` still takes a deletion or a
   submodule, moved whole. `split` and every working-tree source take any

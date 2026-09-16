@@ -270,6 +270,188 @@ fn a_worktree_picker_fingerprints_the_commit_it_lands_in() {
     );
 }
 
+/// Built the way `collect_unstaged_hunks` builds it, so a change to the
+/// synthesized header shows up here rather than silently stopping the summary.
+fn whole_file_hunk(lines: usize) -> String {
+    let mut text = format!("{}+1,{lines} @@\n", crate::core::diff::NEW_FILE_HEADER);
+    for n in 0..lines {
+        text.push_str(&format!("+line {n}\n"));
+    }
+    text
+}
+
+fn with_origin(mut entry: FileEntry, origin: HunkOrigin) -> FileEntry {
+    for hunk in &mut entry.hunks {
+        hunk.origin = origin;
+    }
+    entry
+}
+
+/// An untracked file's entry: the picker synthesizes its whole content so it
+/// can preview it.
+fn untracked(path: &str, lines: usize) -> FileEntry {
+    let mut entry = file(path, &[whole_file_hunk(lines).as_str()]);
+    entry.index_status = '?';
+    entry.worktree_status = '?';
+    with_origin(entry, HunkOrigin::Unstaged)
+}
+
+/// The same file once staged: `git diff --cached` gives its whole content back.
+fn staged_new(path: &str, lines: usize) -> FileEntry {
+    let mut entry = file(path, &[whole_file_hunk(lines).as_str()]);
+    entry.index_status = 'A';
+    with_origin(entry, HunkOrigin::Staged)
+}
+
+/// `git add -N`: in the index as an empty blob, so the whole content is one
+/// unstaged hunk against it.
+fn intent_to_add(path: &str, lines: usize) -> FileEntry {
+    let mut entry = file(path, &[whole_file_hunk(lines).as_str()]);
+    entry.index_status = 'A';
+    entry.worktree_status = 'M';
+    with_origin(entry, HunkOrigin::Unstaged)
+}
+
+#[test]
+fn an_untracked_file_is_listed_by_size_not_by_content() {
+    let listed = items(vec![untracked("new.rs", 3)], true);
+    assert_eq!(listed[0].diff, "(new file, 3 line(s))");
+    assert!(listed[0].selectable);
+
+    // The fingerprint still digests the content the listing left out, so
+    // editing the file invalidates the ids it was numbered for — including an
+    // edit the summary cannot see, which hashing the summary would miss.
+    let mut edited = untracked("new.rs", 3);
+    edited.hunks[0].hunk.text = edited.hunks[0].hunk.text.replace("+line 0", "+edited");
+    assert_ne!(
+        fingerprint("", None, &[untracked("new.rs", 3)]),
+        fingerprint("", None, std::slice::from_ref(&edited))
+    );
+    // Same line count, so the summary is identical: the fingerprint is what
+    // notices, not the listing.
+    assert_eq!(items(vec![edited], true)[0].diff, "(new file, 3 line(s))");
+}
+
+/// Once the file is in the index, its text is git's diff of the *indexed*
+/// content. A clean or eol filter makes that something else than the file on
+/// disk — an LFS pointer for a huge file — so there is no summary to trust.
+#[test]
+fn an_intent_to_add_file_is_listed_verbatim() {
+    let listed = items(vec![intent_to_add("new.rs", 3)], true);
+    assert!(listed[0].diff.starts_with("@@ -0,0"));
+}
+
+#[test]
+fn a_staged_new_file_is_listed_verbatim() {
+    let listed = items(vec![staged_new("new.rs", 3)], true);
+    assert!(listed[0].diff.starts_with("@@ -0,0"));
+}
+
+/// A tracked file that was empty is filled by a `@@ -0,0` hunk too, but it is
+/// not new: its content is a change to list, not a file to read.
+#[test]
+fn filling_a_tracked_empty_file_is_listed_verbatim() {
+    let mut entry = file("empty.rs", &[whole_file_hunk(3).as_str()]);
+    entry.index_status = ' ';
+    entry.worktree_status = 'M';
+    let entry = with_origin(entry, HunkOrigin::Unstaged);
+    assert!(items(vec![entry], true)[0].diff.starts_with("@@ -0,0"));
+}
+
+fn unstaged_hunk(text: &str) -> HunkEntry {
+    HunkEntry {
+        hunk: DiffHunk {
+            text: text.to_string(),
+            modified_lines: vec![],
+        },
+        selected: false,
+        origin: HunkOrigin::Unstaged,
+    }
+}
+
+/// A staged new file deleted from the worktree: there is no file to read, so
+/// the content the agent decides on stays in the listing.
+#[test]
+fn a_staged_new_file_gone_from_the_worktree_is_listed_verbatim() {
+    let mut entry = staged_new("new.rs", 3);
+    entry.worktree_status = 'D';
+    entry.hunks.push(unstaged_hunk(DELETED_ENTRY));
+
+    let listed = items(vec![entry], true);
+    assert!(listed[0].diff.starts_with("@@ -0,0"));
+    assert_eq!(listed[1].diff, DELETED_ENTRY);
+}
+
+#[test]
+fn a_single_line_new_file_is_still_counted() {
+    assert_eq!(
+        items(vec![untracked("new.rs", 1)], true)[0].diff,
+        "(new file, 1 line(s))"
+    );
+}
+
+/// The count is the `+` lines, so a `\ No newline` marker is not one of them.
+#[test]
+fn a_new_file_with_no_trailing_newline_counts_its_lines_only() {
+    let mut entry = untracked("new.rs", 3);
+    entry.hunks[0]
+        .hunk
+        .text
+        .push_str("\\ No newline at end of file\n");
+    assert_eq!(items(vec![entry], true)[0].diff, "(new file, 3 line(s))");
+}
+
+/// Nothing about a staged file is summarized, and its worktree hunks are its
+/// own choices, so every entry stays verbatim.
+#[test]
+fn a_staged_new_file_edited_in_the_worktree_lists_both_hunks_verbatim() {
+    // An edit that drops a staged line: `line 1` is in the staged entry and
+    // nowhere on disk, so a summary would point at a file that has lost it.
+    for edit in [
+        "@@ -3,1 +3,2 @@\n+tail\n",
+        "@@ -1,3 +1,2 @@\n line 0\n-line 1\n line 2\n",
+    ] {
+        let mut entry = staged_new("new.rs", 3);
+        entry.worktree_status = 'M';
+        entry.hunks.push(unstaged_hunk(edit));
+
+        let listed = items(vec![entry], true);
+        assert!(listed[0].diff.starts_with("@@ -0,0"));
+        assert_eq!(listed[1].diff, edit);
+    }
+}
+
+/// A new file with no hunk to summarize keeps the placeholder that says why.
+#[test]
+fn an_untracked_binary_or_empty_file_keeps_its_placeholder() {
+    for placeholder in [BINARY_ENTRY, "(empty file)"] {
+        let mut entry = file("new.bin", &[placeholder]);
+        entry.index_status = '?';
+        entry.worktree_status = '?';
+        let entry = with_origin(entry, HunkOrigin::Unstaged);
+        assert_eq!(items(vec![entry], true)[0].diff, placeholder);
+    }
+}
+
+#[test]
+fn a_tracked_hunk_is_still_listed_verbatim() {
+    let listed = items(sample(), true);
+    assert_eq!(listed[0].diff, "@@ -1,3 +1,4 @@ fn a\n+one\n");
+}
+
+/// A commit's entry stands for content that need not be in the worktree at
+/// all, so there is no file to read instead and it stays verbatim. Built the
+/// way `collect_commit_hunks` builds it: the commit's name-status char, no
+/// worktree side.
+#[test]
+fn a_new_file_in_a_commit_is_listed_verbatim() {
+    let mut entry = file("new.rs", &[whole_file_hunk(3).as_str()]);
+    entry.index_status = 'A';
+    entry.worktree_status = ' ';
+    let entry = with_origin(entry, HunkOrigin::Commit);
+    assert!(items(vec![entry], false)[0].diff.starts_with("@@ -0,0"));
+}
+
 /// A working-tree file with one staged and one unstaged hunk, as listed.
 fn staged_then_changed() -> Vec<FileEntry> {
     let mut f = file(

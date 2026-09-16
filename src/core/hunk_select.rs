@@ -188,18 +188,43 @@ pub fn fingerprint(oid: &str, target: Option<&str>, entries: &[FileEntry]) -> St
     digest.to_string()[..12].to_string()
 }
 
+/// How the listing names a new file (Spec 019). Counts the `+` lines: the `@@`
+/// header and a `\ No newline` marker are not part of the file.
+fn new_file_summary(hunk: &DiffHunk) -> String {
+    let lines = hunk
+        .text
+        .lines()
+        .filter(|line| line.starts_with('+'))
+        .count();
+    format!("(new file, {lines} line(s))")
+}
+
 /// One JSON item per hunk, in the order the ids number them.
 ///
 /// Consumes `entries` so each hunk's text is moved into the response.
 pub fn items(entries: Vec<FileEntry>, whole_files: bool) -> Vec<HunkItem> {
     let mut items = Vec::new();
     for file in entries {
+        // The summary sends the agent to the file, so it may stand in only
+        // where the file *is* this entry. Untracked is the one case that
+        // guarantees it: `collect_unstaged_hunks` built the text from the
+        // bytes it read off disk, and it is that file's only hunk. Anywhere
+        // else the text is git's diff of the *indexed* content, which a clean
+        // or eol filter makes something else entirely — a one-line LFS pointer
+        // for a huge file (Spec 019).
+        let untracked = file.is_untracked();
         for (index, entry) in file.hunks.into_iter().enumerate() {
             let selectable = is_selectable(&entry.hunk, whole_files);
+            let whole_new_file = untracked && entry.hunk.is_whole_new_file();
+            let diff = if whole_new_file {
+                new_file_summary(&entry.hunk)
+            } else {
+                entry.hunk.text
+            };
             items.push(HunkItem {
                 id: hunk_id(&file.path, index),
                 path: file.path.clone(),
-                diff: entry.hunk.text,
+                diff,
                 selectable,
                 staged: entry.selected,
             });

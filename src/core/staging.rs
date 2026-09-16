@@ -320,7 +320,7 @@ fn apply_selections_unguarded(
     let mut files_changed = 0usize;
 
     for file in files {
-        let is_untracked = file.index_status == '?' && file.worktree_status == '?';
+        let is_untracked = file.is_untracked();
         let mut file_had_change = false;
 
         let mut hunks_to_stage: Vec<&diff::DiffHunk> = Vec::new();
@@ -556,7 +556,7 @@ fn collect_unstaged_hunks(
         }
         let content = String::from_utf8_lossy(&raw_bytes);
         let line_count = content.lines().count();
-        let mut text = format!("@@ -0,0 +1,{} @@\n", line_count);
+        let mut text = format!("{}+1,{} @@\n", diff::NEW_FILE_HEADER, line_count);
         for line in content.lines() {
             text.push('+');
             text.push_str(line);

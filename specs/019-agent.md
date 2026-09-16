@@ -317,7 +317,18 @@ changes no longer applies, and is refused rather than placed by a looser match.
 - `diff` is the hunk verbatim and is never truncated — the agent picks from it.
   Verbatim up to UTF-8: a byte that is not valid UTF-8 lists as U+FFFD, and a
   selection carrying that hunk fails the apply and rolls back.
-  A listing is as large as the diff; narrow it with `<files>` on `split -p`.
+  A listing is as large as the diff; narrow it with `<files>`. The one
+  exception is an **untracked** file's sole `@@ -0,0` entry, listed as
+  `(new file, <n> line(s))`, counting the added lines: loom synthesized that
+  text from the bytes it read off disk, so reading the file gives exactly what
+  the id stands for. Nothing else is summarized. Once the path is in the index
+  — staged or `git add -N` — the text is git's diff of the *indexed* content,
+  which a clean or eol filter makes something else than the file on disk (a
+  one-line LFS pointer for a huge file), so it stays verbatim. So does a
+  commit's new file, which need not be on disk at all; a second entry on the
+  same file; and filling a tracked empty file, which is a change and not a new
+  file. The fingerprint covers the content the listing left out, so any edit to
+  the file invalidates the ids.
 - `selectable` marks what this command can take, which differs per command: a
   binary file has no hunk a commit-source `fold` can move (Spec 007), while
   `split` takes it whole (Spec 013) and a working-tree source stages it by

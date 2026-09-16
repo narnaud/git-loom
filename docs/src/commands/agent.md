@@ -119,7 +119,9 @@ git loom split ab --agent -m "Fix the off-by-one" -p --hunks src/parse.rs:1 --hu
 # {"status":"ok","messages":["Split `b41c298` into `2a0a929` and `d979b2b`"]}
 ```
 
-`items` lists every entry of the diff. `"selectable": false` marks one this command cannot take — a binary file under `fold`, which has no hunk to move; `split` takes it whole and marks nothing unselectable. A deletion and a submodule move whole, so `fold` takes them too. `options` repeats only the pickable ids. The `diff` is never truncated, so narrow a large listing with `split -p <files>` rather than expecting loom to cut it short.
+`items` lists every entry of the diff. `"selectable": false` marks one this command cannot take — a binary file under `fold`, which has no hunk to move; `split` takes it whole and marks nothing unselectable. A deletion and a submodule move whole, so `fold` takes them too. `options` repeats only the pickable ids. With the one exception below, a `diff` is never truncated, so narrow a large listing with `split -p <files>` rather than expecting loom to cut it short.
+
+The one exception is an untracked file's sole entry, which lists as `(new file, <n> line(s))`: loom built that entry from the bytes on disk, so reading the file gives exactly what the id stands for. Nothing else is summarized. Once the path is in the index — staged or `git add -N` — the entry is git's diff of the indexed content, which a clean or eol filter can make something else than the file on disk, so it is listed verbatim. So is a file a commit adds, which need not be on disk at all.
 
 Re-run the `hint` as given, including any `<files>` filter — it carries every argument that shapes the listing.
 

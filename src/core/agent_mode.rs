@@ -52,10 +52,12 @@ pub struct HunkItem {
     /// `<path>:<n>`, passed back verbatim in `--hunks`.
     pub id: String,
     pub path: String,
-    /// The hunk, starting with its `@@` header, or the whole-file placeholder
-    /// for an entry with no text hunks. Never truncated: the agent picks from
-    /// this, and it narrows the listing with `<files>` rather than loom cutting
-    /// it short.
+    /// The hunk, starting with its `@@` header; the whole-file placeholder for
+    /// an entry with no text hunks; or `(new file, <n> line(s))` for an
+    /// untracked file's sole entry, which loom built from the bytes on disk,
+    /// so the agent reads the file for its content (Spec 019). Nothing else is
+    /// summarized: a hunk the agent picks from is never truncated, and it
+    /// narrows the listing with `<files>` rather than loom cutting it short.
     pub diff: String,
     /// False for an entry this command cannot take (spec 019).
     pub selectable: bool,
