@@ -236,7 +236,7 @@ fn execute_action(
             fold::run(false, false, None, args, theme)
         }
         Action::NewBranch { name, target } => branch::new::run(Some(name), target),
-        Action::Drop { target } => drop::run(target, false),
+        Action::Drop { target } => drop::run(vec![target], false),
         Action::Reword { target, name } => reword::run(target, name),
     };
     crate::trace::finalize();

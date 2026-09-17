@@ -206,6 +206,9 @@ where
 }
 
 /// Prompt the user for a yes/no confirmation. Returns `true` if confirmed.
+///
+/// Lines after the first are detail (what exactly the yes does), printed as
+/// `›` lines above the question.
 pub fn confirm(prompt: &str, agent_hint: &str) -> Result<bool> {
     if agent_mode::enabled() {
         return Err(agent_mode::respond_needs_confirmation(prompt, agent_hint));
@@ -216,7 +219,13 @@ pub fn confirm(prompt: &str, agent_hint: &str) -> Result<bool> {
             _ => Err(ui::Cancelled.into()),
         };
     }
-    let answer = inquire::Confirm::new(prompt).with_default(false).prompt()?;
+    let (question, detail) = prompt.split_once('\n').unwrap_or((prompt, ""));
+    for line in detail.lines() {
+        println!("  {} {}", "›".blue(), colorize_backticks(line));
+    }
+    let answer = inquire::Confirm::new(question)
+        .with_default(false)
+        .prompt()?;
     Ok(answer)
 }
 

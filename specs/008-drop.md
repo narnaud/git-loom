@@ -5,11 +5,14 @@
 ## CLI
 
 ```bash
-git-loom drop <target> [-y]
+git-loom drop <target>... [-y]
 ```
 
 `<target>` accepts a full/partial commit hash, Git ref, local branch name,
 short ID, file, or `zz`. `-y` skips file/change-discard confirmation.
+Several targets must all be files (see [File and `zz`
+Targets](#file-and-zz-targets)); otherwise error
+`Only files can be dropped together` before anything changes.
 
 Resolve with `resolve_arg(accept = [File, Branch, Commit, Unstaged])` using
 Spec 002. Exact local branch names resolve as branches before Git refs; Git
@@ -92,20 +95,31 @@ Prompt unless `-y`; affect no commits, refs, or other files.
 | Tracked `M`, `D`, or `R` | `Discard changes to '<path>'?` | `git restore --staged --worktree <path>` | `Restored '<path>'` |
 | Staged new file (`A`) | `Delete '<path>'?` | `git rm --force <path>` (index and disk) | `Deleted '<path>'` |
 | Untracked (`??`) | `Delete '<path>'?` | Delete from disk | `Deleted '<path>'` |
+| Directory with tracked changes | `Discard all changes in '<path>'?` | `git restore --staged --worktree -- <path>`, then `git clean -fd -- <path>` | `Discarded all changes in '<path>'` |
+| Directory of untracked entries only | `Delete '<path>'?` | `git clean -fd -- <path>` | `Deleted '<path>'` |
 | `zz` | `Discard all local changes?` | `git restore --staged --worktree .`, then `git clean -fd` | `Discarded all local changes` |
+
+Several files share one prompt: `Discard all selected changes?`,
+`Delete all selected files?`, or
+`Discard all selected changes and delete all selected files?` (a directory
+with tracked changes counts as restored, one of untracked entries as
+deleted), followed by one detail line per path, `restore <path>` or
+`delete <path>`, in argument order, each path once however many targets name
+it; a path inside a directory target is left to the directory and not
+listed. The `zz` prompt carries the same detail lines, one per status entry.
+Success prints one line per path as above. Files are dropped in that order;
+a failure stops there and the files before it stay dropped.
 
 `zz` restores all tracked modifications and deletes all untracked files and
 directories; ignored files remain. With no changes, error exactly
 `No local changes to discard`.
-
-File and `zz` operations are atomic: either all requested changes are
-discarded or the repository remains unchanged.
 
 ## Examples
 
 ```bash
 git-loom drop ab          # commit/branch short ID, according to its type
 git-loom drop src/main.rs # restore or delete one file after confirmation
+git-loom drop a1 a2       # several files, one confirmation
 git-loom drop zz -y       # discard all tracked and untracked changes
 ```
 

@@ -5,14 +5,14 @@ Drop a commit, branch, file, or all local changes.
 ## Usage
 
 ```
-git loom drop [-y] <target>
+git loom drop [-y] <target>...
 ```
 
 ### Arguments
 
 | Argument | Description |
 |----------|-------------|
-| `<target>` | Commit hash, branch name, file short ID, or short ID |
+| `<target>...` | Commit hash, branch name, file, short ID, or `zz`; several files at once |
 
 ### Options
 
@@ -86,9 +86,20 @@ Behavior depends on the file's status:
 
 A confirmation prompt is shown first (skippable with `-y`).
 
+Several files can be dropped in one command. They share a single prompt that lists what gets restored and what gets deleted; anything other than files cannot be combined:
+
+```bash
+git loom drop ma untracked.txt
+#   › restore `src/main.rs`
+#   › delete `untracked.txt`
+# Discard all selected changes and delete all selected files? (y/N)
+# ✓ Restored `src/main.rs`
+# ✓ Deleted `untracked.txt`
+```
+
 ### When Target is `zz` (all local changes)
 
-Discards everything in the working tree and index:
+Discards everything in the working tree and index, after a prompt that lists every path it will restore or delete:
 
 1. `git restore --staged --worktree .` — reverts all tracked modifications
 2. `git clean -fd` — deletes all untracked files and directories

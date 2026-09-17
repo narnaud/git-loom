@@ -366,6 +366,41 @@ out=$(gl drop to-drop.txt --yes)
 assert_exit_ok $? "drop_file_isolated_ok"
 assert_file_content "untouched.txt" "Untouched file" "drop_file_isolated_untouched"
 
+describe "drop several files at once restores and deletes them together"
+setup_repo_with_remote
+commit_file "Original content" "keep-a.txt"
+write_file "keep-a.txt" "modified content"
+write_file "new-b.txt" "untracked"
+out=$(gl drop keep-a.txt new-b.txt --yes)
+assert_exit_ok $? "drop_files_ok"
+assert_contains "$out" "Restored" "drop_files_restored_msg"
+assert_contains "$out" "Deleted"  "drop_files_deleted_msg"
+assert_file_content "keep-a.txt" "Original content" "drop_files_restored"
+[[ ! -f "$WORK/new-b.txt" ]] \
+    || fail "[drop_files_deleted] file still exists after drop"
+
+describe "drop . discards everything under the repo root"
+setup_repo_with_remote
+commit_file "Original content" "root-a.txt"
+write_file "root-a.txt" "modified content"
+write_file "root-b.txt" "untracked"
+out=$(gl drop . --yes)
+assert_exit_ok $? "drop_dot_ok"
+assert_file_content "root-a.txt" "Original content" "drop_dot_restored"
+[[ ! -f "$WORK/root-b.txt" ]] \
+    || fail "[drop_dot_deleted] file still exists after drop ."
+
+describe "drop several targets refuses anything but files"
+setup_repo_with_remote
+commit_file "Keep" "keep.txt"
+keep_hash="$(head_hash)"
+write_file "other.txt" "untracked"
+gl_capture drop other.txt "$keep_hash" --yes
+assert_exit_fail "$CODE" "drop_files_mixed_fail"
+assert_contains "$OUT" "Only files can be dropped together" "drop_files_mixed_msg"
+[[ -f "$WORK/other.txt" ]] \
+    || fail "[drop_files_mixed_untouched] file was deleted despite the error"
+
 # ── DROP ZZ (ALL LOCAL CHANGES) ───────────────────────────────────────────────
 
 describe "drop zz discards staged changes, unstaged changes, and untracked files"

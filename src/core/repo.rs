@@ -395,13 +395,7 @@ fn abs_to_repo_path(workdir: &Path, arg: &str) -> Result<String> {
     let rel = canonical
         .strip_prefix(&workdir_canonical)
         .map_err(|_| anyhow::anyhow!("'{}' is outside repository", arg))?;
-    let s = rel
-        .components()
-        .map(|c| c.as_os_str().to_string_lossy().into_owned())
-        .collect::<Vec<_>>()
-        .join("/");
-    // The repo root itself means "everything"; "." is git's spelling for that.
-    Ok(if s.is_empty() { ".".to_string() } else { s })
+    Ok(normalize_path(rel))
 }
 
 /// Convert a CWD-relative path to a repo-relative path.
@@ -409,10 +403,29 @@ fn abs_to_repo_path(workdir: &Path, arg: &str) -> Result<String> {
 /// If CWD is `<repo>/src/` and `arg` is `"git.rs"`, returns `"src/git.rs"`.
 fn cwd_to_repo_path(repo: &Repository, arg: &str) -> Result<String> {
     let prefix = cwd_relative_to_repo(repo)?;
-    if prefix.is_empty() {
-        return Ok(arg.to_string());
+    Ok(normalize_path(&Path::new(&prefix).join(arg)))
+}
+
+/// One spelling per repo-relative path (`./a`, `a/`, `b/../a` become `a`; on
+/// Windows `a\\b` becomes `a/b`), so resolved file targets compare equal by
+/// string.
+/// The repo root itself is `.`, git's spelling for "everything".
+fn normalize_path(path: &Path) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir if parts.last().is_some_and(|p| p != "..") => {
+                parts.pop();
+            }
+            c => parts.push(c.as_os_str().to_string_lossy().into_owned()),
+        }
     }
-    Ok(format!("{}/{}", prefix, arg))
+    if parts.is_empty() {
+        ".".to_string()
+    } else {
+        parts.join("/")
+    }
 }
 
 /// Compute the CWD relative to the repo root as a forward-slash string.

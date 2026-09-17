@@ -279,8 +279,9 @@ enum Command {
     /// Drop a local change, a commit, or a branch from history
     #[command(visible_alias = "rm")]
     Drop {
-        /// Commit hash, branch name, or short ID to drop
-        target: String,
+        /// Commit hash, branch name, file, short ID, or `zz`; several files at once
+        #[arg(required = true)]
+        targets: Vec<String>,
         /// Skip confirmation prompt
         #[arg(short, long)]
         yes: bool,
@@ -610,7 +611,7 @@ fn main() {
             git_args,
         }) => commit::run(branch, integration, message, patch, files, git_args, &theme),
         Some(Command::Swap { a, b }) => swap::run(a, b),
-        Some(Command::Drop { target, yes }) => drop::run(target, yes),
+        Some(Command::Drop { targets, yes }) => drop::run(targets, yes),
         Some(Command::Absorb { dry_run, files }) => absorb::run(dry_run, files),
         Some(Command::Show { target, git_args }) => show::run(target, git_args),
         Some(Command::Diff {

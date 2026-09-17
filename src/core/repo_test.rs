@@ -463,6 +463,37 @@ fn resolve_arg_file_on_disk() {
 }
 
 #[test]
+fn resolve_arg_file_normalizes_the_spelling() {
+    let test_repo = TestRepo::new_with_remote();
+    std::fs::create_dir_all(test_repo.workdir().join("dir")).unwrap();
+    test_repo.write_file("dir/hello.txt", "content");
+    test_repo.in_dir(|| {
+        for (arg, expected) in [
+            ("./dir/hello.txt", "dir/hello.txt"),
+            ("dir/", "dir"),
+            ("./dir", "dir"),
+            ("dir/../dir/hello.txt", "dir/hello.txt"),
+            (".", "."),
+            ("./", "."),
+        ] {
+            let result = repo::resolve_arg(&test_repo.repo, arg, &[TargetKind::File]).unwrap();
+            assert_eq!(result, Target::File(expected.to_string()), "{arg}");
+        }
+    });
+    let sub_dir = test_repo.workdir().join("dir");
+    test_repo.in_dir_path(&sub_dir, || {
+        for (arg, expected) in [
+            (".", "dir"),
+            ("..", "."),
+            ("../dir/hello.txt", "dir/hello.txt"),
+        ] {
+            let result = repo::resolve_arg(&test_repo.repo, arg, &[TargetKind::File]).unwrap();
+            assert_eq!(result, Target::File(expected.to_string()), "{arg}");
+        }
+    });
+}
+
+#[test]
 fn resolve_arg_file_cwd_relative() {
     let test_repo = TestRepo::new_with_remote();
     let sub_dir = test_repo.workdir().join("sub");

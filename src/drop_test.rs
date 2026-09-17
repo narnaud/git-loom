@@ -355,7 +355,7 @@ fn drop_file_target_fails() {
     test_repo.commit("C1", "c1.txt");
 
     // "nonexistent" doesn't resolve to anything
-    let result = test_repo.in_dir(|| super::run("nonexistent".to_string(), true));
+    let result = test_repo.in_dir(|| super::run(vec!["nonexistent".to_string()], true));
 
     assert!(result.is_err());
 }
@@ -753,7 +753,7 @@ fn run_drop_commit_by_hash() {
     let drop_oid = test_repo.commit("Drop me", "drop.txt");
     test_repo.commit("Keep2", "keep2.txt");
 
-    let result = test_repo.in_dir(|| super::run(drop_oid.to_string(), true));
+    let result = test_repo.in_dir(|| super::run(vec![drop_oid.to_string()], true));
 
     assert!(result.is_ok(), "run failed: {:?}", result);
     assert_eq!(test_repo.get_message(0), "Keep2");
@@ -764,7 +764,7 @@ fn run_drop_commit_by_hash() {
 fn run_drop_branch_by_name() {
     let test_repo = setup_woven_branch(2);
 
-    let result = test_repo.in_dir(|| super::run("feature-a".to_string(), true));
+    let result = test_repo.in_dir(|| super::run(vec!["feature-a".to_string()], true));
 
     assert!(result.is_ok(), "run failed: {:?}", result);
     assert!(!test_repo.branch_exists("feature-a"));
@@ -779,7 +779,7 @@ fn drop_file_restores_tracked_modifications() {
 
     test_repo.write_file("base.txt", "modified content");
 
-    let result = super::drop_file(&test_repo.repo, "base.txt", true);
+    let result = super::drop_files(&test_repo.repo, &["base.txt".to_string()], true);
     assert!(result.is_ok(), "drop_file failed: {:?}", result);
 
     // File should be restored to its committed state (content == commit message)
@@ -797,7 +797,7 @@ fn drop_file_deletes_untracked_file() {
 
     test_repo.write_file("untracked.txt", "new content");
 
-    let result = super::drop_file(&test_repo.repo, "untracked.txt", true);
+    let result = super::drop_files(&test_repo.repo, &["untracked.txt".to_string()], true);
     assert!(result.is_ok(), "drop_file failed: {:?}", result);
 
     let path = test_repo.workdir().join("untracked.txt");
@@ -816,7 +816,7 @@ fn drop_file_deletes_staged_new_file() {
     test_repo.write_file("new.txt", "new content");
     test_repo.stage_files(&["new.txt"]);
 
-    let result = super::drop_file(&test_repo.repo, "new.txt", true);
+    let result = super::drop_files(&test_repo.repo, &["new.txt".to_string()], true);
     assert!(result.is_ok(), "drop_file failed: {:?}", result);
 
     let path = test_repo.workdir().join("new.txt");
@@ -824,6 +824,135 @@ fn drop_file_deletes_staged_new_file() {
     assert!(
         test_repo.status_porcelain().is_empty(),
         "working tree should be clean"
+    );
+}
+
+#[test]
+fn several_files_drop_together_after_one_confirmation() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("Base", "base.txt");
+    test_repo.write_file("base.txt", "modified content");
+    test_repo.write_file("untracked.txt", "new content");
+
+    let result = test_repo.in_dir(|| {
+        super::run(
+            vec!["base.txt".to_string(), "untracked.txt".to_string()],
+            true,
+        )
+    });
+    assert!(result.is_ok(), "drop failed: {:?}", result);
+
+    assert_eq!(test_repo.read_file("base.txt"), "Base");
+    assert!(!test_repo.workdir().join("untracked.txt").exists());
+    assert!(test_repo.status_porcelain().is_empty());
+}
+
+#[test]
+fn only_files_drop_together() {
+    let test_repo = setup_woven_branch(1);
+    test_repo.write_file("extra.txt", "new content");
+
+    for other in ["feature-a", "zz"] {
+        let result =
+            test_repo.in_dir(|| super::run(vec!["extra.txt".to_string(), other.to_string()], true));
+        let err = result.unwrap_err().to_string();
+        assert_eq!(err, "Only files can be dropped together");
+    }
+    assert!(test_repo.branch_exists("feature-a"));
+    assert!(test_repo.workdir().join("extra.txt").exists());
+}
+
+/// The directory's clean already removes the file; a delete of its own would
+/// then fail on a path that is gone.
+#[test]
+fn a_file_inside_a_dropped_directory_goes_with_it() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("Base", "base.txt");
+    std::fs::create_dir_all(test_repo.workdir().join("newdir")).unwrap();
+    test_repo.write_file("newdir/a.txt", "new");
+    test_repo.write_file("newdir/b.txt", "new");
+
+    let paths = ["newdir/a.txt".to_string(), "newdir".to_string()];
+    let result = super::drop_files(&test_repo.repo, &paths, true);
+    assert!(result.is_ok(), "drop failed: {:?}", result);
+    assert!(!test_repo.workdir().join("newdir").exists());
+    assert!(test_repo.status_porcelain().is_empty());
+}
+
+/// Spellings shell completion produces (`newdir/`, `./newdir`, `.`) name the
+/// same directory; it must neither swallow itself nor miss its files.
+#[test]
+fn directory_spellings_drop_the_same_directory() {
+    for args in [
+        vec!["newdir/"],
+        vec!["./newdir", "newdir/a.txt"],
+        vec!["newdir/a.txt", "newdir/"],
+        vec!["."],
+        vec![".", "newdir/a.txt"],
+    ] {
+        let test_repo = TestRepo::new_with_remote();
+        test_repo.commit("Base", "base.txt");
+        std::fs::create_dir_all(test_repo.workdir().join("newdir")).unwrap();
+        test_repo.write_file("newdir/a.txt", "new");
+        test_repo.write_file("base.txt", "dirty");
+
+        let targets: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+        let result = test_repo.in_dir(|| super::run(targets, true));
+        assert!(result.is_ok(), "{args:?}: {:?}", result);
+        assert!(
+            !test_repo.workdir().join("newdir").exists(),
+            "{args:?}: newdir should be gone"
+        );
+        // The root takes tracked changes too; a subdirectory leaves them.
+        let expected = if args.contains(&".") { "Base" } else { "dirty" };
+        assert_eq!(test_repo.read_file("base.txt"), expected, "{args:?}");
+    }
+}
+
+/// A file named twice (here in two spellings) is dropped once.
+#[test]
+fn a_file_named_twice_is_dropped_once() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("Base", "base.txt");
+    test_repo.write_file("untracked.txt", "new content");
+
+    let result = test_repo.in_dir(|| {
+        super::run(
+            vec!["untracked.txt".to_string(), "./untracked.txt".to_string()],
+            true,
+        )
+    });
+    assert!(result.is_ok(), "drop failed: {:?}", result);
+    assert!(!test_repo.workdir().join("untracked.txt").exists());
+}
+
+#[test]
+fn files_prompt_lists_restored_and_deleted_paths() {
+    use super::FileOp;
+    let plan = |path: &str, op| (path.to_string(), op);
+    assert_eq!(
+        super::files_prompt(&[plan("a", FileOp::Restore)]),
+        "Discard changes to `a`?"
+    );
+    assert_eq!(
+        super::files_prompt(&[plan("d", FileOp::RestoreDir)]),
+        "Discard all changes in `d`?"
+    );
+    assert_eq!(
+        super::files_prompt(&[plan("n", FileOp::RmStaged)]),
+        "Delete `n`?"
+    );
+    assert_eq!(
+        super::files_prompt(&[plan("a", FileOp::Restore), plan("b", FileOp::RestoreDir)]),
+        "Discard all selected changes?\nrestore `a`\nrestore `b`"
+    );
+    assert_eq!(
+        super::files_prompt(&[plan("n", FileOp::Remove), plan("d", FileOp::CleanDir)]),
+        "Delete all selected files?\ndelete `n`\ndelete `d`"
+    );
+    assert_eq!(
+        super::files_prompt(&[plan("a", FileOp::Restore), plan("n", FileOp::Remove)]),
+        "Discard all selected changes and delete all selected files?\nrestore `a`\ndelete `n`"
     );
 }
 
@@ -839,7 +968,7 @@ fn drop_dir_with_only_untracked_files() {
     test_repo.write_file("newdir/a.txt", "aaa");
     test_repo.write_file("newdir/b.txt", "bbb");
 
-    let result = super::drop_file(&test_repo.repo, "newdir", true);
+    let result = super::drop_files(&test_repo.repo, &["newdir".to_string()], true);
     assert!(result.is_ok(), "drop_file (dir) failed: {:?}", result);
 
     assert!(
@@ -865,7 +994,7 @@ fn drop_dir_with_only_tracked_modifications() {
     test_repo.write_file("src/one.txt", "modified-one");
     test_repo.write_file("src/two.txt", "modified-two");
 
-    let result = super::drop_file(&test_repo.repo, "src", true);
+    let result = super::drop_files(&test_repo.repo, &["src".to_string()], true);
     assert!(result.is_ok(), "drop_file (dir) failed: {:?}", result);
 
     assert_eq!(test_repo.read_file("src/one.txt"), "original-one");
@@ -889,7 +1018,7 @@ fn drop_dir_with_mixed_tracked_and_untracked() {
     test_repo.write_file("mix/tracked.txt", "modified");
     test_repo.write_file("mix/untracked.txt", "new");
 
-    let result = super::drop_file(&test_repo.repo, "mix", true);
+    let result = super::drop_files(&test_repo.repo, &["mix".to_string()], true);
     assert!(result.is_ok(), "drop_file (dir) failed: {:?}", result);
 
     assert_eq!(test_repo.read_file("mix/tracked.txt"), "original");
@@ -913,7 +1042,7 @@ fn drop_dir_with_staged_new_files() {
     test_repo.write_file("staged/b.txt", "bbb");
     test_repo.stage_files(&["staged/a.txt", "staged/b.txt"]);
 
-    let result = super::drop_file(&test_repo.repo, "staged", true);
+    let result = super::drop_files(&test_repo.repo, &["staged".to_string()], true);
     assert!(result.is_ok(), "drop_file (dir) failed: {:?}", result);
 
     assert!(
@@ -974,7 +1103,7 @@ fn drop_merge_commit_fails() {
     test_repo.commit_merge("Merge side", a_oid, upstream_oid);
     let merge_oid = test_repo.head_oid();
 
-    let result = test_repo.in_dir(|| crate::drop::run(merge_oid.to_string(), true));
+    let result = test_repo.in_dir(|| crate::drop::run(vec![merge_oid.to_string()], true));
     assert!(result.is_err());
     assert!(
         result.unwrap_err().to_string().contains("merge commit"),
@@ -990,7 +1119,7 @@ fn drop_prefers_file_over_branch_name_collision() {
     test_repo.create_branch_at_commit("collision", a1_oid);
     test_repo.write_file("collision", "dirty data");
 
-    let result = test_repo.in_dir(|| crate::drop::run("collision".to_string(), true));
+    let result = test_repo.in_dir(|| crate::drop::run(vec!["collision".to_string()], true));
     assert!(result.is_ok(), "Expected ok, got: {:?}", result);
     // Branch should still exist (file was dropped, not the branch)
     assert!(test_repo.branch_exists("collision"));
@@ -1006,7 +1135,9 @@ fn drop_file_resolves_from_nested_cwd() {
     test_repo.commit_staged("add sub/file.txt");
     std::fs::write(sub_dir.join("file.txt"), "modified").unwrap();
 
-    let result = test_repo.in_dir_path(&sub_dir, || crate::drop::run("file.txt".to_string(), true));
+    let result = test_repo.in_dir_path(&sub_dir, || {
+        crate::drop::run(vec!["file.txt".to_string()], true)
+    });
     assert!(result.is_ok(), "Expected ok, got: {:?}", result);
 }
 

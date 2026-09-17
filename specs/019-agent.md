@@ -116,7 +116,8 @@ answer supplied.
 ```
 
 Emitted when the command would have asked a yes/no question before touching
-history. Nothing was changed.
+history. Nothing was changed. `prompt` may span lines: the first is the
+question, the rest detail what confirming does (`loom drop` lists each path).
 
 ```json
 {"status":"paused","message":"Conflicts detected — the `loom update` is paused",
