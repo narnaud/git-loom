@@ -4,4 +4,5 @@ pub mod common;
 pub mod diff_pane;
 pub mod hunk_view;
 pub mod list_pane;
+pub mod menu;
 pub mod popup;

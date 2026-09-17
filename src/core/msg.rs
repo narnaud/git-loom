@@ -207,8 +207,8 @@ where
 
 /// Prompt the user for a yes/no confirmation. Returns `true` if confirmed.
 ///
-/// Lines after the first are detail (what exactly the yes does), printed as
-/// `›` lines above the question.
+/// Lines after the first are detail (what exactly the yes does): `›` lines
+/// above the question on the CLI, the help box of the TUI menu.
 pub fn confirm(prompt: &str, agent_hint: &str) -> Result<bool> {
     if agent_mode::enabled() {
         return Err(agent_mode::respond_needs_confirmation(prompt, agent_hint));

@@ -59,7 +59,7 @@ Every action suspends the TUI, runs the regular loom command — prompts and edi
 | `c` | [`commit`](commit.md) | Selected working files; nothing relevant selected → the index as-is. Branch and message are prompted as usual. |
 | `f` | [`fold`](fold.md) | Two-step: `f` captures the selection (or cursor row) as sources; move the cursor to the target and press `Enter` (`Esc` cancels). While picking a target, other action keys are inactive. |
 | `b` | [`branch new`](branch.md) | The branch appears in the tree where it will land once created — at the cursor commit or branch tip (its `-t` target), else at the base — and you type its name right there. `Enter` creates it, `Esc` or an empty name cancels. |
-| `d` | [`drop`](drop.md) | Cursor commit, branch, or working file; confirmation prompt as usual. |
+| `d` | [`drop`](drop.md) | Selected working files, all at once; else the cursor commit, branch, working file, or the `[local changes]` header (drops everything, like `drop zz`). A menu asks for confirmation: `Enter` on the action runs it, `Cancel` or `Esc` leaves. |
 | `r` | [`reword`](reword.md) | Cursor commit: opens the editor. Cursor branch: edit the name in place on its row — `Enter` renames, `Esc` cancels. |
 
 ### Diff Pane

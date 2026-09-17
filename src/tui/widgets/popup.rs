@@ -13,6 +13,7 @@ use ratatui::{
 use crate::core::ui::{Answer, Level, PromptKind};
 use crate::tui::theme::TuiTheme;
 use crate::tui::widgets::diff_pane::DiffPane;
+use crate::tui::widgets::menu::{Menu, MenuItem, MenuOutcome};
 
 /// Centered rect of at most `width`×`height` inside `area`.
 pub(crate) fn centered(area: Rect, width: u16, height: u16) -> Rect {
@@ -178,7 +179,8 @@ pub(crate) enum PromptOutcome {
 }
 
 enum PromptState {
-    Confirm,
+    /// The question as the first item, `Cancel` as the second.
+    Confirm(Menu),
     Input(TextField),
     Select {
         items: Vec<String>,
@@ -208,9 +210,24 @@ pub(crate) struct Prompt {
 const LIST_ROWS: usize = 12;
 
 impl Prompt {
-    pub fn new(kind: PromptKind, title: String, error: Option<String>) -> Self {
+    /// `command` is the running command line; a confirmation is titled with
+    /// it, since its question becomes the menu's first item and the detail
+    /// lines after it the item's help.
+    pub fn new(kind: PromptKind, prompt: String, error: Option<String>, command: &str) -> Self {
+        let mut title = prompt;
         let state = match kind {
-            PromptKind::Confirm => PromptState::Confirm,
+            PromptKind::Confirm => {
+                let (question, detail) = title.split_once('\n').unwrap_or((&title, ""));
+                let mut item = MenuItem::new(question.trim_end_matches('?'));
+                if !detail.is_empty() {
+                    item = item.help(detail);
+                }
+                title = command.to_string();
+                PromptState::Confirm(Menu::new(
+                    title.clone(),
+                    vec![item, MenuItem::new("Cancel")],
+                ))
+            }
             PromptKind::Input { placeholder } => {
                 PromptState::Input(TextField::new(placeholder.as_deref().unwrap_or("")))
             }
@@ -262,12 +279,11 @@ impl Prompt {
             return PromptOutcome::Cancel;
         }
         match &mut self.state {
-            PromptState::Confirm => match code {
-                KeyCode::Char('y' | 'Y') => PromptOutcome::Answer(Answer::Bool(true)),
-                KeyCode::Char('n' | 'N') | KeyCode::Enter => {
-                    PromptOutcome::Answer(Answer::Bool(false))
-                }
-                _ => PromptOutcome::Pending,
+            PromptState::Confirm(menu) => match menu.handle_key(code, modifiers) {
+                MenuOutcome::Choose(0) => PromptOutcome::Answer(Answer::Bool(true)),
+                MenuOutcome::Choose(_) => PromptOutcome::Answer(Answer::Bool(false)),
+                MenuOutcome::Cancel => PromptOutcome::Cancel,
+                MenuOutcome::Pending => PromptOutcome::Pending,
             },
             PromptState::Input(field) => {
                 if code == KeyCode::Enter {
@@ -397,7 +413,7 @@ impl Prompt {
     pub fn render(&self, frame: &mut Frame, area: Rect, theme: &TuiTheme) {
         let mut lines: Vec<Line<'static>> = Vec::new();
         let hint = match &self.state {
-            PromptState::Confirm => "y: yes · n: no · Esc: cancel",
+            PromptState::Confirm(menu) => return menu.render(frame, area, theme),
             PromptState::Input(field) => {
                 let mut spans = vec![Span::styled("> ", theme.hint)];
                 spans.extend(field.spans(theme));

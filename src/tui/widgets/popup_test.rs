@@ -68,6 +68,7 @@ fn input_prompt_answers_with_the_typed_text_and_prefills_the_placeholder() {
         },
         "Rename".into(),
         None,
+        "",
     );
     key(&mut prompt, KeyCode::Backspace);
     type_text(&mut prompt, "d-name");
@@ -79,7 +80,7 @@ fn input_prompt_answers_with_the_typed_text_and_prefills_the_placeholder() {
 
 #[test]
 fn escape_and_ctrl_c_cancel() {
-    let mut prompt = Prompt::new(PromptKind::Confirm, "Sure?".into(), None);
+    let mut prompt = Prompt::new(PromptKind::Confirm, "Sure?".into(), None, "loom drop a1");
     assert!(matches!(
         key(&mut prompt, KeyCode::Esc),
         PromptOutcome::Cancel
@@ -91,16 +92,18 @@ fn escape_and_ctrl_c_cancel() {
 }
 
 #[test]
-fn confirm_prompt_maps_keys() {
-    let mut prompt = Prompt::new(PromptKind::Confirm, "Sure?".into(), None);
+fn confirm_prompt_is_a_menu_of_the_question_and_cancel() {
+    let mut prompt = Prompt::new(PromptKind::Confirm, "Sure?".into(), None, "loom drop a1");
+    assert_eq!(prompt.title(), "loom drop a1");
     assert!(matches!(
-        key(&mut prompt, KeyCode::Char('x')),
+        key(&mut prompt, KeyCode::Char('y')),
         PromptOutcome::Pending
     ));
     assert!(matches!(
-        key(&mut prompt, KeyCode::Char('y')),
+        key(&mut prompt, KeyCode::Enter),
         PromptOutcome::Answer(Answer::Bool(true))
     ));
+    key(&mut prompt, KeyCode::Down);
     assert!(matches!(
         key(&mut prompt, KeyCode::Enter),
         PromptOutcome::Answer(Answer::Bool(false))
@@ -116,6 +119,7 @@ fn select_prompt_moves_and_chooses() {
         },
         "Pick".into(),
         None,
+        "",
     );
     key(&mut prompt, KeyCode::Down);
     key(&mut prompt, KeyCode::Char('j'));
@@ -132,14 +136,14 @@ fn select_or_input_takes_typed_text_or_a_highlighted_suggestion() {
         items: items(&["feature-a", "feature-b", "other"]),
         allow_other: true,
     };
-    let mut prompt = Prompt::new(kind.clone(), "Branch".into(), None);
+    let mut prompt = Prompt::new(kind.clone(), "Branch".into(), None, "");
     type_text(&mut prompt, "brand-new");
     match key(&mut prompt, KeyCode::Enter) {
         PromptOutcome::Answer(Answer::Text(t)) => assert_eq!(t, "brand-new"),
         _ => panic!("expected the typed text"),
     }
 
-    let mut prompt = Prompt::new(kind.clone(), "Branch".into(), None);
+    let mut prompt = Prompt::new(kind.clone(), "Branch".into(), None, "");
     type_text(&mut prompt, "feat");
     key(&mut prompt, KeyCode::Down);
     key(&mut prompt, KeyCode::Down);
@@ -149,7 +153,7 @@ fn select_or_input_takes_typed_text_or_a_highlighted_suggestion() {
     }
 
     // Tab completes into the field; typing afterwards drops the highlight.
-    let mut prompt = Prompt::new(kind, "Branch".into(), None);
+    let mut prompt = Prompt::new(kind, "Branch".into(), None, "");
     key(&mut prompt, KeyCode::Down);
     key(&mut prompt, KeyCode::Tab);
     type_text(&mut prompt, "-v2");
@@ -168,6 +172,7 @@ fn select_or_input_ignores_enter_on_empty_input() {
         },
         "Branch".into(),
         None,
+        "",
     );
     assert!(matches!(
         key(&mut prompt, KeyCode::Enter),
@@ -183,6 +188,7 @@ fn multi_select_requires_one_checked_item() {
         },
         "Files".into(),
         None,
+        "",
     );
     assert!(matches!(
         key(&mut prompt, KeyCode::Enter),
@@ -204,6 +210,7 @@ fn prompts_render_title_error_and_hint() {
         PromptKind::Input { placeholder: None },
         "Branch name".into(),
         Some("cannot be empty".into()),
+        "",
     );
     let text = render_text(|f, area| prompt.render(f, area, &theme));
     assert!(text.contains(" Branch name "));
@@ -215,14 +222,35 @@ fn prompts_render_title_error_and_hint() {
         },
         "Files".into(),
         None,
+        "",
     );
     let text = render_text(|f, area| prompt.render(f, area, &theme));
     assert!(text.contains("[ ] src/a.rs"));
     assert!(text.contains("Space: toggle"));
 
-    let prompt = Prompt::new(PromptKind::Confirm, "Drop it?".into(), None);
+    let prompt = Prompt::new(
+        PromptKind::Confirm,
+        "Drop `a1`?".into(),
+        None,
+        "loom drop a1",
+    );
     let text = render_text(|f, area| prompt.render(f, area, &theme));
-    assert!(text.contains("y: yes"));
+    assert!(text.contains(" loom drop a1 "));
+    assert!(text.contains(" Drop a1 "));
+    assert!(text.contains(" Cancel "));
+    assert!(text.contains(" 1 of 2 "));
+
+    // Detail lines after the question become the help box.
+    let prompt = Prompt::new(
+        PromptKind::Confirm,
+        "Delete all selected files?\ndelete `a`\ndelete `b`".into(),
+        None,
+        "loom drop a1 a2",
+    );
+    let text = render_text(|f, area| prompt.render(f, area, &theme));
+    assert!(text.contains(" Delete all selected files "));
+    assert!(text.contains("delete a"));
+    assert!(text.contains("delete b"));
 }
 
 #[test]

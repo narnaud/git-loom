@@ -363,6 +363,44 @@ fn drop_and_reword_require_an_actionable_row() {
     };
     assert_eq!(target, oid('a').to_string());
     assert_eq!(name, None);
+    assert_eq!(
+        app.action_drop(),
+        Some(Action::Drop {
+            targets: vec![oid('a').to_string()]
+        })
+    );
+}
+
+#[test]
+fn drop_takes_the_local_changes_header_as_zz() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, LOCAL_CHANGES_KEY);
+    let zz = app.snapshot.ids.get_unstaged().to_string();
+    assert_eq!(app.action_drop(), Some(Action::Drop { targets: vec![zz] }));
+}
+
+#[test]
+fn drop_takes_every_selected_working_file_but_only_files_together() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, "wf:a.rs");
+    press(&mut app, KeyCode::Char(' '));
+    press(&mut app, KeyCode::Char(' '));
+    // The cursor moved on past the selection; the selection still wins.
+    let ids = &app.snapshot.ids;
+    let expected = vec![
+        ids.get_file("a.rs").to_string(),
+        ids.get_file("b.rs").to_string(),
+    ];
+    assert_eq!(app.action_drop(), Some(Action::Drop { targets: expected }));
+
+    app.selected.insert(oid('a').to_string());
+    assert!(app.action_drop().is_none());
+    assert_eq!(
+        app.notice.as_deref(),
+        Some("drop: only files can be dropped together")
+    );
 }
 
 #[test]
@@ -735,7 +773,7 @@ fn command_line_uses_the_short_ids_the_tree_shows() {
     );
     assert_eq!(
         app.command_line(&Action::Drop {
-            target: oid('a').to_string(),
+            targets: vec![oid('a').to_string()],
         }),
         format!("loom drop {}", commit)
     );
@@ -821,6 +859,19 @@ fn messages_land_in_the_current_log_entry() {
     assert!(app.finish_action(Ok(())));
     assert_eq!(app.notice.as_deref(), Some("✓ Reworded `a1`"));
     assert!(app.popup.is_none());
+
+    // Several ✓ lines (`drop a b`): the last one, with a count of the rest.
+    for text in ["Restored `a`", "Deleted `b`"] {
+        app.handle_request(Request::Message {
+            level: Level::Success,
+            text: text.to_string(),
+        });
+    }
+    assert!(app.finish_action(Ok(())));
+    assert_eq!(
+        app.notice.as_deref(),
+        Some("✓ Deleted `b` (+2 more, L: log)")
+    );
 
     // Failure: an error popup, and the line is logged.
     assert!(!app.finish_action(Err(anyhow::anyhow!("Nothing to commit"))));

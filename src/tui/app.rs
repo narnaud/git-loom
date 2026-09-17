@@ -82,8 +82,8 @@ enum Action {
         name: String,
         target: Option<String>,
     },
-    /// `loom drop <target>`.
-    Drop { target: String },
+    /// `loom drop <targets...>`: one commit, branch, or `zz`, or several files.
+    Drop { targets: Vec<String> },
     /// `loom reword <target>`; `name` is the new branch name typed in the
     /// tree, `None` for a commit (the editor asks for the message).
     Reword {
@@ -236,7 +236,7 @@ fn execute_action(
             fold::run(false, false, None, args, theme)
         }
         Action::NewBranch { name, target } => branch::new::run(Some(name), target),
-        Action::Drop { target } => drop::run(vec![target], false),
+        Action::Drop { targets } => drop::run(targets, false),
         Action::Reword { target, name } => reword::run(target, name),
     };
     crate::trace::finalize();
@@ -435,7 +435,10 @@ impl<'a> App<'a> {
                     words.extend(["-t".into(), sid(target)]);
                 }
             }
-            Action::Drop { target } => words.extend(["drop".into(), sid(target)]),
+            Action::Drop { targets } => {
+                words.push("drop".into());
+                words.extend(targets.iter().map(|t| sid(t)));
+            }
             Action::Reword { target, name } => {
                 words.extend(["reword".into(), sid(target)]);
                 if let Some(name) = name {
@@ -486,8 +489,9 @@ impl<'a> App<'a> {
                 error,
                 reply,
             } => {
+                let command = self.running.as_ref().map_or("", |r| r.command.as_str());
                 self.popup = Some(Popup::Prompt {
-                    prompt: Prompt::new(kind, prompt, error),
+                    prompt: Prompt::new(kind, prompt, error, command),
                     reply,
                 });
             }
@@ -517,16 +521,23 @@ impl<'a> App<'a> {
         self.fallback_cursor = None;
         match result {
             Ok(()) => {
-                let last_success = self.log.last().and_then(|entry| {
+                // A multi-target command (`drop a b`) prints one ✓ per target;
+                // the bar shows the last and says how many it stands for.
+                let successes: Vec<&str> = self.log.last().map_or_else(Vec::new, |entry| {
                     entry
                         .lines
                         .iter()
-                        .rev()
-                        .find(|(level, _)| *level == Level::Success)
-                        .and_then(|(_, text)| text.lines().next())
-                        .map(str::to_string)
+                        .filter(|(level, _)| *level == Level::Success)
+                        .filter_map(|(_, text)| text.lines().next())
+                        .collect()
                 });
-                self.notice = Some(format!("✓ {}", last_success.as_deref().unwrap_or("done")));
+                self.notice = Some(match successes.as_slice() {
+                    [] => "✓ done".to_string(),
+                    [one] => format!("✓ {}", one),
+                    [.., last] => {
+                        format!("✓ {} (+{} more, L: log)", last, successes.len() - 1)
+                    }
+                });
                 true
             }
             Err(e) if e.downcast_ref::<Cancelled>().is_some() => {
@@ -983,18 +994,42 @@ impl<'a> App<'a> {
         Some(Action::NewBranch { name, target })
     }
 
-    /// `d`: drop the row under the cursor (commit, branch, or local change).
+    /// `d`: drop the selected working files together, else the cursor row (a
+    /// commit, branch, working file, or the `[local changes]` header for
+    /// `drop zz`). Only files can go together, as in the CLI.
     fn action_drop(&mut self) -> Option<Action> {
-        let target = self.current_row().and_then(|row| match row.kind {
-            RowKind::Commit { .. } | RowKind::BranchName { .. } | RowKind::WorkingFile { .. } => {
-                row.target.clone()
-            }
-            _ => None,
-        });
-        if target.is_none() {
-            self.notice = Some("drop: move to a commit, branch, or file".to_string());
+        let rows: Vec<&Row> = if self.selected.is_empty() {
+            self.current_row().into_iter().collect()
+        } else {
+            self.rows
+                .iter()
+                .filter(|r| self.selected.contains(&r.key))
+                .collect()
+        };
+        let droppable = |row: &Row| {
+            matches!(
+                row.kind,
+                RowKind::Commit { .. }
+                    | RowKind::BranchName { .. }
+                    | RowKind::WorkingFile { .. }
+                    | RowKind::LocalChanges { .. }
+            ) && row.target.is_some()
+        };
+        if rows.is_empty() || !rows.iter().all(|r| droppable(r)) {
+            self.notice =
+                Some("drop: move to a commit, branch, file, or local changes".to_string());
+            return None;
         }
-        target.map(|target| Action::Drop { target })
+        if rows.len() > 1
+            && !rows
+                .iter()
+                .all(|r| matches!(r.kind, RowKind::WorkingFile { .. }))
+        {
+            self.notice = Some("drop: only files can be dropped together".to_string());
+            return None;
+        }
+        let targets = rows.iter().filter_map(|r| r.target.clone()).collect();
+        Some(Action::Drop { targets })
     }
 
     /// `r`: reword the commit under the cursor, or start editing the branch
