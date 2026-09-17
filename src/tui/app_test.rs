@@ -6,7 +6,7 @@ use crossterm::event::{Event, KeyEvent, MouseEvent};
 use ratatui::style::Style;
 
 use super::*;
-use crate::core::repo::{BranchInfo, CommitInfo, FileChange, UpstreamInfo};
+use crate::core::repo::{BranchInfo, CommitInfo, ContextCommit, FileChange, UpstreamInfo};
 use crate::core::ui::PromptKind;
 use crate::tui::widgets::common::diff_line_style;
 
@@ -29,6 +29,14 @@ fn commit(c: char, parent: char, message: &str) -> CommitInfo {
         message: message.to_string(),
         parent_oid: Some(oid(parent)),
         files: vec![file("src/parser.rs", 'M', ' ')],
+    }
+}
+
+fn context_commit(short_hash: &str) -> ContextCommit {
+    ContextCommit {
+        short_hash: short_hash.to_string(),
+        message: "older".to_string(),
+        date: "2025-12-31".to_string(),
     }
 }
 
@@ -82,7 +90,7 @@ fn make_theme() -> TuiTheme {
 fn make_app(snapshot: Snapshot, theme: &TuiTheme) -> App<'_> {
     let mut expanded = HashSet::new();
     expanded.insert(LOCAL_CHANGES_KEY.to_string());
-    App::new(snapshot, theme, graph::Theme::dark(), expanded)
+    App::new(snapshot, theme, graph::Theme::dark(), expanded, 1)
 }
 
 fn cursor_key(app: &App) -> String {
@@ -299,6 +307,9 @@ fn fold_mode_blocks_action_keys() {
         KeyCode::Char('d'),
         KeyCode::Char('r'),
         KeyCode::Char('R'),
+        KeyCode::Char('+'),
+        KeyCode::Char('='),
+        KeyCode::Char('-'),
         KeyCode::F(5),
     ] {
         let result = app.handle_key(PaneId::Left, code, KeyModifiers::NONE);
@@ -1330,4 +1341,90 @@ fn plain_diff_text_has_no_header_region() {
     let theme = make_theme();
     let lines = colorize_diff("diff --git a/f b/f\n+new\n", &theme);
     assert_eq!(lines[1].spans[0].style, theme.added);
+}
+
+/// Shrinking the context (`-`) removes the row the cursor sits on; it must
+/// land on the neighbour, not back at the top of the tree.
+#[test]
+fn cursor_lands_next_to_a_row_that_disappeared() {
+    let theme = make_theme();
+    let mut info = make_info();
+    info.context_commits = vec![context_commit("1111111"), context_commit("2222222")];
+    let mut app = make_app(snapshot_of(info), &theme);
+    move_cursor_to(&mut app, "ctx:2222222");
+
+    let mut shallower = make_info();
+    shallower.context_commits = vec![context_commit("1111111")];
+    app.apply_snapshot(snapshot_of(shallower));
+
+    assert_eq!(cursor_key(&app), "ctx:1111111");
+}
+
+#[test]
+fn shrinking_the_context_below_one_does_nothing() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    let before = cursor_key(&app);
+
+    app.change_context(-1);
+
+    assert_eq!(app.context, 1);
+    assert!(app.popup.is_none(), "no reload, so no failure popup");
+    assert_eq!(cursor_key(&app), before);
+}
+
+/// Asking for more context than history holds must leave the depth on what
+/// the tree shows, or `-` would take as many presses to change anything.
+#[test]
+fn growing_the_context_clamps_to_the_history_that_exists() {
+    let test_repo = crate::core::test_helpers::TestRepo::new_with_remote();
+    let theme = make_theme();
+
+    test_repo.in_dir(|| {
+        let mut app = make_app(load_snapshot(1).unwrap(), &theme);
+
+        app.change_context(1);
+
+        assert!(app.snapshot.info.context_commits.is_empty());
+        assert_eq!(app.context, 1);
+    });
+}
+
+fn context_messages(app: &App) -> Vec<String> {
+    app.rows
+        .iter()
+        .filter_map(|row| match &row.kind {
+            RowKind::Context { message, .. } => Some(message.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn context_keys_add_and_remove_one_commit_before_the_base() {
+    let test_repo = crate::core::test_helpers::TestRepo::new_with_remote();
+    let tip = test_repo.add_remote_commits(&["Older", "Newer"]);
+    test_repo.fetch_remote();
+    test_repo.reset_hard(tip);
+    let theme = make_theme();
+
+    test_repo.in_dir(|| {
+        let mut app = make_app(load_snapshot(1).unwrap(), &theme);
+        let press = |app: &mut App, key: char| {
+            app.handle_key(PaneId::Left, KeyCode::Char(key), KeyModifiers::NONE);
+        };
+        assert!(context_messages(&app).is_empty());
+
+        press(&mut app, '+');
+        assert_eq!(app.context, 2);
+        assert_eq!(context_messages(&app), ["Older"]);
+
+        press(&mut app, '=');
+        assert_eq!(app.context, 3);
+        assert_eq!(context_messages(&app), ["Older", "Initial"]);
+
+        press(&mut app, '-');
+        assert_eq!(app.context, 2);
+        assert_eq!(context_messages(&app), ["Older"]);
+    });
 }

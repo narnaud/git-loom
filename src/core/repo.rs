@@ -120,6 +120,14 @@ pub fn hide_branch_pattern(repo: &Repository) -> Option<String> {
         .ok()
 }
 
+/// Read the default status context depth from git config `loom.statusContext`
+/// (spec 001): the number of commits shown at and before the base. Values
+/// below 1 and unparsable ones are ignored, leaving the built-in default.
+pub fn status_context(repo: &Repository) -> Option<usize> {
+    let depth = repo.config().ok()?.get_i32("loom.statusContext").ok()?;
+    usize::try_from(depth).ok().filter(|n| *n >= 1)
+}
+
 /// Read git config `loom.pruneGoneBranches`: when true, `loom update` removes
 /// merged and gone-upstream local branches without prompting. False if unset.
 pub fn prune_gone_branches(repo: &Repository) -> bool {

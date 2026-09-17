@@ -12,7 +12,7 @@ git loom [status] [-f [COMMIT...]] [N]
 
 | Argument | Description |
 |----------|-------------|
-| `N` | Number of context commits to show before the base (default: 1) |
+| `N` | Number of commits to show at and before the base (default: [`loom.statusContext`](../configuration.md#loomstatuscontext), else 1) |
 
 ### Options
 
@@ -170,7 +170,7 @@ Show history before the base with a positional argument (`git loom 3` or `git lo
 · def5678 2025-07-04 Earlier change
 ```
 
-Context commits are dimmed and display-only (no short ID, not actionable). The default is 1 (no extra context).
+Context commits are dimmed and display-only (no short ID, not actionable). The default is `loom.statusContext`, falling back to 1: the base alone, no extra context.
 
 ## Hidden Branches
 

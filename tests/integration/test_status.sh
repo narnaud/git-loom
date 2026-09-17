@@ -336,6 +336,23 @@ out=$(gl status 2)
 assert_contains "$out" "·"       "context_dot_marker"
 assert_contains "$out" "Initial" "context_shows_history"
 
+describe "loom.statusContext sets the depth, the argument still overrides it"
+git -C "$WORK" config loom.statusContext 2
+out=$(gl status)
+assert_contains "$out" "·"       "config_context_dot_marker"
+assert_contains "$out" "Initial" "config_context_shows_history"
+out=$(gl status 1)
+assert_not_contains "$out" "·"       "argument_overrides_config"
+assert_not_contains "$out" "Initial" "argument_overrides_config_history"
+
+describe "unusable loom.statusContext values keep the default depth"
+for value in 0 -2 many; do
+    git -C "$WORK" config loom.statusContext "$value"
+    out=$(gl status)
+    assert_not_contains "$out" "·" "bad_context_config_$value"
+done
+git -C "$WORK" config --unset loom.statusContext
+
 # ── CWD-RELATIVE FILE PATHS ───────────────────────────────────────────────────
 
 describe "file paths are CWD-relative when run from a subdirectory"

@@ -9,7 +9,7 @@ The current checkout MUST be a local branch with an upstream tracking branch.
 | Command | Behavior |
 | --- | --- |
 | `git-loom`, `git-loom status` | Show branch-aware status; status is the default command. |
-| `git-loom [status] <N>` | Show `N-1` context commits before the base. Default `N` is 1. |
+| `git-loom [status] <N>` | Show `N-1` context commits before the base. Default `N` is git config `loom.statusContext`, else 1; config values below 1 or unparsable are ignored. |
 | `git-loom [status] --all` | Include branches hidden by `loom.hideBranchPattern`. |
 | `git-loom status -f`, `--files` | Show changed files under every displayed commit. |
 | `git-loom status -f <id>...` | Show files only for identified commits/branches; accept loom commit short IDs and any hash accepted by `git rev-parse`; silently ignore unknown IDs. |

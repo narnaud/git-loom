@@ -40,6 +40,7 @@ Short IDs are displayed like in `git loom status`, so the tree doubles as a chea
 | `PgUp`/`PgDn` | Scroll the diff by a page |
 | Mouse click / wheel | Focus, move, scroll |
 | `R` / `F5` | Reload the tree from the repo |
+| `+` (or `=`) / `-` | Show one more / one fewer context commit before the base (starts at [`loom.statusContext`](../configuration.md#loomstatuscontext), never goes below 1) |
 | `Esc` | Cancel fold, rename, or new-branch mode → clear selection → quit (first that applies) |
 | `q` / `Ctrl-C` | Quit |
 

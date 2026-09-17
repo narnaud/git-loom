@@ -2,7 +2,7 @@ use crate::core::repo::gather_repo_info;
 use crate::core::shortid::IdAllocator;
 use crate::core::test_helpers::TestRepo;
 
-use super::{hide_branches, resolve_commit_filter};
+use super::{hide_branches, resolve_commit_filter, resolve_context};
 
 #[test]
 fn hidden_branch_removed_from_branches() {
@@ -214,4 +214,29 @@ fn filter_unknown_id_silently_skipped() {
         &allocator,
     );
     assert!(filter.is_empty());
+}
+
+/// Re-open so the `git config` write is visible to git2.
+fn reopen(test_repo: &TestRepo) -> git2::Repository {
+    git2::Repository::open(test_repo.workdir()).unwrap()
+}
+
+#[test]
+fn context_depth_falls_back_from_argument_to_config() {
+    let test_repo = TestRepo::new_with_remote();
+    assert_eq!(resolve_context(&test_repo.repo, None), 1);
+    assert_eq!(resolve_context(&test_repo.repo, Some(3)), 3);
+
+    test_repo.set_config("loom.statusContext", "5");
+    assert_eq!(resolve_context(&reopen(&test_repo), None), 5);
+    assert_eq!(resolve_context(&reopen(&test_repo), Some(2)), 2);
+}
+
+#[test]
+fn unusable_context_config_keeps_the_default() {
+    let test_repo = TestRepo::new_with_remote();
+    for value in ["0", "-2", "many"] {
+        test_repo.set_config("loom.statusContext", value);
+        assert_eq!(resolve_context(&reopen(&test_repo), None), 1, "{value}");
+    }
 }

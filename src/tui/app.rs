@@ -170,14 +170,15 @@ pub fn run(theme: graph::Theme) -> Result<()> {
     }
 
     let tui_theme = TuiTheme::from_graph_theme(&theme);
-    let snapshot = load_snapshot()?;
+    let context = crate::status::resolve_context(&repo::open_repo()?, None);
+    let snapshot = load_snapshot(context)?;
     let git_dir = snapshot.git_dir.clone();
 
     // Local changes start expanded.
     let mut expanded: HashSet<String> = HashSet::new();
     expanded.insert(LOCAL_CHANGES_KEY.to_string());
 
-    let app = App::new(snapshot, &tui_theme, theme, expanded);
+    let app = App::new(snapshot, &tui_theme, theme, expanded, context);
     let (_, Outcome::Quit) = Shell::new(app).run()?;
 
     // The TUI leaves on a conflict pause; repeat the popup's guidance where
@@ -197,13 +198,13 @@ fn paused_message(command: &str) -> String {
 }
 
 /// Gather repo info, exactly like `loom status` with files enabled.
-fn load_snapshot() -> Result<Snapshot> {
+fn load_snapshot(context: usize) -> Result<Snapshot> {
     let repo = repo::open_repo()?;
     let workdir = repo::require_workdir(&repo, "display status")?.to_path_buf();
     let git_dir = repo.path().to_path_buf();
     let cwd_prefix = repo::cwd_relative_to_repo(&repo).unwrap_or_default();
 
-    let mut info = repo::gather_repo_info(&repo, true, 1)?;
+    let mut info = repo::gather_repo_info(&repo, true, context)?;
     // Collect entities before filtering so short IDs stay stable.
     let ids = IdAllocator::new(info.collect_entities());
     crate::status::apply_hidden_branches(&repo, &mut info);
@@ -255,6 +256,8 @@ struct App<'a> {
     /// Keys of the multi-selected rows.
     selected: HashSet<String>,
     expanded: HashSet<String>,
+    /// Context depth the tree is loaded with, as `loom status <N>` takes it.
+    context: usize,
     mode: Mode,
     /// Right-pane scroll state.
     diff: DiffPane,
@@ -285,6 +288,7 @@ impl<'a> App<'a> {
         theme: &'a TuiTheme,
         graph_theme: graph::Theme,
         expanded: HashSet<String>,
+        context: usize,
     ) -> Self {
         let (request_tx, requests) = channel();
         let mut app = App {
@@ -295,6 +299,7 @@ impl<'a> App<'a> {
             tree: ListPane::new(0),
             selected: HashSet::new(),
             expanded,
+            context,
             mode: Mode::Normal,
             diff: DiffPane::new(),
             diff_cache: HashMap::new(),
@@ -343,13 +348,14 @@ impl<'a> App<'a> {
             .next_cursor
             .take()
             .or_else(|| self.current_row().map(|r| r.key.clone()));
+        let previous = self.tree.cursor();
         self.snapshot = snapshot;
         self.selected.clear();
         self.diff_cache.clear();
         self.rows = self.build_rows();
         let cursor = key
             .and_then(|key| self.rows.iter().position(|r| r.focusable && r.key == key))
-            .or_else(|| self.rows.iter().position(|r| r.focusable))
+            .or_else(|| nearest_focusable(&self.rows, previous))
             .unwrap_or(0);
         self.tree.set_cursor(cursor);
         self.diff.reset();
@@ -357,13 +363,39 @@ impl<'a> App<'a> {
     }
 
     /// Reload the tree from the repo; a failure is shown, the old tree kept.
-    fn reload(&mut self) {
-        match load_snapshot() {
-            Ok(snapshot) => self.apply_snapshot(snapshot),
+    /// Reports whether the new snapshot was applied.
+    fn reload(&mut self) -> bool {
+        match load_snapshot(self.context) {
+            Ok(snapshot) => {
+                self.apply_snapshot(snapshot);
+                true
+            }
             Err(e) => {
                 self.next_cursor = None;
                 self.show_error(&e.to_string(), AfterNotice::Nothing);
+                false
             }
+        }
+    }
+
+    /// Show `delta` more (or fewer) context commits before the base and
+    /// reload. Depth 1 is the floor: the base alone, as `loom status` starts.
+    fn change_context(&mut self, delta: isize) {
+        let depth = self.context.saturating_add_signed(delta).max(1);
+        if depth == self.context {
+            self.notice = Some(format!("context: {}", depth));
+            return;
+        }
+        let previous = self.context;
+        self.context = depth;
+        if self.reload() {
+            // The walk stops at the root commit, so asking for more than
+            // history holds must not run the depth away from the tree: `-`
+            // would then take as many presses to show anything.
+            self.context = depth.min(self.snapshot.info.context_commits.len() + 1);
+            self.notice = Some(format!("context: {}", self.context));
+        } else {
+            self.context = previous;
         }
     }
 
@@ -533,7 +565,9 @@ impl<'a> App<'a> {
                     then: AfterNotice::Quit,
                 });
             }
-            _ => self.reload(),
+            _ => {
+                self.reload();
+            }
         }
     }
 
@@ -652,7 +686,8 @@ impl<'a> App<'a> {
             }
             // While picking a fold target only navigation, Enter, and Esc
             // apply — action keys must not fire and discard the pending fold.
-            KeyCode::Char(' ' | 'c' | 'f' | 'b' | 'd' | 'r' | 'R') | KeyCode::F(5)
+            KeyCode::Char(' ' | 'c' | 'f' | 'b' | 'd' | 'r' | 'R' | '+' | '=' | '-')
+            | KeyCode::F(5)
                 if matches!(self.mode, Mode::FoldTarget { .. }) =>
             {
                 self.notice = Some("fold: Enter to confirm, Esc to cancel".to_string());
@@ -675,6 +710,15 @@ impl<'a> App<'a> {
             KeyCode::Char('r') => self.action_reword(),
             KeyCode::Char('R') | KeyCode::F(5) => {
                 self.reload();
+                None
+            }
+            // `=` is `+` without Shift on most layouts, next to `-`.
+            KeyCode::Char('+' | '=') => {
+                self.change_context(1);
+                None
+            }
+            KeyCode::Char('-') => {
+                self.change_context(-1);
                 None
             }
             _ => None,
@@ -1297,6 +1341,18 @@ impl ShellApp for App<'_> {
             "Quit: q".into(),
         ]
     }
+}
+
+/// The focusable row at or above `index`, else the first focusable one.
+fn nearest_focusable(rows: &[Row], index: usize) -> Option<usize> {
+    if rows.is_empty() {
+        return None;
+    }
+    let start = index.min(rows.len() - 1);
+    rows[..=start]
+        .iter()
+        .rposition(|r| r.focusable)
+        .or_else(|| rows.iter().position(|r| r.focusable))
 }
 
 // ── Row rendering ────────────────────────────────────────────────────────

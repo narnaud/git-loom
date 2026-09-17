@@ -7,6 +7,7 @@
 | `loom.remote-type` | `github`, `gitlab`, `azure`, `gerrit`, `plain` | Auto-detected | Override the remote type for `git loom push` |
 | `loom.push-remote` | Any remote name | Auto-detected | Override which remote to push to (e.g., `personal` for fork workflows) |
 | `loom.hideBranchPattern` | Any prefix string | `local-` | Prefix for branches hidden from `loom status` by default |
+| `loom.statusContext` | Integer ≥ 1 | `1` | Context commits shown at and before the base by `loom status` and `loom tui` |
 | `loom.pruneGoneBranches` | `true`, `false` | `false` | Let `git loom update` remove local branches whose remote branch is gone |
 
 ### `loom.remote-type`
@@ -59,6 +60,16 @@ git config loom.hideBranchPattern ""         # disable hiding entirely
 Hidden branches remain fully accessible to the other loom commands (`fold`, `drop`, `commit`, etc.), except `push`, which never publishes a hidden branch nor a branch stacked on one.
 
 When creating or renaming a branch to a name that matches this prefix, *git-loom* prints a warning.
+
+### `loom.statusContext`
+
+How much history to show at and before the base: `1` (the default) shows the base alone, `3` adds the two commits before it as dimmed context lines.
+
+```bash
+git config loom.statusContext 5
+```
+
+The positional argument overrides it for one run (`git loom status 1`), and in `loom tui` the `+` and `-` keys change the depth live.
 
 ## Environment Variables
 

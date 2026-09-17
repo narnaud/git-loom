@@ -6,7 +6,7 @@ use crate::core::{graph, repo, shortid};
 
 pub fn run(
     file_filter: Option<Vec<String>>,
-    context: usize,
+    context: Option<usize>,
     show_all: bool,
     theme: graph::Theme,
 ) -> Result<()> {
@@ -16,7 +16,7 @@ pub fn run(
     let cwd_prefix = repo::cwd_relative_to_repo(&repo).unwrap_or_default();
     let opts = graph::default_render_opts(theme, cwd_prefix);
     let show_files = file_filter.is_some();
-    let mut info = repo::gather_repo_info(&repo, show_files, context)?;
+    let mut info = repo::gather_repo_info(&repo, show_files, resolve_context(&repo, context))?;
 
     // Collect entities from the full info BEFORE filtering so that short IDs
     // are stable regardless of which branches are hidden.
@@ -41,6 +41,12 @@ pub fn run(
     let output = graph::render(info, &ids, &opts);
     print!("{}", output);
     Ok(())
+}
+
+/// The context depth to display: the argument, else git config
+/// `loom.statusContext`, else 1.
+pub fn resolve_context(repo: &git2::Repository, arg: Option<usize>) -> usize {
+    arg.or_else(|| repo::status_context(repo)).unwrap_or(1)
 }
 
 /// Drop the branches hidden by the `loom.hideBranchPattern` prefix from `info`,
