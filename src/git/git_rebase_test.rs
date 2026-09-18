@@ -592,7 +592,7 @@ fn a_protected_commit_is_refused_even_with_local_changes() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("replays empty"), "{err}");
+    assert!(err.contains("is redundant"), "{err}");
     assert_eq!(
         t.read_file("three.txt"),
         "edited while paused\n",

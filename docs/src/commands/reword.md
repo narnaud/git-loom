@@ -42,8 +42,8 @@ apply and loom refuses rather than rewrite something else:
 
 ```console
 $ loom reword ab
-# ✗ Commit 4783c1b replays empty — the commits below it already have its changes
-#   › Nothing was rewritten. `loom drop 4783c1b -y` removes it for good
+# ✗ Commit 4783c1b is redundant — the history below it already has its change
+#   › Nothing was rewritten. Run `loom update` if it landed upstream, or `loom drop 4783c1b -y` to remove it now
 ```
 
 A redundant commit that is *not* the one you are rewording is dropped, and loom says so.

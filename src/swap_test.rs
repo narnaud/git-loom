@@ -141,7 +141,7 @@ fn swap_refuses_when_a_swapped_commit_replays_empty() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("replays empty"), "{err}");
+    assert!(err.contains("is redundant"), "{err}");
     assert_eq!(t.head_oid(), head_before, "{err}");
     assert_eq!(t.get_branch_target("alpha"), alpha_before, "{err}");
     assert!(!crate::git::rebase_is_in_progress(t.repo.path()), "{err}");

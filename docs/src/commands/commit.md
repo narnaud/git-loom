@@ -82,7 +82,7 @@ Your changes come back, and there is no commit left to drop:
 
 ```console
 $ loom commit -b feature-auth -m "Restore the check"
-# ✗ Commit `4783c1b` replays empty — the commits below it already have its changes
+# ✗ Commit `4783c1b` is redundant — the history below it already has its change
 #   › The `loom commit` was rolled back, so there is nothing left to drop
 ```
 

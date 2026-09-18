@@ -501,7 +501,7 @@ fn reword_refuses_when_the_replay_is_dropped() {
     .unwrap_err()
     .to_string();
 
-    assert!(err.contains("replays empty"), "{err}");
+    assert!(err.contains("is redundant"), "{err}");
     assert_eq!(t.head_oid(), head_before, "{err}");
     assert_eq!(t.get_branch_target("alpha"), alpha_before, "{err}");
     assert!(!crate::git::rebase_is_in_progress(t.repo.path()), "{err}");
@@ -524,7 +524,7 @@ fn reword_refuses_when_the_upstream_cherry_picked_the_target() {
     .unwrap_err()
     .to_string();
 
-    assert!(err.contains("replays empty"), "{err}");
+    assert!(err.contains("is redundant"), "{err}");
     assert_eq!(t.head_oid(), head_before, "{err}");
     assert_eq!(t.get_branch_target("alpha"), alpha_before, "{err}");
     assert!(!crate::git::rebase_is_in_progress(t.repo.path()), "{err}");

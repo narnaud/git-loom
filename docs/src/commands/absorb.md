@@ -81,13 +81,13 @@ whatever commit sits below:
 
 ```console
 $ loom absorb
-# ✗ Commit `4783c1b` replays empty — the commits below it already have its changes
-#   › Nothing was rewritten. `loom drop 4783c1b -y` removes it for good
+# ✗ Commit `4783c1b` is redundant — the history below it already has its change
+#   › Nothing was rewritten. Run `loom update` if it landed upstream, or `loom drop 4783c1b -y` to remove it now
 ```
 
-The hint is generic, and dropping the target is rarely what you want here: it is
-the commit your changes were headed for. Run `loom update` first, or absorb into
-a different commit. Your changes stay in the working tree either way.
+Dropping the target is rarely what you want here: it is the commit your changes
+were headed for. Run `loom update` first, or absorb into a different commit.
+Your changes stay in the working tree either way.
 
 ## Conflicts
 

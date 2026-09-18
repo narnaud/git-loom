@@ -676,7 +676,7 @@ mod tests {
 
         let err = continue_cmd(&workdir, &git_dir).unwrap_err().to_string();
 
-        assert!(err.contains("replays empty"), "{err}");
+        assert!(err.contains("is redundant"), "{err}");
         assert!(
             err.contains("loom drop"),
             "this rollback keeps the commit, so the hint stands: {err}"
@@ -737,7 +737,7 @@ mod tests {
 
         let err = continue_cmd(&workdir, &git_dir).unwrap_err().to_string();
 
-        assert!(err.contains("replays empty"), "{err}");
+        assert!(err.contains("is redundant"), "{err}");
         assert!(err.contains("stash"), "{err}");
         assert_eq!(t.read_file("three.txt"), "edited while paused\n", "{err}");
         assert!(state_path(&git_dir).exists(), "nothing was undone: {err}");
@@ -783,7 +783,7 @@ mod tests {
 
         let err = continue_cmd(&workdir, &git_dir).unwrap_err().to_string();
 
-        assert!(err.contains("replays empty"), "{err}");
+        assert!(err.contains("is redundant"), "{err}");
         assert!(!err.contains("loom drop"), "{err}");
         assert!(err.contains("rolled back"), "{err}");
         assert!(!state_path(&git_dir).exists(), "{err}");

@@ -265,7 +265,8 @@ pub fn skip_empty_stops(
                 workdir,
                 cause.context(format!(
                     "Commit `{short}` {REPLAYS_EMPTY}\n\
-                     Nothing was rewritten. `loom drop {short} -y` removes it for good"
+                     Nothing was rewritten. Run `loom update` if it landed upstream, or \
+                     `loom drop {short} -y` to remove it now"
                 )),
                 || {},
             ));
@@ -284,13 +285,15 @@ pub fn skip_empty_stops(
             Ok(next) => outcome = next,
             Err(e) => return Err(rebase_abort_then_cleanup(workdir, e, || {})),
         }
-        crate::core::msg::warn(&format!("Dropped `{short}` — it replays empty here"));
+        crate::core::msg::warn(&format!(
+            "Dropped `{short}` — the history below it already has its change"
+        ));
     }
     Ok(outcome)
 }
 
 /// The first line of the empty-replay refusal, wherever it is reported.
-pub const REPLAYS_EMPTY: &str = "replays empty — the commits below it already have its changes";
+pub const REPLAYS_EMPTY: &str = "is redundant — the history below it already has its change";
 
 /// Marker under the refusal [`skip_empty_stops`] returns, carrying git's
 /// `stopped-sha` so a caller whose own undo removes that commit can replace a

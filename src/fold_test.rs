@@ -3321,7 +3321,7 @@ fn fold_file_out_of_a_commit_refuses_when_the_replay_is_dropped() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("replays empty"), "{err}");
+    assert!(err.contains("is redundant"), "{err}");
     assert_eq!(t.head_oid(), head_before, "{err}");
     assert_eq!(t.get_branch_target("alpha"), alpha_before, "{err}");
     assert!(!crate::git::rebase_is_in_progress(t.repo.path()), "{err}");
@@ -3361,7 +3361,7 @@ fn fold_commit_relative_refuses_when_the_moved_commit_replays_empty() {
     .unwrap_err()
     .to_string();
 
-    assert!(err.contains("replays empty"), "{err}");
+    assert!(err.contains("is redundant"), "{err}");
     assert_eq!(t.head_oid(), head_before, "{err}");
     assert_eq!(t.get_branch_target("alpha"), alpha_before, "{err}");
     assert!(!t.branch_exists("_loom-track"), "{err}");
@@ -3390,7 +3390,7 @@ fn fold_commit_into_commit_refuses_when_the_target_replays_empty() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("replays empty"), "{err}");
+    assert!(err.contains("is redundant"), "{err}");
     assert_eq!(t.head_oid(), head_before, "{err}");
     assert_eq!(t.get_branch_target("alpha"), alpha_before, "{err}");
     assert!(!t.branch_exists("_loom-track"), "{err}");
@@ -3422,7 +3422,7 @@ fn fold_files_into_commit_refuses_when_the_target_replays_empty() {
     .unwrap_err()
     .to_string();
 
-    assert!(err.contains("replays empty"), "{err}");
+    assert!(err.contains("is redundant"), "{err}");
     assert_eq!(t.head_oid(), head_before, "{err}");
     assert!(!t.branch_exists("_loom-track"), "{err}");
     assert_eq!(t.read_file("three.txt"), "folded\n", "{err}");
@@ -3449,7 +3449,7 @@ fn fold_commit_to_branch_refuses_when_the_moved_commit_replays_empty() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("replays empty"), "{err}");
+    assert!(err.contains("is redundant"), "{err}");
     assert_eq!(t.head_oid(), head_before, "{err}");
     assert_eq!(t.get_branch_target("beta"), beta_before, "{err}");
     assert!(!crate::git::rebase_is_in_progress(t.repo.path()), "{err}");
@@ -3480,7 +3480,7 @@ fn fold_several_commits_to_a_branch_refuses_when_one_replays_empty() {
     .unwrap_err()
     .to_string();
 
-    assert!(err.contains("replays empty"), "{err}");
+    assert!(err.contains("is redundant"), "{err}");
     assert_eq!(t.head_oid(), head_before, "{err}");
     assert!(!crate::git::rebase_is_in_progress(t.repo.path()), "{err}");
 }
@@ -3543,7 +3543,7 @@ fn fold_several_commits_to_a_branch_refusal_leaves_the_index_as_it_was() {
     .unwrap_err()
     .to_string();
 
-    assert!(err.contains("replays empty"), "{err}");
+    assert!(err.contains("is redundant"), "{err}");
     assert_eq!(
         crate::git::diff_cached(&t.workdir()).unwrap(),
         staged_before
@@ -3566,7 +3566,7 @@ fn fold_several_commits_relative_refusal_leaves_the_index_as_it_was() {
     .unwrap_err()
     .to_string();
 
-    assert!(err.contains("replays empty"), "{err}");
+    assert!(err.contains("is redundant"), "{err}");
     assert_eq!(
         crate::git::diff_cached(&t.workdir()).unwrap(),
         staged_before

@@ -343,7 +343,7 @@ fn split_refuses_when_the_replay_is_dropped() {
     .unwrap_err()
     .to_string();
 
-    assert!(err.contains("replays empty"), "{err}");
+    assert!(err.contains("is redundant"), "{err}");
     assert_eq!(t.head_oid(), head_before, "{err}");
     assert_eq!(
         t.find_remote_branch_target("origin/main"),

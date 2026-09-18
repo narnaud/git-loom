@@ -56,8 +56,8 @@ rather than report a swap of a commit it dropped:
 
 ```console
 $ loom swap ab cd
-# ✗ Commit `4783c1b` replays empty — the commits below it already have its changes
-#   › Nothing was rewritten. `loom drop 4783c1b -y` removes it for good
+# ✗ Commit `4783c1b` is redundant — the history below it already has its change
+#   › Nothing was rewritten. Run `loom update` if it landed upstream, or `loom drop 4783c1b -y` to remove it now
 ```
 
 ## Conflicts

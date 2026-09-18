@@ -838,7 +838,7 @@ fn commit_refuses_when_the_new_commit_replays_empty() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("replays empty"), "{err}");
+    assert!(err.contains("is redundant"), "{err}");
     assert!(
         !err.contains("loom drop"),
         "the rollback takes the commit with it: {err}"
@@ -896,7 +896,7 @@ fn commit_refuses_with_no_file_arguments_too() {
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("replays empty"), "{err}");
+    assert!(err.contains("is redundant"), "{err}");
     assert!(!err.contains("loom drop"), "{err}");
     assert_eq!(test_repo.head_oid(), head_before, "{err}");
     assert_eq!(test_repo.read_file("f.txt"), "final\n", "{err}");
