@@ -34,7 +34,7 @@ Everything after a `--` separator goes to `git diff` untouched — see [Passing 
 ```bash
 git loom diff -- --stat
 git loom diff ma -- -w
-git loom diff ab..d0 -- --name-only
+git loom diff osy..mqt -- --name-only
 git loom diff -- -a            # git's --text; loom's own -a is --all
 ```
 
@@ -59,7 +59,7 @@ Tokens of the form `left..right` are resolved on each side and forwarded to `git
 ```bash
 git loom diff HEAD~3..HEAD
 git loom diff main..HEAD
-git loom diff ab..3c
+git loom diff osy..rsv
 ```
 
 ### When a Commit and a File Are Both Given
@@ -101,8 +101,8 @@ git loom diff --all
 ### Diff a commit by short ID
 
 ```bash
-git loom diff ab
-# Shows the diff between commit "ab" and the working tree
+git loom diff osy
+# Shows the diff between commit "osy" and the working tree
 ```
 
 ### Diff a file by short ID
@@ -115,15 +115,15 @@ git loom diff ma
 ### Diff a commit range
 
 ```bash
-git loom diff ab..d0
+git loom diff osy..mqt
 # Shows what changed between those two commits
 ```
 
 ### Limit diff to a file at a specific commit
 
 ```bash
-git loom diff ab ma
-# Equivalent to: git diff <hash-of-ab> -- src/auth/login.rs
+git loom diff osy ma
+# Equivalent to: git diff <hash-of-osy> -- src/auth/login.rs
 ```
 
 ## Prerequisites

@@ -37,8 +37,8 @@ git loom swap abc123 def456
 ### Swap two commits in a branch section using short IDs
 
 ```bash
-git loom swap aa bb
-# Swapped commits `aa` and `bb`
+git loom swap osy tqn
+# Swapped commits `abc1234` and `def4567`
 ```
 
 ### Error: commits in different branch sections
@@ -55,9 +55,9 @@ changes is already upstream, it has nothing left to apply, and loom refuses
 rather than report a swap of a commit it dropped:
 
 ```console
-$ loom swap ab cd
-# ✗ Commit `4783c1b` is redundant — the history below it already has its change
-#   › Nothing was rewritten. Run `loom update` if it landed upstream, or `loom drop 4783c1b -y` to remove it now
+$ loom swap osy tqn
+# ✗ Commit `abc1234` is redundant — the history below it already has its change
+#   › Nothing was rewritten. Run `loom update` if it landed upstream, or `loom drop abc1234 -y` to remove it now
 ```
 
 ## Conflicts

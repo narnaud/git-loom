@@ -112,8 +112,8 @@ git loom branch feature-auth
 #### At a specific commit by short ID
 
 ```bash
-git loom branch feature-auth -t ab
-# ✓ Created branch `feature-auth` at 72f9d3a
+git loom branch feature-auth -t osy
+# ✓ Created branch `feature-auth` at `72f9d3a`
 # ✓ Woven `feature-auth` into integration branch
 ```
 

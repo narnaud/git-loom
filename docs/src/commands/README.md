@@ -55,7 +55,7 @@ after a `--` separator is handed to that command untouched:
 
 ```bash
 git loom show -- --stat
-git loom diff ab..d0 -- --name-only
+git loom diff osy..mqt -- --name-only
 git loom commit -m "wip" -- --no-verify
 git loom add zz -- -f
 ```

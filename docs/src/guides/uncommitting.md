@@ -8,11 +8,11 @@ $ git loom status -f
 
 ```
 │╭─ fa [feature-auth]
-│●    c2 add password validation
-│┊      c2:0 M  src/auth.rs
-│●    d0 add login form
-│┊      d0:0 A  src/auth.rs
-│┊      d0:1 A  templates/login.html
+│●    pkz 92b8427 add password validation
+│┊      pkz:0 M  src/auth.rs
+│●    mqt bae0b72 add login form
+│┊      mqt:0 A  src/auth.rs
+│┊      mqt:1 A  templates/login.html
 ├╯
 │
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit
@@ -20,10 +20,10 @@ $ git loom status -f
 
 ## Uncommitting a Commit
 
-You decide `c2` ("add password validation") was premature — you want its changes back in the working tree. Fold it into `zz` (the working directory):
+You decide `pkz` ("add password validation") was premature — you want its changes back in the working tree. Fold it into `zz` (the working directory):
 
 ```bash
-$ git loom fold c2 zz
+$ git loom fold pkz zz
 ```
 
 The commit is removed from history and its changes appear as unstaged modifications:
@@ -33,9 +33,9 @@ The commit is removed from history and its changes appear as unstaged modificati
 │    M src/auth.rs
 │
 │╭─ fa [feature-auth]
-│●    d0 add login form
-│┊      d0:0 A  src/auth.rs
-│┊      d0:1 A  templates/login.html
+│●    mqt bae0b72 add login form
+│┊      mqt:0 A  src/auth.rs
+│┊      mqt:1 A  templates/login.html
 ├╯
 │
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit
@@ -43,23 +43,23 @@ The commit is removed from history and its changes appear as unstaged modificati
 
 ## Uncommitting a File
 
-Instead of removing the whole commit, you just want to extract `templates/login.html` (index `d0:1`) from `d0`:
+Instead of removing the whole commit, you just want to extract `templates/login.html` (index `mqt:1`) from `mqt`:
 
 ```bash
-$ git loom fold d0:1 zz
+$ git loom fold mqt:1 zz
 ```
 
-The file is removed from the commit and appears as an untracked file in the working directory, leaving the rest of `d0` intact:
+The file is removed from the commit and appears as an untracked file in the working directory, leaving the rest of `mqt` intact:
 
 ```
 ╭─ zz [local changes]
 │    ⁕ templates/login.html
 │
 │╭─ fa [feature-auth]
-│●    c2 add password validation
-│┊      c2:0 M  src/auth.rs
-│●    d0 add login form
-│┊      d0:0 A  src/auth.rs
+│●    pkz 2a660a7 add password validation
+│┊      pkz:0 M  src/auth.rs
+│●    mqt 4afdd0c add login form
+│┊      mqt:0 A  src/auth.rs
 ├╯
 │
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit

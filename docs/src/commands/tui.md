@@ -15,14 +15,14 @@ No arguments or flags. The global `--theme` and `--no-color` options apply.
 Shows the same tree as `git loom status` with files enabled, plus a live diff pane. Navigate to the thing you see, press one key, and the underlying loom command runs with the right arguments filled in. After every action the tree reloads.
 
 ```
-┌ Status ──────────────────────┐┌ Diff ─────────────────────────┐
-│ ╭─ z0 [local changes]        ││ diff --git a/src/main.rs ...  │
-│ │   a1 M  src/main.rs        ││ @@ -1,3 +1,4 @@               │
-│ │╭─ b0 [feature-a] ✓         ││ +new line                     │
-│ │● d4f2 Add parser (2 files) ││ ...                           │
-│ ├╯                           ││                               │
-│ ●  9999999 (upstream) ...    ││                               │
-└──────────────────────────────┘└───────────────────────────────┘
+┌ Status ──────────────────────────────┐┌ Diff ─────────────────────────┐
+│ ╭─ zz [local changes]                ││ diff --git a/src/main.rs ...  │
+│ │   ma M  src/main.rs                ││ @@ -1,3 +1,4 @@               │
+│ │╭─ fa [feature-a] ✓                 ││ +new line                     │
+│ │●  mqt d4f2a1b Add parser (2 files) ││ ...                           │
+│ ├╯                                   ││                               │
+│ ●  9999999 (upstream) ...            ││                               │
+└──────────────────────────────────────┘└───────────────────────────────┘
  Navigate: ↑/↓ | Fold/unfold: ←/→ | Select: space | Commit: c | ...
 ```
 

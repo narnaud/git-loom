@@ -29,9 +29,9 @@ Removes the commit from history. All descendant commits are replayed to maintain
 Dropping a commit never deletes a branch. If the commit was the **only** commit of a branch, that branch survives, empty, at the base it built on — unwoven, and ready for `git loom commit -b <branch>` once the change is reworked. This holds for a branch that owns the commit, several branches at the same sole commit, and a stacked branch whose only commit it is; the prompt and the result name them.
 
 ```bash
-git loom drop a1
-# Drop commit `a1` Add login form, leaving branch `feature-a` empty? (y/n)
-# ✓ Dropped commit a1
+git loom drop osy
+# Drop commit `4783c1b` Add login form, leaving branch `feature-a` empty? (y/n)
+# ✓ Dropped commit `4783c1b`
 #   › branch feature-a now empty, at the base
 ```
 
@@ -118,7 +118,7 @@ If there are no local changes, the command errors with `"No local changes to dis
 ### Drop a commit by short ID
 
 ```bash
-git loom drop ab
+git loom drop osy
 # Removes the commit from history
 ```
 
@@ -181,7 +181,7 @@ git loom drop feature-a
 the operation is paused:
 
 ```bash
-git loom drop ab
+git loom drop osy
 # ! Conflicts detected — resolve them with git, then run:
 #   loom continue   to complete the drop
 #   loom abort      to cancel and restore original state
@@ -189,7 +189,7 @@ git loom drop ab
 
 ```bash
 git add <resolved-files> && git loom continue
-# ✓ Dropped commit `ab`
+# ✓ Dropped commit `4783c1b`
 ```
 
 **Dropping a branch** does not support pause/resume — if a conflict occurs it

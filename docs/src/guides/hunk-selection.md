@@ -64,17 +64,17 @@ $ git loom commit -b feature-auth -p src/auth.rs -m "partial auth fix"
 Fold only selected working tree hunks into an existing commit:
 
 ```bash
-$ git loom fold -p d0
+$ git loom fold -p mqt
 # Opens TUI for all working tree changes
-# Selected hunks are staged and folded into commit d0
+# Selected hunks are staged and folded into commit mqt
 ```
 
 Narrow to specific files by listing them before the target:
 
 ```bash
-$ git loom fold -p src/auth.rs d0
+$ git loom fold -p src/auth.rs mqt
 # TUI shows only src/auth.rs hunks
-# Selected hunks are folded into d0; the rest stay in the working tree
+# Selected hunks are folded into mqt; the rest stay in the working tree
 ```
 
 ## Common patterns
@@ -94,9 +94,9 @@ $ git loom commit -b feature-ui -p src/auth.rs -m "restyle auth form"
 ### Amend only part of a file into a past commit
 
 ```bash
-$ git loom fold -p src/auth.rs d0
+$ git loom fold -p src/auth.rs mqt
 # Opens TUI filtered to src/auth.rs
-# Pick only the hunks that belong in d0
+# Pick only the hunks that belong in mqt
 # Unselected hunks stay in the working tree unchanged
 ```
 

@@ -3,15 +3,15 @@
 A commit touches multiple files that should really be separate commits. Let's look at the current state:
 
 ```bash
-git loom status -f d0
+git loom status -f mqt
 ```
 
 ```
 │╭─ fa [feature-auth]
-│●    d0 add login form
-│┊      d0:0 A  src/auth.rs
-│┊      d0:1 A  src/validation.rs
-│┊      d0:2 A  templates/login.html
+│●    mqt 291658f add login form
+│┊      mqt:0 A  src/auth.rs
+│┊      mqt:1 A  src/validation.rs
+│┊      mqt:2 A  templates/login.html
 ├╯
 │
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit
@@ -20,7 +20,7 @@ git loom status -f d0
 You want `src/validation.rs` in its own commit. Split the commit:
 
 ```bash
-$ git loom split d0 -m "add validation helpers"
+$ git loom split mqt -m "add validation helpers"
 # ? Select files for the first commit
 # > [x] src/validation.rs
 #   [ ] src/auth.rs
@@ -31,8 +31,8 @@ Select the files for the **first** commit — the remaining files stay in the **
 
 ```
 │╭─ fa [feature-auth]
-│●   d1 add login form
-│●   d0 add validation helpers
+│●    mqt 5e1a9c2 add login form
+│●    wsl 8c2b2fa add validation helpers
 ├╯
 │
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit

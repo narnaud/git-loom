@@ -38,8 +38,8 @@ After analysis, all assigned hunks are folded into their target commits in a sin
 
 ```bash
 git loom absorb
-#   src/auth.rs -> a1b2c3d "Add authentication"
-#   src/utils.rs -> d4e5f6a "Add utility helpers"
+#   src/auth.rs -> a1b2c3d "Add authentication" (feature-auth)
+#   src/utils.rs -> d4e5f6a "Add utility helpers" (feature-utils)
 # Absorbed 2 hunk(s) from 2 file(s) into 2 commit(s)
 ```
 
@@ -49,8 +49,8 @@ git loom absorb
 # src/shared.rs has changes in two separate regions,
 # each originating from a different commit
 git loom absorb
-#   src/shared.rs [hunk 1/2] -> a1b2c3d "Add login form"
-#   src/shared.rs [hunk 2/2] -> d4e5f6a "Add dashboard"
+#   src/shared.rs [hunk 1/2] -> a1b2c3d "Add login form" (feature-auth)
+#   src/shared.rs [hunk 2/2] -> d4e5f6a "Add dashboard" (feature-dashboard)
 # Absorbed 2 hunk(s) from 1 file(s) into 2 commit(s)
 ```
 
@@ -58,8 +58,8 @@ git loom absorb
 
 ```bash
 git loom absorb --dry-run
-#   src/auth.rs -> a1b2c3d "Add authentication"
-#   src/shared.rs [hunk 1/2] -> d4e5f6a "Add utility helpers"
+#   src/auth.rs -> a1b2c3d "Add authentication" (feature-auth)
+#   src/shared.rs [hunk 1/2] -> d4e5f6a "Add utility helpers" (feature-utils)
 #   src/shared.rs [hunk 2/2] -- skipped (pure addition)
 # Dry run: would absorb 2 hunk(s) from 2 file(s) into 2 commit(s)
 ```
@@ -68,8 +68,8 @@ git loom absorb --dry-run
 
 ```bash
 git loom absorb src/auth.rs src/utils.rs
-#   src/auth.rs -> a1b2c3d "Add authentication"
-#   src/utils.rs -> d4e5f6a "Add utility helpers"
+#   src/auth.rs -> a1b2c3d "Add authentication" (feature-auth)
+#   src/utils.rs -> d4e5f6a "Add utility helpers" (feature-utils)
 # Absorbed 2 hunk(s) from 2 file(s) into 2 commit(s)
 ```
 
@@ -96,7 +96,7 @@ If the rebase that folds the fixup commits hits a conflict, the operation is
 
 ```bash
 git loom absorb
-#   src/auth.rs -> a1b2c3d "Add authentication"
+#   src/auth.rs -> a1b2c3d "Add authentication" (feature-auth)
 # ! Conflicts detected — resolve them with git, then run:
 #   loom continue   to complete the absorb
 #   loom abort      to cancel and restore original state

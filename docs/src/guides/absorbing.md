@@ -12,9 +12,9 @@ Run a **dry run** first to see what would happen:
 
 ```bash
 $ git loom absorb -n  # or --dry-run
-#   src/auth.rs -> d0 "add login form"
-#   templates/dashboard.html -> e1 "add dashboard layout"
-#   src/shared.rs [hunk 1/2] -> d0 "add login form"
+#   src/auth.rs -> d0472f9 "add login form" (feature-auth)
+#   templates/dashboard.html -> 2ee61e1 "add dashboard layout" (feature-dashboard)
+#   src/shared.rs [hunk 1/2] -> d0472f9 "add login form" (feature-auth)
 #   src/shared.rs [hunk 2/2] -- skipped (pure addition)
 # Dry run: would absorb 3 hunk(s) from 3 file(s) into 2 commit(s)
 ```

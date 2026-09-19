@@ -22,8 +22,8 @@ Everything after a `--` separator goes to `git show` untouched — see [Passing 
 
 ```bash
 git loom show -- --stat
-git loom show ab -- -U5
-git loom show ab -- -- src/main.rs
+git loom show osy -- -U5
+git loom show osy -- -- src/main.rs
 ```
 
 ## What It Does
@@ -50,8 +50,8 @@ The target is resolved in this order:
 ### Show a commit by short ID
 
 ```bash
-git loom show ab
-# Displays commit info and diff for the commit with short ID "ab"
+git loom show osy
+# Displays commit info and diff for the commit with short ID "osy"
 ```
 
 ### Show a commit by hash

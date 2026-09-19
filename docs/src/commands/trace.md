@@ -27,7 +27,7 @@ Running `git loom trace` prints the latest trace file to stdout with colored out
 ## Output Format
 
 ```
-[2026-03-04 14:30:00.123] git loom fold aa bb
+[2026-03-04 14:30:00.123] git loom fold pkz mqt
 ================================================================================
 
   [git] rebase --interactive --autostash ...abc1234  [230ms]
@@ -70,7 +70,7 @@ Trace files are stored at `.git/loom/logs/<timestamp>.log` with the naming patte
 ### After a fold operation
 
 ```bash
-git loom fold aa bb
+git loom fold pkz mqt
 git loom trace
 # Shows the full sequence: rebase, reset, commit --amend, etc.
 ```
@@ -78,7 +78,7 @@ git loom trace
 ### After a failed rebase
 
 ```bash
-git loom drop aa
+git loom drop osy
 # x Rebase failed with conflicts — aborted
 git loom trace
 # Shows the rebase command with FAILED status and stderr output

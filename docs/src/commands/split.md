@@ -64,16 +64,16 @@ git loom split HEAD -m "refactor: extract auth" src/auth.rs
 ### Split a commit by short ID using the hunk picker
 
 ```bash
-git loom split -p ab -m "fix: extract bounds check"
+git loom split -p osy -m "fix: extract bounds check"
 # (hunk picker TUI opens — toggle hunks for first commit)
-# ✓ Split `ab12345` into `pkz` (cd67890) and `mqt` (ef01234)
+# ✓ Split `ab12345` into `pkz` (cd67890) and `osy` (ef01234)
 ```
 
 ### Split a non-HEAD commit by file
 
 ```bash
-git loom split ab -m "refactor: extract helpers" src/helpers.rs
-# ✓ Split `ab12345` into `pkz` (cd67890) and `mqt` (ef01234)
+git loom split osy -m "refactor: extract helpers" src/helpers.rs
+# ✓ Split `ab12345` into `pkz` (cd67890) and `osy` (ef01234)
 ```
 
 ## Prerequisites

@@ -41,8 +41,8 @@ wrote it. If everything the commit changes is already there, it has nothing left
 apply and loom refuses rather than rewrite something else:
 
 ```console
-$ loom reword ab
-# ✗ Commit 4783c1b is redundant — the history below it already has its change
+$ loom reword osy
+# ✗ Commit `4783c1b` is redundant — the history below it already has its change
 #   › Nothing was rewritten. Run `loom update` if it landed upstream, or `loom drop 4783c1b -y` to remove it now
 ```
 
@@ -55,7 +55,7 @@ Every commit above the target gets a new hash, so any merge commit in the way ha
 When that happens the reword pauses rather than throwing away the new message:
 
 ```bash
-git loom reword ab -m "Fix authentication bug"
+git loom reword osy -m "Fix authentication bug"
 # ! Conflicts detected — resolve them with git, then run:
 #   `loom continue`   to complete the reword
 #   `loom abort`      to cancel and restore original state
@@ -96,14 +96,14 @@ To reword the commit at a branch tip, use its commit hash or commit short ID (no
 ### Reword a commit with editor
 
 ```bash
-git loom reword ab
+git loom reword osy
 # Opens editor with current message
 ```
 
 ### Reword a commit directly
 
 ```bash
-git loom reword ab -m "Fix authentication bug in login flow"
+git loom reword osy -m "Fix authentication bug in login flow"
 ```
 
 ### Rename a branch interactively

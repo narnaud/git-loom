@@ -50,13 +50,13 @@ Check the status:
 
 ```
 │╭─ fa [feature-auth]
-│●   d0 add login form
+│●    mqt 711d082 add login form
 ├╯
 │
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit
 ```
 
-Your commit sits on `feature-auth`, shown as a side branch off the integration line. The short IDs `fa` (branch) and `d0` (commit) are what you'll type in subsequent commands.
+Your commit sits on `feature-auth`, shown as a side branch off the integration line. The short IDs `fa` (branch) and `mqt` (commit) are what you'll type in subsequent commands.
 
 You keep working on the same feature — add password validation and commit again:
 
@@ -68,8 +68,8 @@ Notice you can use the short ID `fa` instead of the full branch name. The status
 
 ```
 │╭─ fa [feature-auth]
-│●   c2 add password validation
-│●   d0 add login form
+│●    pkz 4f825d2 add password validation
+│●    mqt 711d082 add login form
 ├╯
 │
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit
@@ -85,8 +85,8 @@ While `feature-auth` is in progress, you want to start on a dashboard. You creat
 │    ⁕ templates/dashboard.html
 │
 │╭─ fa [feature-auth]
-│●   c2 add password validation
-│●   d0 add login form
+│●    pkz 4f825d2 add password validation
+│●    mqt 711d082 add login form
 ├╯
 │
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit
@@ -100,12 +100,12 @@ git loom commit -b feature-dashboard -m "add dashboard layout" zz
 
 ```
 │╭─ fd [feature-dashboard]
-│●   e1 add dashboard layout
+│●    rsv 7a5bb0b add dashboard layout
 ├╯
 │
 │╭─ fa [feature-auth]
-│●   c2 add password validation
-│●   d0 add login form
+│●    pkz 4f825d2 add password validation
+│●    mqt 711d082 add login form
 ├╯
 │
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit
@@ -125,12 +125,12 @@ This fetches upstream changes, rebases your integration branch (including all wo
 
 ```
 │╭─ fd [feature-dashboard]
-│●   e1 add dashboard layout
+│●    rsv 8f74d1c add dashboard layout
 ├╯
 │
 │╭─ fa [feature-auth]
-│●   c2 add password validation
-│●   d0 add login form
+│●    pkz 660e970 add password validation
+│●    mqt 885cc0c add login form
 ├╯
 │
 ● b2c3d4e (upstream) [origin/main] Teammate's latest commit

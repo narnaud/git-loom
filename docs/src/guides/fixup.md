@@ -1,11 +1,11 @@
 # Fixing Up a Commit
 
-You have two commits on `feature-auth` and realize that `c2` ("add password validation") should really be part of `d0` ("add login form") — they're logically the same change.
+You have two commits on `feature-auth` and realize that `pkz` ("add password validation") should really be part of `mqt` ("add login form") — they're logically the same change.
 
 ```
 │╭─ fa [feature-auth]
-│●   c2 add password validation
-│●   d0 add login form
+│●    pkz 2b48f49 add password validation
+│●    mqt bf7e5af add login form
 ├╯
 │
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit
@@ -14,14 +14,14 @@ You have two commits on `feature-auth` and realize that `c2` ("add password vali
 Fold the newer commit into the older one:
 
 ```bash
-$ git loom fold c2 d0
+$ git loom fold pkz mqt
 ```
 
-Commit `c2` disappears from history and its changes are absorbed into `d0`:
+Commit `pkz` disappears from history and its changes are absorbed into `mqt`:
 
 ```
 │╭─ fa [feature-auth]
-│●   d0 add login form
+│●    mqt 9dff7bd add login form
 ├╯
 │
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit
