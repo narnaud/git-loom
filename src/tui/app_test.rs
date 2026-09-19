@@ -310,8 +310,12 @@ fn escape_clears_selection_before_quitting() {
     assert!(matches!(app.outcome, Some(Outcome::Quit)));
 }
 
+fn pending_commit_key() -> String {
+    PENDING_COMMIT_OID.to_string()
+}
+
 #[test]
-fn commit_action_collects_selected_working_files() {
+fn commit_collects_the_selected_working_files_and_lands_on_integration() {
     let theme = make_theme();
     let mut app = make_app(make_snapshot(), &theme);
     move_cursor_to(&mut app, "wf:a.rs");
@@ -319,32 +323,402 @@ fn commit_action_collects_selected_working_files() {
     move_cursor_to(&mut app, "wf:b.rs");
     app.toggle_selection();
 
-    let Some(Action::Commit { files }) = app.action_commit() else {
+    press(&mut app, KeyCode::Char('c'));
+    assert_eq!(cursor_key(&app), pending_commit_key(), "the cursor follows");
+    assert_eq!(
+        app.rows[app.tree.cursor()].target,
+        None,
+        "the placeholder names no object, so it is no command's argument"
+    );
+    // Default destination: the integration line, its own section above every
+    // feature branch.
+    let at = app.tree.cursor();
+    let branch = app.rows.iter().position(|r| r.key == "br:feature-a");
+    assert_eq!(branch, Some(at + 2), "one spacer between the two sections");
+
+    let Some(Action::Commit { files, dest }) = app.confirm_commit_target() else {
         panic!("expected a commit action");
     };
     assert_eq!(files.len(), 2);
+    assert_eq!(dest, CommitDest::Integration);
+    assert!(matches!(app.mode, Mode::Normal));
+
+    // A failed commit leaves no new row to land on, and the placeholder is
+    // gone after the reload: go back to where `c` was pressed — the row
+    // Space advanced onto after the last selected file.
+    app.finish_action(Err(anyhow::anyhow!("boom")));
+    assert_eq!(app.next_cursor.as_deref(), Some("br:feature-a"));
+    assert_eq!(app.fallback_cursor, None);
 }
 
+/// Down moves the commit to `feature-a`'s tip, drawn inside the branch above
+/// the commit it owns; there is nothing below it to move to.
 #[test]
-fn commit_action_without_selection_uses_index_as_is() {
+fn commit_destination_moves_with_the_arrows() {
     let theme = make_theme();
     let mut app = make_app(make_snapshot(), &theme);
-    // Cursor on the local-changes header → no file args (index as-is).
-    let Some(Action::Commit { files }) = app.action_commit() else {
+    press(&mut app, KeyCode::Char('c'));
+
+    press(&mut app, KeyCode::Down);
+    let at = app.tree.cursor();
+    assert_eq!(cursor_key(&app), pending_commit_key());
+    assert_eq!(app.rows[at - 1].key, "br:feature-a");
+    assert_eq!(app.rows[at + 1].key, oid('a').to_string());
+
+    press(&mut app, KeyCode::Down);
+    assert_eq!(app.tree.cursor(), at, "the last destination is the end");
+
+    press(&mut app, KeyCode::Up);
+    let Some(Action::Commit { dest, .. }) = app.confirm_commit_target() else {
         panic!("expected a commit action");
     };
-    assert!(files.is_empty());
+    assert_eq!(dest, CommitDest::Integration);
 }
 
 #[test]
-fn commit_action_rejects_commit_rows_in_selection() {
+fn commit_on_the_local_changes_header_takes_everything_as_zz() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, LOCAL_CHANGES_KEY);
+
+    press(&mut app, KeyCode::Char('c'));
+    let Some(Action::Commit { files, .. }) = app.confirm_commit_target() else {
+        panic!("expected a commit action");
+    };
+    assert_eq!(files, vec![app.snapshot.ids.get_unstaged().to_string()]);
+}
+
+#[test]
+fn commit_refuses_rows_that_are_not_local_changes() {
     let theme = make_theme();
     let mut app = make_app(make_snapshot(), &theme);
     move_cursor_to(&mut app, &oid('a').to_string());
     app.toggle_selection();
 
-    assert!(app.action_commit().is_none());
-    assert!(app.notice.is_some());
+    press(&mut app, KeyCode::Char('c'));
+    assert!(matches!(app.mode, Mode::Normal));
+    assert_eq!(
+        app.notice.as_deref(),
+        Some("commit: move to local changes or select files")
+    );
+}
+
+/// Nothing to commit: `zz` on an empty working tree would only fail deeper in.
+#[test]
+fn commit_refuses_an_empty_working_tree() {
+    let mut info = make_info();
+    info.working_changes.clear();
+    let theme = make_theme();
+    let mut app = make_app(snapshot_of(info), &theme);
+    move_cursor_to(&mut app, LOCAL_CHANGES_KEY);
+
+    press(&mut app, KeyCode::Char('c'));
+    assert!(matches!(app.mode, Mode::Normal));
+    assert_eq!(app.notice.as_deref(), Some("commit: no local changes"));
+}
+
+/// Two branches at one tip are two destinations, and committing to either
+/// splits the group — the placeholder ends up under the name it was sent to,
+/// never the other one.
+#[test]
+fn a_co_located_group_gives_one_destination_per_name() {
+    let mut info = make_info();
+    info.branches.push(BranchInfo {
+        name: "feature-b".to_string(),
+        tip_oid: oid('a'),
+        remote: None,
+    });
+    let theme = make_theme();
+    let mut app = make_app(snapshot_of(info), &theme);
+
+    press(&mut app, KeyCode::Char('c'));
+    let Mode::CommitTarget { dests, .. } = &app.mode else {
+        panic!("expected commit mode");
+    };
+    let dests = dests.clone();
+    assert_eq!(dests.len(), 3, "the integration line plus both names");
+
+    for dest in &dests[1..] {
+        press(&mut app, KeyCode::Down);
+        let at = app.tree.cursor();
+        let CommitDest::Branch(name) = dest else {
+            panic!("only the first destination is the integration line");
+        };
+        assert_eq!(
+            app.rows[at - 1].key,
+            branch_key(name),
+            "placeholder is not under {name}"
+        );
+        let other = branch_key(if name == "feature-a" {
+            "feature-b"
+        } else {
+            "feature-a"
+        });
+        let other_at = app.rows.iter().position(|r| r.key == other);
+        assert!(
+            other_at > Some(at),
+            "the other name did not stay behind with the commit"
+        );
+    }
+}
+
+/// `feature-b` (owning `a`) is stacked on `feature-a` (owning `b`):
+/// committing to the lower branch keeps the upper one on top of the new
+/// commit, as the relocation rebase will leave it.
+#[test]
+fn commit_to_a_branch_under_a_stack_keeps_the_stack() {
+    let mut info = make_info();
+    info.commits = vec![
+        commit('a', 'b', "Add parser"),
+        commit('b', '9', "Add lexer"),
+    ];
+    info.branches = vec![
+        BranchInfo {
+            name: "feature-a".to_string(),
+            tip_oid: oid('b'),
+            remote: None,
+        },
+        BranchInfo {
+            name: "feature-b".to_string(),
+            tip_oid: oid('a'),
+            remote: None,
+        },
+    ];
+    let theme = make_theme();
+    let mut app = make_app(snapshot_of(info), &theme);
+
+    press(&mut app, KeyCode::Char('c'));
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Down);
+    let Mode::CommitTarget { dests, index, .. } = &app.mode else {
+        panic!("expected commit mode");
+    };
+    assert_eq!(dests[*index], CommitDest::Branch("feature-a".to_string()));
+
+    let at = app.tree.cursor();
+    assert_eq!(app.rows[at - 1].key, "br:feature-a");
+    assert_eq!(app.rows[at + 1].key, oid('b').to_string());
+    assert!(
+        app.rows[..at].iter().any(|r| r.key == oid('a').to_string()),
+        "feature-b still stacked above"
+    );
+}
+
+/// A branch with no commits of its own is at the base: its commit forks from
+/// there, parallel to the other branches, not stacked on them (Spec 006).
+#[test]
+fn commit_to_an_empty_branch_forks_from_the_base() {
+    let mut info = make_info();
+    info.branches.push(BranchInfo {
+        name: "feature-b".to_string(),
+        tip_oid: oid('9'),
+        remote: None,
+    });
+    let theme = make_theme();
+    let mut app = make_app(snapshot_of(info), &theme);
+
+    press(&mut app, KeyCode::Char('c'));
+    let Mode::CommitTarget { dests, .. } = &app.mode else {
+        panic!("expected commit mode");
+    };
+    assert_eq!(
+        dests.clone(),
+        vec![
+            CommitDest::Integration,
+            CommitDest::Branch("feature-a".to_string()),
+            CommitDest::Branch("feature-b".to_string()),
+        ]
+    );
+
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Down);
+    let at = app.tree.cursor();
+    assert_eq!(app.rows[at - 1].key, "br:feature-b");
+    // Its own section, below feature-a's, so the two stay parallel.
+    assert!(
+        app.rows[..at].iter().any(|r| r.key == oid('a').to_string()),
+        "feature-a still owns its commit above"
+    );
+}
+
+/// Every destination draws the placeholder in the section it names, in the
+/// order `↑`/`↓` walk them: a stack and a branch owning nothing included.
+#[test]
+fn every_commit_destination_draws_the_placeholder_in_its_own_section() {
+    let mut info = make_info();
+    info.commits = vec![
+        commit('a', 'b', "Add parser"),
+        commit('b', '9', "Add lexer"),
+    ];
+    info.branches = vec![
+        BranchInfo {
+            name: "feature-a".to_string(),
+            tip_oid: oid('b'),
+            remote: None,
+        },
+        BranchInfo {
+            name: "feature-b".to_string(),
+            tip_oid: oid('a'),
+            remote: None,
+        },
+        BranchInfo {
+            name: "feature-c".to_string(),
+            tip_oid: oid('9'),
+            remote: None,
+        },
+    ];
+    let theme = make_theme();
+    let mut app = make_app(snapshot_of(info), &theme);
+
+    press(&mut app, KeyCode::Char('c'));
+    let Mode::CommitTarget { dests, .. } = &app.mode else {
+        panic!("expected commit mode");
+    };
+    let dests = dests.clone();
+    assert_eq!(dests.len(), 4, "the integration line plus three branches");
+    assert_eq!(dests[0], CommitDest::Integration);
+
+    for dest in &dests[1..] {
+        press(&mut app, KeyCode::Down);
+        let at = app.tree.cursor();
+        assert_eq!(cursor_key(&app), PENDING_COMMIT_OID.to_string());
+        let CommitDest::Branch(name) = dest else {
+            panic!("only the first destination is the integration line");
+        };
+        assert_eq!(
+            app.rows[at - 1].key,
+            branch_key(name),
+            "placeholder is not under {name}"
+        );
+    }
+}
+
+/// Every placement reuses one row key, so a new one must not show the diff
+/// of the files the last one picked; moving the commit keeps it, since only
+/// the destination changed.
+#[test]
+fn a_new_placement_drops_the_cached_preview_but_moving_keeps_it() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, "wf:a.rs");
+    press(&mut app, KeyCode::Char('c'));
+
+    let key = pending_commit_key();
+    let marker = vec![Line::from("stale")];
+    app.diff_cache.insert(key.clone(), marker.clone());
+    press(&mut app, KeyCode::Down);
+    assert_eq!(
+        app.diff_cache.get(&key),
+        Some(&marker),
+        "moving recomputed a diff that cannot have changed"
+    );
+
+    app.handle_escape();
+    move_cursor_to(&mut app, "wf:b.rs");
+    press(&mut app, KeyCode::Char('c'));
+    assert_ne!(
+        app.diff_cache.get(&key),
+        Some(&marker),
+        "the previous placement's diff survived"
+    );
+}
+
+/// The cursor must stay on the placeholder: the wheel moves the destination
+/// like `↑`/`↓`, and a click, which would land anywhere, is ignored.
+#[test]
+fn mouse_moves_the_destination_but_never_leaves_the_placeholder() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, "wf:a.rs");
+    press(&mut app, KeyCode::Char('c'));
+
+    let mut shell = Shell::new(app);
+    let backend = ratatui::backend::TestBackend::new(100, 30);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    terminal.draw(|f| shell.render(f)).unwrap();
+    let tree_area = shell.areas()[0];
+    let at = |kind| {
+        Event::Mouse(MouseEvent {
+            kind,
+            column: tree_area.x + 1,
+            row: tree_area.y + 1,
+            modifiers: KeyModifiers::NONE,
+        })
+    };
+
+    shell.handle_event(at(MouseEventKind::ScrollDown));
+    let Mode::CommitTarget { dests, index, .. } = &shell.app.mode else {
+        panic!("expected commit mode");
+    };
+    assert_eq!(dests[*index], CommitDest::Branch("feature-a".to_string()));
+    assert_eq!(cursor_key(&shell.app), PENDING_COMMIT_OID.to_string());
+
+    shell.handle_event(at(MouseEventKind::Down(MouseButton::Left)));
+    assert_eq!(cursor_key(&shell.app), PENDING_COMMIT_OID.to_string());
+    let Mode::CommitTarget { dests, index, .. } = &shell.app.mode else {
+        panic!("expected commit mode");
+    };
+    assert_eq!(
+        dests[*index],
+        CommitDest::Branch("feature-a".to_string()),
+        "a click changed the destination"
+    );
+}
+
+#[test]
+fn commit_is_cancelled_by_escape() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, "wf:a.rs");
+    let rows_before = app.rows.len();
+
+    press(&mut app, KeyCode::Char('c'));
+    assert!(app.rows.iter().any(|r| r.key == pending_commit_key()));
+
+    app.handle_escape();
+    assert!(matches!(app.mode, Mode::Normal));
+    assert_eq!(app.rows.len(), rows_before, "the placeholder is gone");
+    assert_eq!(cursor_key(&app), "wf:a.rs");
+    assert!(app.outcome.is_none());
+}
+
+#[test]
+fn commit_mode_blocks_action_keys() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, "wf:a.rs");
+    press(&mut app, KeyCode::Char('c'));
+
+    for code in [
+        KeyCode::Char(' '),
+        KeyCode::Char('c'),
+        KeyCode::Char('f'),
+        KeyCode::Char('b'),
+        KeyCode::Char('d'),
+        KeyCode::Char('r'),
+        KeyCode::Char('R'),
+        KeyCode::Char('+'),
+        KeyCode::Char('='),
+        KeyCode::Char('-'),
+        KeyCode::F(5),
+        // Folding walks the cursor off a row, so it is blocked too.
+        KeyCode::Left,
+        KeyCode::Right,
+        KeyCode::Char('h'),
+        KeyCode::Char('l'),
+    ] {
+        press(&mut app, code);
+        assert!(
+            matches!(app.mode, Mode::CommitTarget { .. }),
+            "{code:?} left commit mode"
+        );
+        assert_eq!(cursor_key(&app), pending_commit_key(), "{code:?} moved on");
+        assert_eq!(
+            app.notice.as_deref(),
+            Some("commit: Enter to confirm, Esc to cancel"),
+            "{code:?} reported the wrong mode"
+        );
+    }
 }
 
 #[test]
@@ -839,8 +1213,18 @@ fn command_line_uses_the_short_ids_the_tree_shows() {
         format!("loom fold {} {} {}", file, ids.get_unstaged(), commit)
     );
     assert_eq!(
-        app.command_line(&Action::Commit { files: vec![] }),
-        "loom commit"
+        app.command_line(&Action::Commit {
+            files: vec![ids.get_unstaged().to_string()],
+            dest: CommitDest::Integration,
+        }),
+        format!("loom commit -i {}", ids.get_unstaged())
+    );
+    assert_eq!(
+        app.command_line(&Action::Commit {
+            files: vec![file.clone()],
+            dest: CommitDest::Branch("feature-a".to_string()),
+        }),
+        format!("loom commit -b {} {}", ids.get_branch("feature-a"), file)
     );
     assert_eq!(
         app.command_line(&Action::NewBranch {
@@ -1201,6 +1585,36 @@ fn new_branch_draws_the_field_on_the_fake_branch_row() {
 }
 
 #[test]
+fn commit_draws_a_placeholder_row_at_its_destination() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, LOCAL_CHANGES_KEY);
+    press(&mut app, KeyCode::Char('c'));
+    press(&mut app, KeyCode::Down);
+
+    let mut shell = Shell::new(app);
+    let backend = ratatui::backend::TestBackend::new(100, 30);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    terminal.draw(|f| shell.render(f)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let lines: Vec<String> = (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect();
+    let at = lines
+        .iter()
+        .position(|line| line.contains("·· ······· new commit (2 files)"))
+        .expect("no placeholder commit row");
+    assert!(lines[at - 1].contains("[feature-a]"), "{lines:#?}");
+    assert!(lines[at + 1].contains("Add parser"), "{lines:#?}");
+    assert!(lines.iter().any(|l| l.contains(" Commit to [feature-a] ")));
+    assert!(lines.iter().any(|l| l.contains("Enter to commit")));
+}
+
+#[test]
 fn render_smoke_test_on_every_focusable_row() {
     let theme = make_theme();
     let mut app = make_app(make_snapshot(), &theme);
@@ -1391,6 +1805,138 @@ fn diff_text_per_row_kind() {
 
     // Spacer: empty.
     assert_eq!(diff_text(&snapshot, &row(RowKind::Spacer("│"), "")), "");
+}
+
+/// What the pane really shows while a commit is being placed: the changes,
+/// not the "not created yet" text `diff_text` falls back to once the mode is
+/// over and the row is briefly still on screen.
+#[test]
+fn the_placeholder_pane_shows_the_preview_while_placing() {
+    let repo = crate::core::test_helpers::TestRepo::new();
+    repo.write_file("file.txt", "original content\n");
+    repo.stage_files(&["file.txt"]);
+    repo.commit_staged("Add file");
+    repo.write_file("file.txt", "changed\n");
+
+    let mut info = make_info();
+    info.working_changes = vec![file("file.txt", ' ', 'M')];
+    let snapshot = Snapshot {
+        workdir: repo.workdir(),
+        git_dir: repo.repo.path().to_path_buf(),
+        ..snapshot_of(info)
+    };
+    let theme = make_theme();
+    let mut app = make_app(snapshot, &theme);
+    move_cursor_to(&mut app, "wf:file.txt");
+
+    press(&mut app, KeyCode::Char('c'));
+    let text: String = app.diff_cache[&pending_commit_key()]
+        .iter()
+        .flat_map(|line| line.spans.iter().map(|s| s.content.to_string()))
+        .collect();
+    assert!(text.contains("+changed"), "got: {text}");
+    assert!(!text.contains("not created yet"), "got: {text}");
+}
+
+/// A failed tracked diff ends mid-line, so the untracked header that follows
+/// must not be glued to it.
+#[test]
+fn pending_commit_diff_keeps_a_failed_diff_off_the_untracked_header() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("new.txt"), "fresh\n").unwrap();
+
+    let mut info = make_info();
+    info.working_changes = vec![file("tracked.rs", ' ', 'M'), file("new.txt", '?', '?')];
+    let snapshot = Snapshot {
+        workdir: dir.path().to_path_buf(),
+        git_dir: dir.path().to_path_buf(),
+        ..snapshot_of(info)
+    };
+
+    // Not a repository, so the tracked diff fails and returns its message,
+    // which is what ends mid-line: without the guard the header is glued on.
+    let only_tracked = pending_commit_diff(
+        &snapshot,
+        &[snapshot.ids.get_file("tracked.rs").to_string()],
+    );
+    assert!(only_tracked.starts_with("error:"), "got: {only_tracked}");
+    assert!(!only_tracked.ends_with('\n'), "got: {only_tracked}");
+
+    let text = pending_commit_diff(&snapshot, &[snapshot.ids.get_unstaged().to_string()]);
+    assert!(text.contains("error:"), "got: {text}");
+    assert!(text.contains("\nuntracked file: new.txt"), "got: {text}");
+}
+
+/// The placeholder commit shows what it will contain, not the row it sits on.
+#[test]
+fn pending_commit_diff_shows_the_files_it_will_hold() {
+    let repo = crate::core::test_helpers::TestRepo::new();
+    repo.write_file("file.txt", "original content\n");
+    repo.stage_files(&["file.txt"]);
+    repo.commit_staged("Add file");
+    repo.write_file("file.txt", "changed\n");
+    repo.write_file("new.txt", "fresh\n");
+
+    repo.write_file("other.txt", "second\n");
+    repo.stage_files(&["other.txt"]);
+    repo.commit_staged("Add other");
+    repo.write_file("other.txt", "second changed\n");
+
+    let mut info = make_info();
+    info.working_changes = vec![
+        file("file.txt", ' ', 'M'),
+        file("other.txt", ' ', 'M'),
+        file("new.txt", '?', '?'),
+    ];
+    let snapshot = Snapshot {
+        workdir: repo.workdir(),
+        git_dir: repo.repo.path().to_path_buf(),
+        ..snapshot_of(info)
+    };
+    let ids = &snapshot.ids;
+
+    let one = pending_commit_diff(&snapshot, &[ids.get_file("file.txt").to_string()]);
+    assert!(one.contains("+changed"));
+    assert!(!one.contains("fresh"), "only the file it holds");
+    assert!(!one.contains("second changed"), "only the file it holds");
+
+    // Several tracked files go out as one `git diff`, and both must be in it.
+    let two = pending_commit_diff(
+        &snapshot,
+        &[
+            ids.get_file("file.txt").to_string(),
+            ids.get_file("other.txt").to_string(),
+        ],
+    );
+    assert!(two.contains("+changed"), "got: {two}");
+    assert!(two.contains("+second changed"), "got: {two}");
+
+    // `zz` commits through `git add -A`: the untracked file goes in, so the
+    // preview has to show it next to the tracked change.
+    let all = pending_commit_diff(&snapshot, &[ids.get_unstaged().to_string()]);
+    assert!(all.contains("+changed"));
+    assert!(all.contains("+fresh"), "untracked file missing from zz");
+
+    let untracked = pending_commit_diff(&snapshot, &[ids.get_file("new.txt").to_string()]);
+    assert!(untracked.contains("+fresh"), "untracked shown as added");
+
+    // Nothing tracked to diff: the whole-tree diff is empty and only the
+    // untracked file is left, which must not read as an empty pane.
+    repo.write_file("file.txt", "original content\n");
+    repo.write_file("other.txt", "second\n");
+    let all = pending_commit_diff(&snapshot, &[ids.get_unstaged().to_string()]);
+    assert_eq!(all.trim(), "untracked file: new.txt\n+fresh");
+
+    // Nothing at all: never a blank pane.
+    let mut info = make_info();
+    info.working_changes.clear();
+    let empty = Snapshot {
+        workdir: repo.workdir(),
+        git_dir: repo.repo.path().to_path_buf(),
+        ..snapshot_of(info)
+    };
+    let text = pending_commit_diff(&empty, &[empty.ids.get_unstaged().to_string()]);
+    assert_eq!(text, "no changes");
 }
 
 #[test]

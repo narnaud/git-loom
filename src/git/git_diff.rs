@@ -200,7 +200,19 @@ pub fn diff_head_display(workdir: &Path) -> Result<String> {
 /// Get the working-tree diff of one file against HEAD, for display
 /// (`git diff HEAD -- <path>`), keeping the user's textconv filters.
 pub fn diff_head_file_display(workdir: &Path, path: &str) -> Result<String> {
-    patch_stdout(workdir, "diff", DISPLAY, &["HEAD", "--", path])
+    diff_head_files_display(workdir, &[path])
+}
+
+/// Get the working-tree diff of several files against HEAD, for display
+/// (`git diff HEAD -- <paths>`), in one call. No paths means no diff, not
+/// every file: an empty pathspec would make git match the whole tree.
+pub fn diff_head_files_display(workdir: &Path, paths: &[&str]) -> Result<String> {
+    if paths.is_empty() {
+        return Ok(String::new());
+    }
+    let mut args = vec!["HEAD", "--"];
+    args.extend(paths);
+    patch_stdout(workdir, "diff", DISPLAY, &args)
 }
 
 /// Get the diff between two commits, for display (`git diff <base> <tip>`).

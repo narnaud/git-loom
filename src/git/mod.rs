@@ -24,8 +24,8 @@ pub use git_diff::{
     diff_cached, diff_cached_file, diff_cached_file_is_binary, diff_cached_files, diff_commit,
     diff_commit_file, diff_commit_file_is_binary, diff_commit_name_status, diff_file,
     diff_file_is_binary, diff_head, diff_head_display, diff_head_file, diff_head_file_display,
-    diff_head_file_is_binary, diff_head_files, diff_head_name_only, diff_range, show_commit_file,
-    show_commit_patch,
+    diff_head_file_is_binary, diff_head_files, diff_head_files_display, diff_head_name_only,
+    diff_range, show_commit_file, show_commit_patch,
 };
 pub use git_merge::{MergeOutcome, continue_merge, merge_abort, merge_is_in_progress, merge_no_ff};
 #[cfg(test)]

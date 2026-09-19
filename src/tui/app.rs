@@ -4,7 +4,8 @@
 //! Actions (commit, fold, branch, drop, reword) run the regular loom command
 //! on a worker thread while the TUI stays up: the command's prompts become
 //! popups and its messages a log (`core::ui`), and only an editor takes the
-//! terminal over. Fold picks its target in a second step inside the tree.
+//! terminal over. Fold and commit pick their target in a second step inside
+//! the tree.
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -24,13 +25,15 @@ use ratatui::{
 };
 
 use crate::core::graph::{self, Section};
-use crate::core::repo::{self, BranchInfo, RemoteStatus, RepoInfo};
+use crate::core::repo::{self, BranchInfo, CommitInfo, RemoteStatus, RepoInfo};
 use crate::core::shortid::IdAllocator;
 use crate::core::transaction;
 use crate::core::ui::{self, Answer, Cancelled, Level, Request};
 use crate::git;
 use crate::tui::shell::{KeyResult, PaneId, Shell, ShellApp, ShellConfig, Tick};
-use crate::tui::status_tree::{self, LOCAL_CHANGES_KEY, Row, RowKind, SelectionClass, branch_key};
+use crate::tui::status_tree::{
+    self, LOCAL_CHANGES_KEY, PENDING_COMMIT_OID, Row, RowKind, SelectionClass, branch_key,
+};
 use crate::tui::theme::TuiTheme;
 use crate::tui::widgets::common::{colorize_diff, pane_block};
 use crate::tui::widgets::diff_pane::DiffPane;
@@ -56,22 +59,104 @@ struct Snapshot {
 /// non-empty keeps it distinct from "no branch here" sentinels in `graph`.
 const NEW_BRANCH_NAME: &str = ".new";
 
+/// Where `c` puts its commit: loose on the integration line (`-i`) or at the
+/// tip of a woven branch (`-b`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CommitDest {
+    Integration,
+    Branch(String),
+}
+
+/// A row that exists only on screen: a branch being named, or a commit
+/// being placed.
+enum Preview {
+    Branch(BranchInfo),
+    Commit { dest: CommitDest, file_count: usize },
+}
+
 impl Snapshot {
-    /// The graph sections, with `pending` faked in as a branch at its tip so
-    /// the tree shows where a new branch will land — split ownership,
-    /// co-located names, stacking and all — before it exists.
-    fn sections(&self, pending: Option<&BranchInfo>) -> Vec<Section> {
+    /// The graph sections with `preview` faked in — a branch at its tip, or a
+    /// commit at its destination — so the tree shows where it will land:
+    /// split ownership, co-located names, stacking and all.
+    fn sections(&self, preview: Option<Preview>) -> Vec<Section> {
         let mut info = self.info.clone();
-        info.branches.extend(pending.cloned());
+        match preview {
+            Some(Preview::Branch(pending)) => info.branches.push(pending),
+            Some(Preview::Commit { dest, file_count }) => {
+                place_pending_commit(&mut info, &dest, file_count)
+            }
+            None => {}
+        }
         graph::build_sections(info)
+    }
+
+    /// Whether `files` (short IDs) is the `zz` that stands for every change.
+    fn is_all_changes(&self, files: &[String]) -> bool {
+        files.iter().any(|f| f == self.ids.get_unstaged())
+    }
+}
+
+/// Insert the pending commit into `info` where `loom commit` would put it:
+/// newest on the integration line, or at the branch's tip with the branch
+/// advanced onto it and whatever was stacked on that tip re-parented, so the
+/// ownership walk in `graph` draws the stack as the relocation will leave it.
+fn place_pending_commit(info: &mut RepoInfo, dest: &CommitDest, file_count: usize) {
+    let oid = PENDING_COMMIT_OID;
+    let mut pending = CommitInfo {
+        oid,
+        short_id: String::new(),
+        message: format!(
+            "new commit ({} file{})",
+            file_count,
+            if file_count == 1 { "" } else { "s" }
+        ),
+        parent_oid: None,
+        change_id: None,
+        files: Vec::new(),
+    };
+    match dest {
+        CommitDest::Integration => {
+            pending.parent_oid = Some(
+                info.commits
+                    .first()
+                    .map_or(info.upstream.merge_base_oid, |c| c.oid),
+            );
+            info.commits.insert(0, pending);
+        }
+        CommitDest::Branch(name) => {
+            // Every destination was read off a drawn branch row of this same
+            // snapshot, so the branch is there.
+            let Some(branch) = info.branches.iter_mut().find(|b| b.name == *name) else {
+                return;
+            };
+            let tip = branch.tip_oid;
+            branch.tip_oid = oid;
+            pending.parent_oid = Some(tip);
+            // A tip outside the range is the base: the branches forking from
+            // it stay parallel, only a stack on an in-range tip follows.
+            let at = info.commits.iter().position(|c| c.oid == tip);
+            if at.is_some() {
+                for commit in &mut info.commits {
+                    if commit.parent_oid == Some(tip) {
+                        commit.parent_oid = Some(oid);
+                    }
+                }
+            }
+            info.commits
+                .insert(at.unwrap_or(info.commits.len()), pending);
+        }
     }
 }
 
 /// A loom command to run on the worker thread.
 #[derive(Debug, PartialEq, Eq)]
 enum Action {
-    /// `loom commit [files...]` — empty means all tracked changes.
-    Commit { files: Vec<String> },
+    /// `loom commit -i|-b <branch> <files...>`; `files` is never empty (`zz`
+    /// for everything), so the index never decides what is committed.
+    Commit {
+        files: Vec<String>,
+        dest: CommitDest,
+    },
     /// `loom fold <sources...> <target>`.
     Fold {
         sources: Vec<String>,
@@ -97,13 +182,22 @@ enum Outcome {
     Quit,
 }
 
-/// Input mode: normal, picking the target of a pending fold, or typing a
-/// branch name over its row (an existing branch's, or a placeholder row for
-/// a branch about to be created).
+/// Input mode: normal, picking the target of a pending fold, placing a
+/// pending commit, or typing a branch name over its row (an existing
+/// branch's, or a placeholder row for a branch about to be created).
 enum Mode {
     Normal,
     FoldTarget {
         sources: Vec<String>,
+    },
+    /// `↑`/`↓` move the placeholder commit through `dests`; the tree is
+    /// rebuilt with it at `dests[index]`.
+    CommitTarget {
+        files: Vec<String>,
+        dests: Vec<CommitDest>,
+        index: usize,
+        /// Key of the row `c` was pressed on, to go back to on cancel.
+        origin: String,
     },
     RenameBranch {
         branch: String,
@@ -229,7 +323,13 @@ fn execute_action(
 ) -> Result<()> {
     crate::trace::init(git_dir, &format!("loom tui: {}", command));
     let result = match action {
-        Action::Commit { files } => commit::run(None, false, None, false, files, vec![], theme),
+        Action::Commit { files, dest } => {
+            let (branch, integration) = match dest {
+                CommitDest::Integration => (None, true),
+                CommitDest::Branch(name) => (Some(name), false),
+            };
+            commit::run(branch, integration, None, false, files, vec![], theme)
+        }
         Action::Fold { sources, target } => {
             let mut args = sources;
             args.push(target);
@@ -269,7 +369,7 @@ struct App<'a> {
     /// renames the row it acts on.
     next_cursor: Option<String>,
     /// Row key to fall back to when the action fails and the row it ran from
-    /// was only a preview (`b`), so no longer exists after the reload.
+    /// was only a preview (`b`, `c`), so no longer exists after the reload.
     fallback_cursor: Option<String>,
     /// Transient message shown in the status bar until the next key.
     notice: Option<String>,
@@ -326,18 +426,36 @@ impl<'a> App<'a> {
     }
 
     /// The tree rows for the current snapshot, expansion state, and — while
-    /// a new branch is being named — the fake branch at its tip.
+    /// a new branch is being named or a commit placed — its placeholder row.
     fn build_rows(&self) -> Vec<Row> {
-        let pending = match &self.mode {
-            Mode::NewBranch { tip, .. } => Some(BranchInfo {
+        let preview = match &self.mode {
+            Mode::NewBranch { tip, .. } => Some(Preview::Branch(BranchInfo {
                 name: NEW_BRANCH_NAME.to_string(),
                 tip_oid: *tip,
                 remote: None,
+            })),
+            Mode::CommitTarget {
+                files,
+                dests,
+                index,
+                ..
+            } => Some(Preview::Commit {
+                dest: dests[*index].clone(),
+                file_count: self.commit_file_count(files),
             }),
             _ => None,
         };
-        let sections = self.snapshot.sections(pending.as_ref());
+        let sections = self.snapshot.sections(preview);
         status_tree::build_rows(&sections, &self.snapshot.ids, &self.expanded)
+    }
+
+    /// How many working files `files` (short IDs, or `zz`) stand for.
+    fn commit_file_count(&self, files: &[String]) -> usize {
+        if self.snapshot.is_all_changes(files) {
+            self.snapshot.info.working_changes.len()
+        } else {
+            files.len()
+        }
     }
 
     fn current_row(&self) -> Option<&Row> {
@@ -423,8 +541,12 @@ impl<'a> App<'a> {
         };
         let mut words = vec!["loom".to_string()];
         match action {
-            Action::Commit { files } => {
+            Action::Commit { files, dest } => {
                 words.push("commit".into());
+                match dest {
+                    CommitDest::Integration => words.push("-i".into()),
+                    CommitDest::Branch(name) => words.extend(["-b".into(), sid(name)]),
+                }
                 words.extend(files.iter().map(|f| sid(f)));
             }
             Action::Fold { sources, target } => {
@@ -685,6 +807,15 @@ impl<'a> App<'a> {
                 self.diff.scroll_page(1);
                 None
             }
+            // Folding is how the cursor leaves a row: `←` on a child walks up
+            // to its parent. Fold mode wants it, to reach a target; a commit
+            // being placed must keep the cursor on its placeholder.
+            KeyCode::Left | KeyCode::Right | KeyCode::Char('h' | 'l')
+                if matches!(self.mode, Mode::CommitTarget { .. }) =>
+            {
+                self.notice = Some("commit: Enter to confirm, Esc to cancel".to_string());
+                None
+            }
             KeyCode::Right | KeyCode::Char('l') => {
                 self.expand_current();
                 None
@@ -695,6 +826,7 @@ impl<'a> App<'a> {
             }
             KeyCode::Enter => match &self.mode {
                 Mode::FoldTarget { .. } => self.confirm_fold_target(),
+                Mode::CommitTarget { .. } => self.confirm_commit_target(),
                 // Rename mode never gets here: it is handled above.
                 _ => {
                     self.toggle_current();
@@ -705,20 +837,31 @@ impl<'a> App<'a> {
                 self.open_log();
                 None
             }
-            // While picking a fold target only navigation, Enter, and Esc
-            // apply — action keys must not fire and discard the pending fold.
+            // While picking a fold target or placing a commit only navigation,
+            // Enter, and Esc apply — action keys must not fire and discard
+            // the pending operation.
             KeyCode::Char(' ' | 'c' | 'f' | 'b' | 'd' | 'r' | 'R' | '+' | '=' | '-')
             | KeyCode::F(5)
-                if matches!(self.mode, Mode::FoldTarget { .. }) =>
+                if matches!(
+                    self.mode,
+                    Mode::FoldTarget { .. } | Mode::CommitTarget { .. }
+                ) =>
             {
-                self.notice = Some("fold: Enter to confirm, Esc to cancel".to_string());
+                let what = match self.mode {
+                    Mode::CommitTarget { .. } => "commit",
+                    _ => "fold",
+                };
+                self.notice = Some(format!("{}: Enter to confirm, Esc to cancel", what));
                 None
             }
             KeyCode::Char(' ') => {
                 self.toggle_selection();
                 None
             }
-            KeyCode::Char('c') => self.action_commit(),
+            KeyCode::Char('c') => {
+                self.action_commit_start();
+                None
+            }
             KeyCode::Char('f') => {
                 self.action_fold_start();
                 None
@@ -749,11 +892,14 @@ impl<'a> App<'a> {
         }
     }
 
-    /// Esc: cancel fold-target mode, else clear the selection, else quit.
+    /// Esc: cancel fold-target or commit mode, else clear the selection, else
+    /// quit.
     fn handle_escape(&mut self) {
         if matches!(self.mode, Mode::FoldTarget { .. }) {
             self.mode = Mode::Normal;
             self.notice = Some("fold cancelled".to_string());
+        } else if matches!(self.mode, Mode::CommitTarget { .. }) {
+            self.cancel_commit_target();
         } else if !self.selected.is_empty() {
             self.clear_selection();
         } else {
@@ -762,6 +908,10 @@ impl<'a> App<'a> {
     }
 
     fn move_cursor(&mut self, dir: isize) {
+        if matches!(self.mode, Mode::CommitTarget { .. }) {
+            self.move_commit_dest(dir);
+            return;
+        }
         if self
             .tree
             .move_cursor(dir, self.rows.len(), |i| self.rows[i].focusable)
@@ -879,34 +1029,120 @@ impl<'a> App<'a> {
             .collect()
     }
 
-    /// `c`: commit the selected working-tree files (the index as-is when
-    /// nothing relevant is selected).
-    fn action_commit(&mut self) -> Option<Action> {
-        let mut files: Vec<String> = Vec::new();
-        if self.selected.is_empty() {
-            if let Some(row) = self.current_row()
-                && let RowKind::WorkingFile { .. } = row.kind
-            {
-                files.extend(row.target.clone());
-            }
+    /// `c`: the selected working files or `[local changes]` header (else the
+    /// cursor's) are the commit; the index plays no part. The tree is then
+    /// redrawn with the commit at its destination, and nothing runs until
+    /// that is confirmed.
+    fn action_commit_start(&mut self) {
+        let rows: Vec<&Row> = if self.selected.is_empty() {
+            self.current_row().into_iter().collect()
         } else {
-            let mut non_working = false;
-            for row in &self.rows {
-                if !self.selected.contains(&row.key) {
-                    continue;
-                }
-                match row.kind {
-                    RowKind::WorkingFile { .. } => files.extend(row.target.clone()),
-                    RowKind::LocalChanges { .. } => {} // header = all files
-                    _ => non_working = true,
-                }
-            }
-            if non_working {
-                self.notice = Some("commit acts on local changes only".to_string());
-                return None;
-            }
+            self.rows
+                .iter()
+                .filter(|r| self.selected.contains(&r.key))
+                .collect()
+        };
+        if rows.is_empty()
+            || !rows.iter().all(|r| {
+                matches!(
+                    r.kind,
+                    RowKind::WorkingFile { .. } | RowKind::LocalChanges { .. }
+                )
+            })
+        {
+            self.notice = Some("commit: move to local changes or select files".to_string());
+            return;
         }
-        Some(Action::Commit { files })
+        if rows
+            .iter()
+            .any(|r| matches!(r.kind, RowKind::LocalChanges { count: 0 }))
+        {
+            self.notice = Some("commit: no local changes".to_string());
+            return;
+        }
+        // A row of these kinds always carries a target; refuse rather than
+        // fall through to an argument-less `loom commit`, which would commit
+        // the index — the one thing `c` must never do. An unnamed row is the
+        // same refusal: `loom commit -i ""` is not an improvement.
+        let Some(files) = rows
+            .iter()
+            .map(|r| r.target.clone().filter(|t| !t.is_empty()))
+            .collect::<Option<Vec<String>>>()
+        else {
+            self.notice = Some("commit: this row has nothing to commit".to_string());
+            return;
+        };
+        let Some(origin) = self.current_row().map(|r| r.key.clone()) else {
+            return;
+        };
+        // The destinations are read off the drawn tree, so their order is the
+        // order `↑`/`↓` walk them in.
+        let mut dests = vec![CommitDest::Integration];
+        dests.extend(self.rows.iter().filter_map(|r| match &r.kind {
+            RowKind::BranchName { name, .. } => Some(CommitDest::Branch(name.clone())),
+            _ => None,
+        }));
+        self.mode = Mode::CommitTarget {
+            files,
+            dests,
+            index: 0,
+            origin,
+        };
+        // Every placement shares one row key but shows the files this press
+        // picked, so an earlier press's entry has to go. Moving the commit
+        // afterwards never changes it: only the destination moves.
+        self.diff_cache.remove(&PENDING_COMMIT_OID.to_string());
+        self.diff.reset();
+        self.show_pending_commit();
+    }
+
+    /// Redraw the tree with the placeholder at the current destination and
+    /// put the cursor back on it.
+    fn show_pending_commit(&mut self) {
+        self.rebuild_rows(&PENDING_COMMIT_OID.to_string());
+    }
+
+    /// `↑`/`↓` while placing a commit: the next destination down or up the
+    /// tree, stopping at the ends.
+    fn move_commit_dest(&mut self, dir: isize) {
+        let Mode::CommitTarget { dests, index, .. } = &mut self.mode else {
+            return;
+        };
+        let next = index.saturating_add_signed(dir).min(dests.len() - 1);
+        if next == *index {
+            return;
+        }
+        *index = next;
+        self.show_pending_commit();
+    }
+
+    fn confirm_commit_target(&mut self) -> Option<Action> {
+        let Mode::CommitTarget {
+            files,
+            dests,
+            index,
+            origin,
+        } = std::mem::replace(&mut self.mode, Mode::Normal)
+        else {
+            return None;
+        };
+        // The placeholder row stays while the command runs; a failure has no
+        // new commit to land on, so go back to where `c` was pressed.
+        self.fallback_cursor = Some(origin);
+        Some(Action::Commit {
+            files,
+            dest: dests[index].clone(),
+        })
+    }
+
+    fn cancel_commit_target(&mut self) {
+        let Mode::CommitTarget { origin, .. } = std::mem::replace(&mut self.mode, Mode::Normal)
+        else {
+            return;
+        };
+        self.rebuild_rows(&origin);
+        self.diff.reset();
+        self.notice = Some("commit cancelled".to_string());
     }
 
     /// `f`: remember the sources, then let the user pick the target in the tree.
@@ -1165,6 +1401,13 @@ impl<'a> App<'a> {
             Mode::FoldTarget { sources } => {
                 format!(" Fold {} item(s) into... ", sources.len())
             }
+            Mode::CommitTarget { dests, index, .. } => {
+                let dest = match &dests[*index] {
+                    CommitDest::Integration => &self.snapshot.info.branch_name,
+                    CommitDest::Branch(name) => name,
+                };
+                format!(" Commit to [{}] ", dest)
+            }
             Mode::RenameBranch { .. } => " Rename branch ".to_string(),
             Mode::NewBranch { .. } => " New branch ".to_string(),
         };
@@ -1190,7 +1433,17 @@ impl<'a> App<'a> {
         };
         if !self.diff_cache.contains_key(&key) {
             let lines = match self.rows.get(self.tree.cursor()) {
-                Some(row) => colorize_diff(&diff_text(&self.snapshot, row), self.theme),
+                Some(row) => {
+                    let text = match &self.mode {
+                        Mode::CommitTarget { files, .. }
+                            if row.key == PENDING_COMMIT_OID.to_string() =>
+                        {
+                            pending_commit_diff(&self.snapshot, files)
+                        }
+                        _ => diff_text(&self.snapshot, row),
+                    };
+                    colorize_diff(&text, self.theme)
+                }
                 None => vec![Line::from("")],
             };
             self.diff_cache.insert(key.clone(), lines);
@@ -1267,7 +1520,12 @@ impl ShellApp for App<'_> {
     fn handle_mouse(&mut self, pane: PaneId, kind: MouseEventKind, pos: Position, area: Rect) {
         match pane {
             PaneId::Left => match kind {
-                MouseEventKind::Down(MouseButton::Left) => {
+                // A click while a commit is being placed would take the cursor
+                // off the placeholder. The wheel is safe: it goes through
+                // `move_cursor`, which moves the destination in that mode.
+                MouseEventKind::Down(MouseButton::Left)
+                    if !matches!(self.mode, Mode::CommitTarget { .. }) =>
+                {
                     let Some(clicked) = self.tree.hit_test(area, pos.y) else {
                         return;
                     };
@@ -1385,6 +1643,9 @@ impl ShellApp for App<'_> {
             Mode::FoldTarget { .. } => {
                 Some(" fold: move to the target, Enter to confirm, Esc to cancel".to_string())
             }
+            Mode::CommitTarget { .. } => Some(
+                " commit: ↑/↓ choose the destination, Enter to commit, Esc to cancel".to_string(),
+            ),
             Mode::RenameBranch { .. } => Some(
                 " rename: type the new branch name, Enter to confirm, Esc to cancel".to_string(),
             ),
@@ -1514,11 +1775,11 @@ fn row_line(
             }
         }
         RowKind::Commit {
+            oid,
             message,
             hash,
             dot_color,
             file_count,
-            ..
         } => {
             match dot_color {
                 Some(idx) => {
@@ -1533,6 +1794,15 @@ fn row_line(
                     spans.push(Span::styled("●", theme.graph));
                     spans.push(Span::raw("   "));
                 }
+            }
+            if *oid == PENDING_COMMIT_OID {
+                // A commit being placed has no short ID or hash yet; keep the
+                // columns.
+                spans.push(Span::styled("··", dim));
+                spans.push(Span::raw(" ".repeat(id_width.saturating_sub(2) + 1)));
+                spans.push(Span::styled("······· ", dim));
+                spans.push(Span::styled(message.clone(), dim));
+                return Line::from(spans);
             }
             spans.push(Span::styled(row.sid.clone(), theme.shortid));
             spans.push(Span::raw(" ".repeat(id_width - row.sid.len() + 1)));
@@ -1630,6 +1900,9 @@ fn diff_text(snapshot: &Snapshot, row: &Row) -> String {
             Some((base, tip)) => git::diff_range(workdir, base, tip),
             None => return "branch has no commits of its own".to_string(),
         },
+        RowKind::Commit { oid, .. } if *oid == PENDING_COMMIT_OID => {
+            return "commit not created yet".to_string();
+        }
         RowKind::Commit { oid, .. } => git::show_commit_patch(workdir, &oid.to_string()),
         RowKind::CommitFile { oid, path, .. } => {
             git::show_commit_file(workdir, &oid.to_string(), path)
@@ -1653,6 +1926,61 @@ fn diff_text(snapshot: &Snapshot, row: &Row) -> String {
         Ok(text) => text,
         Err(e) => format!("error: {}", e),
     }
+}
+
+/// What the commit being placed will contain: the working-tree changes of
+/// `files` (short IDs, or `zz` for all of them), as their rows show them.
+///
+/// `zz` commits through `git add -A`, so the untracked files go in too and
+/// the preview must list them — `git diff HEAD` alone would hide exactly the
+/// files the row counts.
+fn pending_commit_diff(snapshot: &Snapshot, files: &[String]) -> String {
+    let workdir = &snapshot.workdir;
+    let ids = &snapshot.ids;
+    let all = snapshot.is_all_changes(files);
+    let or_empty = |result: Result<String>| match result {
+        Ok(text) if text.trim().is_empty() => String::new(),
+        Ok(text) => text,
+        Err(e) => format!("error: {}", e),
+    };
+    let untracked = |c: &repo::FileChange| c.index == '?' && c.worktree == '?';
+    let wanted = |c: &repo::FileChange| all || files.iter().any(|f| f == ids.get_file(&c.path));
+    let mut out = String::new();
+
+    // One `git` for every tracked file at once: `c` runs this on the event
+    // path, and a spawn per selected file freezes the UI for the selection.
+    if all {
+        out.push_str(&or_empty(git::diff_head_display(workdir)));
+    } else {
+        let paths: Vec<&str> = snapshot
+            .info
+            .working_changes
+            .iter()
+            .filter(|c| wanted(c) && !untracked(c))
+            .map(|c| c.path.as_str())
+            .collect();
+        out.push_str(&or_empty(git::diff_head_files_display(workdir, &paths)));
+    }
+
+    // Untracked files have no diff to ask for; `git add -A` commits them, so
+    // the preview reads them itself.
+    for change in snapshot
+        .info
+        .working_changes
+        .iter()
+        .filter(|c| wanted(c) && untracked(c))
+    {
+        // Before, not after: the tracked diff above may end mid-line (an
+        // error message does), and its text must not run into this header.
+        if !out.is_empty() && !out.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push_str(&untracked_file_text(workdir, &change.path));
+    }
+    if out.trim().is_empty() {
+        return "no changes".to_string();
+    }
+    out
 }
 
 /// Render an untracked file's content as added lines.

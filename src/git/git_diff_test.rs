@@ -96,3 +96,22 @@ fn display_diff_keeps_textconv_but_not_color() {
         "textconv leaked:\n{replay}"
     );
 }
+
+/// An empty pathspec makes git match the whole tree, which would show a
+/// caller every file when it asked for none.
+#[test]
+fn diff_head_files_display_with_no_paths_is_empty_not_everything() {
+    let test_repo = TestRepo::new();
+    test_repo.write_file("a.txt", "one\n");
+    test_repo.stage_files(&["a.txt"]);
+    test_repo.commit_staged("Add a");
+    test_repo.write_file("a.txt", "two\n");
+    let workdir = test_repo.workdir();
+
+    assert_eq!(git::diff_head_files_display(&workdir, &[]).unwrap(), "");
+    assert!(
+        git::diff_head_files_display(&workdir, &["a.txt"])
+            .unwrap()
+            .contains("+two")
+    );
+}

@@ -41,7 +41,7 @@ Short IDs are displayed like in `git loom status` (commit ID, then hash), so the
 | Mouse click / wheel | Focus, move, scroll |
 | `R` / `F5` | Reload the tree from the repo |
 | `+` (or `=`) / `-` | Show one more / one fewer context commit before the base (starts at [`loom.statusContext`](../configuration.md#loomstatuscontext), never goes below 1) |
-| `Esc` | Cancel fold, rename, or new-branch mode → clear selection → quit (first that applies) |
+| `Esc` | Cancel fold, commit, rename, or new-branch mode → clear selection → quit (first that applies) |
 | `q` / `Ctrl-C` | Quit |
 
 Commits are collapsed by default; unfolding reveals one row per changed file. Local changes start expanded. Expansion state survives reloads.
@@ -58,7 +58,7 @@ Every action suspends the TUI, runs the regular loom command — prompts and edi
 
 | Key | Command | Arguments |
 |-----|---------|-----------|
-| `c` | [`commit`](commit.md) | Selected working files; nothing relevant selected → the index as-is. Branch and message are prompted as usual. |
+| `c` | [`commit`](commit.md) | Two-step: the selected working files — or the `[local changes]` header for everything — become the commit, then the tree shows it where it will land. `↑`/`↓` move it between the integration branch and every woven branch, `Enter` commits, `Esc` cancels. The message is prompted as usual. What you select is what goes in: the index is never consulted, so a file staged outside the TUI is committed whole or not at all. The destinations are the branches the tree already shows — to commit to a new one, create it with `b` first. |
 | `f` | [`fold`](fold.md) | Two-step: `f` captures the selection (or cursor row) as sources; move the cursor to the target and press `Enter` (`Esc` cancels). While picking a target, other action keys are inactive. |
 | `b` | [`branch new`](branch.md) | The branch appears in the tree where it will land once created — at the cursor commit or branch tip (its `-t` target), else at the base — and you type its name right there. `Enter` creates it, `Esc` or an empty name cancels. |
 | `d` | [`drop`](drop.md) | Selected working files, all at once; else the cursor commit, branch, working file, or the `[local changes]` header (drops everything, like `drop zz`). A menu asks for confirmation: `Enter` on the action runs it, `Cancel` or `Esc` leaves. |
@@ -73,6 +73,7 @@ Every action suspends the TUI, runs the regular loom command — prompts and edi
 | Branch name | Everything the branch owns (nothing while a new branch is still being named) |
 | Commit | `git show` with stats and patch |
 | Commit file | That file's change within the commit |
+| Commit being placed with `c` | The changes it will hold |
 
 ## Conflicts
 

@@ -13,6 +13,11 @@ use crate::core::shortid::IdAllocator;
 /// Key of the local-changes section in the expansion set.
 pub(crate) const LOCAL_CHANGES_KEY: &str = "local";
 
+/// Object name of the commit `c` is placing; also its [`Row::key`]. The null
+/// OID names no real object, so that row carries no `target`: it is drawn,
+/// not acted on.
+pub(crate) const PENDING_COMMIT_OID: git2::Oid = git2::Oid::ZERO_SHA1;
+
 /// [`Row::key`] of the row naming branch `name`.
 pub(crate) fn branch_key(name: &str) -> String {
     format!("br:{}", name)
@@ -305,7 +310,7 @@ fn push_commit_rows(
                 file_count: commit.files.len(),
             },
             sid: sid.clone(),
-            target: Some(commit.oid.to_string()),
+            target: (commit.oid != PENDING_COMMIT_OID).then(|| commit.oid.to_string()),
             key,
             focusable: true,
             expandable: !commit.files.is_empty(),
