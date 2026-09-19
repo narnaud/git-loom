@@ -519,4 +519,25 @@ assert_eq "$(git -C "$WORK" rev-parse HEAD^2)" "$(git -C "$WORK" rev-parse outer
 assert_eq "$(git -C "$WORK" log --format=%s -1 outer)" "Outer O1" "stacked_merged_outer_commit"
 assert_eq "$(git -C "$WORK" rev-parse outer^)" "$(git -C "$WORK" rev-parse "origin/$base_branch")" "stacked_merged_outer_on_upstream"
 
+# ── PERSISTENT IDS ────────────────────────────────────────────────────────────
+
+describe "a commit keeps its short ID across the update rebase"
+setup_repo_with_remote
+echo "stable" > "$WORK/stable.txt"
+gl_capture commit -b g-stable -m "Stable id commit" stable.txt
+assert_exit_ok "$CODE" "update_stable_commit_ok"
+sid_before=$(commit_sid_from_status "Stable id commit")
+hash_before=$(git -C "$WORK" rev-parse g-stable)
+new_tmpdir OTHER_ROOT
+OTHER="$OTHER_ROOT/other"
+git clone -q "$TMPROOT/remote.git" "$OTHER"
+git -C "$OTHER" config user.name "Other"
+git -C "$OTHER" config user.email "other@test.com"
+commit_file_in "$OTHER" "Remote upstream work" "remote.txt"
+git -C "$OTHER" push -q origin
+gl_capture update -y
+assert_exit_ok "$CODE" "update_stable_ok"
+assert_ne "$hash_before" "$(git -C "$WORK" rev-parse g-stable)" "update_stable_hash_changed"
+assert_eq "$sid_before" "$(commit_sid_from_status "Stable id commit")" "update_stable_sid_kept"
+
 pass

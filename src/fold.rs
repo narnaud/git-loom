@@ -389,17 +389,17 @@ fn move_commits_and_report(
     let new_hash = git::rev_parse(workdir, branch_name)?;
     let mut message = if created {
         format!(
-            "Created branch `{}` and moved {} commit(s) to it (now `{}`)",
+            "Created branch `{}` and moved {} commit(s) to it (now {})",
             branch_name,
             commit_hashes.len(),
-            git::short_hash(&new_hash)
+            repo::describe_commit(workdir, &new_hash)
         )
     } else {
         format!(
-            "Moved {} commit(s) to branch `{}` (now `{}`)",
+            "Moved {} commit(s) to branch `{}` (now {})",
             commit_hashes.len(),
             branch_name,
-            git::short_hash(&new_hash)
+            repo::describe_commit(workdir, &new_hash)
         )
     };
     if !parked.is_empty() {
@@ -547,7 +547,14 @@ fn fold_commit_relative(
             transaction::delete(&git_dir)?;
             let new_hash = git::rev_parse(workdir, TRACK_BRANCH)?;
             let _ = git::branch_delete(workdir, TRACK_BRANCH);
-            report_moved_relative(commit_hash, position, target_hash, &new_hash, &parked);
+            report_moved_relative(
+                workdir,
+                commit_hash,
+                position,
+                target_hash,
+                &new_hash,
+                &parked,
+            );
         }
         RebaseOutcome::Paused => {
             transaction::warn_paused_at_edit(Some(COMMAND));
@@ -614,6 +621,7 @@ fn move_commits_relative_and_report(
 }
 
 fn report_moved_relative(
+    workdir: &Path,
     commit_hash: &str,
     position: Position,
     target_hash: &str,
@@ -621,11 +629,11 @@ fn report_moved_relative(
     parked: &[String],
 ) {
     let mut message = format!(
-        "Moved `{}` {} `{}` (now `{}`)",
+        "Moved `{}` {} `{}` (now {})",
         git::short_hash(commit_hash),
         position.as_str(),
         git::short_hash(target_hash),
-        git::short_hash(new_hash)
+        repo::describe_commit(workdir, new_hash)
     );
     if !parked.is_empty() {
         message.push_str(&format!(
@@ -962,11 +970,11 @@ fn run_patch_fold_commit_to_commit(
     )?;
 
     msg::success(&format!(
-        "Moved hunk(s) from `{}` (now `{}`) into `{}` (now `{}`)",
+        "Moved hunk(s) from `{}` (now {}) into `{}` (now {})",
         git::short_hash(source_hash),
-        git::short_hash(&new_source_hash),
+        repo::describe_commit(workdir, &new_source_hash),
         git::short_hash(target_hash),
-        git::short_hash(&new_target_hash)
+        repo::describe_commit(workdir, &new_target_hash)
     ));
 
     Ok(())
@@ -1222,9 +1230,9 @@ fn run_patch_fold_commit_to_unstaged(
     staged.sort();
 
     let mut message = format!(
-        "Uncommitted hunk(s) from `{}` (now `{}`) to working directory",
+        "Uncommitted hunk(s) from `{}` (now {}) to working directory",
         git::short_hash(commit_hash),
-        git::short_hash(&new_hash)
+        repo::describe_commit(workdir, &new_hash)
     );
     if !staged.is_empty() {
         let names: Vec<String> = staged.iter().map(|p| format!("`{p}`")).collect();
@@ -1540,10 +1548,10 @@ fn fold_files_into_commit(
     }
 
     msg::success(&format!(
-        "Folded {} file(s) into `{}` (now `{}`)",
+        "Folded {} file(s) into `{}` (now {})",
         files.len(),
         git::short_hash(commit_hash),
-        git::short_hash(&new_hash)
+        repo::describe_commit(workdir, &new_hash)
     ));
 
     Ok(())
@@ -1672,10 +1680,10 @@ fn fold_commit_into_commit(repo: &Repository, source_hash: &str, target_hash: &s
             let new_hash = git::rev_parse(workdir, TRACK_BRANCH)?;
             let _ = git::branch_delete(workdir, TRACK_BRANCH);
             msg::success(&format!(
-                "Folded `{}` into `{}` (now `{}`)",
+                "Folded `{}` into `{}` (now {})",
                 git::short_hash(source_hash),
                 git::short_hash(target_hash),
-                git::short_hash(&new_hash)
+                repo::describe_commit(workdir, &new_hash)
             ));
         }
         RebaseOutcome::Paused => {
@@ -1731,7 +1739,7 @@ fn fold_commit_to_branch(repo: &Repository, commit_hash: &str, branch_name: &str
         RebaseOutcome::Completed => {
             transaction::delete(&git_dir)?;
             let new_hash = git::rev_parse(workdir, branch_name)?;
-            report_moved(commit_hash, branch_name, &new_hash, &parked);
+            report_moved(workdir, commit_hash, branch_name, &new_hash, &parked);
         }
         RebaseOutcome::Paused => {
             transaction::warn_paused_at_edit(Some(COMMAND));
@@ -1745,12 +1753,18 @@ fn fold_commit_to_branch(repo: &Repository, commit_hash: &str, branch_name: &str
 }
 
 /// Success message for a move, naming the branches it left empty.
-fn report_moved(commit_hash: &str, branch_name: &str, new_hash: &str, parked: &[String]) {
+fn report_moved(
+    workdir: &Path,
+    commit_hash: &str,
+    branch_name: &str,
+    new_hash: &str,
+    parked: &[String],
+) {
     let mut message = format!(
-        "Moved `{}` to branch `{}` (now `{}`)",
+        "Moved `{}` to branch `{}` (now {})",
         git::short_hash(commit_hash),
         branch_name,
-        git::short_hash(new_hash)
+        repo::describe_commit(workdir, new_hash)
     );
     if !parked.is_empty() {
         message.push_str(&format!(
@@ -2023,10 +2037,10 @@ fn fold_commit_file_to_unstaged(repo: &Repository, commit_hash: &str, path: &str
     }
 
     msg::success(&format!(
-        "Uncommitted `{}` from `{}` (now `{}`) {}",
+        "Uncommitted `{}` from `{}` (now {}) {}",
         path,
         git::short_hash(commit_hash),
-        git::short_hash(&new_hash),
+        repo::describe_commit(workdir, &new_hash),
         if staged_removal {
             "as a staged deletion"
         } else {
@@ -2233,12 +2247,12 @@ fn fold_commit_file_to_commit(
     }
 
     msg::success(&format!(
-        "Moved `{}` from `{}` (now `{}`) to `{}` (now `{}`)",
+        "Moved `{}` from `{}` (now {}) to `{}` (now {})",
         path,
         git::short_hash(source_hash),
-        git::short_hash(&new_source_hash),
+        repo::describe_commit(workdir, &new_source_hash),
         git::short_hash(target_hash),
-        git::short_hash(&new_target_hash)
+        repo::describe_commit(workdir, &new_target_hash)
     ));
 
     Ok(())
@@ -2359,10 +2373,10 @@ pub fn after_continue(workdir: &Path, context: &serde_json::Value) -> Result<()>
             let _ = git::branch_delete(workdir, TRACK_BRANCH);
             git::restore_staged_patch(workdir, &saved_staged);
             msg::success(&format!(
-                "Folded {} file(s) into `{}` (now `{}`)",
+                "Folded {} file(s) into `{}` (now {})",
                 files_count,
                 git::short_hash(&original_commit_hash),
-                git::short_hash(&new_hash)
+                repo::describe_commit(workdir, &new_hash)
             ));
         }
         FoldVariant::CommitIntoCommit {
@@ -2372,10 +2386,10 @@ pub fn after_continue(workdir: &Path, context: &serde_json::Value) -> Result<()>
             let new_hash = git::rev_parse(workdir, TRACK_BRANCH)?;
             let _ = git::branch_delete(workdir, TRACK_BRANCH);
             msg::success(&format!(
-                "Folded `{}` into `{}` (now `{}`)",
+                "Folded `{}` into `{}` (now {})",
                 git::short_hash(&source_hash),
                 git::short_hash(&target_hash),
-                git::short_hash(&new_hash)
+                repo::describe_commit(workdir, &new_hash)
             ));
         }
         FoldVariant::CommitToBranch {
@@ -2384,7 +2398,7 @@ pub fn after_continue(workdir: &Path, context: &serde_json::Value) -> Result<()>
             parked,
         } => {
             let new_hash = git::rev_parse(workdir, &branch_name)?;
-            report_moved(&commit_hash, &branch_name, &new_hash, &parked);
+            report_moved(workdir, &commit_hash, &branch_name, &new_hash, &parked);
         }
         FoldVariant::CommitToUnstaged {
             commit_hash,
@@ -2426,7 +2440,14 @@ pub fn after_continue(workdir: &Path, context: &serde_json::Value) -> Result<()>
             } else {
                 Position::Below
             };
-            report_moved_relative(&commit_hash, position, &target_hash, &new_hash, &parked);
+            report_moved_relative(
+                workdir,
+                &commit_hash,
+                position,
+                &target_hash,
+                &new_hash,
+                &parked,
+            );
         }
     }
 

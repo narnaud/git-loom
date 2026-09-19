@@ -61,7 +61,7 @@ git loom reword ab -m "Fix authentication bug"
 #   `loom abort`      to cancel and restore original state
 
 git add shared.rs && git loom continue
-# ✓ Updated commit message for `ab12cd3` (now `e45f678`)
+# ✓ Updated commit message for `ab12cd3` (now `mqt` (e45f678))
 ```
 
 With `rerere.autoUpdate` set, git stages the replayed resolution too, and the pause says so:

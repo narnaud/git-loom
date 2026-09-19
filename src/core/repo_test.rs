@@ -834,3 +834,27 @@ fn resolve_arg_exact_branch_id_beats_a_commit_prefix() {
     let target = resolve(&test_repo, "wpn", &[TargetKind::Commit, TargetKind::Branch]).unwrap();
     assert_eq!(target, Target::Branch("wpn".to_string()));
 }
+
+#[test]
+fn describe_commit_names_persistent_ids_and_falls_back_to_the_hash() {
+    let test_repo = TestRepo::new_with_remote();
+    let plain = test_repo.commit("Plain", "p.txt");
+    let with_id = test_repo.commit(&format!("Identified\n\nChange-Id: {ID_A}\n"), "a.txt");
+    let short = |oid: git2::Oid| oid.to_string()[..7].to_string();
+
+    assert_eq!(
+        repo::describe_commit(&test_repo.workdir(), &with_id.to_string()),
+        format!("`wpn` ({})", short(with_id))
+    );
+    assert_eq!(
+        repo::describe_commit(&test_repo.workdir(), &plain.to_string()),
+        format!("`{}`", short(plain))
+    );
+    // Outside the graph (no upstream), the hash alone is still reported.
+    let bare = TestRepo::new();
+    let oid = bare.commit("Alone", "x.txt");
+    assert_eq!(
+        repo::describe_commit(&bare.workdir(), &oid.to_string()),
+        format!("`{}`", short(oid))
+    );
+}

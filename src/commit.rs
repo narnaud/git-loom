@@ -128,8 +128,8 @@ pub fn run(
         result?;
         let new_head = repo::head_oid(&repo)?;
         msg::success(&format!(
-            "Created commit `{}`",
-            git::short_hash(&new_head.to_string())
+            "Created commit {}",
+            repo::describe_commit(&workdir, &new_head.to_string())
         ));
         return Ok(());
     }
@@ -244,8 +244,8 @@ fn post_commit(workdir: &Path, branch_name: &str, saved_staged: &str) -> Result<
     let new_hash = git::rev_parse(workdir, branch_name)?;
 
     msg::success(&format!(
-        "Created commit `{}` on branch `{}`",
-        git::short_hash(&new_hash),
+        "Created commit {} on branch `{}`",
+        repo::describe_commit(workdir, &new_hash),
         branch_name
     ));
 

@@ -39,6 +39,8 @@ When a feature branch is created inside the integration branch, *git-loom* autom
 
 *git-loom* assigns compact, human-friendly identifiers to branches, commits, and files shown in `git loom status`. You can use these short IDs with any command instead of typing full hashes or branch names. What you see in the status output is what you type.
 
+Commit IDs are persistent: every commit loom creates carries a Gerrit-style `Change-Id` trailer, and its ID (letters such as `mqt`) is derived from that trailer rather than from the hash. Rewrites change the hash, not the ID, so you can chain commands on the same ID across an `update`, a `fold`, or a `swap`.
+
 ## Quick Start
 
 ```bash

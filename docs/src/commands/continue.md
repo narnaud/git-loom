@@ -55,7 +55,7 @@ git add auth.rs && git loom continue
 # ! Conflicts remain — resolve them and run `loom continue` again
 
 git add shared.rs && git loom continue
-# ✓ Created commit `a1b2c3d` on branch `feature-auth`
+# ✓ Created commit `mqt` (a1b2c3d) on branch `feature-auth`
 ```
 
 ## Which Commands Are Paused

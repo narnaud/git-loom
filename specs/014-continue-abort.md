@@ -399,7 +399,7 @@ After continue: prints the drop success message.
 ```json
 {
   "display": "<short hash of the commit before the rebase>",
-  "new_display": "<short hash the commit now has>"
+  "new_hash": "<hash the commit now has>"
 }
 ```
 

@@ -12,7 +12,11 @@ rewrites desynchronize the weave.
 
 Run `git loom status --agent` once. If it succeeds with a branch graph, use loom
 for every history mutation; read-only Git (`status`, `log`, `blame`, etc.) is
-allowed. Run `git loom status --agent` after every mutation.
+allowed. Letter commit IDs (`mqt`) are persistent: they survive every rewrite,
+and `commit`, `split`, `reword`, and `fold` name the commits they create or
+rewrite by them, so chain commands on those IDs. Re-run
+`git loom status --agent` to learn the IDs of new files or branches, after
+`update`, or when a command reports an ambiguous ID.
 
 Rules:
 
@@ -41,9 +45,11 @@ Rules:
 ## IDs and inspection
 
 Status shows: `zz` = all local changes; two letters such as `fa` = branch or
-file; hex prefix such as `3ac` = commit; `d0:1` = file 1 in commit `d0` (with
-`status -f`). Short IDs work wherever that entity is accepted; names, paths,
-and hashes also work. `status -a` includes hidden branches.
+file; three or more letters `k`–`z` such as `mqt` = commit with a Change-Id
+(persistent; any longer prefix of it also works); hex prefix such as `3ac` =
+commit without one (changes on every rewrite); `mqt:1` = file 1 in commit
+`mqt` (with `status -f`). Short IDs work wherever that entity is accepted;
+names, paths, and hashes also work. `status -a` includes hidden branches.
 
 ## Commands
 

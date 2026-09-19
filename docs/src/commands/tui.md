@@ -26,7 +26,7 @@ Shows the same tree as `git loom status` with files enabled, plus a live diff pa
  Navigate: ↑/↓ | Fold/unfold: ←/→ | Select: space | Commit: c | ...
 ```
 
-Short IDs are displayed like in `git loom status`, so the tree doubles as a cheat-sheet for manual commands.
+Short IDs are displayed like in `git loom status` (commit ID, then hash), so the tree doubles as a cheat-sheet for manual commands.
 
 ### Navigation
 

@@ -187,10 +187,10 @@ fn run_split(
     git::restore_staged_patch(workdir, &saved_staged);
     let (h1, h2) = split_result?;
     msg::success(&format!(
-        "Split `{}` into `{}` and `{}`",
+        "Split `{}` into {} and {}",
         short_hash,
-        git::short_hash(&h1),
-        git::short_hash(&h2)
+        repo::describe_commit(workdir, &h1),
+        repo::describe_commit(workdir, &h2)
     ));
     Ok(())
 }

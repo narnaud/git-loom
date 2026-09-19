@@ -23,7 +23,7 @@ Both commits must belong to the same sequence — swapping commits across differ
 
 ## Target Resolution
 
-Accepts full OID, partial OID prefix, or 2-char short ID. Branch names are not accepted.
+Accepts full OID, partial OID prefix, or commit short ID. Branch names are not accepted.
 
 ## Examples
 

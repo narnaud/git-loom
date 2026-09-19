@@ -163,7 +163,7 @@ A branch that ended at `d0` (a stacked branch) stays behind: it ends at the comm
 
 ```bash
 git loom fold d0 feature-b
-# ✓ Moved d0 to branch feature-b (now e1f2a3b)
+# ✓ Moved `d0` to branch `feature-b` (now `mqt` (e1f2a3b))
 #   › branch feature-x now empty, at the base
 ```
 
@@ -335,7 +335,7 @@ git loom fold d0 feature-b
 
 ```bash
 git add <resolved-files> && git loom continue
-# ✓ Moved `d0` to branch `feature-b` (now `e1f2a3b`)
+# ✓ Moved `d0` to branch `feature-b` (now `mqt` (e1f2a3b))
 ```
 
 The following fold operations **do not** support pause/resume and abort immediately on conflict:

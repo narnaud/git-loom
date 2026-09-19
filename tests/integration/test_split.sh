@@ -83,7 +83,8 @@ git -C "$WORK" add ha.txt hb.txt
 git -C "$WORK" commit -q -m "HEAD two files"
 out=$(gl split HEAD -m "First part" ha.txt)
 assert_exit_ok $? "head_split_ok"
-assert_contains "$out" "Split" "head_split_success_msg"
+first_sid=$(commit_sid_from_status "First part")
+assert_contains "$out" "into $first_sid (" "head_split_success_msg"
 assert_head_msg "HEAD two files" "head_split_second_msg"
 assert_msg_at 1 "First part" "head_split_first_msg"
 

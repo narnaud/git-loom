@@ -108,7 +108,7 @@ Ref rules:
 - Branches ending at a moved source stay behind and emptied sections go, as in the topology rules above; report parked branches with the same success line.
 - Refuse a move that changes nothing: the sources, in order, already occupy the positions directly above/below the target. A merge entry between two integration-line picks breaks that adjacency. The test is positional only — an `--above` that would merely advance the target's refs is still refused.
 
-A single-source move is resumable on conflict; the moved commit is tracked through `_loom-track` so success can name its new hash: ``Moved `<hash>` above `<hash>` (now `<hash>`)`` (or `below`). A multi-source move hard-fails: abort the rebase and restore staged changes as staged; success prints ``Moved <n> commit(s) above `<hash>` `` (or `below`).
+A single-source move is resumable on conflict; the moved commit is tracked through `_loom-track` so success can name it afterwards: ``Moved `<hash>` above `<hash>` (now <commit>)`` (or `below`), `<commit>` named per Spec 019. A multi-source move hard-fails: abort the rebase and restore staged changes as staged; success prints ``Moved <n> commit(s) above `<hash>` `` (or `below`).
 
 ## Commit to working tree
 

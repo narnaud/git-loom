@@ -32,13 +32,13 @@ The status displays a branch-aware commit graph using UTF-8 box-drawing characte
 │   A  new_file.rs
 │    ⁕ untracked.txt
 │
-│╭─ [feature-b] ✓
-│●   d0472f9 Fix bug in feature B
-│●   7a067a9 Start feature B
+│╭─ fb [feature-b] ✓
+│●    mqt d0472f9 Fix bug in feature B
+│●    pkz 7a067a9 Start feature B
 ├╯
 │
-│╭─ [feature-a] ↑
-│●   2ee61e1 Add feature A
+│╭─ fa [feature-a] ↑
+│●    rsv 2ee61e1 Add feature A
 ├╯
 │
 ● ff1b247 (upstream) [origin/main] Initial commit
@@ -81,6 +81,10 @@ The graph is rendered top-to-bottom with these sections:
 
 Each branch, commit, and file in the output is assigned a short ID — a compact identifier you can use with other *git-loom* commands. What you see in the status is what you type.
 
+A commit's short ID comes first on its line, then the abbreviated hash. Commits that carry a `Change-Id` trailer (every commit loom creates, see [`loom.changeId`](../configuration.md#loomchangeid)) get a **persistent** ID made of the letters `k`–`z`, such as `mqt`: it is derived from the Change-Id, not from the hash, so it survives `update`, `fold`, `swap`, `split`, and every other rewrite. Any longer prefix of the ID also works, and so does the full `Change-Id` value. A commit without a Change-Id — made with plain `git commit`, or cherry-picked from elsewhere — falls back to a hex prefix of its hash, such as `3a`, which changes whenever the commit is rewritten.
+
+IDs are the shortest prefix that tells commits apart. When a new commit happens to share the first letters of an existing one, both IDs grow by a letter and the old shorter form stops resolving, so a stale ID can never point at the wrong commit.
+
 ## Showing Files
 
 Use `-f` to show the files changed in each commit:
@@ -91,17 +95,17 @@ git loom status -f
 
 ```
 │╭─ fa [feature-a]
-│●    d0 Add feature A
-│┊      d0:0 M  src/feature.rs
-│┊      d0:1 A  tests/feature_test.rs
+│●    mqt 2ee61e1 Add feature A
+│┊      mqt:0 M  src/feature.rs
+│┊      mqt:1 A  tests/feature_test.rs
 ├╯
 ```
 
 To show files for specific commits only, pass their short IDs or git hashes after `-f`:
 
 ```
-git loom status -f d0
-git loom status -f d0 ab
+git loom status -f mqt
+git loom status -f mqt pkz
 git loom status -f abc1234
 ```
 
@@ -114,12 +118,12 @@ Only the listed commits display their file list; all other commits are rendered 
 Each feature branch forks from the integration line independently:
 
 ```
-│╭─ [feature-b]
-│●   d0472f9 Fix bug in feature B
+│╭─ fb [feature-b]
+│●    mqt d0472f9 Fix bug in feature B
 ├╯
 │
-│╭─ [feature-a]
-│●   2ee61e1 Add feature A
+│╭─ fa [feature-a]
+│●    rsv 2ee61e1 Add feature A
 ├╯
 ```
 
@@ -128,13 +132,13 @@ Each feature branch forks from the integration line independently:
 Feature-b is stacked on top of feature-a:
 
 ```
-│╭─ [feature-b]
-│●   4e046ab Second commit on feature-b
-│●   0b85ca7 First commit on feature-b
+│╭─ fb [feature-b]
+│●    mqt 4e046ab Second commit on feature-b
+│●    pkz 0b85ca7 First commit on feature-b
 ││
-│├─ [feature-a]
-│●   caa87a9 Second commit on feature-a
-│●   18faee8 First commit on feature-a
+│├─ fa [feature-a]
+│●    rsv caa87a9 Second commit on feature-a
+│●    tqn 18faee8 First commit on feature-a
 ├╯
 ```
 
@@ -143,9 +147,9 @@ Feature-b is stacked on top of feature-a:
 Multiple branches pointing to the same commit:
 
 ```
-│╭─ [feature-a-v2]
-│├─ [feature-a]
-│●   2ee61e1 Add feature A
+│╭─ fv [feature-a-v2]
+│├─ fa [feature-a]
+│●    rsv 2ee61e1 Add feature A
 ├╯
 ```
 
@@ -154,7 +158,7 @@ Multiple branches pointing to the same commit:
 When upstream has new commits beyond the common base:
 
 ```
-●   abc1234 Fix typo
+●    mqt abc1234 Fix typo
 │
 │●  [origin/main] ⏫ 3 new commits
 ├╯ 204e309 (common base) 2025-07-06 Merge pull request #10

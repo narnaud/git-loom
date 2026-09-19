@@ -19,8 +19,10 @@ use crate::git;
 struct RewordContext {
     /// Short hash of the reworded commit, as it was before the rebase.
     display: String,
-    /// Short hash the reworded commit now has.
-    new_display: String,
+    /// Hash the reworded commit now has; the alias reads state files that
+    /// store it abbreviated, which names the commit just as well.
+    #[serde(alias = "new_display")]
+    new_hash: String,
 }
 
 /// Reword a commit message or rename a branch.
@@ -120,7 +122,7 @@ pub fn reword_commit(repo: &Repository, commit_hash: &str, message: Option<Strin
     // Step 3: Save resume state, then continue the rebase.
     let ctx = RewordContext {
         display: git::short_hash(commit_hash).to_string(),
-        new_display: git::short_hash(&new_hash).to_string(),
+        new_hash,
     };
     let git_dir = repo.path().to_path_buf();
     transaction::save(
@@ -147,7 +149,7 @@ pub fn reword_commit(repo: &Repository, commit_hash: &str, message: Option<Strin
     match outcome {
         git::RebaseOutcome::Completed => {
             transaction::delete(&git_dir)?;
-            report_reworded(&ctx);
+            report_reworded(workdir, &ctx);
         }
         git::RebaseOutcome::Stopped => {
             transaction::warn_paused(workdir, "reword");
@@ -161,17 +163,18 @@ pub fn reword_commit(repo: &Repository, commit_hash: &str, message: Option<Strin
 }
 
 /// Resume a `reword` after a conflict has been resolved.
-pub fn after_continue(_workdir: &Path, context: &serde_json::Value) -> Result<()> {
+pub fn after_continue(workdir: &Path, context: &serde_json::Value) -> Result<()> {
     let ctx: RewordContext =
         serde_json::from_value(context.clone()).context("Failed to parse reword resume context")?;
-    report_reworded(&ctx);
+    report_reworded(workdir, &ctx);
     Ok(())
 }
 
-fn report_reworded(ctx: &RewordContext) {
+fn report_reworded(workdir: &Path, ctx: &RewordContext) {
     msg::success(&format!(
-        "Updated commit message for `{}` (now `{}`)",
-        ctx.display, ctx.new_display
+        "Updated commit message for `{}` (now {})",
+        ctx.display,
+        repo::describe_commit(workdir, &ctx.new_hash)
     ));
 }
 

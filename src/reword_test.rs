@@ -652,3 +652,14 @@ fn reword_mints_a_change_id_for_a_commit_without_one() {
     .unwrap();
     assert_eq!(test_repo.get_message(0), "Still plain");
 }
+
+/// A state file written when the field was `new_display` still resumes.
+#[test]
+fn after_continue_reads_a_state_file_with_the_old_field_name() {
+    let test_repo = TestRepo::new();
+    let context = serde_json::json!({ "display": "abc1234", "new_display": "def5678" });
+
+    let ctx: super::RewordContext = serde_json::from_value(context.clone()).unwrap();
+    assert_eq!(ctx.new_hash, "def5678");
+    super::after_continue(&test_repo.workdir(), &context).unwrap();
+}

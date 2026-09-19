@@ -170,7 +170,7 @@ git-loom status
 
 git-loom split HEAD -m "Extract config changes"
 # → opens file picker; user selects config.rs
-# ✓ Split `3f2a1c` into `1a2b3c` and `4d5e6f`
+# ✓ Split `3f2a1c` into `wsl` (1a2b3c) and `mqt` (4d5e6f)
 ```
 
 ### Split a non-HEAD commit by file
@@ -192,7 +192,7 @@ git-loom split c1
 git-loom split HEAD -p -m "Refactor loop"
 # → opens hunk picker showing the diff of HEAD
 # User selects hunks that belong in the first commit
-# ✓ Split `3f2a1c` into `1a2b3c` and `4d5e6f`
+# ✓ Split `3f2a1c` into `wsl` (1a2b3c) and `mqt` (4d5e6f)
 ```
 
 ### Split a non-HEAD commit by hunk
@@ -201,7 +201,7 @@ git-loom split HEAD -p -m "Refactor loop"
 git-loom split 0a -p
 # → opens hunk picker for commit 0a
 # User selects hunks; editor opens for first commit message
-# ✓ Split `0a3b5c` into `1a2b3c` and `4d5e6f`
+# ✓ Split `0a3b5c` into `wsl` (1a2b3c) and `mqt` (4d5e6f)
 ```
 
 ### Provide files on the command line (bypass picker)

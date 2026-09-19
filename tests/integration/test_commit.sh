@@ -293,4 +293,29 @@ assert_exit_fail "$CODE" "commit_strict_parse_fails"
 assert_contains "$OUT" "unexpected argument" "commit_strict_parse_msg"
 assert_contains "$OUT" "-- --no-verify"      "commit_strict_parse_hint"
 
+# ── CHANGE-ID ─────────────────────────────────────────────────────────────────
+
+describe "a created commit carries a Change-Id and a letter short ID"
+setup_repo_with_remote
+echo "identified" > "$WORK/identified.txt"
+gl_capture commit -b g-ident -m "Identified commit" identified.txt
+assert_exit_ok "$CODE" "commit_change_id_ok"
+body=$(git -C "$WORK" log -1 --format=%B g-ident)
+assert_eq "1" "$(printf '%s' "$body" | grep -c '^Change-Id: I[0-9a-f]\{40\}$')" "commit_change_id_trailer"
+sid=$(commit_sid_from_status "Identified commit")
+[[ "$sid" =~ ^[k-z]{3,}$ ]] || fail "commit_change_id_letters: got '$sid'"
+assert_contains "$OUT" "Created commit $sid (" "commit_change_id_in_message"
+gl_capture show "$sid"
+assert_exit_ok "$CODE" "commit_change_id_resolves"
+
+describe "loom.changeId false creates a plain commit with a hex short ID"
+setup_repo_with_remote
+git -C "$WORK" config loom.changeId false
+echo "plain" > "$WORK/plain.txt"
+gl_capture commit -b g-plain -m "Plain commit" plain.txt
+assert_exit_ok "$CODE" "commit_no_change_id_ok"
+assert_not_contains "$(git -C "$WORK" log -1 --format=%B g-plain)" "Change-Id" "commit_no_change_id_trailer"
+sid=$(commit_sid_from_status "Plain commit")
+[[ "$sid" =~ ^[0-9a-f]{2,}$ ]] || fail "commit_no_change_id_hex: got '$sid'"
+
 pass

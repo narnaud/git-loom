@@ -650,6 +650,22 @@ pub struct FileChange {
     pub worktree: char,
 }
 
+/// How success messages name a commit (Spec 019): `` `mqt` (1a2b3c4) `` when
+/// it has a persistent ID, else `` `1a2b3c4` ``. Never fails, so a message is
+/// printed even when the graph cannot be gathered.
+pub fn describe_commit(workdir: &Path, hash: &str) -> String {
+    let short = crate::git::short_hash(hash);
+    let persistent = || -> Option<String> {
+        let repo = Repository::discover(workdir).ok()?;
+        let oid = repo.revparse_single(hash).ok()?.peel_to_commit().ok()?.id();
+        let info = gather_commit_graph(&repo).ok()?;
+        let ids = crate::core::shortid::IdAllocator::new(info.collect_entities());
+        let id = ids.get_commit(oid);
+        crate::core::changeid::is_letters(id).then(|| format!("`{id}` ({short})"))
+    };
+    persistent().unwrap_or_else(|| format!("`{short}`"))
+}
+
 /// Whether the repo has an integration context: HEAD on a branch that has an
 /// upstream. Commands that fall back to plain-git behavior outside such a
 /// context check this first, so they can propagate every other failure from

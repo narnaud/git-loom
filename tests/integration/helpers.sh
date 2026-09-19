@@ -169,9 +169,13 @@ log_oneline()       { git -C "$WORK" log --oneline; }
 head_parent_count()      { git -C "$WORK" log -1         --pretty=%P | wc -w | tr -d ' '; }
 parent_count_at()        { git -C "$WORK" log -1 "$1"   --pretty=%P | wc -w | tr -d ' '; }
 
-# Return the short ID for a commit, given its message as shown in gl status.
+# Return the short ID for a commit, given its message as shown in gl status:
+# the field right before the abbreviated hash (`│●    mqt d072f9a Message`).
 # Usage: commit_sid=$(commit_sid_from_status "Commit message")
-commit_sid_from_status() { gl status | grep "$1" | grep -oE '[0-9a-z]{4,8}' | head -1; }
+commit_sid_from_status() {
+    gl status | grep -F -- "$1" | head -1 \
+        | awk '{ for (i = 2; i <= NF; i++) if ($i ~ /^[0-9a-f]{7,}$/) { print $(i-1); exit } }'
+}
 
 # Return the short ID for a branch, given its name as shown in gl status.
 # Usage: branch_sid=$(branch_sid_from_status "branch-name")

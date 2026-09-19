@@ -80,7 +80,7 @@ paths, you're ready to continue.
 
 ```bash
 $ git loom continue
-✓ Created commit `b2c3d4e` on branch `feature-auth`
+✓ Created commit `mqt` (b2c3d4e) on branch `feature-auth`
 ```
 
 Loom runs `git rebase --continue` internally, completes the interrupted

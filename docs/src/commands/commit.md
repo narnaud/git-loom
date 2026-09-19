@@ -173,7 +173,7 @@ Resolve conflicts, then:
 ```bash
 git add <resolved-files>
 git loom continue
-# ✓ Created commit `b4c5d6e` on branch `feature-auth`
+# ✓ Created commit `mqt` (b4c5d6e) on branch `feature-auth`
 ```
 
 Or cancel and return to the original state (the commit content comes back as

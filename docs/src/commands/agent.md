@@ -93,7 +93,7 @@ git loom commit --agent -m "Fix login"
 #  "hint":"re-run with: loom commit -b <branch> -m <message> [files...] (a new name creates the branch), or -i for the integration branch itself"}
 
 git loom commit --agent -b feature-auth -m "Fix login"
-# {"status":"ok","messages":["Created commit `1a2b3c4` on branch `feature-auth`"]}
+# {"status":"ok","messages":["Created commit `mqt` (1a2b3c4) on branch `feature-auth`"]}
 ```
 
 ### A conflicting update
