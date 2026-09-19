@@ -48,7 +48,7 @@ Commits are collapsed by default; unfolding reveals one row per changed file. Lo
 
 ### Selection
 
-`Space` toggles selection of the current row (marked `✓`) and advances the cursor. Actions use the selection when one exists, otherwise the cursor row. Selection is cleared on reload.
+`Space` toggles selection of the current row (marked `✓`) and advances the cursor. Actions use the selection when one exists, otherwise the cursor row. Selection is cleared on reload, and collapsing a row drops the selection of the rows it hides.
 
 A selection holds one kind of row — working files, commits, branches, commit files, or the `[local changes]` header — since no loom command takes a mixed list of targets. Pressing `Space` on a row of another kind is refused with a notice and changes nothing; press `Esc` to clear the selection and start another one.
 

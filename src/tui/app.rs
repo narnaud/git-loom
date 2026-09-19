@@ -638,8 +638,15 @@ impl<'a> App<'a> {
     }
 
     /// Rebuild rows after an expansion change, keeping the cursor on `key`.
+    /// Rows that went away take their selection with them: an off-screen row
+    /// would keep vetoing every other class with no marker in sight.
     fn rebuild_rows(&mut self, key: &str) {
         self.rows = self.build_rows();
+        let visible: HashSet<&str> = self.rows.iter().map(|r| r.key.as_str()).collect();
+        self.selected.retain(|k| visible.contains(k.as_str()));
+        if self.selected.is_empty() {
+            self.selected_class = None;
+        }
         if let Some(pos) = self.rows.iter().position(|r| r.key == key) {
             self.tree.set_cursor(pos);
         } else if self.tree.cursor() >= self.rows.len() {

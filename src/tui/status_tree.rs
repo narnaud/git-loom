@@ -125,7 +125,9 @@ impl Row {
             RowKind::BranchName { .. } => SelectionClass::Branch,
             RowKind::Commit { .. } => SelectionClass::Commit,
             RowKind::CommitFile { .. } => SelectionClass::CommitFile,
-            _ => return None,
+            RowKind::Upstream { .. } | RowKind::Context { .. } | RowKind::Spacer(_) => {
+                return None;
+            }
         })
     }
 

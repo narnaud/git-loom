@@ -255,6 +255,46 @@ fn deselecting_the_last_row_frees_the_class() {
 }
 
 #[test]
+fn deselecting_one_of_several_rows_keeps_the_class() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, "wf:a.rs");
+    app.toggle_selection();
+    app.toggle_selection();
+    move_cursor_to(&mut app, "wf:b.rs");
+    app.toggle_selection();
+    assert_eq!(app.selected.len(), 1);
+
+    move_cursor_to(&mut app, &oid('a').to_string());
+    app.toggle_selection();
+    assert!(!app.selected.contains(&oid('a').to_string()));
+}
+
+/// A selection the user can no longer see must not veto the next one.
+#[test]
+fn collapsing_a_parent_forgets_the_rows_it_hides() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, &oid('a').to_string());
+    app.expand_current();
+    let file_key = format!("{}:0", oid('a'));
+    move_cursor_to(&mut app, &file_key);
+    app.toggle_selection();
+
+    move_cursor_to(&mut app, LOCAL_CHANGES_KEY);
+    app.collapse_current();
+    assert!(app.selected.contains(&file_key));
+
+    move_cursor_to(&mut app, &oid('a').to_string());
+    app.collapse_current();
+    assert!(app.selected.is_empty());
+
+    app.toggle_selection();
+    assert!(app.selected.contains(&oid('a').to_string()));
+    assert_eq!(app.notice, None);
+}
+
+#[test]
 fn escape_clears_selection_before_quitting() {
     let theme = make_theme();
     let mut app = make_app(make_snapshot(), &theme);
