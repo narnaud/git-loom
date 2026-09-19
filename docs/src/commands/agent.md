@@ -59,7 +59,7 @@ The global `--agent` flag (or the `LOOM_AGENT` environment variable, any value e
 In agent mode:
 
 - Interactive prompts never render — they answer `needs_input`/`needs_confirmation` instead.
-- `-p`/`--patch` is rejected (the hunk picker is a full-screen UI).
+- `-p`/`--patch` answers with a hunk listing on [`split`](split.md) and on [`fold`](fold.md) with a commit source (see below); everywhere else it is rejected, since the picker is a full-screen UI.
 - `commit`, `split`, and `reword` require `-m` (no editor is opened).
 - `push` never opens a browser: PR creation is skipped and reported in `messages`.
 - `update` skips the gone-branch pruning question (use `-y` to prune).
@@ -95,6 +95,39 @@ git loom commit --agent -m "Fix login"
 git loom commit --agent -b feature-auth -m "Fix login"
 # {"status":"ok","messages":["Created commit `1a2b3c4` on branch `feature-auth`"]}
 ```
+
+### Picking hunks without the picker
+
+`split -p`, `fold -p <source> <target>` and `fold -p <commit> zz` take their hunks from a commit, so agent mode can list them instead of drawing the picker. It takes two calls: the first lists, the second selects.
+
+```bash
+git loom split ab --agent -m "Fix the off-by-one" -p
+# {"status":"needs_input","kind":"multiselect","prompt":"Select hunks",
+#  "options":["src/parse.rs:1","src/parse.rs:2"],"fingerprint":"a91c3f2be417",
+#  "items":[{"id":"src/parse.rs:1","path":"src/parse.rs",
+#            "diff":"@@ -12,7 +12,7 @@ fn scan\n...","selectable":true},
+#           {"id":"src/parse.rs:2", ...}],
+#  "hint":"re-run with: loom split ab -m <message> -p --hunks <id> [--hunks <id>...] --hunks-from a91c3f2be417"}
+
+git loom split ab --agent -m "Fix the off-by-one" -p --hunks src/parse.rs:1 --hunks-from a91c3f2be417
+# {"status":"ok","messages":["Split `b41c298` into `2a0a929` and `d979b2b`"]}
+```
+
+`items` lists every entry of the diff. `"selectable": false` marks one this command cannot take — a binary file under `fold`, which has no hunk to move; `split` takes it whole and marks nothing unselectable. A deletion and a submodule move whole, so `fold` takes them too. `options` repeats only the pickable ids. The `diff` is never truncated, so narrow a large listing with `split -p <files>` rather than expecting loom to cut it short.
+
+Re-run the `hint` as given, including any `<files>` filter — it carries every argument that shapes the listing.
+
+Hunk ids are positional, so `--hunks-from` carries the fingerprint of the listing they came from. Loom recomputes it and refuses a selection taken from a diff that has since changed, rather than move whatever now sits at those positions:
+
+```bash
+# ab was rewritten in between, so the ids no longer number the same hunks
+git loom split ab --agent -m "..." -p --hunks src/parse.rs:1 --hunks-from 35374d8ca902
+# {"status":"error","message":"The hunks changed since the listing fingerprinted 35374d8ca902 (now 6b0f19d4c773)\nRe-run with -p alone to list them again"}
+```
+
+`--hunks` repeats, once per id, and takes no separated list: an id contains a path, and any separator is a character some path may hold. A comma-joined value errors and says so.
+
+`--hunks` needs `-p` and works outside agent mode too, though the fingerprint only comes from a listing, so the first call still needs `--agent` or `LOOM_AGENT=1`. Working-tree hunks have no listing: staged and unstaged entries for one file share the numbering, and it shifts as soon as anything is staged.
 
 ### A conflicting update
 

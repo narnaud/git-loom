@@ -1,10 +1,11 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 use git2::Repository;
 use std::path::Path;
 
 use crate::core::diff::{self, parse_hunk_start};
+use crate::core::hunk_select::{self, Picker};
 use crate::core::repo;
-use crate::core::{graph, msg};
+use crate::core::{agent_mode, graph, msg};
 use crate::git;
 use crate::tui::hunk_selector::{FileEntry, HunkEntry, HunkOrigin};
 use crate::tui::theme::TuiTheme;
@@ -234,7 +235,7 @@ fn collect_staged_hunks(
     if index_status == 'D' {
         hunks.push(HunkEntry {
             hunk: diff::DiffHunk {
-                text: String::from("(file deleted)"),
+                text: String::from(diff::DELETED_ENTRY),
                 modified_lines: vec![],
             },
             selected: true,
@@ -246,7 +247,7 @@ fn collect_staged_hunks(
     if git::diff_cached_file_is_binary(workdir, path)? {
         hunks.push(HunkEntry {
             hunk: diff::DiffHunk {
-                text: String::from("(binary file)"),
+                text: String::from(diff::BINARY_ENTRY),
                 modified_lines: vec![],
             },
             selected: true,
@@ -282,7 +283,7 @@ fn collect_unstaged_hunks(
     if worktree_status == 'D' {
         hunks.push(HunkEntry {
             hunk: diff::DiffHunk {
-                text: String::from("(file deleted)"),
+                text: String::from(diff::DELETED_ENTRY),
                 modified_lines: vec![],
             },
             selected: false,
@@ -315,7 +316,7 @@ fn collect_unstaged_hunks(
         if raw_bytes[..check_len].contains(&0) {
             hunks.push(HunkEntry {
                 hunk: diff::DiffHunk {
-                    text: String::from("(binary file)"),
+                    text: String::from(diff::BINARY_ENTRY),
                     modified_lines: vec![],
                 },
                 selected: false,
@@ -345,7 +346,7 @@ fn collect_unstaged_hunks(
     if git::diff_file_is_binary(workdir, path)? {
         hunks.push(HunkEntry {
             hunk: diff::DiffHunk {
-                text: String::from("(binary file)"),
+                text: String::from(diff::BINARY_ENTRY),
                 modified_lines: vec![],
             },
             selected: false,
@@ -369,21 +370,57 @@ fn collect_unstaged_hunks(
     Ok(false)
 }
 
-/// Open the interactive hunk picker for hunks from a specific commit.
+/// Pick hunks from a specific commit, interactively or by id.
 ///
 /// Shows the diff of `oid` vs its parent. All hunks start unselected (no-op).
-/// Returns `Some(files)` with the user's selections on confirm, `None` on cancel.
+/// Returns `Some(files)` with the selections on confirm, `None` on cancel.
+/// With `picker.hunks` the selection is applied without rendering; in agent
+/// mode without it, the hunks are listed as data instead (spec 019).
 pub fn run_commit_hunk_picker(
     workdir: &Path,
     oid: &str,
     files: &[String],
+    picker: &Picker,
     theme: &graph::Theme,
 ) -> Result<Option<Vec<FileEntry>>> {
-    let entries = collect_commit_hunks(workdir, oid, files)?;
+    let mut entries = collect_commit_hunks(workdir, oid, files)?;
 
     if entries.is_empty() {
+        // Only a rendered picker can be cancelled, so neither an agent nor
+        // `--hunks` may be told `Cancelled` when there was nothing to pick.
+        if agent_mode::enabled() || !picker.hunks.is_empty() {
+            // `fold` never filters, so that clause would name an argument the
+            // caller could not have passed.
+            let filtered = if files.is_empty() {
+                ""
+            } else {
+                ", or the given files matched none"
+            };
+            bail!(
+                "No hunks to select in `{}`\nIts changes carry no text -p can pick{filtered}",
+                git::short_hash(oid)
+            );
+        }
         msg::warn("No changes in commit");
         return Ok(None);
+    }
+
+    if !picker.hunks.is_empty() {
+        hunk_select::apply(oid, &mut entries, picker)?;
+        return Ok(Some(entries));
+    }
+
+    if agent_mode::enabled() {
+        // A listing whose every id `apply` would refuse is a prompt with no
+        // answer. The picker still renders these, so this stays agent-only.
+        if !hunk_select::has_selectable(&entries, picker.whole_files) {
+            bail!(
+                "No hunks to select in `{}`\n\
+                 It changes only binary files, which -p cannot move",
+                git::short_hash(oid)
+            );
+        }
+        return Err(hunk_select::respond(oid, entries, picker));
     }
 
     let tui_theme = TuiTheme::from_graph_theme(theme);
@@ -414,7 +451,7 @@ pub(crate) fn collect_commit_hunks(
         if *status == 'D' {
             hunks.push(HunkEntry {
                 hunk: diff::DiffHunk {
-                    text: String::from("(file deleted)"),
+                    text: String::from(diff::DELETED_ENTRY),
                     modified_lines: vec![],
                 },
                 selected: false,
@@ -426,7 +463,7 @@ pub(crate) fn collect_commit_hunks(
         } else if git::diff_commit_file_is_binary(workdir, oid, path)? {
             hunks.push(HunkEntry {
                 hunk: diff::DiffHunk {
-                    text: String::from("(binary file)"),
+                    text: String::from(diff::BINARY_ENTRY),
                     modified_lines: vec![],
                 },
                 selected: false,
@@ -507,7 +544,7 @@ pub(crate) fn save_and_unstage_other_staged(
 fn submodule_entry(selected: bool, origin: HunkOrigin) -> HunkEntry {
     HunkEntry {
         hunk: diff::DiffHunk {
-            text: String::from("(submodule)"),
+            text: String::from(diff::SUBMODULE_ENTRY),
             modified_lines: vec![],
         },
         selected,

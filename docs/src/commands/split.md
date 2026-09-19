@@ -21,6 +21,8 @@ git loom split [-p] [-m <message>] <target> [<files>...]
 |--------|-------------|
 | `-m, --message <message>` | Message for the first commit. Opens editor if omitted. |
 | `-p, --patch` | Interactively pick individual hunks for the first commit |
+| `--hunks <id>` | Take that hunk for the first commit instead of opening the picker; repeat it per hunk. Needs `-p` and `--hunks-from`; see [agent mode](agent.md). |
+| `--hunks-from <fingerprint>` | Fingerprint of the listing `--hunks` came from. Loom refuses a selection taken from a diff that has since changed. |
 
 ## What It Does
 

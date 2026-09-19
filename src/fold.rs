@@ -3,8 +3,10 @@ use git2::{Repository, StatusOptions};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+use crate::core::agent_mode;
 use crate::core::diff;
 use crate::core::graph;
+use crate::core::hunk_select::{self, HunkArgs, Picker};
 use crate::core::msg;
 use crate::core::repo::{self, Target, TargetKind};
 use crate::core::staging;
@@ -74,6 +76,7 @@ pub fn run(
     create: bool,
     patch: bool,
     anchor: Option<Anchor>,
+    hunks: HunkArgs,
     args: Vec<String>,
     theme: &graph::Theme,
 ) -> Result<()> {
@@ -95,7 +98,7 @@ pub fn run(
     }
 
     if patch {
-        return run_patch_fold(&repo, &args, theme);
+        return run_patch_fold(&repo, &args, &hunks, theme);
     }
 
     if args.len() == 1 {
@@ -636,6 +639,18 @@ fn report_moved_relative(
     msg::success(&message);
 }
 
+/// `fold -p` moves text hunks, and submodules and deletions whole. A binary
+/// file has nothing to move (Spec 007), so `--hunks` refuses its id — but the
+/// TUI still offers it, and `fold` then leaves it behind with a warning.
+fn fold_picker(hunks: &HunkArgs, command: &str, target_hash: Option<&str>) -> Picker {
+    Picker {
+        hunks: hunks.clone(),
+        command: command.to_string(),
+        whole_files: false,
+        target_hash: target_hash.map(str::to_string),
+    }
+}
+
 /// Fold interactively-selected hunks into a target commit, or move/uncommit
 /// hunks from a source commit.
 ///
@@ -643,7 +658,12 @@ fn report_moved_relative(
 /// - `fold -p [<files>...] <commit>` — pick working-tree hunks, fold into commit
 /// - `fold -p <commit1> <commit2>` — pick hunks from commit1 to move into commit2
 /// - `fold -p <commit> zz` — pick hunks from commit to uncommit to working tree
-fn run_patch_fold(repo: &Repository, args: &[String], theme: &graph::Theme) -> Result<()> {
+fn run_patch_fold(
+    repo: &Repository,
+    args: &[String],
+    hunks: &HunkArgs,
+    theme: &graph::Theme,
+) -> Result<()> {
     let workdir = repo::require_workdir(repo, COMMAND)?;
 
     let (target_arg, source_args) = args.split_last().expect("args is non-empty");
@@ -655,17 +675,38 @@ fn run_patch_fold(repo: &Repository, args: &[String], theme: &graph::Theme) -> R
             repo::resolve_arg(repo, source_arg, &[TargetKind::Commit])
         {
             if target_arg == "zz" {
-                return run_patch_fold_commit_to_unstaged(repo, workdir, &source_hash, theme);
+                let picker = fold_picker(
+                    hunks,
+                    &format!("loom fold -p {} zz", hunk_select::quoted(source_arg)),
+                    None,
+                );
+                return run_patch_fold_commit_to_unstaged(
+                    repo,
+                    workdir,
+                    &source_hash,
+                    &picker,
+                    theme,
+                );
             }
             if let Ok(Target::Commit(target_hash)) =
                 repo::resolve_arg(repo, target_arg, &[TargetKind::Commit])
             {
+                let picker = fold_picker(
+                    hunks,
+                    &format!(
+                        "loom fold -p {} {}",
+                        hunk_select::quoted(source_arg),
+                        hunk_select::quoted(target_arg)
+                    ),
+                    Some(&target_hash),
+                );
                 return run_patch_fold_commit_to_commit(
                     repo,
                     workdir,
                     &source_hash,
                     &target_hash,
                     target_arg,
+                    &picker,
                     theme,
                 );
             }
@@ -689,6 +730,21 @@ fn run_patch_fold(repo: &Repository, args: &[String], theme: &graph::Theme) -> R
             Ok(_) => {}
             Err(e) => return Err(e),
         }
+    }
+
+    // Working-tree hunks have no id listing: staged and unstaged entries for the
+    // same file share the numbering and it shifts as soon as anything is staged.
+    if !hunks.is_empty() {
+        bail!(
+            "--hunks only applies to a commit source\n\
+             Use `loom fold -p <commit> <target>`, or pass explicit files"
+        );
+    }
+    if agent_mode::enabled() {
+        bail!(
+            "--patch over working-tree changes is interactive and unavailable in agent mode\n\
+             Pass explicit files instead"
+        );
     }
 
     let resolved = repo::resolve_arg(repo, target_arg, &[TargetKind::Commit])?;
@@ -937,6 +993,7 @@ fn run_patch_fold_commit_to_commit(
     source_hash: &str,
     target_hash: &str,
     target_arg: &str,
+    picker: &Picker,
     theme: &graph::Theme,
 ) -> Result<()> {
     let source_oid = git2::Oid::from_str(source_hash)?;
@@ -949,7 +1006,7 @@ fn run_patch_fold_commit_to_commit(
         bail!("Source commit must be newer than target commit");
     }
 
-    let selections = staging::run_commit_hunk_picker(workdir, source_hash, &[], theme)?
+    let selections = staging::run_commit_hunk_picker(workdir, source_hash, &[], picker, theme)?
         .ok_or_else(msg::cancelled)?;
 
     let (new_source_hash, new_target_hash) = fold_selected_hunks_to_commit(
@@ -1129,9 +1186,10 @@ fn run_patch_fold_commit_to_unstaged(
     repo: &Repository,
     workdir: &Path,
     commit_hash: &str,
+    picker: &Picker,
     theme: &graph::Theme,
 ) -> Result<()> {
-    let selections = staging::run_commit_hunk_picker(workdir, commit_hash, &[], theme)?
+    let selections = staging::run_commit_hunk_picker(workdir, commit_hash, &[], picker, theme)?
         .ok_or_else(msg::cancelled)?;
 
     if !selections

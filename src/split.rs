@@ -1,6 +1,7 @@
 use anyhow::{Result, bail};
 use git2::{Oid, Repository};
 
+use crate::core::hunk_select::{self, HunkArgs, Picker};
 use crate::core::repo::{self, Target, TargetKind};
 use crate::core::weave;
 use crate::core::{agent_mode, diff, graph, msg, staging};
@@ -8,6 +9,38 @@ use crate::git;
 use crate::tui::hunk_selector::FileEntry;
 
 const COMMAND: &str = "split";
+
+/// The invocation to repeat, carrying every argument that shapes the split, so
+/// an agent can replay it with only the missing piece filled in (spec 019).
+/// Dropping the `<files>` filter would list a different set of hunks and fail
+/// the fingerprint check instead of splitting.
+fn invocation(
+    target: &str,
+    message: Option<&str>,
+    patch: bool,
+    hunks: &HunkArgs,
+    files: &[String],
+) -> String {
+    // The placeholder belongs only to the prompt asking for the message; every
+    // other hint repeats the one the caller already gave, or replaying it
+    // commits a subject of `<message>`.
+    let message = message.map_or_else(|| "<message>".to_string(), hunk_select::quoted);
+    let mut out = format!("loom split {} -m {message}", hunk_select::quoted(target));
+    if patch {
+        out.push_str(" -p");
+    }
+    for file in files {
+        out.push(' ');
+        out.push_str(&hunk_select::quoted(file));
+    }
+    if let Some(from) = hunks.from.as_deref().filter(|_| !hunks.is_empty()) {
+        for id in &hunks.ids {
+            out.push_str(&format!(" --hunks {}", hunk_select::quoted(id)));
+        }
+        out.push_str(&format!(" --hunks-from {}", hunk_select::quoted(from)));
+    }
+    out
+}
 
 /// Commit with `-m` message or open the editor.
 fn commit_or_editor(workdir: &std::path::Path, message: Option<&str>) -> Result<()> {
@@ -23,9 +56,12 @@ pub fn run(
     target: String,
     message: Option<String>,
     patch: bool,
+    hunks: HunkArgs,
     files: Vec<String>,
     theme: &graph::Theme,
 ) -> Result<()> {
+    let prompt_hint = invocation(&target, message.as_deref(), patch, &hunks, &files);
+
     // Without -m the first commit would open $GIT_EDITOR, which hangs a headless agent.
     if agent_mode::enabled() && message.is_none() {
         return Err(agent_mode::respond_needs_input(
@@ -33,7 +69,7 @@ pub fn run(
             "Message for the first commit",
             vec![],
             false,
-            "re-run with: loom split <target> -m <message> [files...]",
+            &format!("re-run with: {prompt_hint}"),
         ));
     }
 
@@ -41,18 +77,35 @@ pub fn run(
 
     let resolved = repo::resolve_arg(&repo, &target, &[TargetKind::Commit])?;
 
+    let picker = patch.then_some(Picker {
+        // Built without the selection flags: `respond` appends its own.
+        command: invocation(
+            &target,
+            message.as_deref(),
+            patch,
+            &HunkArgs::default(),
+            &files,
+        ),
+        hunks,
+        // `split` stages a binary or deleted file whole (spec 013).
+        whole_files: true,
+        // Both commits it writes are the one it lists.
+        target_hash: None,
+    });
+
     match resolved {
-        Target::Commit(hash) => split_commit(&repo, &hash, message, patch, files, theme),
+        Target::Commit(hash) => split_commit(&repo, &hash, message, picker, files, theme),
         _ => unreachable!(),
     }
 }
 
 /// Split a commit, using provided files or an interactive picker if none are given.
+/// `picker` is `Some` exactly when `-p` was given: hunk-level split.
 fn split_commit(
     repo: &Repository,
     commit_hash: &str,
     message: Option<String>,
-    patch: bool,
+    picker: Option<Picker>,
     files: Vec<String>,
     theme: &graph::Theme,
 ) -> Result<()> {
@@ -72,10 +125,11 @@ fn split_commit(
         .map(|f| repo::to_repo_path(repo, f))
         .collect::<Result<_>>()?;
 
-    if patch {
+    if let Some(picker) = picker {
         let oid_str = commit_oid.to_string();
-        let selections = staging::run_commit_hunk_picker(workdir, &oid_str, &files, theme)?
-            .ok_or_else(msg::cancelled)?;
+        let selections =
+            staging::run_commit_hunk_picker(workdir, &oid_str, &files, &picker, theme)?
+                .ok_or_else(msg::cancelled)?;
 
         let has_selected = selections
             .iter()
@@ -140,7 +194,7 @@ pub fn split_commit_with_selection(
     message: String,
 ) -> Result<()> {
     let theme = graph::Theme::dark();
-    split_commit(repo, commit_hash, Some(message), false, selected, &theme)
+    split_commit(repo, commit_hash, Some(message), None, selected, &theme)
 }
 
 /// Show an interactive file picker for splitting.

@@ -1,3 +1,9 @@
+// Placeholder texts for a file that has no `@@` hunks: the whole file is one
+// entry in the picker, taken or left entire.
+pub(crate) const DELETED_ENTRY: &str = "(file deleted)";
+pub(crate) const BINARY_ENTRY: &str = "(binary file)";
+pub(crate) const SUBMODULE_ENTRY: &str = "(submodule)";
+
 /// What every real hunk starts with, and no whole-file placeholder does.
 const HUNK_HEADER: &str = "@@ -";
 

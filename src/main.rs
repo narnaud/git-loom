@@ -22,6 +22,7 @@ mod tui;
 mod update;
 
 use crate::agent::AgentKind;
+use crate::core::hunk_select::HunkArgs;
 use crate::core::{agent_mode, graph, msg, repo, transaction};
 
 use std::ffi::OsString;
@@ -227,7 +228,7 @@ enum Command {
         #[arg(short = 'c', long = "create")]
         create: bool,
         /// Interactively select hunks to stage before folding
-        #[arg(short = 'p', long = "patch")]
+        #[arg(short = 'p', long = "patch", conflicts_with = "create")]
         patch: bool,
         /// Move the source commit(s) directly above this commit
         #[arg(long, value_name = "COMMIT", conflicts_with_all = ["below", "create", "patch"])]
@@ -235,6 +236,14 @@ enum Command {
         /// Move the source commit(s) directly below this commit
         #[arg(long, value_name = "COMMIT", conflicts_with_all = ["create", "patch"])]
         below: Option<String>,
+        /// Hunk ids from a `-p` listing, instead of picking them interactively
+        // No `value_delimiter`: a path may contain a comma, so the commas are
+        // split off in `hunk_select`, where the real ids are known.
+        #[arg(long = "hunks", requires = "patch", requires = "hunks_from")]
+        hunks: Vec<String>,
+        /// Fingerprint of the listing `--hunks` was taken from
+        #[arg(long = "hunks-from", requires = "hunks")]
+        hunks_from: Option<String>,
         /// Source(s) and target: files, commits, or branches (last arg is the target, unless --above/--below names it)
         #[arg(required = true, num_args = 1..)]
         args: Vec<String>,
@@ -257,6 +266,13 @@ enum Command {
         /// Interactively pick hunks for the first commit
         #[arg(short = 'p', long = "patch")]
         patch: bool,
+        /// Hunk ids from a `-p` listing, instead of picking them interactively
+        // Comma-splitting happens in `hunk_select`; see `fold`.
+        #[arg(long = "hunks", requires = "patch", requires = "hunks_from")]
+        hunks: Vec<String>,
+        /// Fingerprint of the listing `--hunks` was taken from
+        #[arg(long = "hunks-from", requires = "hunks")]
+        hunks_from: Option<String>,
         /// Files for the first commit (shows interactive picker if omitted)
         files: Vec<String>,
     },
@@ -559,10 +575,10 @@ fn main() {
         }
     }
 
-    // The hunk pickers are full-screen terminal UIs — reject `-p` in agent
-    // mode before any command stages anything (a guard at the picker itself
-    // backstops future call paths).
-    if agent_mode::enabled() && uses_patch_flag(&cli.command) {
+    // `add` and `commit` pick hunks from the working tree, which has no listing
+    // (spec 019), so their `-p` is rejected outright — before either stages
+    // anything. A guard at the picker itself backstops future call paths.
+    if agent_mode::enabled() && rejects_patch_in_agent_mode(&cli.command) {
         finish_and_exit(Err(anyhow::anyhow!(
             "--patch is interactive and unavailable in agent mode\n\
              Pass explicit files instead"
@@ -624,8 +640,17 @@ fn main() {
             target,
             message,
             patch,
+            hunks,
+            hunks_from,
             files,
-        }) => split::run(target, message, patch, files, &theme),
+        }) => split::run(
+            target,
+            message,
+            patch,
+            HunkArgs::new(hunks, hunks_from),
+            files,
+            &theme,
+        ),
         Some(Command::Push {
             branch,
             no_pr,
@@ -637,12 +662,21 @@ fn main() {
             patch,
             above,
             below,
+            hunks,
+            hunks_from,
             args,
         }) => {
             let anchor = above
                 .map(fold::Anchor::Above)
                 .or(below.map(fold::Anchor::Below));
-            fold::run(create, patch, anchor, args, &theme)
+            fold::run(
+                create,
+                patch,
+                anchor,
+                HunkArgs::new(hunks, hunks_from),
+                args,
+                &theme,
+            )
         }
         Some(Command::Trace) => trace::run(),
         Some(Command::Continue) => transaction::continue_run(),
@@ -658,14 +692,14 @@ fn main() {
     finish_and_exit(result);
 }
 
-/// Whether the command was invoked with `-p`/`--patch`.
-fn uses_patch_flag(command: &Option<Command>) -> bool {
+/// Whether `-p`/`--patch` has no non-interactive answer for this command.
+///
+/// `fold` and `split` list their hunks as data instead (spec 019); they reject
+/// the forms they cannot list themselves.
+fn rejects_patch_in_agent_mode(command: &Option<Command>) -> bool {
     matches!(
         command,
-        Some(Command::Add { patch: true, .. })
-            | Some(Command::Commit { patch: true, .. })
-            | Some(Command::Fold { patch: true, .. })
-            | Some(Command::Split { patch: true, .. })
+        Some(Command::Add { patch: true, .. }) | Some(Command::Commit { patch: true, .. })
     )
 }
 

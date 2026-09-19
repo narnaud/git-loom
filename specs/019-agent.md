@@ -169,8 +169,9 @@ mentions the skipped action in `messages`).
 |---|---|---|
 | `commit` branch picker (no `-b`, no `-i`) | pre-flight | `needs_input` (select, `allow_other`) listing woven branches; hint: `loom commit -b <branch> -m <message> [files...]` (a new name creates the branch), or `-i` for the integration branch itself |
 | `commit` editor (no `-m`) | pre-flight | `needs_input` (text); hint: pass `-m <message>` |
-| `split` message editor (no `-m`) | pre-flight | `needs_input` (text); hint: pass `-m <message>` |
+| `split` message editor (no `-m`) | pre-flight | `needs_input` (text); hint repeats the invocation with `-m <message>`, `-p` and the file filter included |
 | `split` file picker (no files, no `-p`) | pre-flight | `needs_input` (multiselect) listing the commit's files; hint: `loom split <target> -m <message> <files...>` |
+| `split -p` / `fold -p` hunk picker over a commit | pre-flight | `needs_input` (multiselect) listing the commit's hunks (see [Hunk selection](#hunk-selection)) |
 | `reword` commit editor (no `-m`) | pre-flight | `needs_input` (text); hint: pass `-m <message>` |
 | `reword` branch-rename prompt (no `-m`) | pre-flight | `needs_input` (text); hint: `loom reword <target> -m <new-name>` |
 | `drop` confirmations | pre-flight | `needs_confirmation`; hint: `loom drop <target> -y` |
@@ -184,19 +185,107 @@ mentions the skipped action in `messages`).
 | `branch merge` / `branch unmerge` / `switch` pickers | pre-flight | `needs_input` (select) listing candidates; hint: `loom branch merge <branch>` etc. |
 | `init` upstream picker (several candidates) | pre-flight | `needs_input` (select) listing the remote branches |
 
-### `-p` / `--patch` rejection
+### `-p` / `--patch`
 
 The hunk pickers are full-screen terminal UIs and cannot run in agent mode.
-Passing `-p`/`--patch` to `add`, `commit`, `fold`, or `split` in agent mode
-fails immediately — before anything is staged — with:
+Commands whose `-p` source is a commit answer it as data instead (see
+[Hunk selection](#hunk-selection)); the rest fail immediately — before anything
+is staged — with:
 
 ```
 --patch is interactive and unavailable in agent mode
 Pass explicit files instead
 ```
 
-reported as `status: error`, exit code 1. A second guard at the picker itself
-backstops any future call path.
+reported as `status: error`, exit code 1. This covers `add -p`, `commit -p`
+and `fold -p` over working-tree changes, which MUST use the same wording
+prefixed by `--patch over working-tree changes` in the `fold` case. A second
+guard at the picker itself backstops any future call path.
+
+### Hunk selection
+
+`split -p`, `fold -p <source> <target>` and `fold -p <commit> zz` take their
+hunks from a commit, which does not change under them, so agent mode answers
+their picker with the hunk listing:
+
+```json
+{"status":"needs_input","kind":"multiselect","prompt":"Select hunks",
+ "options":["src/fold.rs:1"],"fingerprint":"a91c3f2be417",
+ "items":[{"id":"src/fold.rs:1","path":"src/fold.rs",
+           "diff":"@@ -120,7 +120,9 @@ fn resolve\n...","selectable":true},
+          {"id":"logo.png:1","path":"logo.png",
+           "diff":"(binary file)","selectable":false}],
+ "hint":"re-run with: loom fold -p c2 c1 --hunks <id> [--hunks <id>...] --hunks-from a91c3f2be417"}
+```
+
+Listing a commit's hunks is pre-flight: nothing is staged, committed or
+rewritten. The agent re-runs the same command with the ids it picked.
+
+- `items` lists every entry the picker itself would show, in that order,
+  including the ones this command cannot take, so the ids it did not get are
+  still accounted for. A file whose diff carries no text at all — a mode-only
+  change, a pure rename — reaches neither, and a commit with nothing but those
+  errors ``No hunks to select in `<hash>`⏎Its changes carry no text -p can
+  pick, or the given files matched none`` instead of listing nothing.
+- `id` is `<path>:<n>`, `n` counting from 1 within the file. It is passed back
+  verbatim, one `--hunks` per id, so a path may hold any character including a
+  comma. There is no separator to escape and none to get wrong.
+- `diff` is the hunk verbatim and is never truncated — the agent picks from it.
+  Verbatim up to UTF-8: a byte that is not valid UTF-8 lists as U+FFFD, and a
+  selection carrying that hunk fails the apply and rolls back.
+  A listing is as large as the diff; narrow it with `<files>` on `split -p`.
+- `selectable` marks what this command can take, which differs per command: a
+  binary file has no hunk `fold` can move (Spec 007), while `split` takes it
+  whole (Spec 013), so only `fold` marks it `false`. A submodule entry and a
+  deletion are selectable in both: they travel whole.
+- `options` repeats the selectable ids, so an agent reading only the common
+  `needs_input` fields cannot pick a rejected one.
+- `fingerprint` digests both commits the operation touches and the whole
+  listing — paths and hunk texts, unselectable entries included. The target
+  matters because the replay re-resolves it from the revspec the agent typed,
+  and a relative one can name a different commit by then.
+- A listing MUST have at least one selectable entry. A commit with none is an
+  error (``No hunks to select in `<hash>`⏎It changes only binary files, which
+  -p cannot move``), never a prompt no answer satisfies.
+
+**CLI:**
+
+```bash
+git-loom split <target> -m <message> -p --hunks <id> [--hunks <id>...] --hunks-from <fingerprint>
+git-loom fold -p <source> <target> --hunks <id> [--hunks <id>...] --hunks-from <fingerprint>
+git-loom fold -p <commit> zz --hunks <id> [--hunks <id>...] --hunks-from <fingerprint>
+```
+
+`--hunks` repeats, once per id, and MUST NOT take a separated list: an id
+contains a path, and every separator is a character some path is allowed to
+hold. A value that is not an id errors as one, naming the repeated form when it
+holds a comma. `--hunks` requires `-p` and `--hunks-from`, excludes `fold -c`,
+and is accepted with or without agent mode. The selected hunks
+then follow the interactive path exactly, including its hard-fail and rollback
+rules.
+
+`hint` MUST repeat every argument that shapes the operation, shell-quoted:
+`split`'s `-m` message and `<files>` filter, and the revisions naming the
+commits. `-m <message>` stays a placeholder only in the prompt asking for it. One left
+out makes the replay list a different set and fail the fingerprint check
+instead of working. The same rule applies to `split`'s missing-`-m` prompt,
+whose hint keeps `-p` and the filter rather than pointing at a file-level
+split.
+
+Ids are positional, so `--hunks-from` is what keeps a stale selection from
+moving whatever now sits at those positions. Recompute the fingerprint from the
+current diff and refuse a mismatch — never resolve the ids against it:
+
+| Condition | Error |
+| --- | --- |
+| Fingerprint mismatch | ``The hunks changed since the listing fingerprinted <given> (now <current>)⏎Re-run with -p alone to list them again`` |
+| Id absent from the diff | ``No hunk `<id>` in this diff`` |
+| Id not `<path>:<n>` with `n` plain digits from 1 | ``Invalid hunk id `<id>`⏎Ids look like `src/main.rs:1`` |
+| Id of an unselectable entry | ``` `fold -p` cannot move `<id>`: a binary file has no hunk ``` |
+| `--hunks` on `fold -p` over working-tree changes | ``--hunks only applies to a commit source⏎Use `loom fold -p <commit> <target>`, or pass explicit files`` |
+
+Working-tree hunks have no listing: staged and unstaged entries for one file
+share the numbering and it shifts as soon as anything is staged.
 
 ### Pager suppression
 

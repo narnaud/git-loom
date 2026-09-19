@@ -146,7 +146,9 @@ $_gitLoomCompleter = {
                 @{ Name = '-p'; Description = 'Interactively select hunks to fold' },
                 @{ Name = '--patch'; Description = 'Interactively select hunks to fold' },
                 @{ Name = '--above'; Description = 'Move the source commit(s) above this commit' },
-                @{ Name = '--below'; Description = 'Move the source commit(s) below this commit' }
+                @{ Name = '--below'; Description = 'Move the source commit(s) below this commit' },
+                @{ Name = '--hunks'; Description = 'Hunk id to pick, once per id (needs --hunks-from)' },
+                @{ Name = '--hunks-from'; Description = 'Fingerprint of the listing --hunks came from' }
             )
         }
         'absorb' {
@@ -160,7 +162,9 @@ $_gitLoomCompleter = {
                 @{ Name = '-m'; Description = 'Message for the first commit' },
                 @{ Name = '--message'; Description = 'Message for the first commit' },
                 @{ Name = '-p'; Description = 'Interactively pick hunks for the first commit' },
-                @{ Name = '--patch'; Description = 'Interactively pick hunks for the first commit' }
+                @{ Name = '--patch'; Description = 'Interactively pick hunks for the first commit' },
+                @{ Name = '--hunks'; Description = 'Hunk id to pick, once per id (needs --hunks-from)' },
+                @{ Name = '--hunks-from'; Description = 'Fingerprint of the listing --hunks came from' }
             )
         }
         'reword' {

@@ -1,3 +1,4 @@
+use crate::core::hunk_select::HunkArgs;
 use crate::core::repo;
 use crate::core::test_helpers::TestRepo;
 use crate::core::weave::{Position, Weave};
@@ -461,6 +462,7 @@ fn fold_commit_to_branch_via_short_ids() {
             false,
             false,
             None,
+            HunkArgs::default(),
             vec![commit_sid.clone(), branch_sid.clone()],
             &crate::core::graph::Theme::dark(),
         )
@@ -1126,6 +1128,7 @@ fn fold_unstaged_into_commit() {
             false,
             false,
             None,
+            HunkArgs::default(),
             vec!["zz".into(), "HEAD".into()],
             &crate::core::graph::Theme::dark(),
         )
@@ -1147,6 +1150,7 @@ fn fold_unstaged_clean_tree_fails() {
             false,
             false,
             None,
+            HunkArgs::default(),
             vec!["zz".into(), "HEAD".into()],
             &crate::core::graph::Theme::dark(),
         )
@@ -2804,6 +2808,7 @@ fn fold_moves_several_commits_to_a_branch() {
             false,
             false,
             None,
+            HunkArgs::default(),
             vec![m2.to_string(), m1.to_string(), "feature-a".to_string()],
             &crate::core::graph::Theme::dark(),
         )

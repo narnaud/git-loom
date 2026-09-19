@@ -24,6 +24,7 @@ use ratatui::{
 };
 
 use crate::core::graph::{self, Section};
+use crate::core::hunk_select::HunkArgs;
 use crate::core::repo::{self, BranchInfo, RemoteStatus, RepoInfo};
 use crate::core::shortid::IdAllocator;
 use crate::core::transaction;
@@ -233,7 +234,7 @@ fn execute_action(
         Action::Fold { sources, target } => {
             let mut args = sources;
             args.push(target);
-            fold::run(false, false, None, args, theme)
+            fold::run(false, false, None, HunkArgs::default(), args, theme)
         }
         Action::NewBranch { name, target } => branch::new::run(Some(name), target),
         Action::Drop { targets } => drop::run(targets, false),

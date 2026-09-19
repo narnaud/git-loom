@@ -21,7 +21,9 @@ When only a target is given, currently staged files are folded into the target c
 
 | Option | Description |
 |--------|-------------|
-| `-p, --patch` | Interactively select hunks before folding. Three forms depending on argument types (see below). |
+| `-p, --patch` | Interactively select hunks before folding. Three forms depending on argument types (see below). Cannot be combined with `-c`, which moves whole commits. |
+| `--hunks <id>` | Select that hunk instead of opening the picker, for the two commit-source forms; repeat it per hunk. Needs `-p` and `--hunks-from`; see [agent mode](agent.md). |
+| `--hunks-from <fingerprint>` | Fingerprint of the listing `--hunks` came from. Loom refuses a selection taken from a diff that has since changed. |
 | `-c, --create` | Create a new branch and move the source commit(s) into it. |
 | `--above <commit>` | Move the source commit(s) directly above (newer than) this commit. |
 | `--below <commit>` | Move the source commit(s) directly below (older than) this commit. |

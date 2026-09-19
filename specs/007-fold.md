@@ -19,7 +19,8 @@ With one argument, fold the current index into that target. With two or more, th
 
 - `-c, --create`: create a new branch at the resolved Weave base and move one or more source commits into it. The target name MUST NOT exist. Sources may be loose or already branch-owned. Order commits oldest-first (ancestors before descendants; unrelated lines by committer date), independent of input order.
 - `--above <commit>` / `--below <commit>`: move one or more source commits directly above or below the target commit, per [Commit move next to a commit](#commit-move-next-to-a-commit). The two are mutually exclusive and exclude `-c` and `-p`.
-- `-p, --patch`: select hunks interactively according to [Patch mode](#patch-mode--p).
+- `-p, --patch`: select hunks according to [Patch mode](#patch-mode--p), interactively or with `--hunks`. Excludes `-c`, which moves whole commits.
+- `--hunks <id>` (repeated) with `--hunks-from <fingerprint>`: supply a commit-source `-p` selection by id instead of picking it. Requires `-p`, and each flag requires the other.
 - `zz`: reserved `Unstaged` target/source representing the working directory/all its changes.
 - `commit_sid:index` (for example `fa:0`): `CommitFile` shown by `git loom status -f`.
 
@@ -149,7 +150,14 @@ Both messages, all other files, topology, unrelated branches, and pre-existing c
 
 ## Patch mode (`-p`)
 
-All forms open the interactive hunk picker and require at least one selection; otherwise error `No hunks selected`.
+All forms open the interactive hunk picker and require at least one selection; otherwise error `No hunks selected`. The two commit-source forms below also accept the selection by id, which is how agent mode answers the picker (Spec 019):
+
+```bash
+git-loom fold -p <source> <target> --hunks <id> [--hunks <id>...] --hunks-from <fingerprint>
+git-loom fold -p <commit> zz --hunks <id> [--hunks <id>...] --hunks-from <fingerprint>
+```
+
+`--hunks` on the working-tree form errors exactly ``--hunks only applies to a commit source⏎Use `loom fold -p <commit> <target>`, or pass explicit files``. An id-supplied selection follows the interactive path from validation onward, including the hard-fail and rollback rules below.
 
 ### Working-tree hunks into Commit
 

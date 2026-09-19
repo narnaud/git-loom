@@ -209,4 +209,397 @@ assert_exit_ok "$CODE" "continue_exit"
 assert_contains "$OUT" '"status":"ok"' "continue_status"
 assert_no_state_file "continue_state_cleared"
 
+# ── hunk selection: -p answered as data ───────────────────────────────────────
+
+# The fingerprint out of the JSON status (the last line of the captured output).
+json_fingerprint() { tail -1 <<< "$OUT" | grep -o '"fingerprint":"[0-9a-f]*"' | cut -d'"' -f4; }
+
+# Two edits far enough apart in one file to be two hunks.
+setup_two_hunk_commit() {
+    setup_repo_with_remote
+    create_feature_branch feature-a
+    switch_to feature-a
+    seq 1 40 > "$WORK/multi.txt"
+    git -C "$WORK" add multi.txt
+    git -C "$WORK" commit -q -m "Add multi"
+    switch_to integration
+    weave_branch feature-a
+    perl -pi -e 's/^3$/THREE/; s/^37$/THIRTYSEVEN/' "$WORK/multi.txt"
+    git -C "$WORK" add multi.txt
+    git -C "$WORK" commit -q -m "Change two regions"
+}
+
+describe "agent mode: split -p lists its hunks instead of rendering the picker"
+setup_two_hunk_commit
+
+gl_capture split HEAD -m "first region" -p --agent
+assert_eq "10" "$CODE" "split_patch_listed_exit"
+assert_contains "$OUT" '"status":"needs_input"' "split_patch_listed_status"
+assert_contains "$OUT" '"kind":"multiselect"' "split_patch_listed_kind"
+assert_contains "$OUT" '"options":["multi.txt:1","multi.txt:2"]' "split_patch_listed_options"
+assert_contains "$OUT" '"diff":"@@ -1,6 +1,6 @@' "split_patch_listed_diff_header"
+assert_contains "$OUT" "+THIRTYSEVEN" "split_patch_listed_diff"
+assert_contains "$OUT" "--hunks <id> [--hunks <id>...] --hunks-from" "split_patch_listed_hint"
+# Listing is pre-flight: nothing was split.
+assert_head_msg "Change two regions" "split_patch_listed_no_mutation"
+
+FP="$(json_fingerprint)"
+
+describe "agent mode: split -p --hunks splits by the listed ids"
+gl_capture split HEAD -m "first region" -p --hunks multi.txt:1 --hunks-from "$FP" --agent
+assert_exit_ok "$CODE" "split_by_hunks_exit"
+assert_contains "$OUT" '"status":"ok"' "split_by_hunks_status"
+assert_head_msg "Change two regions" "split_by_hunks_second"
+assert_msg_at 1 "first region" "split_by_hunks_first"
+assert_contains "$(git -C "$WORK" show HEAD~1)" "+THREE" "split_by_hunks_first_content"
+assert_not_contains "$(git -C "$WORK" show HEAD~1)" "+THIRTYSEVEN" "split_by_hunks_first_only"
+assert_contains "$(git -C "$WORK" show HEAD)" "+THIRTYSEVEN" "split_by_hunks_second_content"
+
+describe "agent mode: a selection listed against a different diff is refused"
+setup_two_hunk_commit
+gl_capture split HEAD -m "nope" -p --hunks multi.txt:1 --hunks-from deadbeef --agent
+assert_eq "1" "$CODE" "stale_fingerprint_exit"
+assert_contains "$OUT" '"status":"error"' "stale_fingerprint_status"
+assert_contains "$OUT" "hunks changed since" "stale_fingerprint_msg"
+assert_head_msg "Change two regions" "stale_fingerprint_no_mutation"
+
+gl_capture split HEAD -m "nope" -p --agent
+FP="$(json_fingerprint)"
+gl_capture split HEAD -m "nope" -p --hunks multi.txt:9 --hunks-from "$FP" --agent
+assert_eq "1" "$CODE" "unknown_hunk_id_exit"
+assert_contains "$OUT" "No hunk" "unknown_hunk_id_msg"
+
+describe "agent mode: fold -p moves listed hunks between commits"
+setup_two_hunk_commit
+SRC="$(commit_sid_from_status "Change two regions")"
+TGT="$(commit_sid_from_status "Add multi")"
+
+gl_capture fold -p "$SRC" "$TGT" --agent
+assert_eq "10" "$CODE" "fold_patch_listed_exit"
+assert_contains "$OUT" '"status":"needs_input"' "fold_patch_listed_status"
+FP="$(json_fingerprint)"
+
+gl_capture fold -p "$SRC" "$TGT" --hunks multi.txt:2 --hunks-from "$FP" --agent
+assert_exit_ok "$CODE" "fold_by_hunks_exit"
+assert_contains "$OUT" '"status":"ok"' "fold_by_hunks_status"
+assert_contains "$(git -C "$WORK" show "$(branch_oid feature-a)")" "+THIRTYSEVEN" "fold_by_hunks_moved"
+assert_contains "$(git -C "$WORK" show HEAD)" "+THREE" "fold_by_hunks_kept"
+assert_not_contains "$(git -C "$WORK" show HEAD)" "+THIRTYSEVEN" "fold_by_hunks_removed"
+
+describe "agent mode: fold -p <commit> zz uncommits listed hunks"
+setup_two_hunk_commit
+SRC="$(commit_sid_from_status "Change two regions")"
+gl_capture fold -p "$SRC" zz --agent
+assert_eq "10" "$CODE" "fold_zz_listed_exit"
+FP="$(json_fingerprint)"
+
+gl_capture fold -p "$SRC" zz --hunks multi.txt:1 --hunks-from "$FP" --agent
+assert_exit_ok "$CODE" "fold_zz_exit"
+assert_contains "$(git -C "$WORK" diff)" "+THREE" "fold_zz_unstaged"
+assert_contains "$(git -C "$WORK" show HEAD)" "+THIRTYSEVEN" "fold_zz_kept"
+
+# A deletion has no hunk of its own, so it moves as the commit's whole-file
+# diff — the one form `git apply` can take for it.
+setup_deleted_and_changed() {
+    setup_repo_with_remote
+    echo gone > "$WORK/gone.txt"
+    git -C "$WORK" add gone.txt
+    git -C "$WORK" commit -q -m "Add gone"
+    echo kept > "$WORK/kept.txt"
+    git -C "$WORK" add kept.txt
+    git -C "$WORK" commit -q -m "Add kept"
+    git -C "$WORK" rm -q gone.txt
+    echo changed > "$WORK/kept.txt"
+    git -C "$WORK" add kept.txt
+    git -C "$WORK" commit -q -m "Delete one, change another"
+}
+
+describe "agent mode: fold -p moves a picked deletion whole"
+setup_deleted_and_changed
+
+gl_capture fold -p HEAD 'HEAD^' --agent
+assert_eq "10" "$CODE" "fold_deletion_listed_exit"
+assert_contains "$OUT" '"id":"gone.txt:1"' "fold_deletion_listed"
+FP="$(json_fingerprint)"
+
+gl_capture fold -p HEAD 'HEAD^' --hunks gone.txt:1 --hunks-from "$FP" --agent
+assert_exit_ok "$CODE" "fold_deletion_exit"
+assert_contains "$(git -C "$WORK" show --name-status 'HEAD^')" "D	gone.txt" "fold_deletion_moved"
+assert_not_contains "$(git -C "$WORK" show --name-status HEAD)" "gone.txt" "fold_deletion_left_source"
+assert_contains "$(git -C "$WORK" show HEAD)" "+changed" "fold_deletion_kept_hunk"
+assert_eq "" "$(git -C "$WORK" status --porcelain)" "fold_deletion_clean"
+
+describe "agent mode: fold -p <commit> zz uncommits a deletion"
+setup_deleted_and_changed
+
+gl_capture fold -p HEAD zz --agent
+assert_eq "10" "$CODE" "fold_zz_deletion_listed_exit"
+FP="$(json_fingerprint)"
+
+gl_capture fold -p HEAD zz --hunks gone.txt:1 --hunks-from "$FP" --agent
+assert_exit_ok "$CODE" "fold_zz_deletion_exit"
+assert_not_contains "$(git -C "$WORK" show --name-status HEAD)" "gone.txt" "fold_zz_deletion_left_commit"
+assert_contains "$(git -C "$WORK" status --porcelain)" " D gone.txt" "fold_zz_deletion_unstaged"
+
+describe "agent mode: split -p keeps its <files> filter in the replay hint"
+setup_two_hunk_commit
+echo other > "$WORK/other.txt"
+git -C "$WORK" add other.txt
+git -C "$WORK" commit -q --amend --no-edit
+
+gl_capture split HEAD -m "first region" -p multi.txt --agent
+assert_eq "10" "$CODE" "split_filtered_listed_exit"
+assert_contains "$OUT" "-p multi.txt --hunks" "split_filtered_hint_keeps_files"
+assert_not_contains "$OUT" '"id":"other.txt:1"' "split_filtered_listing"
+FP="$(json_fingerprint)"
+
+# The hint has to round-trip: without the filter the re-run lists a different
+# set and fails the fingerprint check instead of splitting.
+gl_capture split HEAD -m "first region" -p multi.txt --hunks multi.txt:1 --hunks-from "$FP" --agent
+assert_exit_ok "$CODE" "split_filtered_replay_exit"
+assert_msg_at 1 "first region" "split_filtered_replay_split"
+
+# A path the agent must get back as one argument, not two.
+describe "agent mode: split -p quotes a filtered path that has a space"
+setup_two_hunk_commit
+cp "$WORK/multi.txt" "$WORK/with space.txt"
+git -C "$WORK" add "with space.txt"
+git -C "$WORK" commit -q --amend --no-edit
+
+gl_capture split HEAD -m "spaced" -p "with space.txt" --agent
+assert_eq "10" "$CODE" "split_spaced_listed_exit"
+assert_contains "$OUT" "-p 'with space.txt' --hunks" "split_spaced_hint_quoted"
+
+# A revspec is shell syntax in zsh, so the hint has to come back quotable.
+describe "agent mode: fold -p quotes both hint arguments"
+setup_two_hunk_commit
+
+# Two loose commits, so HEAD^ is a plain fold target rather than the merge.
+seq 1 40 > "$WORK/later.txt"
+git -C "$WORK" add later.txt
+git -C "$WORK" commit -q -m "Later commit"
+
+gl_capture fold -p HEAD 'HEAD^' --agent
+assert_eq "10" "$CODE" "fold_hint_quoted_exit"
+assert_contains "$OUT" "loom fold -p HEAD 'HEAD^' --hunks" "fold_hint_quoted_both"
+
+gl_capture fold -p 'HEAD^{commit}' zz --agent
+assert_eq "10" "$CODE" "fold_zz_hint_quoted_exit"
+assert_contains "$OUT" "loom fold -p 'HEAD^{commit}' zz --hunks" "fold_zz_hint_quoted"
+
+# Replaying the -m hint must run the same kind of split the agent asked for.
+describe "agent mode: split without -m keeps -p and its files in the hint"
+setup_two_hunk_commit
+gl_capture split HEAD -p multi.txt --agent
+assert_eq "10" "$CODE" "split_no_message_exit"
+assert_contains "$OUT" '"kind":"text"' "split_no_message_kind"
+assert_contains "$OUT" "loom split HEAD -m <message> -p multi.txt" "split_no_message_hint"
+
+gl_capture split HEAD -p --agent
+assert_contains "$OUT" "loom split HEAD -m <message> -p" "split_no_message_hint_bare"
+
+# An id already chosen comes back in the form the listing hint advertises.
+# The fingerprint has to be fetched with -m: without it the listing never runs.
+gl_capture split HEAD -m tmp -p --agent
+FP="$(json_fingerprint)"
+gl_capture split HEAD -p --hunks multi.txt:1 --hunks multi.txt:2 --hunks-from "$FP" --agent
+assert_contains "$OUT" "--hunks 'multi.txt:1' --hunks 'multi.txt:2' --hunks-from $FP" "split_no_message_hint_hunks"
+assert_head_msg "Change two regions" "split_no_message_no_mutation"
+
+describe "agent mode: split -p handles a path containing a comma"
+setup_two_hunk_commit
+cp "$WORK/multi.txt" "$WORK/a,b.txt"
+git -C "$WORK" add "a,b.txt"
+git -C "$WORK" commit -q --amend --no-edit
+
+gl_capture split HEAD -m comma -p "a,b.txt" --agent
+assert_eq "10" "$CODE" "split_comma_listed_exit"
+assert_contains "$OUT" '"options":["a,b.txt:1"]' "split_comma_listed_option"
+FP="$(json_fingerprint)"
+
+gl_capture split HEAD -m comma -p "a,b.txt" --hunks "a,b.txt:1" --hunks-from "$FP" --agent
+assert_contains "$OUT" "at least one hunk for the second commit" "split_comma_id_resolved"
+assert_not_contains "$OUT" "Invalid hunk id" "split_comma_not_split"
+
+# One flag per id, so a comma path sits next to another id without ambiguity.
+gl_capture split HEAD -m comma -p --agent
+FP="$(json_fingerprint)"
+gl_capture split HEAD -m comma -p --hunks "a,b.txt:1" --hunks multi.txt:1 --hunks-from "$FP" --agent
+assert_exit_ok "$CODE" "split_comma_mixed_exit"
+assert_contains "$(git -C "$WORK" show HEAD~1)" "a,b.txt" "split_comma_mixed_took_comma_path"
+assert_contains "$(git -C "$WORK" show HEAD~1)" "multi.txt" "split_comma_mixed_took_plain"
+
+# A comma list is the natural wrong guess; the error has to name the fix.
+# The split above moved HEAD, so the listing has to be taken again.
+setup_two_hunk_commit
+cp "$WORK/multi.txt" "$WORK/a,b.txt"
+git -C "$WORK" add "a,b.txt"
+git -C "$WORK" commit -q --amend --no-edit
+gl_capture split HEAD -m comma -p --agent
+FP="$(json_fingerprint)"
+gl_capture split HEAD -m comma -p --hunks "a,b.txt:1,multi.txt:1" --hunks-from "$FP" --agent
+assert_eq "1" "$CODE" "split_comma_list_exit"
+assert_contains "$OUT" "one \`--hunks\` per id" "split_comma_list_msg"
+
+describe "agent mode: a commit with nothing pickable is not reported as cancelled"
+setup_repo_with_remote
+echo x > "$WORK/mode.txt"
+git -C "$WORK" add mode.txt
+git -C "$WORK" commit -q -m "Add mode.txt"
+chmod +x "$WORK/mode.txt"
+git -C "$WORK" add -A
+git -C "$WORK" commit -q -m "Make it executable"
+
+gl_capture split HEAD -m nope -p --agent
+assert_eq "1" "$CODE" "nothing_pickable_exit"
+assert_contains "$OUT" "No hunks to select in" "nothing_pickable_msg"
+assert_not_contains "$OUT" "Cancelled" "nothing_pickable_not_cancelled"
+
+describe "agent mode: split -p must leave a hunk for the second commit"
+setup_two_hunk_commit
+gl_capture split HEAD -m all -p --agent
+FP="$(json_fingerprint)"
+gl_capture split HEAD -m all -p --hunks multi.txt:1 --hunks multi.txt:2 --hunks-from "$FP" --agent
+assert_eq "1" "$CODE" "split_all_hunks_exit"
+assert_contains "$OUT" "at least one hunk for the second commit" "split_all_hunks_msg"
+assert_head_msg "Change two regions" "split_all_hunks_no_mutation"
+
+# The target is re-resolved on the replay, so a revspec that has come to name a
+# different commit must be refused, not amended into whatever now sits there.
+describe "agent mode: a target that moved between the two calls is refused"
+setup_repo_with_remote
+seq 1 40 > "$WORK/f.txt"
+git -C "$WORK" add f.txt
+git -C "$WORK" commit -q -m "A"
+commit_file "B" b.txt
+perl -pi -e 's/^3$/THREE/' "$WORK/f.txt"
+git -C "$WORK" add f.txt
+git -C "$WORK" commit -q -m "C"
+source_sha="$(head_hash)"
+
+gl_capture fold -p "$source_sha" 'HEAD~2' --agent
+assert_eq "10" "$CODE" "moved_target_listed_exit"
+FP="$(json_fingerprint)"
+
+commit_file "D" d.txt   # HEAD~2 now names B, not A
+
+gl_capture fold -p "$source_sha" 'HEAD~2' --hunks f.txt:1 --hunks-from "$FP" --agent
+assert_eq "1" "$CODE" "moved_target_exit"
+assert_contains "$OUT" "hunks changed since" "moved_target_msg"
+assert_contains "$(git -C "$WORK" show "$source_sha")" "+THREE" "moved_target_source_intact"
+assert_not_contains "$(git -C "$WORK" show HEAD~2)" "+THREE" "moved_target_not_amended"
+
+# `--hunks` is not agent-only, and the non-agent path has its own messages.
+describe "--hunks works without --agent"
+setup_two_hunk_commit
+gl_capture split HEAD -m "first region" -p --agent
+FP="$(json_fingerprint)"
+
+gl_capture split HEAD -m "first region" -p --hunks multi.txt:1 --hunks-from "$FP"
+assert_exit_ok "$CODE" "no_agent_hunks_exit"
+assert_msg_at 1 "first region" "no_agent_hunks_split"
+assert_contains "$(git -C "$WORK" show HEAD~1)" "+THREE" "no_agent_hunks_content"
+
+describe "--hunks without --agent refuses a stale fingerprint"
+setup_two_hunk_commit
+gl_capture split HEAD -m nope -p --hunks multi.txt:1 --hunks-from deadbeefcafe
+assert_eq "1" "$CODE" "no_agent_stale_exit"
+assert_contains "$OUT" "hunks changed since" "no_agent_stale_msg"
+assert_head_msg "Change two regions" "no_agent_stale_no_mutation"
+
+# Nobody opened a picker, so `Cancelled` would be the wrong answer here.
+describe "--hunks without --agent on a commit with nothing to pick"
+setup_repo_with_remote
+echo x > "$WORK/mode.txt"
+git -C "$WORK" add mode.txt
+git -C "$WORK" commit -q -m "Add mode.txt"
+chmod +x "$WORK/mode.txt"
+git -C "$WORK" add -A
+git -C "$WORK" commit -q -m "Make it executable"
+
+gl_capture split HEAD -m nope -p --hunks mode.txt:1 --hunks-from deadbeefcafe
+assert_eq "1" "$CODE" "no_agent_empty_exit"
+assert_contains "$OUT" "No hunks to select in" "no_agent_empty_msg"
+assert_not_contains "$OUT" "Cancelled" "no_agent_empty_not_cancelled"
+
+describe "agent mode: split takes binary and deleted files whole"
+setup_repo_with_remote
+printf '\x00\x01old\x00' > "$WORK/blob.bin"
+echo doomed > "$WORK/gone.txt"
+seq 1 10 > "$WORK/plain.txt"
+git -C "$WORK" add blob.bin gone.txt plain.txt
+git -C "$WORK" commit -q -m "Add three files"
+printf '\x00\x01new\x00' > "$WORK/blob.bin"
+rm "$WORK/gone.txt"
+perl -pi -e 's/^5$/FIVE/' "$WORK/plain.txt"
+git -C "$WORK" add -A
+git -C "$WORK" commit -q -m "Touch three files"
+
+gl_capture split HEAD -m "binary and deletion" -p --agent
+assert_eq "10" "$CODE" "split_whole_listed_exit"
+assert_contains "$OUT" '"options":["blob.bin:1","gone.txt:1","plain.txt:1"]' "split_whole_all_selectable"
+assert_not_contains "$OUT" '"selectable":false' "split_whole_none_rejected"
+FP="$(json_fingerprint)"
+
+gl_capture split HEAD -m "binary and deletion" -p --hunks blob.bin:1 --hunks gone.txt:1 --hunks-from "$FP" --agent
+assert_exit_ok "$CODE" "split_whole_exit"
+assert_msg_at 1 "binary and deletion" "split_whole_first"
+assert_contains "$(git -C "$WORK" show --stat HEAD~1)" "blob.bin" "split_whole_first_binary"
+assert_contains "$(git -C "$WORK" show --stat HEAD~1)" "gone.txt" "split_whole_first_deletion"
+assert_contains "$(git -C "$WORK" show --stat HEAD)" "plain.txt" "split_whole_second_text"
+assert_not_contains "$(git -C "$WORK" show --stat HEAD)" "blob.bin" "split_whole_second_clean"
+
+describe "agent mode: fold cannot take binary entries"
+setup_repo_with_remote
+printf '\x00\x01\x02binary\x00' > "$WORK/blob.bin"
+seq 1 10 > "$WORK/plain.txt"
+git -C "$WORK" add blob.bin plain.txt
+git -C "$WORK" commit -q -m "Add binary and text"
+
+gl_capture fold -p HEAD zz --agent
+assert_eq "10" "$CODE" "binary_listed_exit"
+assert_contains "$OUT" '"id":"blob.bin:1"' "binary_listed_item"
+assert_contains "$OUT" '"selectable":false' "binary_listed_unselectable"
+assert_contains "$OUT" '"options":["plain.txt:1"]' "binary_listed_options"
+FP="$(json_fingerprint)"
+
+gl_capture fold -p HEAD zz --hunks blob.bin:1 --hunks-from "$FP" --agent
+assert_eq "1" "$CODE" "binary_picked_exit"
+assert_contains "$OUT" "cannot move \`blob.bin:1\`" "binary_picked_msg"
+
+# A listing whose every id would be refused is a prompt with no answer.
+describe "agent mode: a commit fold cannot touch at all is not listed"
+setup_repo_with_remote
+printf '\x00\x01old\x00' > "$WORK/only.bin"
+git -C "$WORK" add only.bin
+git -C "$WORK" commit -q -m "Add binary"
+printf '\x00\x01new\x00' > "$WORK/only.bin"
+git -C "$WORK" add only.bin
+git -C "$WORK" commit -q -m "Change binary"
+
+gl_capture fold -p HEAD zz --agent
+assert_eq "1" "$CODE" "unanswerable_exit"
+assert_contains "$OUT" "only binary files" "unanswerable_msg"
+assert_not_contains "$OUT" "needs_input" "unanswerable_not_a_prompt"
+
+describe "agent mode: -p over working-tree changes is still rejected"
+setup_two_hunk_commit
+write_file multi.txt "dirty"
+
+gl_capture fold -p HEAD --agent
+assert_eq "1" "$CODE" "fold_worktree_patch_exit"
+assert_contains "$OUT" '"status":"error"' "fold_worktree_patch_status"
+assert_contains "$OUT" "unavailable in agent mode" "fold_worktree_patch_msg"
+
+gl_capture fold -p HEAD --hunks multi.txt:1 --hunks-from deadbeef --agent
+assert_eq "1" "$CODE" "fold_worktree_hunks_exit"
+assert_contains "$OUT" "only applies to a commit source" "fold_worktree_hunks_msg"
+
+# Validating the arguments first is what makes this message the one about
+# unsupported sources rather than the working-tree-patch one below it.
+describe "agent mode: fold -p with a branch target reports the source rule"
+gl_capture fold -p HEAD feature-a --agent
+assert_eq "1" "$CODE" "fold_branch_target_exit"
+assert_contains "$OUT" "does not support commit or branch sources" "fold_branch_target_msg"
+
 pass

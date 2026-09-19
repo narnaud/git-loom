@@ -41,6 +41,21 @@ impl std::fmt::Display for NeedsInput {
 
 impl std::error::Error for NeedsInput {}
 
+/// One hunk in a `needs_input` hunk listing (spec 019).
+#[derive(Serialize, Debug)]
+pub struct HunkItem {
+    /// `<path>:<n>`, passed back verbatim in `--hunks`.
+    pub id: String,
+    pub path: String,
+    /// The hunk, starting with its `@@` header, or the whole-file placeholder
+    /// for an entry with no text hunks. Never truncated: the agent picks from
+    /// this, and it narrows the listing with `<files>` rather than loom cutting
+    /// it short.
+    pub diff: String,
+    /// False for an entry this command cannot take (spec 019).
+    pub selectable: bool,
+}
+
 /// The kind of input a prompt would have collected.
 #[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -65,6 +80,11 @@ pub enum AgentResponse {
         options: Vec<String>,
         #[serde(skip_serializing_if = "std::ops::Not::not")]
         allow_other: bool,
+        /// Hunk listings only: the digest `--hunks-from` must match.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        fingerprint: Option<String>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        items: Vec<HunkItem>,
         hint: String,
     },
     NeedsConfirmation {
@@ -120,6 +140,29 @@ pub fn respond_needs_input(
         prompt: prompt.to_string(),
         options,
         allow_other,
+        fingerprint: None,
+        items: Vec::new(),
+        hint: hint.to_string(),
+    });
+    anyhow::Error::new(NeedsInput)
+}
+
+/// Store the hunk listing that answers a `-p` picker, and return the marker error.
+///
+/// `options` carries only the selectable ids, so an agent that reads just the
+/// common `needs_input` fields cannot pick an entry `-p` would reject.
+pub fn respond_needs_hunks(items: Vec<HunkItem>, fingerprint: String, hint: &str) -> anyhow::Error {
+    *PENDING.lock().unwrap() = Some(AgentResponse::NeedsInput {
+        kind: InputKind::Multiselect,
+        prompt: "Select hunks".to_string(),
+        options: items
+            .iter()
+            .filter(|item| item.selectable)
+            .map(|item| item.id.clone())
+            .collect(),
+        allow_other: false,
+        fingerprint: Some(fingerprint),
+        items,
         hint: hint.to_string(),
     });
     anyhow::Error::new(NeedsInput)
@@ -209,6 +252,8 @@ mod tests {
             prompt: "Select target branch".to_string(),
             options: vec!["feature-a".to_string(), "feature-b".to_string()],
             allow_other: true,
+            fingerprint: None,
+            items: vec![],
             hint: "re-run with: loom commit -b <branch>".to_string(),
         };
         assert_eq!(
@@ -225,6 +270,8 @@ mod tests {
             prompt: "Commit message".to_string(),
             options: vec![],
             allow_other: false,
+            fingerprint: None,
+            items: vec![],
             hint: "pass -m <message>".to_string(),
         };
         assert_eq!(
@@ -292,8 +339,39 @@ mod tests {
             prompt: "Select files".to_string(),
             options: vec!["a.rs".to_string()],
             allow_other: false,
+            fingerprint: None,
+            items: vec![],
             hint: "pass files".to_string(),
         };
         assert!(r.to_json().contains(r#""kind":"multiselect""#));
+    }
+
+    #[test]
+    fn needs_hunks_lists_only_selectable_ids_in_options() {
+        let err = respond_needs_hunks(
+            vec![
+                HunkItem {
+                    id: "a.rs:1".to_string(),
+                    path: "a.rs".to_string(),
+                    diff: "@@ -1 +1 @@\n-a\n+b\n".to_string(),
+                    selectable: true,
+                },
+                HunkItem {
+                    id: "logo.png:1".to_string(),
+                    path: "logo.png".to_string(),
+                    diff: "(binary file)".to_string(),
+                    selectable: false,
+                },
+            ],
+            "a91c3f2be417".to_string(),
+            "re-run with: loom split ab -m <message> -p --hunks <id> --hunks-from a91c3f2be417",
+        );
+        assert!(err.downcast_ref::<NeedsInput>().is_some());
+
+        let json = PENDING.lock().unwrap().take().unwrap().to_json();
+        assert!(json.contains(r#""options":["a.rs:1"]"#));
+        assert!(json.contains(r#""fingerprint":"a91c3f2be417""#));
+        assert!(json.contains(r#""selectable":false"#));
+        assert!(!json.contains("allow_other"));
     }
 }

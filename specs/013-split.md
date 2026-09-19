@@ -19,6 +19,7 @@ command with an interactive picker.
 
 ```bash
 git-loom split <target> [-m <message>] [-p] [<files>...]
+git-loom split <target> [-m <message>] -p --hunks <id> [--hunks <id>...] --hunks-from <fingerprint>
 ```
 
 **Arguments:**
@@ -86,7 +87,9 @@ The **second** commit keeps the original commit message in both modes.
 3. **Save pre-existing staged changes** — Same as file-level split.
 4. **Hunk selection** — Opens the commit-diff hunk picker for the target
    commit, optionally filtered to `<files>`. The user selects hunks for the
-   **first** commit.
+   **first** commit. `--hunks <id>` (repeated) with `--hunks-from <fingerprint>` supplies
+   that selection without the picker, which is how agent mode answers it
+   (Spec 019); validation from step 5 on is unchanged.
 5. **Validate selection**:
    - Error if no hunks selected: `"Must select at least one hunk for the first commit"`.
    - Error if all hunks selected: `"Must leave at least one hunk for the second commit"`.
