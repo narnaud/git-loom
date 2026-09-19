@@ -18,6 +18,31 @@ pub(crate) fn branch_key(name: &str) -> String {
     format!("br:{}", name)
 }
 
+/// The kind of thing a selection holds. A selection never mixes classes: no
+/// loom command takes a heterogeneous target list (Spec 020).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum SelectionClass {
+    /// The `[local changes]` header — `zz`, which subsumes the files under it.
+    LocalChanges,
+    WorkingFile,
+    Branch,
+    Commit,
+    CommitFile,
+}
+
+impl SelectionClass {
+    /// Plural name of the class, for the status-bar notice.
+    pub fn label(self) -> &'static str {
+        match self {
+            SelectionClass::LocalChanges => "local changes",
+            SelectionClass::WorkingFile => "files",
+            SelectionClass::Branch => "branches",
+            SelectionClass::Commit => "commits",
+            SelectionClass::CommitFile => "commit files",
+        }
+    }
+}
+
 /// What a tree row represents, with the data needed to render it.
 pub(crate) enum RowKind {
     /// The `[local changes]` header. Expandable to its files.
@@ -86,14 +111,24 @@ pub(crate) struct Row {
     pub key: String,
     /// Whether the cursor can rest on this row.
     pub focusable: bool,
-    /// Whether the row can be multi-selected and used in actions.
-    pub selectable: bool,
     /// Whether the row can be expanded to child rows.
     pub expandable: bool,
     pub expanded: bool,
 }
 
 impl Row {
+    /// Which selection the row can join; `None` = not selectable.
+    pub fn selection_class(&self) -> Option<SelectionClass> {
+        Some(match self.kind {
+            RowKind::LocalChanges { .. } => SelectionClass::LocalChanges,
+            RowKind::WorkingFile { .. } => SelectionClass::WorkingFile,
+            RowKind::BranchName { .. } => SelectionClass::Branch,
+            RowKind::Commit { .. } => SelectionClass::Commit,
+            RowKind::CommitFile { .. } => SelectionClass::CommitFile,
+            _ => return None,
+        })
+    }
+
     fn structural(kind: RowKind) -> Self {
         Row {
             kind,
@@ -101,7 +136,6 @@ impl Row {
             target: None,
             key: String::new(),
             focusable: false,
-            selectable: false,
             expandable: false,
             expanded: false,
         }
@@ -140,7 +174,6 @@ pub(crate) fn build_rows(
                     target: Some(ids.get_unstaged().to_string()),
                     key,
                     focusable: true,
-                    selectable: true,
                     expandable: !changes.is_empty(),
                     expanded: is_expanded,
                 });
@@ -156,7 +189,6 @@ pub(crate) fn build_rows(
                             target: Some(ids.get_file(&change.path).to_string()),
                             key: format!("wf:{}", change.path),
                             focusable: true,
-                            selectable: true,
                             expandable: false,
                             expanded: false,
                         });
@@ -200,7 +232,6 @@ pub(crate) fn build_rows(
                         target: Some(name.clone()),
                         key: branch_key(name),
                         focusable: true,
-                        selectable: true,
                         expandable: false,
                         expanded: false,
                     });
@@ -276,7 +307,6 @@ fn push_commit_rows(
             target: Some(commit.oid.to_string()),
             key,
             focusable: true,
-            selectable: true,
             expandable: !commit.files.is_empty(),
             expanded: is_expanded,
         });
@@ -295,7 +325,6 @@ fn push_commit_rows(
                     target: Some(file_sid.clone()),
                     key: format!("{}:{}", commit.oid, i),
                     focusable: true,
-                    selectable: true,
                     expandable: false,
                     expanded: false,
                 });

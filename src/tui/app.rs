@@ -30,7 +30,7 @@ use crate::core::transaction;
 use crate::core::ui::{self, Answer, Cancelled, Level, Request};
 use crate::git;
 use crate::tui::shell::{KeyResult, PaneId, Shell, ShellApp, ShellConfig, Tick};
-use crate::tui::status_tree::{self, LOCAL_CHANGES_KEY, Row, RowKind, branch_key};
+use crate::tui::status_tree::{self, LOCAL_CHANGES_KEY, Row, RowKind, SelectionClass, branch_key};
 use crate::tui::theme::TuiTheme;
 use crate::tui::widgets::common::{colorize_diff, pane_block};
 use crate::tui::widgets::diff_pane::DiffPane;
@@ -255,6 +255,8 @@ struct App<'a> {
     tree: ListPane,
     /// Keys of the multi-selected rows.
     selected: HashSet<String>,
+    /// Class every selected row belongs to; `None` when nothing is selected.
+    selected_class: Option<SelectionClass>,
     expanded: HashSet<String>,
     /// Context depth the tree is loaded with, as `loom status <N>` takes it.
     context: usize,
@@ -298,6 +300,7 @@ impl<'a> App<'a> {
             rows: Vec::new(),
             tree: ListPane::new(0),
             selected: HashSet::new(),
+            selected_class: None,
             expanded,
             context,
             mode: Mode::Normal,
@@ -350,7 +353,7 @@ impl<'a> App<'a> {
             .or_else(|| self.current_row().map(|r| r.key.clone()));
         let previous = self.tree.cursor();
         self.snapshot = snapshot;
-        self.selected.clear();
+        self.clear_selection();
         self.diff_cache.clear();
         self.rows = self.build_rows();
         let cursor = key
@@ -457,7 +460,7 @@ impl<'a> App<'a> {
             command: command.clone(),
             lines: Vec::new(),
         });
-        self.selected.clear();
+        self.clear_selection();
         self.mode = Mode::Normal;
         self.notice = None;
 
@@ -745,7 +748,7 @@ impl<'a> App<'a> {
             self.mode = Mode::Normal;
             self.notice = Some("fold cancelled".to_string());
         } else if !self.selected.is_empty() {
-            self.selected.clear();
+            self.clear_selection();
         } else {
             self.outcome = Some(Outcome::Quit);
         }
@@ -815,18 +818,40 @@ impl<'a> App<'a> {
         }
     }
 
+    /// Toggle the cursor row in or out of the selection. A selection holds one
+    /// class of row: toggling in a different one is refused rather than
+    /// replacing what is already selected, since no action could use the mix.
     fn toggle_selection(&mut self) {
         let Some(row) = self.current_row() else {
             return;
         };
-        if !row.selectable {
+        let Some(class) = row.selection_class() else {
             return;
-        }
+        };
         let key = row.key.clone();
-        if !self.selected.remove(&key) {
+        if self.selected.remove(&key) {
+            if self.selected.is_empty() {
+                self.selected_class = None;
+            }
+        } else {
+            if let Some(current) = self.selected_class
+                && current != class
+            {
+                self.notice = Some(format!(
+                    "selection holds {}; Esc clears it",
+                    current.label()
+                ));
+                return;
+            }
             self.selected.insert(key);
+            self.selected_class = Some(class);
         }
         self.move_cursor(1);
+    }
+
+    fn clear_selection(&mut self) {
+        self.selected.clear();
+        self.selected_class = None;
     }
 
     // -- actions ----------------------------------------------------------------

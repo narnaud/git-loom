@@ -208,6 +208,53 @@ fn space_toggles_selection_and_advances() {
 }
 
 #[test]
+fn selection_holds_one_class_of_row() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, "wf:a.rs");
+    app.toggle_selection();
+
+    move_cursor_to(&mut app, &oid('a').to_string());
+    app.toggle_selection();
+    assert_eq!(app.selected.len(), 1);
+    assert!(app.selected.contains("wf:a.rs"));
+    assert_eq!(cursor_key(&app), oid('a').to_string());
+    assert_eq!(
+        app.notice.as_deref(),
+        Some("selection holds files; Esc clears it")
+    );
+}
+
+/// `zz` subsumes the files under it, so the header is its own class.
+#[test]
+fn local_changes_header_does_not_mix_with_its_files() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, LOCAL_CHANGES_KEY);
+    app.toggle_selection();
+
+    move_cursor_to(&mut app, "wf:a.rs");
+    app.toggle_selection();
+    assert_eq!(app.selected.len(), 1);
+    assert!(app.selected.contains(LOCAL_CHANGES_KEY));
+}
+
+#[test]
+fn deselecting_the_last_row_frees_the_class() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, "wf:a.rs");
+    app.toggle_selection();
+    move_cursor_to(&mut app, "wf:a.rs");
+    app.toggle_selection();
+    assert!(app.selected.is_empty());
+
+    move_cursor_to(&mut app, &oid('a').to_string());
+    app.toggle_selection();
+    assert!(app.selected.contains(&oid('a').to_string()));
+}
+
+#[test]
 fn escape_clears_selection_before_quitting() {
     let theme = make_theme();
     let mut app = make_app(make_snapshot(), &theme);
@@ -1205,7 +1252,6 @@ fn row(kind: RowKind, key: &str) -> Row {
         target: None,
         key: key.to_string(),
         focusable: true,
-        selectable: false,
         expandable: false,
         expanded: false,
     }

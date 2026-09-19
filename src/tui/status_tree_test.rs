@@ -213,7 +213,7 @@ fn spacers_are_not_focusable() {
     for row in &rows {
         if matches!(row.kind, RowKind::Spacer(_)) {
             assert!(!row.focusable);
-            assert!(!row.selectable);
+            assert!(row.selection_class().is_none());
         }
     }
 }
@@ -229,6 +229,6 @@ fn upstream_row_is_focusable_but_not_selectable() {
         .find(|r| matches!(r.kind, RowKind::Upstream { .. }))
         .unwrap();
     assert!(row.focusable);
-    assert!(!row.selectable);
+    assert!(row.selection_class().is_none());
     assert!(row.target.is_none());
 }
