@@ -59,6 +59,11 @@ pub fn to_letters(change_id: &str) -> String {
         .collect()
 }
 
+/// Whether `s` could be a persistent commit ID or a prefix of one.
+pub fn is_letters(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| ('k'..='z').contains(&c))
+}
+
 /// Whether loom should add a Change-Id to the commits it creates: git config
 /// `loom.changeId` (default true), also off under the hook's own opt-out,
 /// `gerrit.createChangeId=false`.

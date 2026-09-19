@@ -317,3 +317,44 @@ fn letter_and_hex_commits_coexist_with_a_branch() {
     assert_eq!(alloc.get_branch("wp-n"), "wn");
     assert_eq!(alloc.commit_id_width(), 3);
 }
+
+#[test]
+fn find_persistent_by_prefix_or_literal() {
+    let alloc = IdAllocator::new(vec![
+        persistent(2, ID_B),
+        persistent(1, ID_A),
+        Entity::commit(oid(0xAB)),
+    ]);
+    assert_eq!(alloc.find_persistent("wpns"), vec![oid(1)]);
+    assert_eq!(alloc.find_persistent("wpnszzz"), vec![oid(1)]);
+    assert_eq!(alloc.find_persistent(ID_B), vec![oid(2)]);
+    assert_eq!(alloc.find_persistent(&ID_B.to_uppercase()), vec![oid(2)]);
+    assert_eq!(sorted(alloc.find_persistent("wpn")), vec![oid(1), oid(2)]);
+    assert!(
+        alloc.find_persistent("wp").is_empty(),
+        "shorter than MIN_LEN"
+    );
+    assert!(
+        alloc.find_persistent("ab").is_empty(),
+        "hex ids are not letters"
+    );
+    assert!(alloc.find_persistent("osy").is_empty());
+}
+
+#[test]
+fn find_persistent_returns_both_twins() {
+    let alloc = IdAllocator::new(vec![persistent(0x11, ID_A), persistent(0x22, ID_A)]);
+    assert_eq!(
+        sorted(alloc.find_persistent(ID_A)),
+        vec![oid(0x11), oid(0x22)]
+    );
+    assert_eq!(
+        sorted(alloc.find_persistent("wpn")),
+        vec![oid(0x11), oid(0x22)]
+    );
+}
+
+fn sorted(mut oids: Vec<git2::Oid>) -> Vec<git2::Oid> {
+    oids.sort();
+    oids
+}

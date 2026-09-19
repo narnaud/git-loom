@@ -87,8 +87,9 @@ pub fn top_commit(repo: &git2::Repository) -> Result<Option<git2::Oid>> {
 }
 
 /// Resolve a list of user-supplied IDs to a set of commit OIDs whose files
-/// should be shown. Supports git hashes and loom commit short IDs.
-/// Unknown IDs are silently skipped.
+/// should be shown. Supports git hashes and loom commit short IDs, including a
+/// unique persistent-ID prefix or Change-Id (Spec 002). Unknown and ambiguous
+/// IDs are silently skipped.
 fn resolve_commit_filter(
     repo: &git2::Repository,
     ids: &[String],
@@ -116,7 +117,10 @@ fn resolve_commit_filter(
             continue;
         }
 
-        // Not found → skip silently
+        // 3. A persistent-ID prefix or Change-Id literal naming one commit
+        if let [oid] = allocator.find_persistent(id).as_slice() {
+            filter_oids.insert(*oid);
+        }
     }
 
     filter_oids

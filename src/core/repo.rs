@@ -293,20 +293,26 @@ fn try_resolve_commit(repo: &Repository, arg: &str) -> Result<Option<Target>> {
 }
 
 /// Try to resolve `arg` via the shortid allocator, but only return
-/// results matching one of the `accept` kinds.
+/// results matching one of the `accept` kinds: first an exact displayed ID of
+/// any accepted kind, then a persistent commit ID prefix or Change-Id literal
+/// (Spec 002). Two passes, so a file or branch whose exact ID is `arg` wins
+/// over the commits whose letters merely start with it.
 fn try_resolve_shortid(
     repo: &Repository,
     arg: &str,
     accept: &[TargetKind],
 ) -> Result<Option<Target>> {
-    let needs_commit_files = arg.contains(':');
+    // `<commit>:<n>` names a file inside a commit.
+    let commit_file = arg
+        .split_once(':')
+        .and_then(|(commit, index)| index.parse::<usize>().ok().map(|i| (commit, i)));
     // File short IDs are the only ones that need the working tree scanned;
     // branch and commit IDs are allocated before files, so leaving them out
     // does not shift any ID. Context commits get no short IDs at all.
     let info = gather(
         repo,
         GatherOpts {
-            commit_files: needs_commit_files,
+            commit_files: commit_file.is_some(),
             context: 0,
             working_changes: accept.contains(&TargetKind::File),
         },
@@ -344,28 +350,76 @@ fn try_resolve_shortid(
                 }
             }
             TargetKind::CommitFile => {
-                if let Some((commit_part, index_part)) = arg.split_once(':')
-                    && let Ok(index) = index_part.parse::<usize>()
-                {
+                if let Some((commit_part, index)) = commit_file {
                     for commit in &info.commits {
                         if allocator.get_commit(commit.oid) == commit_part {
-                            if let Some(file) = commit.files.get(index) {
-                                return Ok(Some(Target::CommitFile {
-                                    commit: commit.oid.to_string(),
-                                    path: file.path.clone(),
-                                }));
-                            }
-                            bail!(
-                                "Commit has no file at index {}\nRun `loom status -f` to see available IDs",
-                                index
-                            );
+                            return commit_file_target(commit, index).map(Some);
                         }
                     }
                 }
             }
         }
     }
-    Ok(None)
+
+    let (commit_part, index) = match commit_file {
+        Some((commit_part, index)) if accept.contains(&TargetKind::CommitFile) => {
+            (commit_part, Some(index))
+        }
+        None if accept.contains(&TargetKind::Commit) => (arg, None),
+        _ => return Ok(None),
+    };
+    let oid = match allocator.find_persistent(commit_part).as_slice() {
+        [] => return Ok(None),
+        [oid] => *oid,
+        many => bail!(
+            "{}",
+            ambiguous_commit_message(commit_part, many, &info, &allocator)
+        ),
+    };
+    // The allocator was built from these commits, so a miss is a bug.
+    let commit = info
+        .commits
+        .iter()
+        .find(|c| c.oid == oid)
+        .context("Resolved commit is missing from the graph")?;
+    match index {
+        None => Ok(Some(Target::Commit(oid.to_string()))),
+        Some(index) => commit_file_target(commit, index).map(Some),
+    }
+}
+
+fn commit_file_target(commit: &CommitInfo, index: usize) -> Result<Target> {
+    match commit.files.get(index) {
+        Some(file) => Ok(Target::CommitFile {
+            commit: commit.oid.to_string(),
+            path: file.path.clone(),
+        }),
+        None => bail!(
+            "Commit has no file at index {}\nRun `loom status -f` to see available IDs",
+            index
+        ),
+    }
+}
+
+/// The error for a persistent-ID prefix or Change-Id shared by several
+/// commits, listing each so a hidden-branch commit is explainable too.
+fn ambiguous_commit_message(
+    arg: &str,
+    oids: &[git2::Oid],
+    info: &RepoInfo,
+    allocator: &crate::core::shortid::IdAllocator,
+) -> String {
+    let mut lines = vec![format!("'{arg}' matches several commits:")];
+    for commit in info.commits.iter().filter(|c| oids.contains(&c.oid)) {
+        lines.push(format!(
+            "  {} {} {}",
+            allocator.get_commit(commit.oid),
+            commit.short_id,
+            commit.message
+        ));
+    }
+    lines.push("Use one of the IDs above".to_string());
+    lines.join("\n")
 }
 
 /// Convert a user-supplied path — absolute or CWD-relative — to a repo-relative

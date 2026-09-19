@@ -111,6 +111,9 @@ For accepted kinds, resolution proceeds as follows:
 
 1. Try Git-native revision resolution first: full hashes, partial hashes of at least four characters, symbolic refs (`HEAD`, `HEAD~2`, `main`, `origin/main`), and other valid revision syntax. A successful result is a commit, subject to accepted kind and the non-merge rule.
 2. If Git resolution fails, build the same full graph/status entities and look up an exact short ID in this order: branch, commit, file (restricted by `accept`).
-3. If no match exists, error and suggest `git-loom status` to list IDs.
+3. For `Commit`/`CommitFile` only, then match a persistent commit ID: a canonical `I<40 hex>` Change-Id (any case), or a prefix of at least three letters of a commit's Change-Id letters. Exactly one commit resolves; several (a prefix shorter than the displayed IDs, or twins sharing a Change-Id) error, listing each as `<id> <hash> <subject>`; a listed commit may be on a hidden branch. This pass runs after step 2 for every accepted kind, so a prefix never shadows a branch or file whose exact ID starts the same way. `status -f` accepts the same prefixes and skips ambiguous ones.
+4. If no match exists, error and suggest `git-loom status` to list IDs.
+
+A ref literally named like a persistent ID wins in step 1, exactly as a ref named like a two-character hex ID does today.
 
 Git-native resolution works without an upstream. Short-ID resolution requires an upstream-configured current branch, successful `gather_repo_info()`, and an ID currently shown by status.

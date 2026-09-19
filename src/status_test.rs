@@ -278,3 +278,29 @@ fn commit_id_survives_an_update_rebase() {
     let ids = IdAllocator::new(info.collect_entities());
     assert_eq!(ids.get_commit(tip_after), id_before);
 }
+
+#[test]
+fn filter_by_persistent_prefix_skips_ambiguous_ones() {
+    let test_repo = TestRepo::new_with_remote();
+    let a = test_repo.commit(
+        "A\n\nChange-Id: I3ac7000000000000000000000000000000000000\n",
+        "a.txt",
+    );
+    test_repo.commit(
+        "B\n\nChange-Id: I3ac8000000000000000000000000000000000000\n",
+        "b.txt",
+    );
+
+    let info = gather_repo_info(&test_repo.repo, true, 1).unwrap();
+    let allocator = IdAllocator::new(info.collect_entities());
+    let filter =
+        |arg: &str| resolve_commit_filter(&test_repo.repo, &[arg.to_string()], &info, &allocator);
+    assert_eq!(filter("wpnsz").into_iter().collect::<Vec<_>>(), vec![a]);
+    assert_eq!(
+        filter("I3ac7000000000000000000000000000000000000")
+            .into_iter()
+            .collect::<Vec<_>>(),
+        vec![a]
+    );
+    assert!(filter("wpn").is_empty(), "ambiguous prefix is skipped");
+}

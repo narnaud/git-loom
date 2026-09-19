@@ -26,12 +26,20 @@ impl Entity {
     }
 }
 
+/// What the allocator knows about one commit.
+struct CommitId {
+    id: String,
+    /// The commit's Change-Id as letters, for prefix resolution. Present for
+    /// every commit with a Change-Id, twins included.
+    letters: Option<String>,
+}
+
 /// Allocates unique short IDs to entities (Spec 002): persistent letter IDs
 /// for commits with a Change-Id, word-based or hash-prefix IDs for the rest,
 /// resolving collisions by trying alternative candidates.
 pub struct IdAllocator {
     map: HashMap<Entity, String>,
-    commits: HashMap<git2::Oid, String>,
+    commits: HashMap<git2::Oid, CommitId>,
 }
 
 impl IdAllocator {
@@ -42,7 +50,13 @@ impl IdAllocator {
         let commits = map
             .iter()
             .filter_map(|(entity, id)| match entity {
-                Entity::Commit { oid, .. } => Some((*oid, id.clone())),
+                Entity::Commit { oid, change_id } => Some((
+                    *oid,
+                    CommitId {
+                        id: id.clone(),
+                        letters: change_id.as_deref().map(changeid::to_letters),
+                    },
+                )),
                 _ => None,
             })
             .collect();
@@ -64,7 +78,7 @@ impl IdAllocator {
     }
 
     pub fn get_commit(&self, oid: git2::Oid) -> &str {
-        self.commits.get(&oid).map(|s| s.as_str()).unwrap_or("")
+        self.commits.get(&oid).map(|c| c.id.as_str()).unwrap_or("")
     }
 
     pub fn get_file(&self, path: &str) -> &str {
@@ -76,7 +90,25 @@ impl IdAllocator {
 
     /// Width of the widest commit ID, for column alignment.
     pub fn commit_id_width(&self) -> usize {
-        self.commits.values().map(|s| s.len()).max().unwrap_or(0)
+        self.commits.values().map(|c| c.id.len()).max().unwrap_or(0)
+    }
+
+    /// Every commit `arg` names by Change-Id: the canonical `I…` literal, or
+    /// a prefix of at least [`changeid::MIN_LEN`] letters. One hit resolves;
+    /// several mean a too-short prefix or twins sharing a Change-Id.
+    pub fn find_persistent(&self, arg: &str) -> Vec<git2::Oid> {
+        // A literal's letters are as long as the stored ones, so the prefix
+        // test is equality for it.
+        let needle = match changeid::normalize(arg) {
+            Some(id) => changeid::to_letters(&id),
+            None if arg.len() >= changeid::MIN_LEN && changeid::is_letters(arg) => arg.to_string(),
+            None => return Vec::new(),
+        };
+        self.commits
+            .iter()
+            .filter(|(_, c)| c.letters.as_deref().is_some_and(|l| l.starts_with(&needle)))
+            .map(|(oid, _)| *oid)
+            .collect()
     }
 }
 

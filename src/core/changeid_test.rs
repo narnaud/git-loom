@@ -49,6 +49,10 @@ fn letters_use_jujutsu_reverse_hex() {
     assert_eq!(to_letters("0f"), "zk");
     assert_eq!(to_letters("I0123456789abcdef"), "zyxwvutsrqponmlk");
     assert_eq!(to_letters(ID).len(), 40);
+    assert!(is_letters("mqt"));
+    assert!(!is_letters("mq1"));
+    assert!(!is_letters(""));
+    assert!(!is_letters("3ac"));
 }
 
 /// The hook pipes `git var GIT_COMMITTER_IDENT`, the refhash, and the message

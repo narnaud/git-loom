@@ -723,3 +723,114 @@ fn resolve_arg_unstaged_not_accepted() {
         assert!(result.is_err());
     });
 }
+
+// ── Persistent commit IDs (Spec 002) ─────────────────────────────────────
+
+/// `3ac7…` encodes to `wpns…`, `3ac8…` to `wpnr…`.
+const ID_A: &str = "I3ac7000000000000000000000000000000000000";
+const ID_B: &str = "I3ac8000000000000000000000000000000000000";
+
+fn resolve(test_repo: &TestRepo, arg: &str, accept: &[TargetKind]) -> anyhow::Result<Target> {
+    test_repo.in_dir(|| repo::resolve_arg(&test_repo.repo, arg, accept))
+}
+
+#[test]
+fn resolve_arg_persistent_id_and_any_longer_prefix() {
+    let test_repo = TestRepo::new_with_remote();
+    let a = test_repo.commit(&format!("A\n\nChange-Id: {ID_A}\n"), "a.txt");
+
+    for arg in ["wpn", "wpns", "wpnszzzz"] {
+        let target = resolve(&test_repo, arg, &[TargetKind::Commit]).unwrap();
+        assert_eq!(target, Target::Commit(a.to_string()), "{arg}");
+    }
+    let err = resolve(&test_repo, "wp", &[TargetKind::Commit]).unwrap_err();
+    assert!(err.to_string().contains("did not resolve"), "{err}");
+}
+
+#[test]
+fn resolve_arg_persistent_prefix_shared_by_two_commits_lists_them() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit(&format!("Older\n\nChange-Id: {ID_A}\n"), "a.txt");
+    test_repo.commit(&format!("Newer\n\nChange-Id: {ID_B}\n"), "b.txt");
+
+    let err = resolve(&test_repo, "wpn", &[TargetKind::Commit]).unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("'wpn' matches several commits"), "{msg}");
+    assert!(msg.contains("wpnr ") && msg.contains(" Newer"), "{msg}");
+    assert!(msg.contains("wpns ") && msg.contains(" Older"), "{msg}");
+}
+
+#[test]
+fn resolve_arg_change_id_literal_in_any_case() {
+    let test_repo = TestRepo::new_with_remote();
+    let a = test_repo.commit(&format!("A\n\nChange-Id: {ID_A}\n"), "a.txt");
+
+    for arg in [ID_A.to_string(), ID_A.to_uppercase()] {
+        let target = resolve(&test_repo, &arg, &[TargetKind::Commit]).unwrap();
+        assert_eq!(target, Target::Commit(a.to_string()), "{arg}");
+    }
+}
+
+#[test]
+fn resolve_arg_twins_are_ambiguous_by_change_id_but_not_by_hash_id() {
+    let test_repo = TestRepo::new_with_remote();
+    let first = test_repo.commit(&format!("First\n\nChange-Id: {ID_A}\n"), "a.txt");
+    test_repo.commit(&format!("Twin\n\nChange-Id: {ID_A}\n"), "b.txt");
+
+    for arg in [ID_A, "wpn"] {
+        let err = resolve(&test_repo, arg, &[TargetKind::Commit]).unwrap_err();
+        assert!(
+            err.to_string().contains("matches several commits"),
+            "{arg}: {err}"
+        );
+    }
+    let hash_id = &first.to_string()[..2];
+    let target = resolve(&test_repo, hash_id, &[TargetKind::Commit]).unwrap();
+    assert_eq!(target, Target::Commit(first.to_string()));
+}
+
+#[test]
+fn resolve_arg_persistent_commit_file() {
+    let test_repo = TestRepo::new_with_remote();
+    let a = test_repo.commit(&format!("A\n\nChange-Id: {ID_A}\n"), "a.txt");
+
+    let target = resolve(&test_repo, "wpn:0", &[TargetKind::CommitFile]).unwrap();
+    assert_eq!(
+        target,
+        Target::CommitFile {
+            commit: a.to_string(),
+            path: "a.txt".to_string()
+        }
+    );
+    let err = resolve(&test_repo, "wpn:3", &[TargetKind::CommitFile]).unwrap_err();
+    assert!(err.to_string().contains("no file at index 3"), "{err}");
+}
+
+/// The persistent pass honors the accepted kinds like the exact one.
+#[test]
+fn resolve_arg_persistent_id_respects_the_accepted_kinds() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit(&format!("A\n\nChange-Id: {ID_A}\n"), "a.txt");
+
+    let err = resolve(&test_repo, "wpn:0", &[TargetKind::Commit]).unwrap_err();
+    assert!(err.to_string().contains("did not resolve"), "{err}");
+    let err = resolve(&test_repo, "wpn", &[TargetKind::CommitFile]).unwrap_err();
+    assert!(err.to_string().contains("did not resolve"), "{err}");
+}
+
+/// The prefix pass runs after every exact match: a branch whose exact ID is
+/// `wpn` wins over the commits whose letters merely start with it.
+#[test]
+fn resolve_arg_exact_branch_id_beats_a_commit_prefix() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit(&format!("Older\n\nChange-Id: {ID_A}\n"), "a.txt");
+    let tip = test_repo.commit(&format!("Newer\n\nChange-Id: {ID_B}\n"), "b.txt");
+    // `wpn` has candidates wp, wn, pn, then wpn; the first three go to
+    // their own branches.
+    for name in ["wp", "wn", "pn", "wpn"] {
+        test_repo.create_branch_at_commit(name, tip);
+    }
+
+    let target = resolve(&test_repo, "wpn", &[TargetKind::Commit, TargetKind::Branch]).unwrap();
+    assert_eq!(target, Target::Branch("wpn".to_string()));
+}
