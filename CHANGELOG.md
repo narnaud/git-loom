@@ -1,5 +1,64 @@
 # Changelog
 
+## [0.24.0](https://github.com/narnaud/git-loom/compare/v0.23.0...v0.24.0) (2026-09-19)
+
+
+### Features ✨
+
+* **commit:** add a Gerrit Change-Id trailer to created commits ([3af8daf](https://github.com/narnaud/git-loom/commit/3af8dafbbe7fc3dcb0a9103cee60576fdde700c1))
+* **core:** add a TUI mode redirecting msg prompts and messages ([db54b32](https://github.com/narnaud/git-loom/commit/db54b32cd8dd8c5ea30c0c6723a456f60393e3d4))
+* **drop:** accept several file targets at once ([11cf884](https://github.com/narnaud/git-loom/commit/11cf884056af841f83fa3a003edd78ec260531ae))
+* **drop:** delete the ref of a stacked inner branch ([02ee608](https://github.com/narnaud/git-loom/commit/02ee6088098657ab58a5ec84e9aeaefc08778e6b))
+* **drop:** say how many commits a branch drop removes ([d0a256f](https://github.com/narnaud/git-loom/commit/d0a256f445085dd212921ad4fb2b6e4b4102e283))
+* **fold:** move commits above or below another commit ([54f06bc](https://github.com/narnaud/git-loom/commit/54f06bcf2d1a6842b91d714ae7f953246f72023f))
+* name new and rewritten commits by persistent ID in messages ([05e4c90](https://github.com/narnaud/git-loom/commit/05e4c9048bf9a40dcfa6ad0d69fb240cf6071077))
+* **shortid:** resolve commits by persistent ID prefix or Change-Id ([81b38b2](https://github.com/narnaud/git-loom/commit/81b38b24ede3108a5d21f141934bfb249cbecefe))
+* **shortid:** show persistent letter IDs for commits with a Change-Id ([b51aced](https://github.com/narnaud/git-loom/commit/b51acedd27db4e573b4761c5ae9f3cb56c1a6a46))
+* **status:** configurable context depth, adjustable in the TUI ([d874eaf](https://github.com/narnaud/git-loom/commit/d874eaff4e656172d3a0e1206dfebad1957d2ef7))
+* **tui:** add prompt and notice popups ([44cc61c](https://github.com/narnaud/git-loom/commit/44cc61c3780bc10e38cb8f95fe3270a0d155df68))
+* **tui:** drop the selection of rows a collapse hides ([d9c9062](https://github.com/narnaud/git-loom/commit/d9c90622b559ff3897244f034c1b23357eb79642))
+* **tui:** drop zz and selected files, confirm in a choice menu ([9f070cd](https://github.com/narnaud/git-loom/commit/9f070cdd553996d67d466b27d69254a252ba4bfa))
+* **tui:** keep a selection to one class of row ([0e65365](https://github.com/narnaud/git-loom/commit/0e6536544e79f0d03f0844d33bf42cb713b0bfdf))
+* **tui:** let the shell host modals and background work ([76f9780](https://github.com/narnaud/git-loom/commit/76f9780cdbb6fcf1ec5ab450c5a3b6b97979b57f))
+* **tui:** log actions with their equivalent command line ([6c8347b](https://github.com/narnaud/git-loom/commit/6c8347bd7dd3f06289f3d80a277a2db9c5b23abd))
+* **tui:** name a new branch in place where it will land ([1142d5a](https://github.com/narnaud/git-loom/commit/1142d5ad643ee0cd019ba47ed7e3e3f8722acbb1))
+* **tui:** pick the commit's contents, then its place in the tree ([2fcb64b](https://github.com/narnaud/git-loom/commit/2fcb64b77a5fddfa7ea63c6a29c03b4695101cc6))
+* **tui:** rename a branch in place from the status tree ([f10341d](https://github.com/narnaud/git-loom/commit/f10341d33c9704cf2ec307b3c162106cc2b81d20))
+* **tui:** run actions without leaving the TUI ([17d3196](https://github.com/narnaud/git-loom/commit/17d3196756c8be995a1043633afd6bc0152e4aa7))
+
+
+### Bug Fixes 🐞
+
+* **fold:** fold only what the `-p` picker showed ([465541b](https://github.com/narnaud/git-loom/commit/465541b650a69839b22fcc46ee7633d3b9375c06))
+* **fold:** move a picked deletion instead of breaking mid-rebase ([7d2fef7](https://github.com/narnaud/git-loom/commit/7d2fef72ad4980f52473e21bafe2639429a7357b))
+* **fold:** move submodule entries through the index ([d13f46b](https://github.com/narnaud/git-loom/commit/d13f46b92deca00b68a5d81d44410f1699bca251))
+* **git:** make a parked patch survive a crash ([142afc0](https://github.com/narnaud/git-loom/commit/142afc04bc6639c3376dd185d5431cf2dec2c0a6))
+* **git:** park a patch that will not go back ([7953559](https://github.com/narnaud/git-loom/commit/7953559be54d96795db8a7426c3b917b8c484347))
+* **git:** warn through msg, not eprintln, when a patch will not go back ([f2a1a05](https://github.com/narnaud/git-loom/commit/f2a1a05d9db5b5a44ab931fea0dc31688354819a))
+* **weave:** don't refuse rewrites inside a submodule ([9ad856c](https://github.com/narnaud/git-loom/commit/9ad856cefcd6f67e2fadff3354ac91753080bd34))
+* **weave:** don't rewrite the wrong commit when a replay comes out empty ([c26332c](https://github.com/narnaud/git-loom/commit/c26332cfa39cb2b26a324b388f10770e199d9696))
+* **weave:** protect the commits a result names from being dropped as empty ([3d6163d](https://github.com/narnaud/git-loom/commit/3d6163dd6594e751aed025fcf62fa903f4e1ad7d))
+* **weave:** say a commit is redundant instead of "replays empty" ([61256cc](https://github.com/narnaud/git-loom/commit/61256ccf887e0ab1d09e01a973f728a4eaa8e2e4))
+
+
+### Documentation
+
+* compress code comments to reduce token usage ([e75d3a2](https://github.com/narnaud/git-loom/commit/e75d3a2706a3efda256e2474293aa860787c8a27))
+* **specs:** state the real Git minimum, 2.40 ([d821f5a](https://github.com/narnaud/git-loom/commit/d821f5a6090933f7dd637ad82f69a65ae0600646))
+* **specs:** state the real Git minimum, 2.40 ([a492256](https://github.com/narnaud/git-loom/commit/a492256f73f603c4d1508bd0c03bff88382933c8))
+* use persistent commit IDs in examples ([4503c3f](https://github.com/narnaud/git-loom/commit/4503c3f0325c83e2102943f2fab7f6d8e2d02aab))
+
+
+### Changes
+
+* **git:** drop the vacuous Result from restore_staged_patch ([2494d45](https://github.com/narnaud/git-loom/commit/2494d45d4710161356b322ad5540cd84e8aa6495))
+* **git:** move patch parking out of fold into git_apply ([648c326](https://github.com/narnaud/git-loom/commit/648c3265975c5f0cb9e3b383d845fc87df737adf))
+
+
+### Other
+
+* **release:** credit commit authors in the release notes ([8f27389](https://github.com/narnaud/git-loom/commit/8f2738915a7d17524e4a2c3dd8de7f479bc4fb14))
+
 ## [0.23.0](https://github.com/narnaud/git-loom/compare/v0.22.0...v0.23.0) (2026-09-13)
 
 
