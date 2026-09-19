@@ -170,7 +170,7 @@ shown in parentheses.
 
 ## Prerequisites
 
-- Git 2.38 or later
+- Git 2.40 or later
 - Must be in a git repository with a working tree (not bare)
 - Must have upstream tracking configured (needed to determine merge-base)
 - At least one commit in scope (between merge-base and HEAD)

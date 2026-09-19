@@ -19,7 +19,7 @@ Spec 002. Exact local branch names resolve as branches before Git refs; Git
 refs (including `HEAD`) resolve as commits; branch and commit short IDs retain
 their types. `zz` means all local changes.
 
-Requirements: Git 2.38+, a non-bare repository, upstream tracking for short
+Requirements: Git 2.40+, a non-bare repository, upstream tracking for short
 IDs, and (for branch targets) a branch in the integration range.
 
 ## Commit Targets

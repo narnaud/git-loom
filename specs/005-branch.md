@@ -81,7 +81,7 @@ While paused, block other loom commands except `loom show`, `loom diff`, `loom t
 
 ## Prerequisites
 
-- Git 2.38+ and a non-bare repository working tree.
+- Git 2.40+ and a non-bare repository working tree.
 - Upstream tracking for a default target or short-ID target.
 - An upstream-configured integration context for operations that weave/unweave.
 

@@ -166,7 +166,7 @@ are permitted.
 
 - Must be in a git repository with a working tree (not bare)
 - Current branch must have an upstream tracking ref (use `git-loom init` first)
-- Git 2.38 or later (checked globally at startup)
+- Git 2.40 or later (checked globally at startup)
 - Network access to the remote (for `git fetch`)
 
 ## Examples

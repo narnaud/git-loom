@@ -590,6 +590,6 @@ branches are never pushed together — that would be confusing and error-prone.
 - Current branch must be an integration branch (has upstream tracking)
 - At least one woven branch must exist
 - Network access to the remote (for `git push`)
-- Git 2.38 or later (checked globally at startup)
+- Git 2.40 or later (checked globally at startup)
 - `gh` CLI (optional, for GitHub PR creation)
 - `az` CLI (optional, for Azure DevOps PR creation)

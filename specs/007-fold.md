@@ -205,7 +205,7 @@ Multiple moves (to a branch or next to a commit), all `-c` moves, all `-p` forms
 
 ## General invariants and prerequisites
 
-- Require Git 2.38+ and a non-bare repository working tree.
+- Require Git 2.40+ and a non-bare repository working tree.
 - Short-ID arguments require upstream tracking.
 - Preserve uncommitted/index changes except where the requested operation intentionally consumes them; restore them exactly on abort/hard-fail.
 - Move submodule entries (gitlinks) through the index alone, in every form including `-p`: apply their whole-file diff with `--cached`, never stage them by path, and never move a submodule checkout. Uncommitting to `zz` then needs no working-tree replay: a bump is unstaged as soon as the index entry moves, and an addition becomes an untracked directory. A removal is the exception — while its checkout is still on disk the restored entry matches it and nothing would show, so stage that deletion rather than lose it.
