@@ -49,6 +49,46 @@ IDs use blue underline (`COLOR_SHORTID`). Placement is:
 
 For a commit, the ID replaces/styles the matching initial hash characters; the rest of the abbreviated hash is dimmed. ANSI-stripped output still contains the full abbreviated hash. The upstream/common-base marker gets no ID.
 
+## Persistent commit identity
+
+Commits that `commit`, `split`, and `reword` create carry a Gerrit `Change-Id`
+trailer so that a commit keeps one identity across every rewrite (rebase
+replays copy the message verbatim); merges and `fixup!` commits get none.
+
+- Format: `Change-Id: I<40 lowercase hex>`. When `gerrit.reviewUrl` is set, the
+  trailer is instead `Link: <url>/id/I<hex>`, as Gerrit's `commit-msg` hook
+  writes it. Both forms are read; the last matching trailer in the trailer
+  block wins; hex is matched case-insensitively.
+- Value: the current Gerrit hook's recipe — the blob hash of
+  `<git var GIT_COMMITTER_IDENT>`, a newline, `HEAD`'s hash (the empty-tree
+  hash on an unborn branch; after an editor-path commit, the new commit
+  itself), a newline, and the message text. The value is opaque: Gerrit never
+  re-derives it, only the shape is checked.
+- Generation is on unless git config `loom.changeId` is `false` or
+  `gerrit.createChangeId` is `false`. A message that already carries a
+  Change-Id, or whose subject is an autosquash marker (`fixup! `, `squash! `),
+  is never stamped. Loom's own `fixup!` commits (fold, absorb) get none.
+- Loom writes the trailer into the message text itself, never through
+  `git commit --trailer`, so `trailer.*` git config cannot rename, move, or
+  suppress it. With `-m` the trailer is appended before committing (joined to
+  an existing trailer block, otherwise as a new last paragraph). Without `-m`
+  the commit is made with the editor first, then amended once (message only,
+  `--no-verify`: the `pre-commit`/`commit-msg` hooks ran on the commit itself)
+  when the final message has no Change-Id, so an editor that dropped it cannot
+  leave the commit without one. Other hooks (`prepare-commit-msg`,
+  `post-commit`, and `post-rewrite` for the amend) run for both commits. The
+  amend follows git config, not the options forwarded after `--`: a commit
+  signed because `commit.gpgsign` is set stays signed, one signed only by a
+  forwarded `-S` does not. If that amend fails, the commit stands and a
+  warning says it has no Change-Id (`reword` aborts instead: the id it keeps
+  is the point).
+- A rewrite that replaces the message (`reword`) re-stamps the commit's
+  existing Change-Id; a commit without one receives a fresh one when
+  generation is enabled. `split` keeps the original message, and so its id,
+  on the second commit and stamps a fresh one on the first.
+- Which commits carry a Change-Id is per repository, not enforced: commits made
+  with raw git or received from elsewhere may have none.
+
 ## Argument resolution
 
 Commands use `git::resolve_arg(repo, arg, accept)`, where ordered `accept: &[TargetKind]` limits both target kinds and their priority. Available kinds:

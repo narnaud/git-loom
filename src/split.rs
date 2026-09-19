@@ -3,17 +3,26 @@ use git2::{Oid, Repository};
 
 use crate::core::repo::{self, Target, TargetKind};
 use crate::core::weave;
-use crate::core::{agent_mode, diff, graph, msg, staging};
+use crate::core::{agent_mode, changeid, diff, graph, msg, staging};
 use crate::git;
 use crate::tui::hunk_selector::FileEntry;
 
 const COMMAND: &str = "split";
 
-/// Commit with `-m` message or open the editor.
-fn commit_or_editor(workdir: &std::path::Path, message: Option<&str>) -> Result<()> {
+/// Commit with `-m` message or open the editor; either way the new commit
+/// gets a Change-Id (Spec 002).
+fn commit_or_editor(
+    repo: &Repository,
+    workdir: &std::path::Path,
+    message: Option<&str>,
+) -> Result<()> {
     match message {
         Some(m) => git::commit(workdir, m),
-        None => git::commit_with_editor(workdir),
+        None => {
+            git::commit_with_editor(workdir)?;
+            changeid::ensure_on_head_or_warn(repo, workdir, None);
+            Ok(())
+        }
     }
 }
 
@@ -216,15 +225,43 @@ fn perform_split(
     msg1: Option<&str>,
     msg2: &str,
 ) -> Result<()> {
+    let (msg1, msg2) = stamped_messages(repo, workdir, msg1, msg2)?;
+    let (msg1, msg2) = (msg1.as_deref(), msg2.as_str());
     run_split(repo, workdir, commit_oid, |is_head| {
         if is_head {
-            perform_head_split(workdir, selected, remaining, msg1, msg2)
+            perform_head_split(repo, workdir, selected, remaining, msg1, msg2)
         } else {
             perform_non_head_with(repo, workdir, commit_oid, || {
-                perform_head_split(workdir, selected, remaining, msg1, msg2)
+                perform_head_split(repo, workdir, selected, remaining, msg1, msg2)
             })
         }
     })
+}
+
+/// Both messages with their Change-Id (Spec 013), stamped before the split
+/// dismantles the commit so no generation failure can strike in between. The
+/// original message keeps its id; one without gets a fresh one.
+fn stamped_messages(
+    repo: &Repository,
+    workdir: &std::path::Path,
+    msg1: Option<&str>,
+    msg2: &str,
+) -> Result<(Option<String>, String)> {
+    let stamped1 = match msg1 {
+        Some(m) => Some(changeid::for_message(repo, workdir, m, None)?),
+        None => None,
+    };
+    let mut stamped2 = changeid::for_message(repo, workdir, msg2, None)?;
+    // Same ident, HEAD, and text give the same fresh id twice; the first
+    // half's id then salts the second's.
+    let id1 = stamped1.as_deref().and_then(changeid::from_message);
+    if let Some(id1) = &id1
+        && changeid::from_message(&stamped2).as_deref() == Some(id1)
+    {
+        let id2 = changeid::generate_unlike(workdir, msg2, id1)?;
+        stamped2 = changeid::for_message(repo, workdir, msg2, Some(&id2))?;
+    }
+    Ok((stamped1, stamped2))
 }
 
 /// Split HEAD commit (no rebase needed).
@@ -235,6 +272,7 @@ fn perform_split(
 ///
 /// Returns `(hash1, hash2)` — the two new commit hashes.
 fn perform_head_split(
+    repo: &Repository,
     workdir: &std::path::Path,
     selected: &[String],
     remaining: &[String],
@@ -245,7 +283,7 @@ fn perform_head_split(
 
     let selected_refs: Vec<&str> = selected.iter().map(|s| s.as_str()).collect();
     git::stage_files(workdir, &selected_refs)?;
-    commit_or_editor(workdir, msg1)?;
+    commit_or_editor(repo, workdir, msg1)?;
 
     let remaining_refs: Vec<&str> = remaining.iter().map(|s| s.as_str()).collect();
     git::stage_files(workdir, &remaining_refs)?;
@@ -266,12 +304,14 @@ fn perform_split_by_hunks(
     msg1: Option<&str>,
     msg2: &str,
 ) -> Result<()> {
+    let (msg1, msg2) = stamped_messages(repo, workdir, msg1, msg2)?;
+    let (msg1, msg2) = (msg1.as_deref(), msg2.as_str());
     run_split(repo, workdir, commit_oid, |is_head| {
         if is_head {
-            perform_head_split_by_hunks(workdir, selections, msg1, msg2)
+            perform_head_split_by_hunks(repo, workdir, selections, msg1, msg2)
         } else {
             perform_non_head_with(repo, workdir, commit_oid, || {
-                perform_head_split_by_hunks(workdir, selections, msg1, msg2)
+                perform_head_split_by_hunks(repo, workdir, selections, msg1, msg2)
             })
         }
     })
@@ -283,6 +323,7 @@ fn perform_split_by_hunks(
 /// reset_mixed(HEAD~1) → apply selected hunks → commit(msg1) → stage remaining → commit(msg2)
 /// ```
 fn perform_head_split_by_hunks(
+    repo: &Repository,
     workdir: &std::path::Path,
     selections: &[FileEntry],
     msg1: Option<&str>,
@@ -322,7 +363,7 @@ fn perform_head_split_by_hunks(
         git::apply_cached_patch(workdir, &selected_patch)?;
     }
 
-    commit_or_editor(workdir, msg1)?;
+    commit_or_editor(repo, workdir, msg1)?;
 
     for file in selections {
         if file.hunks.iter().any(|h| !h.selected) {

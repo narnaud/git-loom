@@ -16,8 +16,9 @@ pub use git_branch::{
     branch_switch_create_tracking, branch_switch_detach, branch_validate_name,
 };
 pub use git_commit::{
-    commit, commit_amend, commit_amend_no_edit, commit_opts, commit_with_editor, reset_hard,
-    reset_mixed, reset_soft, stage_all, stage_all_opts, stage_files, stage_files_opts, stage_path,
+    commit, commit_amend, commit_amend_message_unverified, commit_amend_no_edit, commit_opts,
+    commit_with_editor, reset_hard, reset_mixed, reset_soft, stage_all, stage_all_opts,
+    stage_files, stage_files_opts, stage_path,
 };
 pub use git_diff::{
     diff_cached, diff_cached_file, diff_cached_file_is_binary, diff_cached_files, diff_commit,
@@ -243,10 +244,14 @@ pub fn run_git_interactive(workdir: &Path, args: &[&str]) -> Result<()> {
 
     let start = Instant::now();
     let terminal = crate::core::ui::suspend()?;
-    let status = Command::new("git")
-        .current_dir(workdir)
-        .args(&full_args)
-        .status()?;
+    let mut command = Command::new("git");
+    command.current_dir(workdir).args(&full_args);
+    // The test binary's fake editor is repository config, which an inherited
+    // `GIT_EDITOR` outranks. Dropped from this command alone: a test must not
+    // mutate the environment the whole process shares.
+    #[cfg(test)]
+    command.env_remove("GIT_EDITOR");
+    let status = command.status()?;
     drop(terminal);
 
     let duration_ms = start.elapsed().as_millis();

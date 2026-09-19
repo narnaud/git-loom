@@ -35,7 +35,10 @@ git-loom split <target> [-m <message>] [-p] [<files>...]
   assign selected hunks to the first commit instead of whole files. When `-p`
   is given, the `<files>` arguments filter which files appear in the picker.
 
-The **second** commit keeps the original commit message in both modes.
+The **second** commit keeps the original commit message in both modes, and
+with it the original `Change-Id`; the **first** commit gets a fresh one (Spec
+002). An original without a Change-Id gives both commits fresh ones when
+generation is enabled.
 
 ## What Happens
 

@@ -5,6 +5,7 @@ use git2::Repository;
 use serde::{Deserialize, Serialize};
 
 use crate::core::agent_mode;
+use crate::core::changeid;
 use crate::core::graph;
 use crate::core::msg;
 use crate::core::repo;
@@ -84,6 +85,13 @@ pub fn run(
         git::diff_cached(&workdir)?
     };
 
+    // Stamp before the index is touched: nothing below may fail without
+    // restoring what `resolve_staging` sets aside, and this can (`git var`).
+    let message = match &message {
+        Some(m) => Some(changeid::for_message(&repo, &workdir, m, None)?),
+        None => None,
+    };
+
     // Stage files, saving aside any pre-existing staged files not in the
     // target list so they don't accidentally end up in this commit.
     let saved_staged = if patch {
@@ -99,7 +107,16 @@ pub fn run(
     }
 
     let git_opts: Vec<&str> = git_args.iter().map(String::as_str).collect();
-    let do_commit = || git::commit_opts(&workdir, message.as_deref(), &git_opts);
+    let do_commit = || -> Result<()> {
+        let head_before = repo::head_oid(&repo).ok();
+        git::commit_opts(&workdir, message.as_deref(), &git_opts)?;
+        // The editor path: the message is only known now. A forwarded
+        // `--dry-run` creates nothing, and HEAD is then not loom's to amend.
+        if message.is_none() && repo::head_oid(&repo).ok() != head_before {
+            changeid::ensure_on_head_or_warn(&repo, &workdir, None);
+        }
+        Ok(())
+    };
 
     // Loose commit: commit on the integration branch itself, targeting no
     // feature branch. Happens with -i, or with no -b when the local branch name

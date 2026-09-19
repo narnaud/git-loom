@@ -215,13 +215,13 @@ Detection priority (first match wins):
 4. **URL heuristics**: Remote URL contains `dev.azure.com` → Azure DevOps
 5. **Hook inspection**: `.git/hooks/commit-msg` contains "gerrit" (case-insensitive) → Gerrit
 6. **Gerrit confirmation**: if nothing matched but the remote *looks* like
-   Gerrit — the remote URL uses Gerrit's standard SSH port (`:29418/`), or one
-   of the last 20 commits reachable from HEAD carries a `Change-Id:` trailer —
-   the user is asked to confirm. The answer is saved as
+   Gerrit — the remote URL uses Gerrit's standard SSH port (`:29418/`) — the
+   user is asked to confirm. The answer is saved as
    `git config loom.remote-type` (`gerrit` or `plain`) so the question is asked
    at most once per repository. This catches Gerrit repos where the hook check
    fails, e.g. when [pre-commit](https://pre-commit.com) manages the commit-msg
-   hook and the generated wrapper never mentions "gerrit".
+   hook and the generated wrapper never mentions "gerrit". A `Change-Id:`
+   trailer is not a hint: loom puts one on every commit it creates (Spec 002).
 7. **Fallback**: Plain
 
 Self-hosted GitLab instances whose hostname does not contain `gitlab` (e.g.

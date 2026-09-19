@@ -24,9 +24,9 @@ fn split_head_commit() {
     assert!(result.is_ok(), "split_head_commit failed: {:?}", result);
 
     // HEAD should be the second commit (original message)
-    assert_eq!(test_repo.get_message(0), "Two files commit");
+    assert_eq!(test_repo.get_subject(0), "Two files commit");
     // HEAD~1 should be the first commit (new message)
-    assert_eq!(test_repo.get_message(1), "First part");
+    assert_eq!(test_repo.get_subject(1), "First part");
 
     // Verify files are in the right commits
     assert_eq!(
@@ -100,11 +100,11 @@ fn split_non_head_commit() {
     assert!(result.is_ok(), "split_non_head_commit failed: {:?}", result);
 
     // HEAD should still be the later commit
-    assert_eq!(test_repo.get_message(0), "Later commit");
+    assert_eq!(test_repo.get_subject(0), "Later commit");
     // HEAD~1 should be the second part (original message)
-    assert_eq!(test_repo.get_message(1), "Two files commit");
+    assert_eq!(test_repo.get_subject(1), "Two files commit");
     // HEAD~2 should be the first part (new message)
-    assert_eq!(test_repo.get_message(2), "First part");
+    assert_eq!(test_repo.get_subject(2), "First part");
 }
 
 // ── Validation error tests ───────────────────────────────────────────
@@ -192,10 +192,10 @@ fn split_preserves_other_commits() {
     );
 
     // Verify surrounding commits are preserved
-    assert_eq!(test_repo.get_message(0), "After");
-    assert_eq!(test_repo.get_message(1), "Split me");
-    assert_eq!(test_repo.get_message(2), "First part");
-    assert_eq!(test_repo.get_message(3), "Before");
+    assert_eq!(test_repo.get_subject(0), "After");
+    assert_eq!(test_repo.get_subject(1), "Split me");
+    assert_eq!(test_repo.get_subject(2), "First part");
+    assert_eq!(test_repo.get_subject(3), "Before");
 
     // Before commit is an ancestor of the rebase range and should be unchanged
     assert_eq!(test_repo.get_oid(3), c1_oid);
@@ -271,8 +271,8 @@ fn split_head_commit_with_a_deletion() {
     );
 
     assert!(result.is_ok(), "split of a deletion failed: {:?}", result);
-    assert_eq!(test_repo.get_message(1), "Delete file1");
-    assert_eq!(test_repo.get_message(0), "Delete one, add another");
+    assert_eq!(test_repo.get_subject(1), "Delete file1");
+    assert_eq!(test_repo.get_subject(0), "Delete one, add another");
     assert!(!test_repo.commit_has_file(test_repo.get_oid(1), "file1.txt"));
     assert_eq!(
         test_repo.commit_file_paths(test_repo.get_oid(0)),
@@ -317,13 +317,19 @@ fn split_by_hunks_takes_a_submodule_from_the_commit() {
     let selections = [entry("Data", true, true), entry("other.txt", false, false)];
 
     let workdir = test_repo.workdir();
-    let (hash1, _hash2) =
-        super::perform_head_split_by_hunks(&workdir, &selections, Some("first"), "second").unwrap();
+    let (hash1, _hash2) = super::perform_head_split_by_hunks(
+        &test_repo.repo,
+        &workdir,
+        &selections,
+        Some("first"),
+        "second",
+    )
+    .unwrap();
 
     let split_off = git2::Oid::from_str(&hash1).unwrap();
     assert_eq!(test_repo.submodule_oid(split_off, "Data"), second);
-    assert_eq!(test_repo.get_message(1), "first");
-    assert_eq!(test_repo.get_message(0), "second");
+    assert_eq!(test_repo.get_subject(1), "first");
+    assert_eq!(test_repo.get_subject(0), "second");
 }
 
 #[test]
@@ -351,4 +357,118 @@ fn split_refuses_when_the_replay_is_dropped() {
         "{err}"
     );
     assert!(!crate::git::rebase_is_in_progress(t.repo.path()), "{err}");
+}
+
+// ── Change-Id ────────────────────────────────────────────────────────────
+
+const CHANGE_ID: &str = "I0123456789abcdef0123456789abcdef01234567";
+
+fn change_id_at(test_repo: &TestRepo, steps_back: usize) -> Option<String> {
+    crate::core::changeid::from_message(test_repo.get_commit(steps_back).message().unwrap())
+}
+
+#[test]
+fn split_keeps_the_change_id_on_the_second_commit_and_mints_one_for_the_first() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("Add files", "file1.txt");
+    let target_oid = test_repo.commit_multi(
+        &[("file_a.txt", "a"), ("file_b.txt", "b")],
+        &format!("Two files commit\n\nChange-Id: {CHANGE_ID}\n"),
+    );
+
+    super::split_commit_with_selection(
+        &test_repo.repo,
+        &target_oid.to_string(),
+        vec!["file_a.txt".to_string()],
+        "First part".to_string(),
+    )
+    .unwrap();
+
+    assert_eq!(change_id_at(&test_repo, 0).as_deref(), Some(CHANGE_ID));
+    let first = change_id_at(&test_repo, 1).expect("first half gets a fresh id");
+    assert_ne!(first, CHANGE_ID);
+    assert_eq!(
+        test_repo.get_message(0).matches("Change-Id:").count(),
+        1,
+        "the original trailer is not duplicated"
+    );
+}
+
+#[test]
+fn split_mints_change_ids_for_both_halves_of_a_plain_commit() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("Add files", "file1.txt");
+    let target_oid = test_repo.commit_multi(
+        &[("file_a.txt", "a"), ("file_b.txt", "b")],
+        "Two files commit",
+    );
+
+    super::split_commit_with_selection(
+        &test_repo.repo,
+        &target_oid.to_string(),
+        vec!["file_a.txt".to_string()],
+        "First part".to_string(),
+    )
+    .unwrap();
+
+    let second = change_id_at(&test_repo, 0).expect("second half");
+    let first = change_id_at(&test_repo, 1).expect("first half");
+    assert_ne!(first, second);
+    assert!(
+        test_repo
+            .get_message(0)
+            .starts_with("Two files commit\n\nChange-Id: I")
+    );
+}
+
+/// Split with `-m` equal to the id-less original's own text: both fresh ids
+/// come from the same ident, HEAD, and message, and must still differ.
+#[test]
+fn split_gives_distinct_ids_when_both_halves_share_the_message() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("Add files", "file1.txt");
+    let target_oid = test_repo.commit_multi(
+        &[("file_a.txt", "a"), ("file_b.txt", "b")],
+        "Two files commit",
+    );
+
+    super::split_commit_with_selection(
+        &test_repo.repo,
+        &target_oid.to_string(),
+        vec!["file_a.txt".to_string()],
+        "Two files commit".to_string(),
+    )
+    .unwrap();
+
+    let second = change_id_at(&test_repo, 0).expect("second half");
+    let first = change_id_at(&test_repo, 1).expect("first half");
+    assert_ne!(first, second);
+}
+
+#[test]
+fn split_with_editor_stamps_the_first_half_and_keeps_the_second() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("Add files", "file1.txt");
+    let target_oid = test_repo.commit_multi(
+        &[("file_a.txt", "a"), ("file_b.txt", "b")],
+        &format!("Two files commit\n\nChange-Id: {CHANGE_ID}\n"),
+    );
+    test_repo.set_fake_editor("First part by editor");
+
+    super::split_commit(
+        &test_repo.repo,
+        &target_oid.to_string(),
+        None,
+        false,
+        vec!["file_a.txt".to_string()],
+        &crate::core::graph::Theme::dark(),
+    )
+    .unwrap();
+
+    assert!(
+        test_repo
+            .get_message(1)
+            .starts_with("First part by editor\n\nChange-Id: I")
+    );
+    assert_eq!(change_id_at(&test_repo, 0).as_deref(), Some(CHANGE_ID));
 }

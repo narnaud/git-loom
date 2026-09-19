@@ -28,6 +28,29 @@ pub fn commit_amend(workdir: &Path, message: Option<&str>) -> Result<()> {
     }
 }
 
+/// Replace the current commit's message with `--no-verify`, so the
+/// `pre-commit` and `commit-msg` hooks that already ran on the commit are not
+/// run again by loom's own follow-up. Options forwarded to the first commit
+/// are not repeated here, so the new object follows git config alone
+/// (Spec 002).
+pub fn commit_amend_message_unverified(workdir: &Path, message: &str) -> Result<()> {
+    super::run_git(
+        workdir,
+        &[
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "--amend",
+            "--only",
+            "--no-verify",
+            // The message is stored text plus one trailer line: append it as is.
+            "--cleanup=verbatim",
+            "-m",
+            message,
+        ],
+    )
+}
+
 /// Amend the current commit, keeping its message and including staged changes
 /// (`git commit --amend --no-edit --allow-empty` — no `--only`, unlike
 /// [`commit_amend`]).

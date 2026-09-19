@@ -144,15 +144,17 @@ fn looks_like_gerrit_by_ssh_port() {
     assert!(super::looks_like_gerrit(&test_repo.repo, "origin/main"));
 }
 
+/// Every loom commit carries a Change-Id, so a trailer says nothing about the
+/// remote; treating it as a hint would prompt on every plain push.
 #[test]
-fn looks_like_gerrit_by_change_id_trailer() {
+fn looks_like_gerrit_ignores_change_id_trailers() {
     let test_repo = TestRepo::new_with_remote();
     test_repo.commit(
         "C1\n\nChange-Id: I61096b677887afc82613103d8467808b77ecbd50",
         "c1.txt",
     );
 
-    assert!(super::looks_like_gerrit(&test_repo.repo, "origin/main"));
+    assert!(!super::looks_like_gerrit(&test_repo.repo, "origin/main"));
 }
 
 #[test]

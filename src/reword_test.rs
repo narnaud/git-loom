@@ -28,11 +28,11 @@ fn reword_commit_with_message() {
 
     // The original c1_oid has been rewritten, so we need to find the new commit
     // by walking back from HEAD
-    assert_eq!(test_repo.get_message(2), "Updated first commit");
+    assert_eq!(test_repo.get_subject(2), "Updated first commit");
 
     // Other commits should have same messages but different hashes (because parent changed)
-    assert_eq!(test_repo.get_message(1), "Second commit");
-    assert_eq!(test_repo.get_message(0), "Third commit");
+    assert_eq!(test_repo.get_subject(1), "Second commit");
+    assert_eq!(test_repo.get_subject(0), "Third commit");
 
     assert_ne!(
         test_repo.get_oid(2),
@@ -65,7 +65,7 @@ fn reword_commit_without_message() {
     }
     assert!(result.is_ok(), "Failed to reword commit: {:?}", result);
 
-    assert_eq!(test_repo.get_message(1), "Reworded by editor");
+    assert_eq!(test_repo.get_subject(1), "Reworded by editor");
 }
 
 #[test]
@@ -88,7 +88,7 @@ fn reword_root_commit() {
     }
     assert!(result.is_ok(), "Failed to reword root commit: {:?}", result);
 
-    assert_eq!(test_repo.get_message(0), "Updated initial commit");
+    assert_eq!(test_repo.get_subject(0), "Updated initial commit");
     assert_eq!(
         test_repo.get_commit(0).parent_count(),
         0,
@@ -127,15 +127,15 @@ fn reword_root_commit_with_descendants() {
         result
     );
 
-    assert_eq!(test_repo.get_message(2), "Updated root");
+    assert_eq!(test_repo.get_subject(2), "Updated root");
     assert_eq!(
         test_repo.get_commit(2).parent_count(),
         0,
         "Should still be a root commit"
     );
 
-    assert_eq!(test_repo.get_message(1), "Second commit");
-    assert_eq!(test_repo.get_message(0), "Third commit");
+    assert_eq!(test_repo.get_subject(1), "Second commit");
+    assert_eq!(test_repo.get_subject(0), "Third commit");
 }
 
 #[test]
@@ -241,7 +241,7 @@ fn reword_commit_with_partial_hash() {
         result
     );
 
-    assert_eq!(test_repo.get_message(1), "Updated via partial hash");
+    assert_eq!(test_repo.get_subject(1), "Updated via partial hash");
 }
 
 #[test]
@@ -569,5 +569,86 @@ fn reword_works_with_a_short_core_abbrev() {
 
     super::reword_commit(&t.repo, &c1.to_string(), Some("Reworded".to_string())).unwrap();
 
-    assert_eq!(t.get_message(1), "Reworded");
+    assert_eq!(t.get_subject(1), "Reworded");
+}
+
+// ── Change-Id ────────────────────────────────────────────────────────────
+
+const CHANGE_ID: &str = "I0123456789abcdef0123456789abcdef01234567";
+
+#[test]
+fn reword_with_message_keeps_the_change_id() {
+    let test_repo = TestRepo::new();
+    let c1_oid = test_repo.commit(&format!("First\n\nChange-Id: {CHANGE_ID}\n"), "file1.txt");
+    test_repo.commit("Second", "file2.txt");
+
+    super::reword_commit(
+        &test_repo.repo,
+        &c1_oid.to_string(),
+        Some("Updated first".to_string()),
+    )
+    .unwrap();
+
+    assert_eq!(
+        test_repo.get_message(1),
+        format!("Updated first\n\nChange-Id: {CHANGE_ID}")
+    );
+}
+
+#[test]
+fn reword_with_editor_restores_a_dropped_change_id() {
+    let test_repo = TestRepo::new();
+    let c1_oid = test_repo.commit(&format!("First\n\nChange-Id: {CHANGE_ID}\n"), "file1.txt");
+    test_repo.commit("Second", "file2.txt");
+    test_repo.set_fake_editor("Reworded by editor");
+
+    super::reword_commit(&test_repo.repo, &c1_oid.to_string(), None).unwrap();
+
+    assert_eq!(
+        test_repo.get_message(1),
+        format!("Reworded by editor\n\nChange-Id: {CHANGE_ID}")
+    );
+    assert_eq!(test_repo.get_message(0), "Second");
+}
+
+/// A Change-Id written in the editor is deliberate: it wins over the old one.
+#[test]
+fn reword_with_editor_keeps_a_change_id_the_editor_wrote() {
+    let test_repo = TestRepo::new();
+    let c1_oid = test_repo.commit(&format!("First\n\nChange-Id: {CHANGE_ID}\n"), "file1.txt");
+    let other = "I9999999999999999999999999999999999999999";
+    test_repo.set_fake_editor(&format!("Reworded by editor\n\nChange-Id: {other}"));
+
+    super::reword_commit(&test_repo.repo, &c1_oid.to_string(), None).unwrap();
+
+    assert_eq!(
+        test_repo.get_message(0),
+        format!("Reworded by editor\n\nChange-Id: {other}")
+    );
+}
+
+#[test]
+fn reword_mints_a_change_id_for_a_commit_without_one() {
+    let test_repo = TestRepo::new();
+    let c1_oid = test_repo.commit("First", "file1.txt");
+
+    super::reword_commit(
+        &test_repo.repo,
+        &c1_oid.to_string(),
+        Some("Updated first".to_string()),
+    )
+    .unwrap();
+
+    let msg = test_repo.get_message(0);
+    assert!(msg.starts_with("Updated first\n\nChange-Id: I"), "{msg}");
+
+    test_repo.set_config("loom.changeId", "false");
+    let c2_oid = test_repo.commit("Plain", "file2.txt");
+    super::reword_commit(
+        &test_repo.repo,
+        &c2_oid.to_string(),
+        Some("Still plain".to_string()),
+    )
+    .unwrap();
+    assert_eq!(test_repo.get_message(0), "Still plain");
 }

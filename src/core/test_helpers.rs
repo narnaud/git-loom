@@ -139,6 +139,13 @@ impl TestRepo {
         // against an index that holds LF. Pin it so a fixture means the same
         // thing on every platform.
         config.set_str("core.autocrlf", "false").unwrap();
+        // Hooks a test installs go in this repository's `.git/hooks`; a
+        // `core.hooksPath` in the user's config would leave them all inert, and
+        // the test passing for the wrong reason.
+        let hooks = repo.path().join("hooks").display().to_string();
+        config
+            .set_str("core.hooksPath", &hooks.replace('\\', "/"))
+            .unwrap();
     }
 
     /// Get the signature used for commits.
@@ -245,6 +252,11 @@ impl TestRepo {
             .unwrap()
             .trim()
             .to_string()
+    }
+
+    /// Get the first line of the commit message at a position relative to HEAD.
+    pub fn get_subject(&self, steps_back: usize) -> String {
+        crate::core::repo::commit_subject(&self.get_commit(steps_back))
     }
 
     /// Get the OID of a commit relative to HEAD.
@@ -407,24 +419,16 @@ impl TestRepo {
         self.repo.set_head_detached(oid).unwrap();
     }
 
-    /// Set up a fake editor that replaces commit messages, returning the script
-    /// path.
+    /// Set up a fake editor that replaces commit messages. Per repository
+    /// (`core.editor`), so tests running at the same time each keep their own
+    /// message.
     ///
     /// Only reaches `run_git_interactive` commands: `run_git_captured` sets
     /// `GIT_EDITOR=true` itself, so captured commands ignore it.
-    pub fn set_fake_editor(&self, new_message: &str) -> String {
+    pub fn set_fake_editor(&self, new_message: &str) {
         // Git on Windows uses Git Bash, so we use the same shell command format for all platforms
         let editor_script = format!("sh -c 'echo \"{}\" > \"$1\"' --", new_message);
-
-        // SAFETY: `set_var` is process-global, so every test running at the
-        // same time sees this editor. Captured commands ignore `GIT_EDITOR`,
-        // and no other test runs a git command that opens an editor, so
-        // nothing else observes it.
-        unsafe {
-            std::env::set_var("GIT_EDITOR", &editor_script);
-        }
-
-        editor_script
+        self.set_config("core.editor", &editor_script);
     }
 
     /// Path to the remote repository, `None` without a remote.git setup.

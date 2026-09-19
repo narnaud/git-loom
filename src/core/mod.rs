@@ -1,4 +1,5 @@
 pub mod agent_mode;
+pub mod changeid;
 pub mod diff;
 pub mod graph;
 pub mod msg;

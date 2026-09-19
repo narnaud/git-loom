@@ -28,7 +28,8 @@ Change the target message and replay descendants with native interactive rebase.
 - preserve commit contents, messages of other commits, topology (including merges), and empty commits;
 - update rewritten descendant hashes and affected branch refs;
 - leave branches outside the ancestry chain unchanged;
-- automatically stash and restore working-tree changes.
+- automatically stash and restore working-tree changes;
+- keep the commit's `Change-Id` (Spec 002): with `-m` it is re-appended to the new message unless that message already carries one; with the editor it is restored after editing. A commit without one receives a fresh one when generation is enabled.
 
 Rebuilding a descendant merge can conflict, including a merge previously resolved manually. With `rerere`, Git may replay the resolution but rebase still stops; `rerere.autoUpdate` may also stage it.
 

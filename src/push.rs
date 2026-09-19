@@ -430,43 +430,23 @@ fn detect_remote_type(
     Ok(RemoteType::Plain)
 }
 
-/// Hints of a Gerrit remote: the standard SSH port (29418), or a recent
-/// commit carrying a `Change-Id:` trailer. Only hints — the hook check in
-/// [`detect_remote_type`] can miss (e.g. pre-commit owns commit-msg) — so
-/// callers confirm with the user first.
+/// Hint of a Gerrit remote: the standard SSH port (29418). Only a hint — the
+/// hook check in [`detect_remote_type`] can miss (e.g. pre-commit owns
+/// commit-msg) — so callers confirm with the user first. `Change-Id` trailers
+/// are no hint: loom itself puts one on every commit (Spec 002).
 fn looks_like_gerrit(repo: &Repository, upstream_label: &str) -> bool {
     let remote_name = extract_remote_name(upstream_label);
-    if let Ok(remote) = repo.find_remote(&remote_name)
-        && let Ok(url) = remote.url()
-        && url.contains(":29418/")
-    {
-        return true;
-    }
-    recent_commits_have_change_id(repo)
-}
-
-/// Whether any of the last 20 commits reachable from HEAD carries a
-/// `Change-Id:` trailer.
-fn recent_commits_have_change_id(repo: &Repository) -> bool {
-    let Ok(mut revwalk) = repo.revwalk() else {
-        return false;
-    };
-    if revwalk.push_head().is_err() {
-        return false;
-    }
-    revwalk.take(20).flatten().any(|oid| {
-        repo.find_commit(oid)
-            .ok()
-            .and_then(|c| c.message().ok().map(|m| m.contains("\nChange-Id: I")))
-            .unwrap_or(false)
-    })
+    repo.find_remote(&remote_name)
+        .ok()
+        .and_then(|remote| remote.url().ok().map(|url| url.contains(":29418/")))
+        .unwrap_or(false)
 }
 
 /// Ask the user to confirm a suspected Gerrit remote, saving the answer as
 /// `loom.remote-type` so the question is asked at most once per repository.
 fn confirm_gerrit(workdir: &Path, upstream_label: &str) -> Result<RemoteType> {
     let is_gerrit = msg::confirm(
-        "This remote looks like Gerrit (SSH port 29418 or Change-Id trailers). Is it a Gerrit remote?",
+        "This remote looks like Gerrit (SSH port 29418). Is it a Gerrit remote?",
         "set `git config loom.remote-type gerrit` (or plain), then re-run: loom push <branch>",
     )?;
     let value = if is_gerrit { "gerrit" } else { "plain" };

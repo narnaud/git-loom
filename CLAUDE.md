@@ -22,7 +22,7 @@ keep it terse and normative, and do not duplicate rules, docs, or examples.
 | Spec | Feature |
 | --- | --- |
 | `specs/001-status.md` | Branch-aware status / commit graph display |
-| `specs/002-shortid.md` | Short ID generation and collision resolution |
+| `specs/002-shortid.md` | Short ID generation and collision resolution; persistent commit identity (`Change-Id`) |
 | `specs/003-reword.md` | Commit reword / branch rename via short IDs |
 | `specs/004-weave.md` | Weave: structured graph model for topology-aware rebase |
 | `specs/005-branch.md` | Branch creation and weaving into integration branches |

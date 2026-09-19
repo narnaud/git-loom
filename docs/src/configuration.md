@@ -9,6 +9,7 @@
 | `loom.hideBranchPattern` | Any prefix string | `local-` | Prefix for branches hidden from `loom status` by default |
 | `loom.statusContext` | Integer ≥ 1 | `1` | Context commits shown at and before the base by `loom status` and `loom tui` |
 | `loom.pruneGoneBranches` | `true`, `false` | `false` | Let `git loom update` remove local branches whose remote branch is gone |
+| `loom.changeId` | `true`, `false` | `true` | Add a Gerrit-style `Change-Id` trailer to every commit loom creates |
 
 ### `loom.remote-type`
 
@@ -70,6 +71,29 @@ git config loom.statusContext 5
 ```
 
 The positional argument overrides it for one run (`git loom status 1`), and in `loom tui` the `+` and `-` keys change the depth live.
+
+### `loom.changeId`
+
+Every commit that `git loom commit`, `split`, or `reword` creates ends with a
+`Change-Id: I<40 hex>` trailer, in the form Gerrit's `commit-msg` hook
+writes. Git rebases copy messages verbatim, so the trailer gives a commit one
+identity that survives every `update`, `fold`, `swap`, or `split`.
+
+```bash
+git config loom.changeId false   # create commits without a Change-Id
+```
+
+Gerrit's own settings are honored too: `gerrit.createChangeId false` also
+disables generation, and with `gerrit.reviewUrl` set the trailer is written in
+Gerrit's `Link: <url>/id/I<hex>` form. Commits that already carry a Change-Id
+are never stamped twice, and a `commit-msg` hook, if installed, still runs:
+with `-m` it sees the trailer loom added; on the editor path it runs first, and
+a Change-Id it adds is kept. Without `-m`, loom adds a missing trailer by
+amending the message once after the editor, so `post-commit` and
+`post-rewrite` hooks see that amend too. That amend follows your git config
+rather than the options you passed after `--`: a commit signed through
+`commit.gpgsign` stays signed, one signed only by a forwarded `-S` loses its
+signature. Set the config, or pass `-m`.
 
 ## Environment Variables
 

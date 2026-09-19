@@ -41,7 +41,7 @@ After staging resolution, an empty index errors exactly `Nothing to commit`.
 1. Resolve staging.
 2. Select loose or branch-targeted mode.
 3. For branch-targeted mode, resolve/create target and obtain message.
-4. Create the commit.
+4. Create the commit, with a `Change-Id` trailer per Spec 002 (on `-m` and editor paths alike; `-- --no-verify` does not disable it).
 5. Move it to the feature branch and update topology/refs in one operation.
 
 ### Loose mode

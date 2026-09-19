@@ -933,3 +933,371 @@ fn after_continue_reads_a_state_file_without_the_saved_staged_field() {
         aside
     );
 }
+
+// ── Change-Id ────────────────────────────────────────────────────────────
+
+const CHANGE_ID: &str = "I0123456789abcdef0123456789abcdef01234567";
+
+fn full_message(test_repo: &TestRepo, rev: &str) -> String {
+    test_repo
+        .repo
+        .revparse_single(rev)
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .message()
+        .unwrap()
+        .to_string()
+}
+
+/// A `commit-msg` hook that adds its own Change-Id when the message has none,
+/// as Gerrit's does.
+fn write_gerrit_like_hook(test_repo: &TestRepo) {
+    write_hook(
+        test_repo,
+        "commit-msg",
+        "grep -q '^Change-Id:' \"$1\" || printf '\\nChange-Id: I%s\\n' \
+         0000000000000000000000000000000000000000 >> \"$1\"",
+    );
+}
+
+fn write_hook(test_repo: &TestRepo, name: &str, body: &str) {
+    write_script(test_repo, &format!(".git/hooks/{name}"), body);
+}
+
+/// A `sh` script under the workdir; returns its path, slashes forward so git
+/// config accepts it on Windows too.
+fn write_script(test_repo: &TestRepo, relative: &str, body: &str) -> String {
+    let script = test_repo.workdir().join(relative);
+    std::fs::create_dir_all(script.parent().unwrap()).unwrap();
+    std::fs::write(&script, format!("#!/bin/sh\n{body}\nexit 0\n")).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    script.display().to_string().replace('\\', "/")
+}
+
+/// A `commit-msg` hook that logs every run to `runs` in the workdir.
+fn write_counting_hook(test_repo: &TestRepo) {
+    let log = test_repo
+        .workdir()
+        .join("runs")
+        .display()
+        .to_string()
+        .replace('\\', "/");
+    write_hook(test_repo, "commit-msg", &format!("echo run >> \"{log}\""));
+}
+
+#[test]
+fn commit_adds_a_change_id_trailer() {
+    let test_repo = setup_with_woven_branch();
+    test_repo.write_file("a.txt", "a");
+
+    let result = test_repo.in_dir(|| {
+        run(
+            Some("feature-a".to_string()),
+            Some("Add a".to_string()),
+            vec!["a.txt".to_string()],
+        )
+    });
+    assert!(result.is_ok(), "{result:?}");
+
+    let msg = full_message(&test_repo, "feature-a");
+    assert!(msg.starts_with("Add a\n\nChange-Id: I"), "{msg}");
+    assert!(crate::core::changeid::from_message(&msg).is_some());
+}
+
+#[test]
+fn commit_respects_the_change_id_opt_out() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.set_config("loom.changeId", "false");
+    test_repo.write_file("a.txt", "a");
+
+    let result = test_repo.in_dir(|| run_integration("Plain", vec!["a.txt".to_string()]));
+    assert!(result.is_ok(), "{result:?}");
+
+    assert_eq!(full_message(&test_repo, "HEAD"), "Plain\n");
+}
+
+#[test]
+fn commit_keeps_a_change_id_already_in_the_message() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.write_file("a.txt", "a");
+    let message = format!("Has one\n\nChange-Id: {CHANGE_ID}");
+
+    let result = test_repo.in_dir(|| run_integration(&message, vec!["a.txt".to_string()]));
+    assert!(result.is_ok(), "{result:?}");
+
+    let msg = full_message(&test_repo, "HEAD");
+    assert_eq!(msg.matches("Change-Id:").count(), 1, "{msg}");
+    assert!(msg.contains(CHANGE_ID));
+}
+
+#[test]
+fn commit_editor_path_gets_a_change_id_after_editing() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.set_fake_editor("Reworded by editor");
+    test_repo.write_file("a.txt", "a");
+
+    let result = test_repo.in_dir(|| {
+        super::run(
+            None,
+            true,
+            None,
+            false,
+            vec!["a.txt".to_string()],
+            vec![],
+            &graph::Theme::dark(),
+        )
+    });
+    assert!(result.is_ok(), "{result:?}");
+
+    let msg = full_message(&test_repo, "HEAD");
+    assert!(
+        msg.starts_with("Reworded by editor\n\nChange-Id: I"),
+        "{msg}"
+    );
+    assert_eq!(
+        test_repo.commit_file_paths(test_repo.head_oid()),
+        vec!["a.txt"]
+    );
+}
+
+/// The amend that adds the trailer after the editor runs no hooks: they
+/// already ran on the commit the user made.
+#[test]
+fn commit_editor_path_runs_hooks_once() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.set_fake_editor("Reworded by editor");
+    write_counting_hook(&test_repo);
+    test_repo.write_file("a.txt", "a");
+
+    let result = test_repo.in_dir(|| {
+        super::run(
+            None,
+            true,
+            None,
+            false,
+            vec!["a.txt".to_string()],
+            vec![],
+            &graph::Theme::dark(),
+        )
+    });
+    assert!(result.is_ok(), "{result:?}");
+
+    let runs = std::fs::read_to_string(test_repo.workdir().join("runs")).unwrap();
+    assert_eq!(runs.lines().count(), 1, "{runs}");
+    assert!(full_message(&test_repo, "HEAD").contains("Change-Id: I"));
+}
+
+/// The trailer amend failing must not turn a commit that exists into an error
+/// and leave it stranded on the integration branch.
+#[test]
+fn commit_editor_path_survives_a_failing_trailer_amend() {
+    let test_repo = setup_with_woven_branch();
+    test_repo.set_fake_editor("Reworded by editor");
+    // Only the amend carries the trailer; the editor commit and the weave's
+    // picks pass.
+    write_hook(
+        &test_repo,
+        "prepare-commit-msg",
+        "grep -q Change-Id \"$1\" && exit 1",
+    );
+    test_repo.write_file("a.txt", "a");
+
+    let result = test_repo.in_dir(|| {
+        run(
+            Some("feature-a".to_string()),
+            None,
+            vec!["a.txt".to_string()],
+        )
+    });
+    assert!(result.is_ok(), "{result:?}");
+
+    assert_eq!(
+        test_repo.branch_commit_summary("feature-a"),
+        "Reworded by editor"
+    );
+    assert!(!full_message(&test_repo, "feature-a").contains("Change-Id"));
+}
+
+/// The trailer amend builds a new object, so it must still honor the signing
+/// config. A fake gpg that git accepts stands in for a key.
+#[test]
+fn commit_editor_path_keeps_a_configured_signature() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.set_fake_editor("Reworded by editor");
+    let gpg = write_script(
+        &test_repo,
+        ".git/fake-gpg",
+        "printf '\\n[GNUPG:] SIG_CREATED D 1 8 00 1 X\\n' >&2\n\
+         printf -- '-----BEGIN PGP SIGNATURE-----\\n\\nfake\\n-----END PGP SIGNATURE-----\\n'",
+    );
+    test_repo.set_config("gpg.program", &gpg);
+    test_repo.set_config("user.signingkey", "fake");
+    test_repo.set_config("commit.gpgsign", "true");
+    test_repo.write_file("a.txt", "a");
+
+    let result = test_repo.in_dir(|| {
+        super::run(
+            None,
+            true,
+            None,
+            false,
+            vec!["a.txt".to_string()],
+            vec![],
+            &graph::Theme::dark(),
+        )
+    });
+    assert!(result.is_ok(), "{result:?}");
+
+    let head = test_repo.head_commit();
+    assert!(head.raw_header().unwrap().contains("gpgsig"));
+    assert!(full_message(&test_repo, "HEAD").contains("Change-Id: I"));
+}
+
+/// The trailer amend appends to the stored message as is: a `#` line the
+/// user's forwarded `--cleanup=verbatim` kept must not fall to `commit.cleanup`.
+#[test]
+fn commit_editor_path_amend_keeps_the_stored_message_verbatim() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.set_config("commit.cleanup", "strip");
+    test_repo.set_fake_editor("Reworded by editor\n\n# kept");
+    test_repo.write_file("a.txt", "a");
+
+    let result = test_repo.in_dir(|| {
+        super::run(
+            None,
+            true,
+            None,
+            false,
+            vec!["a.txt".to_string()],
+            vec!["--cleanup=verbatim".to_string()],
+            &graph::Theme::dark(),
+        )
+    });
+    assert!(result.is_ok(), "{result:?}");
+
+    let msg = full_message(&test_repo, "HEAD");
+    assert!(
+        msg.starts_with("Reworded by editor\n\n# kept\n\nChange-Id: I"),
+        "{msg}"
+    );
+}
+
+#[test]
+fn commit_msg_hook_sees_looms_change_id() {
+    let test_repo = TestRepo::new_with_remote();
+    write_gerrit_like_hook(&test_repo);
+    test_repo.write_file("a.txt", "a");
+
+    let result = test_repo.in_dir(|| run_integration("Hooked", vec!["a.txt".to_string()]));
+    assert!(result.is_ok(), "{result:?}");
+
+    let msg = full_message(&test_repo, "HEAD");
+    assert_eq!(msg.matches("Change-Id:").count(), 1, "{msg}");
+    assert!(
+        !msg.contains("I0000000000"),
+        "the hook id must not win: {msg}"
+    );
+}
+
+#[test]
+fn commit_no_verify_still_adds_a_change_id() {
+    let test_repo = TestRepo::new_with_remote();
+    write_gerrit_like_hook(&test_repo);
+    test_repo.write_file("a.txt", "a");
+
+    let result = test_repo.in_dir(|| {
+        super::run(
+            None,
+            true,
+            Some("Unverified".to_string()),
+            false,
+            vec!["a.txt".to_string()],
+            vec!["--no-verify".to_string()],
+            &graph::Theme::dark(),
+        )
+    });
+    assert!(result.is_ok(), "{result:?}");
+
+    let msg = full_message(&test_repo, "HEAD");
+    assert!(msg.starts_with("Unverified\n\nChange-Id: I"), "{msg}");
+}
+
+/// Stamping runs before anything is set aside, so its failure cannot leave
+/// the user's other staged files unstaged.
+#[test]
+fn commit_restores_other_staged_files_when_the_change_id_cannot_be_generated() {
+    let test_repo = TestRepo::new_with_remote();
+    // SAFETY: removals only, so concurrent tests cannot disagree, and every
+    // fixture sets its identity in repo config. An exported one would
+    // otherwise satisfy `git var`.
+    unsafe {
+        for var in ["GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "EMAIL"] {
+            std::env::remove_var(var);
+        }
+    }
+    test_repo.set_config("user.useConfigOnly", "true");
+    test_repo.set_config("user.name", "");
+    test_repo.set_config("user.email", "");
+    test_repo.write_file("other.txt", "other");
+    test_repo.stage_files(&["other.txt"]);
+    test_repo.write_file("mine.txt", "mine");
+
+    let result = test_repo.in_dir(|| run_integration("Nobody", vec!["mine.txt".to_string()]));
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("committer identity"), "{err}");
+
+    let status = test_repo.status_porcelain();
+    assert!(
+        status.lines().any(|l| l == "A  other.txt"),
+        "other.txt must still be staged, got: {status:?}"
+    );
+}
+
+/// Loom writes the trailer into the message itself, so `trailer.*` config
+/// cannot rename, move, or suppress it.
+#[test]
+fn commit_ignores_trailer_config() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.set_config("trailer.Change-Id.key", "Nope");
+    test_repo.set_config("trailer.ifexists", "doNothing");
+    test_repo.set_config("trailer.where", "start");
+    test_repo.write_file("a.txt", "a");
+
+    let result = test_repo.in_dir(|| run_integration("Configured", vec!["a.txt".to_string()]));
+    assert!(result.is_ok(), "{result:?}");
+
+    let msg = full_message(&test_repo, "HEAD");
+    assert!(msg.starts_with("Configured\n\nChange-Id: I"), "{msg}");
+    assert_eq!(msg.lines().count(), 3, "{msg}");
+    assert!(crate::core::changeid::from_message(&msg).is_some(), "{msg}");
+}
+
+/// A forwarded option that creates no commit leaves HEAD alone: the
+/// editor-path stamping must never amend a commit loom did not create.
+#[test]
+fn commit_dry_run_does_not_amend_head() {
+    let test_repo = TestRepo::new_with_remote();
+    let head = test_repo.head_oid();
+    test_repo.write_file("a.txt", "a");
+
+    let result = test_repo.in_dir(|| {
+        super::run(
+            None,
+            true,
+            None,
+            false,
+            vec!["a.txt".to_string()],
+            vec!["--dry-run".to_string()],
+            &graph::Theme::dark(),
+        )
+    });
+    assert!(result.is_ok(), "{result:?}");
+
+    assert_eq!(test_repo.head_oid(), head);
+    assert!(!full_message(&test_repo, "HEAD").contains("Change-Id"));
+}

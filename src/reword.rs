@@ -8,6 +8,7 @@ use crate::branch;
 use crate::core::repo::{self, Target};
 
 use crate::core::agent_mode;
+use crate::core::changeid;
 use crate::core::msg;
 use crate::core::transaction::{self, LoomState, Rollback};
 use crate::core::weave;
@@ -91,13 +92,25 @@ pub fn reword_commit(repo: &Repository, commit_hash: &str, message: Option<Strin
 
     let workdir = repo::require_workdir(repo, "reword")?;
 
-    let commit_oid = repo.revparse_single(commit_hash)?.peel_to_commit()?.id();
+    let commit = repo.revparse_single(commit_hash)?.peel_to_commit()?;
+    let commit_oid = commit.id();
+    // The identity survives the reword: re-stamped on the new message, or
+    // restored after an editor that dropped it (Spec 002).
+    let keep = commit.message().ok().and_then(changeid::from_message);
+    let message = match &message {
+        Some(m) => Some(changeid::for_message(repo, workdir, m, keep.as_deref())?),
+        None => None,
+    };
 
     // Step 1: Start interactive rebase with edit at target
     weave::start_edit_rebase(repo, workdir, commit_oid)?;
 
     // Step 2: Amend the commit message
-    if let Err(e) = git::commit_amend(workdir, message.as_deref()) {
+    let amend = git::commit_amend(workdir, message.as_deref()).and_then(|()| match message {
+        Some(_) => Ok(()),
+        None => changeid::ensure_on_head(repo, workdir, keep.as_deref()),
+    });
+    if let Err(e) = amend {
         return Err(git::rebase_abort_then_cleanup(workdir, e, || {}));
     }
 
