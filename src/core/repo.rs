@@ -524,7 +524,10 @@ impl RepoInfo {
         }
 
         for commit in &self.commits {
-            entities.push(crate::core::shortid::Entity::Commit(commit.oid));
+            entities.push(crate::core::shortid::Entity::Commit {
+                oid: commit.oid,
+                change_id: commit.change_id.clone(),
+            });
         }
 
         for file in &self.working_changes {
@@ -546,6 +549,8 @@ pub struct CommitInfo {
     /// Parent commit OID (None for root commits). Always a single parent
     /// since merge commits are excluded.
     pub parent_oid: Option<git2::Oid>,
+    /// Canonical Change-Id from the message trailers, when present (Spec 002).
+    pub change_id: Option<String>,
     /// Files changed in this commit (only populated when `-f` is active).
     pub files: Vec<FileChange>,
 }
@@ -859,6 +864,10 @@ fn walk_commits(
             .context("Commit short_id is not valid UTF-8")?
             .to_string();
         let message = commit_subject(&commit);
+        let change_id = commit
+            .message()
+            .ok()
+            .and_then(crate::core::changeid::from_message);
         let parent_oid = commit.parent_id(0).ok();
         let files = if show_files {
             get_commit_files(repo, &commit)?
@@ -869,6 +878,7 @@ fn walk_commits(
             oid,
             short_id,
             message,
+            change_id,
             parent_oid,
             files,
         });

@@ -1,27 +1,52 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::core::changeid;
+
 /// Types of entities that can receive short IDs.
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub enum Entity {
     Unstaged,
     Branch(String),
-    Commit(git2::Oid),
+    Commit {
+        oid: git2::Oid,
+        /// Canonical Change-Id when the commit carries one (Spec 002).
+        change_id: Option<String>,
+    },
     File(String),
 }
 
-/// Allocates unique short IDs (2+ characters) to entities, resolving collisions
-/// by trying alternative 2-char combinations before falling back to 3+ chars.
+#[cfg(test)]
+impl Entity {
+    /// A commit with no Change-Id.
+    pub fn commit(oid: git2::Oid) -> Self {
+        Entity::Commit {
+            oid,
+            change_id: None,
+        }
+    }
+}
+
+/// Allocates unique short IDs to entities (Spec 002): persistent letter IDs
+/// for commits with a Change-Id, word-based or hash-prefix IDs for the rest,
+/// resolving collisions by trying alternative candidates.
 pub struct IdAllocator {
     map: HashMap<Entity, String>,
+    commits: HashMap<git2::Oid, String>,
 }
 
 impl IdAllocator {
     /// Create a new allocator from a list of entities.
     /// IDs are deterministic: same entities in same order produce same IDs.
     pub fn new(entities: Vec<Entity>) -> Self {
-        IdAllocator {
-            map: resolve_collisions(entities),
-        }
+        let map = resolve_collisions(entities);
+        let commits = map
+            .iter()
+            .filter_map(|(entity, id)| match entity {
+                Entity::Commit { oid, .. } => Some((*oid, id.clone())),
+                _ => None,
+            })
+            .collect();
+        IdAllocator { map, commits }
     }
 
     pub fn get_unstaged(&self) -> &str {
@@ -39,10 +64,7 @@ impl IdAllocator {
     }
 
     pub fn get_commit(&self, oid: git2::Oid) -> &str {
-        self.map
-            .get(&Entity::Commit(oid))
-            .map(|s| s.as_str())
-            .unwrap_or("")
+        self.commits.get(&oid).map(|s| s.as_str()).unwrap_or("")
     }
 
     pub fn get_file(&self, path: &str) -> &str {
@@ -50,6 +72,11 @@ impl IdAllocator {
             .get(&Entity::File(path.to_string()))
             .map(|s| s.as_str())
             .unwrap_or("")
+    }
+
+    /// Width of the widest commit ID, for column alignment.
+    pub fn commit_id_width(&self) -> usize {
+        self.commits.values().map(|s| s.len()).max().unwrap_or(0)
     }
 }
 
@@ -62,12 +89,13 @@ impl IdAllocator {
 /// - Single-word names: first 2 letters (e.g. `main` → `ma`). If collision on
 ///   first letter, shift forward (e.g. `main`, `mainstream` → `ma`, `ai`).
 ///
-/// For commits, candidates are successive prefixes of the hex hash (2, 3, 4…).
+/// For commits, candidates are successive prefixes of the hex hash (2, 3,
+/// 4…); a commit with a Change-Id gets [`persistent_candidates`] instead.
 fn generate_candidates(entity: &Entity) -> Vec<String> {
     let candidates = match entity {
         // `zz` belongs to unstaged changes, which commands match literally.
         Entity::Unstaged => return vec!["zz".to_string()],
-        Entity::Commit(oid) => {
+        Entity::Commit { oid, .. } => {
             let hex = oid.to_string();
             let chars: Vec<char> = hex.chars().collect();
             (2..=chars.len())
@@ -104,6 +132,48 @@ fn generate_candidates(entity: &Entity) -> Vec<String> {
     }
 }
 
+/// For each commit whose Change-Id no other commit shares: prefixes of its
+/// letters from the shortest length, at least [`changeid::MIN_LEN`], at which
+/// they differ from every other such commit's. Symmetric by construction, so
+/// a new commit sharing a prefix lengthens both IDs and can never take an
+/// existing one (Spec 002). Twins are left out: a shared Change-Id identifies
+/// none of them, so they fall back to hash prefixes.
+fn persistent_candidates(entities: &[Entity]) -> HashMap<git2::Oid, Vec<String>> {
+    let mut owners: HashMap<&str, Vec<git2::Oid>> = HashMap::new();
+    for entity in entities {
+        if let Entity::Commit {
+            oid,
+            change_id: Some(change_id),
+        } = entity
+        {
+            owners.entry(change_id).or_default().push(*oid);
+        }
+    }
+    let unique: Vec<(git2::Oid, Vec<char>)> = owners
+        .iter()
+        .filter(|(_, oids)| oids.len() == 1)
+        .map(|(change_id, oids)| (oids[0], changeid::to_letters(change_id).chars().collect()))
+        .collect();
+
+    unique
+        .iter()
+        .map(|(oid, letters)| {
+            let mut n = changeid::MIN_LEN.min(letters.len());
+            while n < letters.len()
+                && unique
+                    .iter()
+                    .any(|(other, l)| other != oid && l[..n] == letters[..n])
+            {
+                n += 1;
+            }
+            let candidates = (n..=letters.len())
+                .map(|n| letters[..n].iter().collect())
+                .collect();
+            (*oid, candidates)
+        })
+        .collect()
+}
+
 /// Build candidate IDs from a name, splitting on `-`, `_`, `/`.
 fn word_candidates(name: &str) -> Vec<String> {
     let words: Vec<Vec<char>> = name
@@ -121,7 +191,7 @@ fn word_candidates(name: &str) -> Vec<String> {
 
 /// Candidates for multi-word names: first letter of first word, first letter of second word.
 /// Then shift indices forward to avoid collisions.
-/// Example: `feature-alpha` → `fa`, then `fe`, `ft`, `fu`, `fr`, `ea`, `la`, etc.
+/// Example: `feature-alpha` → `fa`, then `fl`, `fp`, `fh`, `ea`, `el`, etc.
 fn multi_word_candidates(words: &[Vec<char>]) -> Vec<String> {
     let mut candidates = Vec::new();
 
@@ -196,12 +266,12 @@ fn single_word_candidates(word: &str) -> Vec<String> {
 }
 
 /// Priority for entity allocation, lower first. Commits come before
-/// branches/files: their candidate set is the most constrained (hex prefixes
-/// only), while names have rich word-based alternatives.
+/// branches/files: their candidate sets are the most constrained (prefixes of
+/// one string), while names have rich word-based alternatives.
 fn entity_priority(entity: &Entity) -> u8 {
     match entity {
         Entity::Unstaged => 0,
-        Entity::Commit(_) => 1,
+        Entity::Commit { .. } => 1,
         Entity::Branch(_) | Entity::File(_) => 2,
     }
 }
@@ -211,10 +281,15 @@ fn entity_priority(entity: &Entity) -> u8 {
 /// original order holds within a group), each taking the first candidate not
 /// already assigned.
 fn resolve_collisions(entities: Vec<Entity>) -> HashMap<Entity, String> {
+    let mut persistent = persistent_candidates(&entities);
     let mut items: Vec<(Entity, Vec<String>)> = entities
         .into_iter()
         .map(|e| {
-            let cands = generate_candidates(&e);
+            let cands = match &e {
+                Entity::Commit { oid, .. } => persistent.remove(oid),
+                _ => None,
+            }
+            .unwrap_or_else(|| generate_candidates(&e));
             (e, cands)
         })
         .collect();

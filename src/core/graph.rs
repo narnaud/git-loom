@@ -438,6 +438,7 @@ fn render_sections(sections: &[Section], ids: &IdAllocator, opts: &RenderOpts) -
     let mut out = String::new();
     let last_idx = sections.len() - 1;
     let mut branch_color_idx: usize = 0;
+    let id_width = ids.commit_id_width();
 
     for (idx, section) in sections.iter().enumerate() {
         match section {
@@ -461,6 +462,7 @@ fn render_sections(sections: &[Section], ids: &IdAllocator, opts: &RenderOpts) -
                     next_stacked,
                     idx < last_idx,
                     ids,
+                    id_width,
                     &opts.theme,
                     &opts.cwd_prefix,
                 );
@@ -468,6 +470,7 @@ fn render_sections(sections: &[Section], ids: &IdAllocator, opts: &RenderOpts) -
             Section::Loose(commits) => {
                 render_loose(
                     &mut out,
+                    id_width,
                     commits,
                     idx < last_idx,
                     ids,
@@ -665,6 +668,7 @@ fn render_branch(
     next_stacked: bool,
     more_sections: bool,
     ids: &IdAllocator,
+    id_width: usize,
     theme: &Theme,
     cwd_prefix: &str,
 ) {
@@ -696,14 +700,14 @@ fn render_branch(
 
     for commit in commits {
         let sid = ids.get_commit(commit.oid);
-        let rest: String = commit.short_id.chars().skip(sid.len()).collect();
         writeln!(
             out,
-            "{}{}    {}{} {}",
+            "{}{}    {}{} {} {}",
             "│".color(theme.graph),
             "●".color(dot_color),
             sid.color(theme.shortid).underline(),
-            rest.color(theme.dim),
+            " ".repeat(id_width - sid.len()),
+            commit.short_id.color(theme.dim),
             commit.message
         )
         .unwrap();
@@ -734,6 +738,7 @@ fn render_branch(
 
 fn render_loose(
     out: &mut String,
+    id_width: usize,
     commits: &[CommitInfo],
     more_sections: bool,
     ids: &IdAllocator,
@@ -742,13 +747,13 @@ fn render_loose(
 ) {
     for commit in commits {
         let sid = ids.get_commit(commit.oid);
-        let rest: String = commit.short_id.chars().skip(sid.len()).collect();
         writeln!(
             out,
-            "{}    {}{} {}",
+            "{}    {}{} {} {}",
             "●".color(theme.graph),
             sid.color(theme.shortid).underline(),
-            rest.color(theme.dim),
+            " ".repeat(id_width - sid.len()),
+            commit.short_id.color(theme.dim),
             commit.message
         )
         .unwrap();

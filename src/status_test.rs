@@ -240,3 +240,41 @@ fn unusable_context_config_keeps_the_default() {
         assert_eq!(resolve_context(&reopen(&test_repo), None), 1, "{value}");
     }
 }
+
+/// The point of persistent IDs: a rebase changes the hash, not the ID.
+#[test]
+fn commit_id_survives_an_update_rebase() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.write_file("a.txt", "a");
+    test_repo
+        .in_dir(|| {
+            crate::commit::run(
+                Some("feature-a".to_string()),
+                false,
+                Some("Add a".to_string()),
+                false,
+                vec!["a.txt".to_string()],
+                vec![],
+                &crate::core::graph::Theme::dark(),
+            )
+        })
+        .unwrap();
+    let tip_before = test_repo.get_branch_target("feature-a");
+    let id_before = {
+        let info = gather_repo_info(&test_repo.repo, false, 1).unwrap();
+        IdAllocator::new(info.collect_entities())
+            .get_commit(tip_before)
+            .to_string()
+    };
+    assert_eq!(id_before.len(), 3, "{id_before}");
+    assert!(id_before.chars().all(|c| ('k'..='z').contains(&c)));
+
+    test_repo.add_remote_commits(&["Upstream change"]);
+    test_repo.in_dir(|| crate::update::run(true)).unwrap();
+
+    let tip_after = test_repo.get_branch_target("feature-a");
+    assert_ne!(tip_after, tip_before, "the rebase rewrote the commit");
+    let info = gather_repo_info(&reopen(&test_repo), false, 1).unwrap();
+    let ids = IdAllocator::new(info.collect_entities());
+    assert_eq!(ids.get_commit(tip_after), id_before);
+}

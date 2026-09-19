@@ -37,7 +37,7 @@ fn single_word_branch_uses_first_two_chars() {
 
 #[test]
 fn commit_uses_first_two_hex_chars() {
-    let alloc = IdAllocator::new(vec![Entity::Commit(oid(0xAB))]);
+    let alloc = IdAllocator::new(vec![Entity::commit(oid(0xAB))]);
     let id = alloc.get_commit(oid(0xAB));
     assert_eq!(id.len(), 2);
     assert_eq!(id, "ab");
@@ -129,7 +129,7 @@ fn no_collision_stays_two_chars() {
         Entity::Branch("alpha".to_string()),
         Entity::Branch("beta".to_string()),
         Entity::File("src/config.rs".to_string()),
-        Entity::Commit(oid(0xFF)),
+        Entity::commit(oid(0xFF)),
     ]);
     assert_eq!(alloc.get_branch("alpha"), "al");
     assert_eq!(alloc.get_branch("beta"), "be");
@@ -176,7 +176,7 @@ fn commits_allocated_before_branches() {
     let commit_oid = Oid::from_str("eaec409000000000000000000000000000000000").unwrap();
     let alloc = IdAllocator::new(vec![
         Entity::Branch("feat2".to_string()),
-        Entity::Commit(commit_oid),
+        Entity::commit(commit_oid),
     ]);
     // Commit keeps its natural 2-char hex prefix
     assert_eq!(alloc.get_commit(commit_oid), "ea");
@@ -252,4 +252,68 @@ fn zz_is_never_generated_for_other_entities() {
     assert_ne!(alloc.get_branch("zoo-zulu"), "zz");
     // "zz.rs" exhausts its candidates, so it falls back to the reserved escape.
     assert_eq!(alloc.get_file("zz.rs"), "zz1");
+}
+
+// ── Persistent commit IDs (Change-Id letters) ────────────────────────────
+
+/// `3ac7…` encodes to `wpns…`, `3ac8…` to `wpnr…`, `b71…` to `osy…`.
+const ID_A: &str = "I3ac7000000000000000000000000000000000000";
+const ID_B: &str = "I3ac8000000000000000000000000000000000000";
+const ID_C: &str = "Ib710000000000000000000000000000000000000";
+
+fn persistent(byte: u8, change_id: &str) -> Entity {
+    Entity::Commit {
+        oid: oid(byte),
+        change_id: Some(change_id.to_string()),
+    }
+}
+
+#[test]
+fn commit_with_change_id_gets_three_letters() {
+    let alloc = IdAllocator::new(vec![persistent(1, ID_A), persistent(2, ID_C)]);
+    assert_eq!(alloc.get_commit(oid(1)), "wpn");
+    assert_eq!(alloc.get_commit(oid(2)), "osy");
+    assert_eq!(alloc.commit_id_width(), 3);
+}
+
+/// A newcomer sharing a prefix must never take an existing commit's ID: both
+/// grow, so a stale `wpn` matches neither instead of the wrong one.
+#[test]
+fn a_colliding_newcomer_lengthens_both_ids() {
+    let before = IdAllocator::new(vec![persistent(1, ID_A)]);
+    assert_eq!(before.get_commit(oid(1)), "wpn");
+
+    // Newest first, as the graph lists commits.
+    let after = IdAllocator::new(vec![persistent(2, ID_B), persistent(1, ID_A)]);
+    assert_eq!(after.get_commit(oid(1)), "wpns");
+    assert_eq!(after.get_commit(oid(2)), "wpnr");
+    assert_eq!(after.commit_id_width(), 4);
+}
+
+#[test]
+fn persistent_ids_do_not_depend_on_commit_order() {
+    let one = IdAllocator::new(vec![persistent(1, ID_A), persistent(2, ID_B)]);
+    let two = IdAllocator::new(vec![persistent(2, ID_B), persistent(1, ID_A)]);
+    assert_eq!(one.get_commit(oid(1)), two.get_commit(oid(1)));
+    assert_eq!(one.get_commit(oid(2)), two.get_commit(oid(2)));
+}
+
+#[test]
+fn twins_sharing_a_change_id_fall_back_to_hash_ids() {
+    let alloc = IdAllocator::new(vec![persistent(0x11, ID_A), persistent(0x22, ID_A)]);
+    assert_eq!(alloc.get_commit(oid(0x11)), "11");
+    assert_eq!(alloc.get_commit(oid(0x22)), "22");
+}
+
+#[test]
+fn letter_and_hex_commits_coexist_with_a_branch() {
+    let alloc = IdAllocator::new(vec![
+        Entity::commit(oid(0xAB)),
+        persistent(1, ID_A),
+        Entity::Branch("wp-n".to_string()),
+    ]);
+    assert_eq!(alloc.get_commit(oid(0xAB)), "ab");
+    assert_eq!(alloc.get_commit(oid(1)), "wpn");
+    assert_eq!(alloc.get_branch("wp-n"), "wn");
+    assert_eq!(alloc.commit_id_width(), 3);
 }

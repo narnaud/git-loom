@@ -603,6 +603,7 @@ fn commit(byte: u8, message: &str, parent: Option<u8>) -> CommitInfo {
         oid: oid(byte),
         short_id: format!("{:07x}", byte),
         message: message.to_string(),
+        change_id: None,
         parent_oid: parent.map(oid),
         files: vec![],
     }

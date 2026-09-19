@@ -26,7 +26,7 @@ Output runs top-to-bottom in this order:
 4. Upstream or common-base marker.
 5. Optional context commits.
 
-Commits use `<short-hash> <commit-message-first-line>`. Hashes are unique abbreviations respecting `core.abbrev`. Merge commits have no special treatment.
+Commits use `<short-id> <short-hash> <commit-message-first-line>`: the commit's short ID (Spec 002), padded to the widest commit ID in the output, then the abbreviated hash. Hashes are unique abbreviations respecting `core.abbrev`. Merge commits have no special treatment.
 
 | Symbol | Normative meaning |
 | --- | --- |

@@ -44,6 +44,13 @@ fn from_message_ignores_mentions_outside_the_trailer_block() {
     assert!(from_message("Subject only\n").is_none());
 }
 
+#[test]
+fn letters_use_jujutsu_reverse_hex() {
+    assert_eq!(to_letters("0f"), "zk");
+    assert_eq!(to_letters("I0123456789abcdef"), "zyxwvutsrqponmlk");
+    assert_eq!(to_letters(ID).len(), 40);
+}
+
 /// The hook pipes `git var GIT_COMMITTER_IDENT`, the refhash, and the message
 /// file into `git hash-object --stdin`; the same bytes must hash the same.
 #[test]

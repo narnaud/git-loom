@@ -9,18 +9,23 @@ All displayed actionable entities share one global ID namespace.
 | Entity | Source | First/default candidate |
 | --- | --- | --- |
 | Unstaged/local changes | fixed | `zz` |
-| Commit | full hexadecimal hash | first two hex characters |
+| Commit | Change-Id letters (see Persistent commit identity), else full hexadecimal hash | first three letters, else first two hex characters |
 | Branch | branch name words | first character of each of the first two words |
 | File | filename stem (not extension/path) | first character of each of the first two words |
 
-IDs are at least two characters. For branch/file sources:
+Branch and file IDs are at least two characters, commit IDs with a Change-Id at least three. For branch/file sources:
 
-- Split multi-word names on `-`, `_`, and `/`; generate, in order, every pair containing one character from the first word and one from the second. Example: `feature-alpha` starts `fa, fe, ft, fu, fr, ea, ...`.
+- Split multi-word names on `-`, `_`, and `/`; generate, in order, every pair containing one character from the first word and one from the second. Example: `feature-alpha` starts `fa, fl, fp, fh, ea, el, ...`.
 - For a single word, generate every character pair `(i,j)` where `i < j`. `main` gives `ma, mi, mn, ai, an, in, ...`.
 - Double a single character: `a` gives `aa`.
 - After all two-character candidates, fall back to prefixes of length three or more.
 
-Commit candidates are successive hash prefixes of length 2, 3, 4, and so on.
+Commit candidates depend on whether the commit carries a Change-Id:
+
+- With one, its 40 hex digits are encoded as letters — jujutsu's reverse hex, `0→z, 1→y, … f→k` — and the candidates are prefixes of that string from the shortest length, at least three, at which no other displayed commit's letters share the prefix. This minimum is computed against every other Change-Id commit, so it is symmetric: a new commit whose letters share a prefix with an older one lengthens both IDs and never takes the older one; the old shorter ID then resolves to neither (see Argument resolution). A Change-Id displayed by more than one commit (cherry-pick twins) identifies none of them; those commits use hash candidates.
+- Without one, successive hash prefixes of length 2, 3, 4, and so on.
+
+The two alphabets are disjoint: letters mean a persistent ID, hex an ephemeral one.
 
 ## Allocation and collisions
 
@@ -43,11 +48,12 @@ IDs use blue underline (`COLOR_SHORTID`). Placement is:
 │   ma M src/main.rs
 │
 │╭─ fa [feature-a]
-│●   d072f9 Fix bug
+│●    mqt d072f9a Fix bug
+│●    3a  3a6f21c Cherry-picked
 ├╯
 ```
 
-For a commit, the ID replaces/styles the matching initial hash characters; the rest of the abbreviated hash is dimmed. ANSI-stripped output still contains the full abbreviated hash. The upstream/common-base marker gets no ID.
+A commit line is `<id> <abbreviated hash> <subject>`: the ID first, padded to the widest commit ID in the output, then the dimmed abbreviated hash. ANSI-stripped output still contains the full abbreviated hash. The upstream/common-base marker gets no ID.
 
 ## Persistent commit identity
 

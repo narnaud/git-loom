@@ -14,6 +14,7 @@ fn commit(id: char, parent: Option<char>, message: &str, files: Vec<FileChange>)
         oid: oid(id),
         short_id: hex_short(id),
         message: message.to_string(),
+        change_id: None,
         parent_oid: parent.map(oid),
         files,
     }
@@ -63,7 +64,7 @@ fn sample_ids() -> IdAllocator {
     IdAllocator::new(vec![
         Entity::Unstaged,
         Entity::Branch("feature-a".to_string()),
-        Entity::Commit(oid('a')),
+        Entity::commit(oid('a')),
         Entity::File("wt.rs".to_string()),
     ])
 }

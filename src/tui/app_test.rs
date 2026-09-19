@@ -27,6 +27,7 @@ fn commit(c: char, parent: char, message: &str) -> CommitInfo {
         oid: oid(c),
         short_id: c.to_string().repeat(7),
         message: message.to_string(),
+        change_id: None,
         parent_oid: Some(oid(parent)),
         files: vec![file("src/parser.rs", 'M', ' ')],
     }
@@ -1357,7 +1358,7 @@ fn diff_text_per_row_kind() {
     let kind = RowKind::Commit {
         oid: commit_oid,
         message: String::new(),
-        sid_rest: String::new(),
+        hash: String::new(),
         dot_color: None,
         file_count: 1,
     };

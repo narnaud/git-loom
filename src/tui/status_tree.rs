@@ -67,8 +67,8 @@ pub(crate) enum RowKind {
     Commit {
         oid: git2::Oid,
         message: String,
-        /// Abbreviated-hash characters after the short-ID prefix.
-        sid_rest: String,
+        /// Abbreviated hash, shown after the short ID.
+        hash: String,
         /// Index into the theme's rotating dot colors; `None` = loose commit.
         dot_color: Option<usize>,
         file_count: usize,
@@ -294,14 +294,13 @@ fn push_commit_rows(
 ) {
     for commit in commits {
         let sid = ids.get_commit(commit.oid).to_string();
-        let sid_rest: String = commit.short_id.chars().skip(sid.len()).collect();
         let key = commit.oid.to_string();
         let is_expanded = expanded.contains(&key);
         rows.push(Row {
             kind: RowKind::Commit {
                 oid: commit.oid,
                 message: commit.message.clone(),
-                sid_rest,
+                hash: commit.short_id.clone(),
                 dot_color,
                 file_count: commit.files.len(),
             },

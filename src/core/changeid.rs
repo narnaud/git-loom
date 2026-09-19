@@ -1,4 +1,5 @@
-//! Persistent commit identity: Gerrit `Change-Id` trailers (Spec 002).
+//! Persistent commit identity: Gerrit `Change-Id` trailers and their
+//! jujutsu-style letter form (Spec 002).
 
 use std::path::Path;
 
@@ -6,6 +7,8 @@ use anyhow::{Context, Result};
 use git2::Repository;
 
 pub const TRAILER: &str = "Change-Id";
+/// Shortest displayed persistent commit ID.
+pub const MIN_LEN: usize = 3;
 const HEX_LEN: usize = 40;
 /// `git hash-object -t tree /dev/null`, what Gerrit's hook uses as `refhash`
 /// on an unborn branch.
@@ -40,6 +43,20 @@ pub fn from_message(message: &str) -> Option<String> {
         }
     }
     found
+}
+
+/// Reverse-hex letters, jujutsu's change-id alphabet: `0→z … f→k`. A
+/// leading `I` is skipped; any other non-hex character is kept as is.
+pub fn to_letters(change_id: &str) -> String {
+    change_id
+        .strip_prefix('I')
+        .unwrap_or(change_id)
+        .chars()
+        .map(|c| match c.to_digit(16) {
+            Some(d) => (b'z' - d as u8) as char,
+            None => c,
+        })
+        .collect()
 }
 
 /// Whether loom should add a Change-Id to the commits it creates: git config
