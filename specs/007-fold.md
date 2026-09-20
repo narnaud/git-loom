@@ -216,6 +216,10 @@ These operations pause on rebase conflict and save the listed `LoomState.context
 
 `loom continue` dispatches `after_continue`, removes `_loom-track`, restores pre-existing staged changes from `LoomState.rollback`, and prints the operation's success message. `loom abort` restores original history, staged state, and working-tree state (Spec 014). The post-continue unapplied-patch exception is defined above.
 
+Staged files set aside so they cannot join the fold MUST come back on every
+failure path, including the ones reached before `state.json` exists, where no
+rollback can return them.
+
 Multiple moves (to a branch or next to a commit), all `-c` moves, all `-p` forms, and CommitFile move failures save no resumable state and auto-rollback as specified in their sections.
 
 ## General invariants and prerequisites

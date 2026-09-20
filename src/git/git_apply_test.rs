@@ -374,7 +374,7 @@ fn restore_or_park_after_abort_parks_when_the_rebase_survived() {
     std::fs::create_dir_all(t.repo.path().join("rebase-merge")).unwrap();
     let err = anyhow::anyhow!("the abort failed too");
 
-    git::restore_loom_unstaged_after_abort(&workdir, &patch, &err);
+    git::restore_or_park_after_abort(&workdir, &patch, &err);
 
     let parked = git::git_path(&workdir, "loom").unwrap();
     assert!(
@@ -564,11 +564,39 @@ fn restore_staged_after_rebase_parks_a_patch_naming_a_removed_path() {
     );
 }
 
-/// `loom fold -p` empties the index itself before rebasing, so a refusal from
-/// before the rebase started has no autostash behind it: the staged side is
-/// only in the patch, and must go back even though nothing was ever stashed.
+/// A refusal raised before the rebase started autostashed nothing and left the
+/// index where it was, so it is the user's and this must not write to it. The
+/// patch names work the index does not hold, which is what would show if the
+/// early return went.
 #[test]
-fn restore_loom_unstaged_after_abort_restores_when_the_rebase_never_started() {
+fn restore_or_park_after_abort_leaves_the_index_alone_before_the_rebase_starts() {
+    let t = TestRepo::new();
+    t.write_file("a.txt", "committed\n");
+    t.stage_files(&["a.txt"]);
+    t.commit_staged("base");
+
+    let workdir = t.workdir();
+    t.write_file("aside.txt", "set aside\n");
+    t.stage_files(&["aside.txt"]);
+    let patch = git::diff_cached(&workdir).unwrap();
+    git::run_git(&workdir, &["reset", "-q", "HEAD"]).unwrap();
+
+    let err = git::before_rebase_starts::<()>(Err(anyhow::anyhow!("checked out elsewhere")))
+        .expect_err("tagged as raised before the rebase started");
+    git::restore_or_park_after_abort(&workdir, &patch, &err);
+
+    assert_eq!(git::diff_cached(&workdir).unwrap(), "");
+    assert!(
+        !git::git_path(&workdir, "loom").unwrap().exists(),
+        "nothing to park either"
+    );
+}
+
+/// `loom fold -p` empties the index itself before rebasing, so a failure with
+/// no rebase left on disk has no autostash behind it: the staged side is only
+/// in the patch, and must go back even though nothing was ever stashed.
+#[test]
+fn restore_loom_unstaged_restores_when_no_rebase_is_on_disk() {
     let t = TestRepo::new();
     t.write_file("a.txt", "committed\n");
     t.stage_files(&["a.txt"]);
@@ -581,9 +609,7 @@ fn restore_loom_unstaged_after_abort_restores_when_the_rebase_never_started() {
     // What `staging::save_and_unstage_staged` leaves behind.
     git::run_git(&workdir, &["reset", "-q", "HEAD"]).unwrap();
 
-    let err = git::before_rebase_starts::<()>(Err(anyhow::anyhow!("checked out elsewhere")))
-        .expect_err("tagged as raised before the rebase started");
-    git::restore_loom_unstaged_after_abort(&workdir, &patch, &err);
+    git::restore_loom_unstaged(&workdir, &patch);
 
     assert_eq!(git::diff_cached(&workdir).unwrap(), patch);
 }

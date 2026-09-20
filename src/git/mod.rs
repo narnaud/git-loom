@@ -9,7 +9,7 @@ pub mod git_worktree;
 pub use git_apply::{
     Replay, apply_cached_patch, apply_cached_patch_reverse, apply_patch, apply_patch_reverse,
     apply_patch_to_worktree, apply_patch_with_index, apply_patch_with_index_reverse,
-    restore_loom_unstaged_after_abort, restore_or_park_after_abort, restore_staged_after_rebase,
+    restore_loom_unstaged, restore_or_park_after_abort, restore_staged_after_rebase,
     restore_staged_patch, save_or_warn, save_patch_aside,
 };
 pub use git_branch::{

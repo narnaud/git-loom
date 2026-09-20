@@ -9,7 +9,7 @@ use crate::core::changeid;
 use crate::core::graph;
 use crate::core::msg;
 use crate::core::repo;
-use crate::core::staging;
+use crate::core::staging::{self, StagedAside};
 use crate::core::transaction::{self, LoomState, Rollback};
 use crate::core::weave::{self, RebaseOutcome, Weave};
 use crate::git;
@@ -94,17 +94,13 @@ pub fn run(
 
     // Stage files, saving aside any pre-existing staged files not in the
     // target list so they don't accidentally end up in this commit.
-    let saved_staged = if patch {
+    let staged_aside = if patch {
         resolve_staging_patch(&repo, &workdir, &files, theme)?
     } else {
         resolve_staging(&repo, &workdir, &files)?
     };
 
-    // Restore the saved staged work if the index turns out to be empty.
-    if let Err(e) = repo::verify_has_staged_changes(&repo) {
-        git::restore_staged_patch(&workdir, &saved_staged);
-        return Err(e);
-    }
+    repo::verify_has_staged_changes(&repo)?;
 
     let git_opts: Vec<&str> = git_args.iter().map(String::as_str).collect();
     let do_commit = || -> Result<()> {
@@ -124,7 +120,9 @@ pub fn run(
     // "origin/main").
     if loose {
         let result = do_commit();
-        git::restore_staged_patch(&workdir, &saved_staged);
+        // Put back either way: a loose commit writes no state file, so there
+        // is no later owner for the patch and no rollback to hold it.
+        staged_aside.restore();
         result?;
         let new_head = repo::head_oid(&repo)?;
         msg::success(&format!(
@@ -139,25 +137,15 @@ pub fn run(
     // Resolve branch target (may create a new branch at merge-base).
     // Returns whether the branch was newly created — only newly-created
     // branches are deleted on rollback (not pre-existing empty ones).
-    // A cancelled prompt here must put the saved-aside files back in the index.
     let (branch_name, branch_is_new) =
-        match resolve_branch_target(&repo, &info, &workdir, branch.as_deref()) {
-            Ok(resolved) => resolved,
-            Err(e) => {
-                git::restore_staged_patch(&workdir, &saved_staged);
-                return Err(e);
-            }
-        };
+        resolve_branch_target(&repo, &info, &workdir, branch.as_deref())?;
 
     // Empty branches (pointing at merge-base) need a branch section and
     // merge entry created in the Weave before moving the commit there.
     let branch_is_empty =
         is_branch_at_merge_base(&repo, &branch_name, info.upstream.merge_base_oid)?;
 
-    if let Err(e) = do_commit() {
-        git::restore_staged_patch(&workdir, &saved_staged);
-        return Err(e);
-    }
+    do_commit()?;
 
     let head_oid = repo::head_oid(&repo)?;
 
@@ -184,7 +172,7 @@ pub fn run(
     }
     let ctx = CommitContext {
         branch_name: branch_name.clone(),
-        saved_staged: Some(saved_staged.clone()),
+        saved_staged: Some(staged_aside.patch().to_string()),
     };
     let state = LoomState {
         command: "commit".to_string(),
@@ -200,6 +188,9 @@ pub fn run(
         protect: vec![head_oid.to_string()],
     };
     transaction::save(&git_dir, &state)?;
+    // The state file owns the patch from here: `post_commit` puts it back on
+    // success, `Rollback` on abort.
+    let saved_staged = staged_aside.release();
 
     let base = graph.base_oid.to_string();
 
@@ -256,14 +247,14 @@ fn post_commit(workdir: &Path, branch_name: &str, saved_staged: &str) -> Result<
 ///
 /// With specific files, other staged files are saved aside and unstaged first,
 /// so they neither show in the picker nor leak into this commit. Returns that
-/// saved patch for restoration after the commit; a cancelled picker restores
-/// it and errors.
-fn resolve_staging_patch(
+/// saved patch for restoration after the commit; a picker that is cancelled or
+/// fails puts it back and errors.
+fn resolve_staging_patch<'a>(
     repo: &Repository,
-    workdir: &std::path::Path,
+    workdir: &'a Path,
     files: &[String],
     theme: &graph::Theme,
-) -> Result<String> {
+) -> Result<StagedAside<'a>> {
     // Save aside other staged files when specific files are targeted.
     let filter = staging::filter_paths(repo, files)?;
     let saved_staged = match &filter {
@@ -271,15 +262,12 @@ fn resolve_staging_patch(
             let path_refs: Vec<&str> = paths.iter().map(|s| s.as_str()).collect();
             staging::save_and_unstage_other_staged(repo, workdir, &path_refs)?
         }
-        None => String::new(),
+        None => StagedAside::none(workdir),
     };
 
-    let confirmed = staging::run_hunk_picker(repo, workdir, filter.as_deref(), theme)?;
-    if confirmed.is_none() {
-        git::restore_staged_patch(workdir, &saved_staged);
+    if staging::run_hunk_picker(repo, workdir, filter.as_deref(), theme)?.is_none() {
         return Err(msg::cancelled());
     }
-
     Ok(saved_staged)
 }
 
@@ -287,18 +275,18 @@ fn resolve_staging_patch(
 /// as-is, `zz` stages everything, and named files are staged after any other
 /// pre-existing staged file is saved aside and unstaged so it cannot leak into
 /// this commit. Returns that saved patch for later restoration.
-fn resolve_staging(
+fn resolve_staging<'a>(
     repo: &Repository,
-    workdir: &std::path::Path,
+    workdir: &'a Path,
     files: &[String],
-) -> Result<String> {
+) -> Result<StagedAside<'a>> {
     if files.is_empty() {
-        return Ok(String::new());
+        return Ok(StagedAside::none(workdir));
     }
 
     if files.iter().any(|f| f == "zz") {
         git::stage_all(workdir)?;
-        return Ok(String::new());
+        return Ok(StagedAside::none(workdir));
     }
 
     let resolved_paths = resolve_file_args(repo, files)?;

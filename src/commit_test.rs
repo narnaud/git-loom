@@ -177,6 +177,66 @@ fn commit_to_non_woven_branch_fails() {
     assert!(result.unwrap_err().to_string().contains("not woven"));
 }
 
+/// The worst window: the commit is made, but the state file that would carry
+/// the set-aside work is not written yet, so nothing else can return it —
+/// `loom abort` has no rollback to read. A file where `.git/loom` must be a
+/// directory is what makes `transaction::save` fail here — which also blocks
+/// the last-resort patch dump the restore falls back on, so the one asserted
+/// below is the real one, not the fallback.
+#[test]
+fn a_commit_failing_after_it_is_created_puts_back_the_staging() {
+    let test_repo = setup_with_woven_branch();
+    test_repo.write_file("kept.txt", "staged before the commit");
+    test_repo.stage_files(&["kept.txt"]);
+    test_repo.write_file("file.txt", "content");
+    std::fs::write(test_repo.repo.path().join("loom"), "not a directory").unwrap();
+    let before = test_repo.head_oid();
+
+    let result = test_repo.in_dir(|| {
+        run(
+            Some("feature-a".to_string()),
+            Some("Message".to_string()),
+            vec!["file.txt".to_string()],
+        )
+    });
+
+    assert!(result.is_err(), "the state file cannot be written");
+    // Without this the test still passes if the failure ever moves earlier,
+    // leaving the window it is named after unguarded.
+    assert_ne!(
+        test_repo.head_oid(),
+        before,
+        "the commit must already exist"
+    );
+    let status = test_repo.status_porcelain();
+    assert!(status.contains("A  kept.txt"), "{status}");
+}
+
+/// A failure between staging and the commit puts the set-aside work back too:
+/// which files were staged is state git keeps no second copy of.
+#[test]
+fn a_failed_commit_puts_back_the_staging_it_set_aside() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("A1", "a1.txt");
+    test_repo.create_branch_tracking("not-woven", "origin/main");
+
+    test_repo.write_file("kept.txt", "staged before the commit");
+    test_repo.stage_files(&["kept.txt"]);
+    test_repo.write_file("file.txt", "content");
+
+    let result = test_repo.in_dir(|| {
+        run(
+            Some("not-woven".to_string()),
+            Some("Message".to_string()),
+            vec!["file.txt".to_string()],
+        )
+    });
+
+    assert!(result.is_err());
+    let status = test_repo.status_porcelain();
+    assert!(status.contains("A  kept.txt"), "{status}");
+}
+
 #[test]
 fn commit_to_new_branch_creates_and_weaves() {
     let test_repo = TestRepo::new_with_remote();

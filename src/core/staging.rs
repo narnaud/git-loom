@@ -1,5 +1,6 @@
 use anyhow::{Result, bail};
 use git2::Repository;
+use std::cell::Cell;
 use std::path::Path;
 
 use crate::core::diff::{self, parse_hunk_start};
@@ -499,31 +500,94 @@ pub(crate) fn collect_commit_hunks(
     Ok(entries)
 }
 
-/// Save and unstage all currently staged changes, returning a patch to restore them later.
+/// Staged work an operation set aside, put back into the index when this
+/// drops — every `?` in between included, which is what keeps it (Spec 006).
 ///
-/// Returns an empty string if nothing is staged. Callers must call
-/// `git::restore_staged_patch` with the returned patch when the operation
-/// completes (or is rolled back), so pre-existing staged work is never lost.
-pub(crate) fn save_and_unstage_staged(repo: &Repository, workdir: &Path) -> Result<String> {
+/// Hand it on where someone else owns the restore: a state file, or a worktree
+/// snapshot taken before the unstaging. That owner has to be one this guard
+/// cannot outlive uncollected — see [`StagedAside::handed_over`].
+#[must_use = "dropping the guard right away puts the work straight back, undoing the unstage"]
+pub(crate) struct StagedAside<'a> {
+    workdir: &'a Path,
+    patch: String,
+    armed: Cell<bool>,
+}
+
+impl<'a> StagedAside<'a> {
+    fn new(workdir: &'a Path, patch: String) -> Self {
+        StagedAside {
+            workdir,
+            patch,
+            armed: Cell::new(true),
+        }
+    }
+
+    /// A guard over nothing: the operation set no staged work aside.
+    pub(crate) fn none(workdir: &'a Path) -> Self {
+        StagedAside::new(workdir, String::new())
+    }
+
+    pub(crate) fn patch(&self) -> &str {
+        &self.patch
+    }
+
+    /// Put it back now, rather than wherever this would have dropped. Does
+    /// nothing once [`StagedAside::handed_over`] has run.
+    pub(crate) fn restore(self) {}
+
+    /// Take the patch back: the caller restores it from here.
+    #[must_use = "the set-aside patch is lost unless a new owner keeps it"]
+    pub(crate) fn release(mut self) -> String {
+        self.armed.set(false);
+        std::mem::take(&mut self.patch)
+    }
+
+    /// Something else holds the patch now, so this must not put it back a
+    /// second time.
+    ///
+    /// Data safety: that owner must be durable (a state file `loom abort`
+    /// reads) or already have run. A rollback closure is neither until it
+    /// runs, and [`git::rebase_abort_then_cleanup`] skips its closure when the
+    /// abort fails — so call this from inside such a closure, never before it.
+    /// Disarming early there drops the patch on the one path that cannot get
+    /// it back; leaving the guard armed parks it instead.
+    pub(crate) fn handed_over(&self) {
+        self.armed.set(false);
+    }
+}
+
+impl Drop for StagedAside<'_> {
+    fn drop(&mut self) {
+        if self.armed.get() {
+            git::restore_loom_unstaged(self.workdir, &self.patch);
+        }
+    }
+}
+
+/// Save and unstage all currently staged changes, so an amend or rebase below
+/// leaves them out. Restored when the returned guard drops.
+pub(crate) fn save_and_unstage_staged<'a>(
+    repo: &Repository,
+    workdir: &'a Path,
+) -> Result<StagedAside<'a>> {
     let staged = repo::get_staged_files(repo)?;
     if staged.is_empty() {
-        return Ok(String::new());
+        return Ok(StagedAside::new(workdir, String::new()));
     }
     let refs: Vec<&str> = staged.iter().map(|s| s.as_str()).collect();
     let patch = git::diff_cached_files(workdir, &refs)?;
     git::unstage_files(workdir, &refs)?;
-    Ok(patch)
+    Ok(StagedAside::new(workdir, patch))
 }
 
 /// Save the staged diff for files that are staged but NOT in `target_files`,
-/// then unstage them so they don't leak into the upcoming commit.
-///
-/// Returns the patch as a string (may be empty if nothing to save).
-pub(crate) fn save_and_unstage_other_staged(
+/// then unstage them so they don't leak into the upcoming commit. Restored
+/// when the returned guard drops.
+pub(crate) fn save_and_unstage_other_staged<'a>(
     repo: &Repository,
-    workdir: &Path,
+    workdir: &'a Path,
     target_files: &[&str],
-) -> Result<String> {
+) -> Result<StagedAside<'a>> {
     let staged = repo::get_staged_files(repo)?;
     let other: Vec<&str> = staged
         .iter()
@@ -531,11 +595,11 @@ pub(crate) fn save_and_unstage_other_staged(
         .map(|s| s.as_str())
         .collect();
     if other.is_empty() {
-        return Ok(String::new());
+        return Ok(StagedAside::new(workdir, String::new()));
     }
     let patch = git::diff_cached_files(workdir, &other)?;
     git::unstage_files(workdir, &other)?;
-    Ok(patch)
+    Ok(StagedAside::new(workdir, patch))
 }
 
 /// The single entry a submodule contributes to a picker: one object id, with no

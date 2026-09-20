@@ -255,25 +255,27 @@ fn run_apply(
 /// non-zero. Left in the real one those read as `UU` with no merge in progress
 /// and — the apply being `--cached` — no markers in the files to resolve.
 ///
-/// An unmerged index is left alone: the autostash replay conflicted, so those
-/// stages are the user's own merge to finish, and git keeps the stash it could
-/// not replay. Best-effort otherwise — every caller runs this after its own
-/// rewrite has landed, so a failure here must not turn that into a command
-/// reporting failure; one caller deletes the branch it just wove on `Err`.
+/// An unmerged index is left alone: those stages are a merge the user has to
+/// finish, and writing over them would bury it. After a rebase they come from
+/// an autostash replay that conflicted, and git keeps that stash behind them;
+/// the guard's exits reach this having stashed nothing, so the parked patch is
+/// the staged side either way.
+///
+/// Best-effort otherwise, and it must never fail its caller: the rebase
+/// callers run it once their own rewrite has landed, one of which deletes the
+/// branch it just wove on `Err`, and [`restore_loom_unstaged`] brings in the
+/// guard's exits, where nothing landed and no rebase ever ran.
 pub fn restore_staged_after_rebase(workdir: &Path, patch: &str) {
     if patch.is_empty() {
         return;
     }
-    // Git keeps the stash it could not replay, so the content is in there and
-    // the stages are the user's merge to finish.
     if super::has_unmerged_paths(workdir) {
-        // `git stash pop --index` is refused while the index is unmerged, so
-        // pointing at the stash would be advice that fails when followed. The
-        // patch is the staged side, so it is handed over instead.
+        // Not the stash a rebase would have kept: `git stash pop --index` is
+        // refused while the index is unmerged, and the guard's exits never made
+        // one. The patch is the staged side, so it is handed over instead.
         msg::warn(
             "the index has unmerged paths, so your staged changes could not go back \
-             — resolve them, then either replay the patch below or take the staged \
-             side from the stash git kept",
+             — resolve them, then replay the patch below",
         );
         park(workdir, patch);
         return;
@@ -313,8 +315,10 @@ pub fn restore_staged_after_rebase(workdir: &Path, patch: &str) {
             if super::diff_cached(workdir).is_ok_and(|current| current == patch) {
                 return;
             }
+            // Not "what the rebase wrote": the guard reaches this from exits
+            // that never ran one.
             msg::warn(&format!(
-                "your staged changes no longer apply over what the rebase wrote: {e}"
+                "your staged changes no longer apply over what is in the index now: {e}"
             ));
             park(workdir, patch);
         }
@@ -329,17 +333,28 @@ pub fn restore_staged_after_rebase(workdir: &Path, patch: &str) {
     }
 }
 
-/// Put back a patch loom unstaged itself, after a call that aborted its own
-/// rebase.
+/// Put back a patch loom unstaged itself, wherever the call ended.
 ///
-/// Unlike [`restore_or_park_after_abort`], a refusal from before the rebase
-/// started still restores: no autostash ever held this staged side, because
-/// loom emptied the index before the rebase existed.
-pub fn restore_loom_unstaged_after_abort(workdir: &Path, patch: &str, err: &anyhow::Error) {
-    if super::rebase_never_started(err) {
-        restore_staged_patch(workdir, patch);
+/// For the owner that cannot see the error — the guard restoring on drop — so
+/// a rebase left on disk by a failed abort is recognised from the git dir
+/// instead. Restoring into a live rebase's index would only be dropped again
+/// by the `loom abort` that follows, so the patch goes to the user. The guard
+/// emptied the index itself, so it restores after a refusal from before the
+/// rebase started too: no autostash ever held that staged side.
+/// [`restore_or_park_after_abort`] is the other way in and filters that case
+/// out before here — its patch is autostashed work, which loom never unstaged.
+pub fn restore_loom_unstaged(workdir: &Path, patch: &str) {
+    // Before the git dir is asked for: a guard over nothing is the common case,
+    // and it must neither warn about work that does not exist nor pay for a git
+    // call per command.
+    if patch.is_empty() {
+        return;
+    }
+    if super::rebase_is_over(workdir) {
+        restore_staged_after_rebase(workdir, patch);
     } else {
-        restore_or_park_after_abort(workdir, patch, err);
+        msg::warn("the rebase is still on disk, so your staged changes could not be put back");
+        park(workdir, patch);
     }
 }
 
@@ -353,12 +368,7 @@ pub fn restore_or_park_after_abort(workdir: &Path, patch: &str, err: &anyhow::Er
     if super::rebase_never_started(err) {
         return;
     }
-    if super::rebase_is_over(workdir) {
-        restore_staged_after_rebase(workdir, patch);
-    } else {
-        msg::warn("the rebase is still on disk, so your staged changes could not be put back");
-        park(workdir, patch);
-    }
+    restore_loom_unstaged(workdir, patch);
 }
 
 /// Hand the staged patch to the user: a clean autostash replay puts the

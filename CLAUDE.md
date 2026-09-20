@@ -81,7 +81,10 @@ because nothing was autostashed — unless `reset_mixed_to` or `reset_hard_to` i
 set, which marks a caller that moved HEAD before the rebase existed (`commit`,
 `absorb`) and so has its own work to take back. A caller that unstages before
 its rebase without moving HEAD keeps a `staging::StagedAside` guard instead
-(Spec 014).
+(Spec 014). `StagedAside::handed_over()` may only name an owner that is durable
+or has already run: called before a `rebase_abort_then_cleanup` closure it
+drops the patch on exactly the path that skips that closure, so it goes inside
+one.
 
 Every rebase autostashes, and that replay reaches the working tree only: a
 staged modification comes back unstaged on a rebase that completed just as it

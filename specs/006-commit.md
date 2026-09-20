@@ -72,6 +72,10 @@ Create the commit at HEAD, then relocate it to the target via one Weave operatio
 
 If relocation conflicts, pause and save `.git/loom/state.json`. The new commit remains recoverable in the working tree through mixed reset; original staged changes MUST be restored on abort.
 
+Staged files set aside so they cannot join this commit MUST come back on every
+failure path, including the ones after the commit is created but before
+`state.json` exists, where no rollback can return them.
+
 - `loom continue` resolves/completes relocation.
 - `loom abort` cancels and restores original history and staged state.
 

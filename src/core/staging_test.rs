@@ -1,4 +1,4 @@
-use super::{filter_paths, selected_paths};
+use super::{filter_paths, save_and_unstage_staged, selected_paths};
 use crate::core::diff::DiffHunk;
 use crate::core::repo;
 use crate::core::test_helpers::TestRepo;
@@ -153,5 +153,99 @@ fn only_the_picked_files_are_folded_and_order_is_kept() {
     assert_eq!(
         selected_paths(&entries),
         vec!["a.rs".to_string(), "c.rs".to_string()]
+    );
+}
+
+/// The guard is what every `?` between the unstaging and the end of an
+/// operation relies on, so its two states are pinned here rather than only
+/// through the commands that hold it.
+#[test]
+fn the_set_aside_staging_comes_back_when_the_guard_drops() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("A1", "a1.txt");
+    test_repo.write_file("kept.txt", "staged");
+    test_repo.stage_files(&["kept.txt"]);
+
+    let workdir = test_repo.repo.workdir().unwrap().to_path_buf();
+    {
+        let guard = save_and_unstage_staged(&test_repo.repo, &workdir).unwrap();
+        assert!(!guard.patch().is_empty());
+        let status = test_repo.status_porcelain();
+        assert!(!status.contains("A  kept.txt"), "{status}");
+    }
+
+    let status = test_repo.status_porcelain();
+    assert!(status.contains("A  kept.txt"), "{status}");
+}
+
+#[test]
+fn a_released_guard_leaves_the_index_to_its_new_owner() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("A1", "a1.txt");
+    test_repo.write_file("kept.txt", "staged");
+    test_repo.stage_files(&["kept.txt"]);
+
+    let workdir = test_repo.repo.workdir().unwrap().to_path_buf();
+    let patch = {
+        let guard = save_and_unstage_staged(&test_repo.repo, &workdir).unwrap();
+        guard.release()
+    };
+
+    let status = test_repo.status_porcelain();
+    assert!(!status.contains("A  kept.txt"), "{status}");
+    assert!(patch.contains("kept.txt"), "{patch}");
+}
+
+#[test]
+fn a_handed_over_guard_leaves_the_index_to_its_new_owner() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("A1", "a1.txt");
+    test_repo.write_file("kept.txt", "staged");
+    test_repo.stage_files(&["kept.txt"]);
+
+    let workdir = test_repo.repo.workdir().unwrap().to_path_buf();
+    save_and_unstage_staged(&test_repo.repo, &workdir)
+        .unwrap()
+        .handed_over();
+
+    let status = test_repo.status_porcelain();
+    assert!(!status.contains("A  kept.txt"), "{status}");
+}
+
+/// The handover a failed abort never reaches. `rebase_abort_then_cleanup`
+/// skips its closure when the abort fails, so disarming before the call
+/// dropped the patch on the one path that cannot get it back: the `-p` folds
+/// save no `LoomState` for `loom abort` to read it out of, and the snapshot
+/// that owns it only replays from inside that closure.
+#[test]
+fn a_handover_the_cleanup_never_reached_parks_the_patch() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("A1", "a1.txt");
+    test_repo.write_file("kept.txt", "staged");
+    test_repo.stage_files(&["kept.txt"]);
+
+    let workdir = test_repo.repo.workdir().unwrap().to_path_buf();
+    let guard = save_and_unstage_staged(&test_repo.repo, &workdir).unwrap();
+    // A rebase dir with no rebase under it: the abort git tries here fails.
+    std::fs::create_dir_all(test_repo.repo.path().join("rebase-merge")).unwrap();
+
+    let err =
+        crate::git::rebase_abort_then_cleanup(&workdir, anyhow::anyhow!("the fold failed"), || {
+            guard.handed_over()
+        });
+    assert!(err.to_string().contains("The abort failed"), "{err}");
+
+    drop(guard);
+
+    let parked = crate::git::git_path(&workdir, "loom").unwrap();
+    assert!(
+        std::fs::read_dir(&parked)
+            .expect("the patch is parked under the git dir")
+            .filter_map(|e| e.ok())
+            .any(|e| e
+                .file_name()
+                .to_string_lossy()
+                .starts_with("unrestored-staged")),
+        "a cleanup that never ran leaves the guard to hand the patch over"
     );
 }

@@ -1065,7 +1065,7 @@ fn fold_selected_hunks_to_commit(
     let saved_worktree = WorktreeSnapshot::take(workdir)?;
 
     // Unstage pre-existing staged changes so the amends below leave them out.
-    let saved_staged = staging::save_and_unstage_staged(repo, workdir)?;
+    let staged = staging::save_and_unstage_staged(repo, workdir)?;
 
     // Phase 1: edit source, remove selected hunks.
     let mut graph = Weave::from_repo(repo)?;
@@ -1081,7 +1081,6 @@ fn fold_selected_hunks_to_commit(
         &[target_hash],
     ) {
         let _ = git::branch_delete(workdir, TRACK_BRANCH);
-        git::restore_loom_unstaged_after_abort(workdir, &saved_staged, &e);
         return Err(e);
     }
 
@@ -1093,22 +1092,16 @@ fn fold_selected_hunks_to_commit(
         true,
         git_opts,
     ) {
-        // Outside the cleanup closure: a failed abort skips it, and there is no
-        // `LoomState` yet for `loom abort` to find the patch in.
-        let e = git::rebase_abort_then_cleanup(workdir, e, || {
+        return Err(git::rebase_abort_then_cleanup(workdir, e, || {
             let _ = git::branch_delete(workdir, TRACK_BRANCH);
-        });
-        git::restore_loom_unstaged_after_abort(workdir, &saved_staged, &e);
-        return Err(e);
+        }));
     }
 
     let phase1_source_hash = git::rev_parse(workdir, "HEAD").map_err(|e| {
         // Still inside the paused rebase, so the abort comes first.
-        let e = git::rebase_abort_then_cleanup(workdir, e, || {
+        git::rebase_abort_then_cleanup(workdir, e, || {
             let _ = git::branch_delete(workdir, TRACK_BRANCH);
-        });
-        git::restore_loom_unstaged_after_abort(workdir, &saved_staged, &e);
-        e
+        })
     })?;
 
     // The source replays during this continue; dropping it as empty would
@@ -1118,15 +1111,16 @@ fn fold_selected_hunks_to_commit(
         git::continue_rebase_expecting_edit(workdir, git::AfterStop::nothing().protecting(&protect))
     {
         let _ = git::branch_delete(workdir, TRACK_BRANCH);
-        git::restore_loom_unstaged_after_abort(workdir, &saved_staged, &e);
         return Err(e);
     }
 
     // Phase 1 is already committed, so undoing anything from here means
     // resetting over a working tree its rebase has restored. The snapshot
-    // predates `save_and_unstage_staged`, so it puts `saved_staged` back
-    // along with it.
+    // predates the unstaging, so a rollback puts the set-aside work back with
+    // the rest — but only once it runs, and a failed abort skips it, so the
+    // handover is inside the closure rather than before it.
     let rollback = || {
+        staged.handed_over();
         let _ = git::branch_delete(workdir, TRACK_BRANCH);
         rollback_fold(workdir, &saved_head, Some(&saved_refs), &saved_worktree);
     };
@@ -1196,7 +1190,7 @@ fn fold_selected_hunks_to_commit(
     // emptied, and it goes back whichever way this ends.
     let tracked = git::rev_parse(workdir, TRACK_BRANCH);
     let _ = git::branch_delete(workdir, TRACK_BRANCH);
-    git::restore_staged_after_rebase(workdir, &saved_staged);
+    staged.restore();
     let new_source_hash = tracked?;
 
     Ok((new_source_hash, new_target_hash))
@@ -1235,14 +1229,17 @@ fn run_patch_fold_commit_to_unstaged(
     let saved_worktree = WorktreeSnapshot::take(workdir)?;
 
     // Unstage pre-existing staged changes so the amend below leaves them out.
-    let saved_staged = staging::save_and_unstage_staged(repo, workdir)?;
+    // Held armed throughout, so every exit below puts it back; only the
+    // `rollback_fold` paths hand it over, to the snapshot above, which predates
+    // the unstaging.
+    let staged_aside = staging::save_and_unstage_staged(repo, workdir)?;
 
     let new_hash;
 
     if is_head {
         let pre_amend_hash = head_oid.to_string();
         // Same rollback as below: a failure part-way through leaves the hunks
-        // reverse-applied in the working tree, and `saved_staged` unstaged.
+        // reverse-applied in the working tree, and the set-aside work unstaged.
         if let Err(e) = apply_and_amend(
             workdir,
             &selections,
@@ -1251,13 +1248,13 @@ fn run_patch_fold_commit_to_unstaged(
             true,
             git_opts,
         ) {
+            staged_aside.handed_over();
             rollback_fold(workdir, &pre_amend_hash, None, &saved_worktree);
             return Err(e).context("Failed to remove hunks from the commit, operation rolled back");
         }
         new_hash = git::rev_parse(workdir, "HEAD")?;
         if let Err(e) = restore_to_worktree(workdir, &selected_patch, &whole_files) {
-            // The snapshot predates `save_and_unstage_staged`, so the rollback
-            // puts `saved_staged` back along with the rest.
+            staged_aside.handed_over();
             rollback_fold(workdir, &pre_amend_hash, None, &saved_worktree);
             return Err(e)
                 .context("Failed to restore hunks to working directory, operation rolled back");
@@ -1269,16 +1266,13 @@ fn run_patch_fold_commit_to_unstaged(
         let mut graph = Weave::from_repo(repo)?;
         let _ = graph.edit_commit(target_oid);
         let todo = graph.to_todo();
-        if let Err(e) = weave::run_rebase_expecting_edit(
+        weave::run_rebase_expecting_edit(
             workdir,
             Some(&graph.base_oid.to_string()),
             &todo,
             target_oid,
             &[],
-        ) {
-            git::restore_loom_unstaged_after_abort(workdir, &saved_staged, &e);
-            return Err(e);
-        }
+        )?;
 
         if let Err(e) = apply_and_amend(
             workdir,
@@ -1288,33 +1282,29 @@ fn run_patch_fold_commit_to_unstaged(
             true,
             git_opts,
         ) {
-            // Outside the cleanup closure: a failed abort skips it, and there is
-            // no `LoomState` yet for `loom abort` to find the patch in.
-            let e = git::rebase_abort_then_cleanup(workdir, e, || {});
-            git::restore_loom_unstaged_after_abort(workdir, &saved_staged, &e);
-            return Err(e);
+            return Err(git::rebase_abort_then_cleanup(workdir, e, || {}));
         }
 
         new_hash = git::rev_parse(workdir, "HEAD").map_err(|e| {
             // Still inside the paused rebase, so the abort comes first.
-            let e = git::rebase_abort_then_cleanup(workdir, e, || {});
-            git::restore_loom_unstaged_after_abort(workdir, &saved_staged, &e);
-            e
+            git::rebase_abort_then_cleanup(workdir, e, || {})
         })?;
         if let Err(e) = git::continue_rebase_expecting_edit(workdir, git::AfterStop::nothing()) {
             return Err(git::rebase_abort_then_cleanup(workdir, e, || {
+                staged_aside.handed_over();
                 rollback_fold(workdir, &saved_head, Some(&saved_refs), &saved_worktree);
             }));
         }
 
         if let Err(e) = restore_to_worktree(workdir, &selected_patch, &whole_files) {
+            staged_aside.handed_over();
             rollback_fold(workdir, &saved_head, Some(&saved_refs), &saved_worktree);
             return Err(e)
                 .context("Failed to apply changes to working directory, operation rolled back");
         }
     }
 
-    git::restore_staged_after_rebase(workdir, &saved_staged);
+    staged_aside.restore();
 
     let mut staged: Vec<String> = whole_files
         .iter()
@@ -1569,7 +1559,7 @@ fn fold_files_into_commit(
 
     // Unstage pre-existing staged files outside the target list, so they do
     // not end up in this commit/amend.
-    let saved_staged = staging::save_and_unstage_other_staged(repo, workdir, &file_refs)?;
+    let staged = staging::save_and_unstage_other_staged(repo, workdir, &file_refs)?;
 
     let new_hash;
 
@@ -1581,10 +1571,10 @@ fn fold_files_into_commit(
             // An amend that got as far as replacing HEAD and then failed leaves
             // it on a commit the user never asked for, so this takes HEAD back
             // too.
-            undo_commit_attempt(workdir, head_oid, staged_by_loom, &saved_staged);
+            undo_commit_attempt(workdir, head_oid, staged_by_loom, staged);
             return Err(e);
         }
-        git::restore_staged_patch(workdir, &saved_staged);
+        staged.restore();
         new_hash = git::rev_parse(workdir, "HEAD")?;
     } else {
         // Create a fixup commit on HEAD with only the changed files, then
@@ -1599,7 +1589,7 @@ fn fold_files_into_commit(
             git::stage_files(workdir, &file_refs)?;
         }
         if let Err(e) = git::commit_captured(workdir, &message, git_opts) {
-            undo_commit_attempt(workdir, head_oid, staged_by_loom, &saved_staged);
+            undo_commit_attempt(workdir, head_oid, staged_by_loom, staged);
             return Err(e);
         }
 
@@ -1608,7 +1598,7 @@ fn fold_files_into_commit(
         // would then feed the user's own HEAD commit into the target and lose
         // it, so check what git actually did before anything is rewritten.
         if !committed_onto(workdir, head_oid) {
-            undo_commit_attempt(workdir, head_oid, staged_by_loom, &saved_staged);
+            undo_commit_attempt(workdir, head_oid, staged_by_loom, staged);
             let blame = if git_opts.is_empty() {
                 ""
             } else {
@@ -1621,7 +1611,7 @@ fn fold_files_into_commit(
         // the result through. The squash would then rewrite the target with
         // nothing in it and report the fold as done.
         if !git_opts.is_empty() && committed_the_same_tree(workdir, head_oid) {
-            undo_commit_attempt(workdir, head_oid, staged_by_loom, &saved_staged);
+            undo_commit_attempt(workdir, head_oid, staged_by_loom, staged);
             bail!(
                 "`git commit` made an empty `fixup!` commit, so nothing was folded\n\
                  An argument after `--` kept the staged changes out of it"
@@ -1629,28 +1619,34 @@ fn fold_files_into_commit(
         }
 
         // From here the repository carries a commit the user never asked for,
-        // and their other staged files live only in `saved_staged`.
+        // and their other staged files live only in the guard.
         let git_dir = repo.path().to_path_buf();
-        match squash_fixup_into_commit(
+        // Not in the match scrutinee: that would hold the borrow of `staged`
+        // across arms that consume it.
+        let outcome = squash_fixup_into_commit(
             &git_dir,
             workdir,
             target_oid,
             head_oid,
             files,
-            &saved_staged,
-        ) {
+            staged.patch(),
+        );
+        match outcome {
             // The rebase is over, so the finishing steps run outside the
             // rollback: undoing a rewrite that succeeded would leave the
             // integration branch behind its own feature branches.
             Ok(FixupOutcome::Rebased) => {
-                git::restore_staged_after_rebase(workdir, &saved_staged);
+                staged.restore();
                 transaction::delete(&git_dir)?;
                 new_hash = git::rev_parse(workdir, TRACK_BRANCH)?;
                 let _ = git::branch_delete(workdir, TRACK_BRANCH);
             }
             // `loom continue` and `loom abort` own the rest, through the state
-            // file the rebase left behind.
-            Ok(FixupOutcome::Paused) => return Ok(()),
+            // file the rebase left behind — the patch is in it.
+            Ok(FixupOutcome::Paused) => {
+                staged.handed_over();
+                return Ok(());
+            }
             Err(e) => {
                 return Err(git::rebase_abort_then_cleanup(workdir, e, || {
                     // Take the commit back first: the saved patch was made
@@ -1661,7 +1657,6 @@ fn fold_files_into_commit(
                         // had these files modified, not staged.
                         let _ = git::unstage_files(workdir, &file_refs);
                     }
-                    git::restore_staged_patch(workdir, &saved_staged);
                     let _ = git::branch_delete(workdir, TRACK_BRANCH);
                     let _ = transaction::delete(&git_dir);
                 }));
@@ -1707,7 +1702,7 @@ fn undo_commit_attempt(
     workdir: &Path,
     head_oid: git2::Oid,
     staged_by_loom: &[&str],
-    saved_staged: &str,
+    staged: staging::StagedAside<'_>,
 ) {
     // A `--amend` moved HEAD instead of adding to it; the reset puts the
     // commit back and leaves what it held staged, for the two steps below. A
@@ -1724,7 +1719,7 @@ fn undo_commit_attempt(
         git::save_or_warn(
             workdir,
             "unrestored-staged",
-            saved_staged,
+            &staged.release(),
             git::Replay::Cached,
         );
         return;
@@ -1732,7 +1727,7 @@ fn undo_commit_attempt(
     if !staged_by_loom.is_empty() {
         let _ = git::unstage_files(workdir, staged_by_loom);
     }
-    git::restore_staged_patch(workdir, saved_staged);
+    staged.restore();
 }
 
 /// How far [`squash_fixup_into_commit`] got.

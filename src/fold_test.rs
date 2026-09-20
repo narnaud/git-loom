@@ -304,6 +304,81 @@ fn fold_patch_only_staged_hunk_is_folded_into_non_head() {
     );
 }
 
+/// Files staged outside the fold are set aside so they cannot join it, and
+/// must be staged again afterwards — here across the fixup path, where a whole
+/// rebase runs in between.
+#[test]
+fn fold_into_a_non_head_commit_stages_the_other_files_again() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.write_file("file.txt", "target\n");
+    test_repo.stage_files(&["file.txt"]);
+    test_repo.commit_staged("target commit");
+    let target_oid = test_repo.head_oid();
+
+    test_repo.write_file("later.txt", "later\n");
+    test_repo.stage_files(&["later.txt"]);
+    test_repo.commit_staged("second commit");
+
+    test_repo.write_file("file.txt", "target amended\n");
+    test_repo.write_file("kept.txt", "staged, and none of the fold's business\n");
+    test_repo.stage_files(&["file.txt", "kept.txt"]);
+
+    let result = super::fold_files_into_commit(
+        &test_repo.repo,
+        &["file.txt".to_string()],
+        &target_oid.to_string(),
+        true,
+        &[],
+    );
+    assert!(result.is_ok(), "fold failed: {result:?}");
+
+    let status = test_repo.status_porcelain();
+    assert!(status.contains("A  kept.txt"), "{status}");
+}
+
+/// The same set-aside work, on the path where the fold fails after the fixup
+/// commit exists: nothing durable holds the patch yet, so only the guard can
+/// bring it back. A file where `.git/loom` must be a directory is what makes
+/// `transaction::save` fail this late.
+#[test]
+fn a_fold_failing_after_the_fixup_commit_puts_back_the_staging() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.write_file("file.txt", "target\n");
+    test_repo.stage_files(&["file.txt"]);
+    test_repo.commit_staged("target commit");
+    let target_oid = test_repo.head_oid();
+
+    test_repo.write_file("later.txt", "later\n");
+    test_repo.stage_files(&["later.txt"]);
+    test_repo.commit_staged("second commit");
+
+    test_repo.write_file("file.txt", "target amended\n");
+    test_repo.write_file("kept.txt", "staged, and none of the fold's business\n");
+    test_repo.stage_files(&["file.txt", "kept.txt"]);
+    std::fs::write(test_repo.repo.path().join("loom"), "not a directory").unwrap();
+
+    let result = super::fold_files_into_commit(
+        &test_repo.repo,
+        &["file.txt".to_string()],
+        &target_oid.to_string(),
+        true,
+        &[],
+    );
+
+    assert!(result.is_err(), "the state file cannot be written");
+    // The rollback resets over the fixup commit, so only the reflog still shows
+    // it. Without this the test passes just as green if the failure ever moves
+    // earlier, leaving the window it is named after unguarded.
+    let reflog = crate::git::run_git_stdout(&test_repo.workdir(), &["reflog", "--format=%gs"])
+        .expect("reflog");
+    assert!(
+        reflog.contains("fixup! target commit"),
+        "the fixup commit must already exist: {reflog}"
+    );
+    let status = test_repo.status_porcelain();
+    assert!(status.contains("A  kept.txt"), "{status}");
+}
+
 // ── Case 2: Commit + Commit (Fixup) ─────────────────────────────────────
 
 #[test]
@@ -4275,7 +4350,7 @@ fn an_amend_that_replaced_head_is_taken_back() {
     crate::git::run_git(&workdir, &["commit", "--amend", "--no-edit"]).unwrap();
     assert_ne!(t.head_oid(), head, "the amend should have moved HEAD");
 
-    super::undo_commit_attempt(&workdir, head, &["file1.txt"], &saved);
+    super::undo_commit_attempt(&workdir, head, &["file1.txt"], saved);
 
     assert_eq!(t.head_oid(), head);
     assert_eq!(t.get_message(0), "Second");
