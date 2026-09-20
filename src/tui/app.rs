@@ -1375,7 +1375,6 @@ impl<'a> App<'a> {
             Mode::NewBranch { field, .. } => Some((branch_key(NEW_BRANCH_NAME), field)),
             _ => None,
         };
-        let id_width = self.snapshot.ids.commit_id_width();
         let items: Vec<ListItem> = self
             .rows
             .iter()
@@ -1384,7 +1383,6 @@ impl<'a> App<'a> {
                 ListItem::new(row_line(
                     row,
                     self.theme,
-                    id_width,
                     &self.snapshot.cwd_prefix,
                     self.selected.contains(&row.key),
                     i == cursor,
@@ -1687,13 +1685,11 @@ fn nearest_focusable(rows: &[Row], index: usize) -> Option<usize> {
 
 // ── Row rendering ────────────────────────────────────────────────────────
 
-/// Render one tree row as a styled line; `id_width` pads commit IDs into one
-/// column; `editing` replaces the branch name with the field being typed. The
-/// first span is the multi-select gutter.
+/// Render one tree row as a styled line; `editing` replaces the branch name
+/// with the field being typed. The first span is the multi-select gutter.
 fn row_line(
     row: &Row,
     theme: &TuiTheme,
-    id_width: usize,
     cwd_prefix: &str,
     selected: bool,
     is_cursor: bool,
@@ -1777,7 +1773,6 @@ fn row_line(
         RowKind::Commit {
             oid,
             message,
-            hash,
             dot_color,
             file_count,
         } => {
@@ -1796,18 +1791,14 @@ fn row_line(
                 }
             }
             if *oid == PENDING_COMMIT_OID {
-                // A commit being placed has no short ID or hash yet; keep the
-                // columns.
+                // A commit being placed has no short ID yet; keep the column.
                 spans.push(Span::styled("··", dim));
-                spans.push(Span::raw(" ".repeat(id_width.saturating_sub(2) + 1)));
-                spans.push(Span::styled("······· ", dim));
+                spans.push(Span::raw(graph::id_pad("··")));
                 spans.push(Span::styled(message.clone(), dim));
                 return Line::from(spans);
             }
             spans.push(Span::styled(row.sid.clone(), theme.shortid));
-            spans.push(Span::raw(" ".repeat(id_width - row.sid.len() + 1)));
-            spans.push(Span::styled(hash.clone(), dim));
-            spans.push(Span::raw(" "));
+            spans.push(Span::raw(graph::id_pad(&row.sid)));
             spans.push(Span::styled(message.clone(), theme.message));
             if row.expandable && !row.expanded {
                 spans.push(Span::styled(format!(" ({} files)", file_count), dim));

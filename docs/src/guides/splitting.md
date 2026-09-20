@@ -8,7 +8,7 @@ git loom status -f mqt
 
 ```
 │╭─ fa [feature-auth]
-│●    mqt 291658f add login form
+│●    mqt  add login form 291658f
 │┊      mqt:0 A  src/auth.rs
 │┊      mqt:1 A  src/validation.rs
 │┊      mqt:2 A  templates/login.html
@@ -31,8 +31,8 @@ Select the files for the **first** commit — the remaining files stay in the **
 
 ```
 │╭─ fa [feature-auth]
-│●    mqt 5e1a9c2 add login form
-│●    wsl 8c2b2fa add validation helpers
+│●    mqt  add login form 5e1a9c2
+│●    wsl  add validation helpers 8c2b2fa
 ├╯
 │
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit

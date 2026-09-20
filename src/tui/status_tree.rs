@@ -72,8 +72,6 @@ pub(crate) enum RowKind {
     Commit {
         oid: git2::Oid,
         message: String,
-        /// Abbreviated hash, shown after the short ID.
-        hash: String,
         /// Index into the theme's rotating dot colors; `None` = loose commit.
         dot_color: Option<usize>,
         file_count: usize,
@@ -305,7 +303,6 @@ fn push_commit_rows(
             kind: RowKind::Commit {
                 oid: commit.oid,
                 message: commit.message.clone(),
-                hash: commit.short_id.clone(),
                 dot_color,
                 file_count: commit.files.len(),
             },

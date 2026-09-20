@@ -170,11 +170,15 @@ head_parent_count()      { git -C "$WORK" log -1         --pretty=%P | wc -w | t
 parent_count_at()        { git -C "$WORK" log -1 "$1"   --pretty=%P | wc -w | tr -d ' '; }
 
 # Return the short ID for a commit, given its message as shown in gl status:
-# the field right before the abbreviated hash (`│●    mqt d072f9a Message`).
+# the field after the graph prefix (`│●    mqt  Message d072f9a`).
 # Usage: commit_sid=$(commit_sid_from_status "Commit message")
 commit_sid_from_status() {
-    gl status | grep -F -- "$1" | head -1 \
-        | awk '{ for (i = 2; i <= NF; i++) if ($i ~ /^[0-9a-f]{7,}$/) { print $(i-1); exit } }'
+    gl status | subject="$1" awk '
+        ($1 == "●" || $1 == "│●") &&
+        $NF ~ /^[0-9a-f]{7,}$/ && index($0, ENVIRON["subject"]) {
+            print $2
+            exit
+        }'
 }
 
 # Return the short ID for a branch, given its name as shown in gl status.

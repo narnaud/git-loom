@@ -158,8 +158,8 @@ fn single_branch() {
 │   no changes
 │
 │╭─ fa [feature-a]
-│●    02 0000002 A2
-│●    01 0000001 A1
+│●    02   A2 0000002
+│●    01   A1 0000001
 ├╯
 │
 ● aaa0000 (upstream) [origin/main] Initial commit
@@ -246,7 +246,7 @@ fn loose_commits_on_integration_line() {
 
     let output = render_plain(info);
     assert!(
-        output.contains("●    02 0000002 Fix typo\n●    01 0000001 Refactor"),
+        output.contains("●    02   Fix typo 0000002\n●    01   Refactor 0000001"),
         "expected loose commits, got:\n{}",
         output
     );
@@ -277,7 +277,7 @@ fn mixed_loose_and_branch() {
     let output = render_plain(info);
     // Loose commit should appear before the branch
     assert!(
-        output.contains("●    03 0000003 Loose on top\n│\n│╭─ fb [feature-b]"),
+        output.contains("●    03   Loose on top 0000003\n│\n│╭─ fb [feature-b]"),
         "expected loose then branch, got:\n{}",
         output
     );
@@ -359,7 +359,7 @@ fn merge_based_integration_branch() {
 
     // Integration-line commits should be loose (plain ● without │ prefix)
     assert!(
-        output.contains("●    23 0000023 Feature 3 depends on Feature 2"),
+        output.contains("●    23   Feature 3 depends on Feature 2 0000023"),
         "expected loose integration commit, got:\n{}",
         output
     );
@@ -538,13 +538,13 @@ fn files_shown_under_branch_commits() {
     // File shortids use commit_sid:index format
     assert!(
         output.contains(
-            "│●    02 0000002 A2\n│┊      02:0 M  src/graph.rs\n│┊      02:1 A  new_file.txt\n"
+            "│●    02   A2 0000002\n│┊      02:0 M  src/graph.rs\n│┊      02:1 A  new_file.txt\n"
         ),
         "expected files under A2, got:\n{}",
         output
     );
     assert!(
-        output.contains("│●    01 0000001 A1\n│┊      01:0 M  src/status.rs\n"),
+        output.contains("│●    01   A1 0000001\n│┊      01:0 M  src/status.rs\n"),
         "expected files under A1, got:\n{}",
         output
     );
@@ -567,7 +567,7 @@ fn files_shown_under_loose_commits() {
     let output = render_plain(info);
     // Loose commit file should have ┊ prefix with commit_sid:index format
     assert!(
-        output.contains("●    02 0000002 Fix typo\n┊       02:0 M  README.md\n"),
+        output.contains("●    02   Fix typo 0000002\n┊       02:0 M  README.md\n"),
         "expected files under loose commit, got:\n{}",
         output
     );
@@ -629,7 +629,7 @@ fn root_commit_files_shown() {
 
     let output = render_plain(info);
     assert!(
-        output.contains("●    01 0000001 Initial\n┊       01:0 A  init.rs\n"),
+        output.contains("●    01   Initial 0000001\n┊       01:0 A  init.rs\n"),
         "expected file under root commit, got:\n{}",
         output
     );
@@ -1173,7 +1173,7 @@ fn stack_helpers_use_canonical_name_for_colocated_tips() {
 // ── Persistent commit IDs ────────────────────────────────────────────────
 
 #[test]
-fn commit_with_change_id_shows_letters_then_hash() {
+fn commit_ids_share_one_fixed_width_column() {
     let mut info = base_info();
     let mut a2 = commit(2, "A2", Some(1));
     a2.change_id = Some("I3ac7000000000000000000000000000000000000".to_string());
@@ -1185,20 +1185,47 @@ fn commit_with_change_id_shows_letters_then_hash() {
     }];
 
     let output = render_plain(info);
-    // The hash-only commit is padded to the letter ID's width.
     assert!(
-        output.contains("│●    wpn 0000002 A2\n│●    01  0000001 A1\n"),
+        output.contains("│●    wpn  A2 0000002\n│●    01   A1 0000001\n"),
+        "{output}"
+    );
+}
+
+/// A five-letter ID outgrows the column and shifts only its own line, so the
+/// rest of the tree keeps the width it had before the collision.
+#[test]
+fn an_oversized_commit_id_pushes_only_its_own_line() {
+    let mut info = base_info();
+    let mut a3 = commit(3, "A3", Some(2));
+    a3.change_id = Some("I3ac7000000000000000000000000000000000000".to_string());
+    let mut a2 = commit(2, "A2", Some(1));
+    a2.change_id = Some("I3ac7100000000000000000000000000000000000".to_string());
+    info.commits = vec![a3, a2, commit(1, "A1", None)];
+    info.branches = vec![BranchInfo {
+        name: "feature-a".to_string(),
+        tip_oid: oid(3),
+        remote: None,
+    }];
+
+    let output = render_plain(info);
+    assert!(
+        output.contains(
+            "│●    wpnsz A3 0000003
+│●    wpnsy A2 0000002
+│●    01   A1 0000001
+"
+        ),
         "{output}"
     );
 }
 
 #[test]
-fn loose_commit_with_change_id_keeps_the_hash_after_the_id() {
+fn loose_commit_keeps_the_hash_at_the_end_of_the_line() {
     let mut info = base_info();
     let mut c = commit(2, "Fix typo", Some(1));
     c.change_id = Some("Ib710000000000000000000000000000000000000".to_string());
     info.commits = vec![c];
 
     let output = render_plain(info);
-    assert!(output.contains("●    osy 0000002 Fix typo\n"), "{output}");
+    assert!(output.contains("●    osy  Fix typo 0000002\n"), "{output}");
 }

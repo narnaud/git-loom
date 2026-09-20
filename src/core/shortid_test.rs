@@ -273,7 +273,6 @@ fn commit_with_change_id_gets_three_letters() {
     let alloc = IdAllocator::new(vec![persistent(1, ID_A), persistent(2, ID_C)]);
     assert_eq!(alloc.get_commit(oid(1)), "wpn");
     assert_eq!(alloc.get_commit(oid(2)), "osy");
-    assert_eq!(alloc.commit_id_width(), 3);
 }
 
 /// A newcomer sharing a prefix must never take an existing commit's ID: both
@@ -287,7 +286,6 @@ fn a_colliding_newcomer_lengthens_both_ids() {
     let after = IdAllocator::new(vec![persistent(2, ID_B), persistent(1, ID_A)]);
     assert_eq!(after.get_commit(oid(1)), "wpns");
     assert_eq!(after.get_commit(oid(2)), "wpnr");
-    assert_eq!(after.commit_id_width(), 4);
 }
 
 #[test]
@@ -315,7 +313,6 @@ fn letter_and_hex_commits_coexist_with_a_branch() {
     assert_eq!(alloc.get_commit(oid(0xAB)), "ab");
     assert_eq!(alloc.get_commit(oid(1)), "wpn");
     assert_eq!(alloc.get_branch("wp-n"), "wn");
-    assert_eq!(alloc.commit_id_width(), 3);
 }
 
 #[test]

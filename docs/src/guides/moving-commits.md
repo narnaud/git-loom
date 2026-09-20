@@ -4,12 +4,12 @@ You committed a logging helper to `feature-auth` by mistake — it belongs in `f
 
 ```
 │╭─ fd [feature-dashboard]
-│●    rsv 24a86e6 add dashboard layout
+│●    rsv  add dashboard layout 24a86e6
 ├╯
 │
 │╭─ fa [feature-auth]
-│●    tqn 6395f01 add logging helper
-│●    mqt 64518a4 add login form
+│●    tqn  add logging helper 6395f01
+│●    mqt  add login form 64518a4
 ├╯
 │
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit
@@ -25,12 +25,12 @@ Commit `tqn` is removed from `feature-auth` and appended to `feature-dashboard`:
 
 ```
 │╭─ fd [feature-dashboard]
-│●    tqn db04256 add logging helper
-│●    rsv 24a86e6 add dashboard layout
+│●    tqn  add logging helper db04256
+│●    rsv  add dashboard layout 24a86e6
 ├╯
 │
 │╭─ fa [feature-auth]
-│●    mqt 64518a4 add login form
+│●    mqt  add login form 64518a4
 ├╯
 │
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit

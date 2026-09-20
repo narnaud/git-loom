@@ -431,6 +431,17 @@ pub(crate) fn is_stacked_with_next(sections: &[Section], idx: usize) -> bool {
 
 // ── Rendering ───────────────────────────────────────────────────────────
 
+/// Columns reserved for a commit short ID, so the subject column stays put
+/// across invocations instead of reflowing when an ID grows (Spec 002). A
+/// longer ID (five letters, or a numeric-suffix fallback) pushes its own line
+/// right rather than the whole tree.
+const COMMIT_ID_SLOT: usize = 4;
+
+/// Spaces between a commit short ID and the subject: always at least one.
+pub(crate) fn id_pad(sid: &str) -> String {
+    " ".repeat(COMMIT_ID_SLOT.saturating_sub(sid.chars().count()) + 1)
+}
+
 /// Render sections as a UTF-8 graph. Stacked branches (where the last commit
 /// of a branch is a parent of the first commit of the next) are connected
 /// with `││` and `│├─`, while independent branches get `├╯` then `│╭─`.
@@ -438,7 +449,6 @@ fn render_sections(sections: &[Section], ids: &IdAllocator, opts: &RenderOpts) -
     let mut out = String::new();
     let last_idx = sections.len() - 1;
     let mut branch_color_idx: usize = 0;
-    let id_width = ids.commit_id_width();
 
     for (idx, section) in sections.iter().enumerate() {
         match section {
@@ -462,7 +472,6 @@ fn render_sections(sections: &[Section], ids: &IdAllocator, opts: &RenderOpts) -
                     next_stacked,
                     idx < last_idx,
                     ids,
-                    id_width,
                     &opts.theme,
                     &opts.cwd_prefix,
                 );
@@ -470,7 +479,6 @@ fn render_sections(sections: &[Section], ids: &IdAllocator, opts: &RenderOpts) -
             Section::Loose(commits) => {
                 render_loose(
                     &mut out,
-                    id_width,
                     commits,
                     idx < last_idx,
                     ids,
@@ -668,7 +676,6 @@ fn render_branch(
     next_stacked: bool,
     more_sections: bool,
     ids: &IdAllocator,
-    id_width: usize,
     theme: &Theme,
     cwd_prefix: &str,
 ) {
@@ -702,13 +709,13 @@ fn render_branch(
         let sid = ids.get_commit(commit.oid);
         writeln!(
             out,
-            "{}{}    {}{} {} {}",
+            "{}{}    {}{}{} {}",
             "│".color(theme.graph),
             "●".color(dot_color),
             sid.color(theme.shortid).underline(),
-            " ".repeat(id_width - sid.len()),
-            commit.short_id.color(theme.dim),
-            commit.message
+            id_pad(sid),
+            commit.message,
+            commit.short_id.color(theme.dim)
         )
         .unwrap();
         for (i, file) in commit.files.iter().enumerate() {
@@ -738,7 +745,6 @@ fn render_branch(
 
 fn render_loose(
     out: &mut String,
-    id_width: usize,
     commits: &[CommitInfo],
     more_sections: bool,
     ids: &IdAllocator,
@@ -749,12 +755,12 @@ fn render_loose(
         let sid = ids.get_commit(commit.oid);
         writeln!(
             out,
-            "{}    {}{} {} {}",
+            "{}    {}{}{} {}",
             "●".color(theme.graph),
             sid.color(theme.shortid).underline(),
-            " ".repeat(id_width - sid.len()),
-            commit.short_id.color(theme.dim),
-            commit.message
+            id_pad(sid),
+            commit.message,
+            commit.short_id.color(theme.dim)
         )
         .unwrap();
         for (i, file) in commit.files.iter().enumerate() {

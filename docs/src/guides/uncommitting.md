@@ -8,9 +8,9 @@ $ git loom status -f
 
 ```
 │╭─ fa [feature-auth]
-│●    pkz 92b8427 add password validation
+│●    pkz  add password validation 92b8427
 │┊      pkz:0 M  src/auth.rs
-│●    mqt bae0b72 add login form
+│●    mqt  add login form bae0b72
 │┊      mqt:0 A  src/auth.rs
 │┊      mqt:1 A  templates/login.html
 ├╯
@@ -33,7 +33,7 @@ The commit is removed from history and its changes appear as unstaged modificati
 │    M src/auth.rs
 │
 │╭─ fa [feature-auth]
-│●    mqt bae0b72 add login form
+│●    mqt  add login form bae0b72
 │┊      mqt:0 A  src/auth.rs
 │┊      mqt:1 A  templates/login.html
 ├╯
@@ -56,9 +56,9 @@ The file is removed from the commit and appears as an untracked file in the work
 │    ⁕ templates/login.html
 │
 │╭─ fa [feature-auth]
-│●    pkz 2a660a7 add password validation
+│●    pkz  add password validation 2a660a7
 │┊      pkz:0 M  src/auth.rs
-│●    mqt 4afdd0c add login form
+│●    mqt  add login form 4afdd0c
 │┊      mqt:0 A  src/auth.rs
 ├╯
 │

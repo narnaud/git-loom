@@ -48,12 +48,14 @@ IDs use blue underline (`COLOR_SHORTID`). Placement is:
 │   ma M src/main.rs
 │
 │╭─ fa [feature-a]
-│●    mqt d072f9a Fix bug
-│●    3a  3a6f21c Cherry-picked
+│●    mqt  Fix bug d072f9a
+│●    3a   Cherry-picked 3a6f21c
 ├╯
 ```
 
-A commit line is `<id> <abbreviated hash> <subject>`: the ID first, padded to the widest commit ID in the output, then the dimmed abbreviated hash. ANSI-stripped output still contains the full abbreviated hash. The upstream/common-base marker gets no ID.
+A commit line is `<id> <subject> <abbreviated hash>`: the ID first, then the subject, then the dimmed abbreviated hash at the end of the line. ANSI-stripped output still contains the full abbreviated hash. The upstream/common-base marker gets no ID.
+
+The ID occupies a fixed four-column field followed by one space, so the subject column does not move between invocations when a new commit lengthens an ID. An ID wider than the field (five letters, or a numeric-suffix fallback) keeps its single trailing space and shifts only its own line. The interactive TUI uses the same column but shows no hash.
 
 ## Persistent commit identity
 

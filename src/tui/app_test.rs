@@ -1606,7 +1606,7 @@ fn commit_draws_a_placeholder_row_at_its_destination() {
         .collect();
     let at = lines
         .iter()
-        .position(|line| line.contains("·· ······· new commit (2 files)"))
+        .position(|line| line.contains("··   new commit (2 files)"))
         .expect("no placeholder commit row");
     assert!(lines[at - 1].contains("[feature-a]"), "{lines:#?}");
     assert!(lines[at + 1].contains("Add parser"), "{lines:#?}");
@@ -1772,7 +1772,6 @@ fn diff_text_per_row_kind() {
     let kind = RowKind::Commit {
         oid: commit_oid,
         message: String::new(),
-        hash: String::new(),
         dot_color: None,
         file_count: 1,
     };

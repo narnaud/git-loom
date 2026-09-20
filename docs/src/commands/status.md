@@ -33,12 +33,12 @@ The status displays a branch-aware commit graph using UTF-8 box-drawing characte
 │    ⁕ untracked.txt
 │
 │╭─ fb [feature-b] ✓
-│●    mqt d0472f9 Fix bug in feature B
-│●    pkz 7a067a9 Start feature B
+│●    mqt  Fix bug in feature B d0472f9
+│●    pkz  Start feature B 7a067a9
 ├╯
 │
 │╭─ fa [feature-a] ↑
-│●    rsv 2ee61e1 Add feature A
+│●    rsv  Add feature A 2ee61e1
 ├╯
 │
 ● ff1b247 (upstream) [origin/main] Initial commit
@@ -81,7 +81,7 @@ The graph is rendered top-to-bottom with these sections:
 
 Each branch, commit, and file in the output is assigned a short ID — a compact identifier you can use with other *git-loom* commands. What you see in the status is what you type.
 
-A commit's short ID comes first on its line, then the abbreviated hash. Commits that carry a `Change-Id` trailer (every commit loom creates, see [`loom.changeId`](../configuration.md#loomchangeid)) get a **persistent** ID made of the letters `k`–`z`, such as `mqt`: it is derived from the Change-Id, not from the hash, so it survives `update`, `fold`, `swap`, `split`, and every other rewrite. Any longer prefix of the ID also works, and so does the full `Change-Id` value. A commit without a Change-Id — made with plain `git commit`, or cherry-picked from elsewhere — falls back to a hex prefix of its hash, such as `3a`, which changes whenever the commit is rewritten.
+A commit's short ID comes first on its line, in a fixed column, with the abbreviated hash at the end of the line. Commits that carry a `Change-Id` trailer (every commit loom creates, see [`loom.changeId`](../configuration.md#loomchangeid)) get a **persistent** ID made of the letters `k`–`z`, such as `mqt`: it is derived from the Change-Id, not from the hash, so it survives `update`, `fold`, `swap`, `split`, and every other rewrite. Any longer prefix of the ID also works, and so does the full `Change-Id` value. A commit without a Change-Id — made with plain `git commit`, or cherry-picked from elsewhere — falls back to a hex prefix of its hash, such as `3a`, which changes whenever the commit is rewritten.
 
 IDs are the shortest prefix that tells commits apart. When a new commit happens to share the first letters of an existing one, both IDs grow by a letter and the old shorter form stops resolving, so a stale ID can never point at the wrong commit.
 
@@ -95,7 +95,7 @@ git loom status -f
 
 ```
 │╭─ fa [feature-a]
-│●    mqt 2ee61e1 Add feature A
+│●    mqt  Add feature A 2ee61e1
 │┊      mqt:0 M  src/feature.rs
 │┊      mqt:1 A  tests/feature_test.rs
 ├╯
@@ -119,11 +119,11 @@ Each feature branch forks from the integration line independently:
 
 ```
 │╭─ fb [feature-b]
-│●    mqt d0472f9 Fix bug in feature B
+│●    mqt  Fix bug in feature B d0472f9
 ├╯
 │
 │╭─ fa [feature-a]
-│●    rsv 2ee61e1 Add feature A
+│●    rsv  Add feature A 2ee61e1
 ├╯
 ```
 
@@ -133,12 +133,12 @@ Feature-b is stacked on top of feature-a:
 
 ```
 │╭─ fb [feature-b]
-│●    mqt 4e046ab Second commit on feature-b
-│●    pkz 0b85ca7 First commit on feature-b
+│●    mqt  Second commit on feature-b 4e046ab
+│●    pkz  First commit on feature-b 0b85ca7
 ││
 │├─ fa [feature-a]
-│●    rsv caa87a9 Second commit on feature-a
-│●    tqn 18faee8 First commit on feature-a
+│●    rsv  Second commit on feature-a caa87a9
+│●    tqn  First commit on feature-a 18faee8
 ├╯
 ```
 
@@ -149,7 +149,7 @@ Multiple branches pointing to the same commit:
 ```
 │╭─ fv [feature-a-v2]
 │├─ fa [feature-a]
-│●    rsv 2ee61e1 Add feature A
+│●    rsv  Add feature A 2ee61e1
 ├╯
 ```
 
@@ -158,7 +158,7 @@ Multiple branches pointing to the same commit:
 When upstream has new commits beyond the common base:
 
 ```
-●    mqt abc1234 Fix typo
+●    mqt  Fix typo abc1234
 │
 │●  [origin/main] ⏫ 3 new commits
 ├╯ 204e309 (common base) 2025-07-06 Merge pull request #10

@@ -7,8 +7,8 @@ You realize the login form is missing a CSRF token. You fix `src/auth.rs` and ch
 │    M src/auth.rs
 │
 │╭─ fa [feature-auth]
-│●    pkz 81356bf add password validation
-│●    mqt a337eda add login form
+│●    pkz  add password validation 81356bf
+│●    mqt  add login form a337eda
 ├╯
 │
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit

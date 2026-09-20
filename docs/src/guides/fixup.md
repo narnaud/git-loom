@@ -4,8 +4,8 @@ You have two commits on `feature-auth` and realize that `pkz` ("add password val
 
 ```
 │╭─ fa [feature-auth]
-│●    pkz 2b48f49 add password validation
-│●    mqt bf7e5af add login form
+│●    pkz  add password validation 2b48f49
+│●    mqt  add login form bf7e5af
 ├╯
 │
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit
@@ -21,7 +21,7 @@ Commit `pkz` disappears from history and its changes are absorbed into `mqt`:
 
 ```
 │╭─ fa [feature-auth]
-│●    mqt 9dff7bd add login form
+│●    mqt  add login form 9dff7bd
 ├╯
 │
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit

@@ -19,14 +19,14 @@ Shows the same tree as `git loom status` with files enabled, plus a live diff pa
 │ ╭─ zz [local changes]                ││ diff --git a/src/main.rs ...  │
 │ │   ma M  src/main.rs                ││ @@ -1,3 +1,4 @@               │
 │ │╭─ fa [feature-a] ✓                 ││ +new line                     │
-│ │●  mqt d4f2a1b Add parser (2 files) ││ ...                           │
+│ │●  mqt  Add parser (2 files)        ││ ...                           │
 │ ├╯                                   ││                               │
 │ ●  9999999 (upstream) ...            ││                               │
 └──────────────────────────────────────┘└───────────────────────────────┘
  Navigate: ↑/↓ | Fold/unfold: ←/→ | Select: space | Commit: c | ...
 ```
 
-Short IDs are displayed like in `git loom status` (commit ID, then hash), so the tree doubles as a cheat-sheet for manual commands.
+Short IDs are displayed like in `git loom status`, so the tree doubles as a cheat-sheet for manual commands. Commit rows leave out the abbreviated hash: the short ID already names the commit for every loom command.
 
 ### Navigation
 

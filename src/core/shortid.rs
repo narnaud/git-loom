@@ -88,11 +88,6 @@ impl IdAllocator {
             .unwrap_or("")
     }
 
-    /// Width of the widest commit ID, for column alignment.
-    pub fn commit_id_width(&self) -> usize {
-        self.commits.values().map(|c| c.id.len()).max().unwrap_or(0)
-    }
-
     /// Every commit `arg` names by Change-Id: the canonical `I…` literal, or
     /// a prefix of at least [`changeid::MIN_LEN`] letters. One hit resolves;
     /// several mean a too-short prefix or twins sharing a Change-Id.
