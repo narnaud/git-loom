@@ -48,6 +48,10 @@ pub(crate) enum Tick<E> {
     /// Restore the terminal for a subprocess, ack on the sender, then block
     /// in [`ShellApp::wait_for_resume`] until the app says it is back.
     Suspend(Sender<()>),
+    /// Hand the live terminal to [`ShellApp::take_over`] — a nested shell of
+    /// the app's own — then redraw. Nothing is torn down, so the screen does
+    /// not flicker between the two.
+    TakeOver,
     Exit(E),
 }
 
@@ -139,6 +143,10 @@ pub(crate) trait ShellApp {
     /// After a [`Tick::Suspend`]: block until the subprocess is done with the
     /// terminal. Must not read terminal events.
     fn wait_for_resume(&mut self) {}
+    /// After a [`Tick::TakeOver`]: the app draws on `terminal` until this
+    /// returns, by running a nested shell on it ([`Shell::run_nested`]). The
+    /// terminal is the host's, already set up — leave it that way.
+    fn take_over(&mut self, _terminal: &mut ratatui::DefaultTerminal) {}
     /// Drawn last, over the panes and the status bar (popups).
     fn render_overlay(&mut self, _frame: &mut Frame, _area: Rect) {}
 }
@@ -148,8 +156,13 @@ pub(crate) trait ShellApp {
 /// panicking is reported by the app, not by tearing the TUI down.
 static TUI_THREAD: Mutex<Option<ThreadId>> = Mutex::new(None);
 
-fn set_tui_thread(id: Option<ThreadId>) {
-    *TUI_THREAD.lock().unwrap_or_else(|e| e.into_inner()) = id;
+/// Points the panic hook at the thread running the loop; returns the thread
+/// it pointed at, so a shell run from inside another one puts it back.
+fn set_tui_thread(id: Option<ThreadId>) -> Option<ThreadId> {
+    std::mem::replace(
+        &mut *TUI_THREAD.lock().unwrap_or_else(|e| e.into_inner()),
+        id,
+    )
 }
 
 /// Install the terminal-restoring panic hook, once per process.
@@ -220,14 +233,21 @@ impl<A: ShellApp> Shell<A> {
         // handler. The hook is installed once per process and is inert
         // between shell runs, so repeated runs don't nest wrappers.
         install_panic_hook();
-        set_tui_thread(Some(std::thread::current().id()));
+        let outer = set_tui_thread(Some(std::thread::current().id()));
 
         let result = enter_terminal().and_then(|mut terminal| self.event_loop(&mut terminal));
 
-        set_tui_thread(None);
+        set_tui_thread(outer);
         leave_terminal();
 
         result.map(|exit| (self.app, exit))
+    }
+
+    /// Run the event loop on a terminal the caller set up, for a shell hosted
+    /// inside another one: the host's alternate screen, raw mode and mouse
+    /// capture stay as they are, so the two draw over each other seamlessly.
+    pub fn run_nested(mut self, terminal: &mut ratatui::DefaultTerminal) -> Result<(A, A::Exit)> {
+        self.event_loop(terminal).map(|exit| (self.app, exit))
     }
 
     fn event_loop(&mut self, terminal: &mut ratatui::DefaultTerminal) -> Result<A::Exit> {
@@ -245,6 +265,10 @@ impl<A: ShellApp> Shell<A> {
                     let _ = ack.send(());
                     self.app.wait_for_resume();
                     *terminal = enter_terminal()?;
+                    dirty = true;
+                }
+                Tick::TakeOver => {
+                    self.app.take_over(terminal);
                     dirty = true;
                 }
                 Tick::Exit(exit) => return Ok(exit),

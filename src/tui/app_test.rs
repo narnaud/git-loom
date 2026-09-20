@@ -336,8 +336,11 @@ fn commit_collects_the_selected_working_files_and_lands_on_integration() {
     let branch = app.rows.iter().position(|r| r.key == "br:feature-a");
     assert_eq!(branch, Some(at + 2), "one spacer between the two sections");
 
-    let Some(Action::Commit { files, dest }) = app.confirm_commit_target() else {
+    let Some(Action::Commit { source, dest }) = app.confirm_commit_target() else {
         panic!("expected a commit action");
+    };
+    let CommitSource::Files(files) = source else {
+        panic!("`c` names its files");
     };
     assert_eq!(files.len(), 2);
     assert_eq!(dest, CommitDest::Integration);
@@ -382,10 +385,223 @@ fn commit_on_the_local_changes_header_takes_everything_as_zz() {
     move_cursor_to(&mut app, LOCAL_CHANGES_KEY);
 
     press(&mut app, KeyCode::Char('c'));
-    let Some(Action::Commit { files, .. }) = app.confirm_commit_target() else {
+    let Some(Action::Commit { source, .. }) = app.confirm_commit_target() else {
         panic!("expected a commit action");
     };
+    assert_eq!(
+        source,
+        CommitSource::Files(vec![app.snapshot.ids.get_unstaged().to_string()])
+    );
+}
+
+#[test]
+fn commit_with_hunks_asks_for_the_terminal_before_placing_anything() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, "wf:a.rs");
+
+    press(&mut app, KeyCode::Char('C'));
+    assert!(matches!(app.mode, Mode::Normal), "no destination yet");
+    let (files, origin) = app.pending_pick.clone().expect("no pick requested");
     assert_eq!(files, vec![app.snapshot.ids.get_unstaged().to_string()]);
+    assert_eq!(origin, "wf:a.rs");
+    assert!(matches!(app.poll_background(), Tick::TakeOver));
+}
+
+/// The selector rewrites the whole index, so it opens over every local change
+/// — the cursor row and the selection only decide where the cursor goes back.
+#[test]
+fn commit_with_hunks_picks_from_every_local_change() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, "wf:a.rs");
+    app.toggle_selection();
+    move_cursor_to(&mut app, &oid('a').to_string());
+
+    press(&mut app, KeyCode::Char('C'));
+    let (files, _) = app.pending_pick.clone().expect("no pick requested");
+    assert_eq!(files, vec![app.snapshot.ids.get_unstaged().to_string()]);
+}
+
+/// `C` is in the key list that is inert while a commit is being placed, so it
+/// cannot discard the pending placement to start a pick.
+#[test]
+fn commit_with_hunks_is_inert_while_a_commit_is_being_placed() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, "wf:a.rs");
+    press(&mut app, KeyCode::Char('c'));
+    assert!(matches!(app.mode, Mode::CommitTarget { .. }));
+
+    press(&mut app, KeyCode::Char('C'));
+    assert!(app.pending_pick.is_none(), "no pick may start");
+    assert!(
+        matches!(app.mode, Mode::CommitTarget { .. }),
+        "still placing"
+    );
+}
+
+#[test]
+fn commit_with_hunks_refuses_an_empty_working_tree() {
+    let mut info = make_info();
+    info.working_changes.clear();
+    let theme = make_theme();
+    let mut app = make_app(snapshot_of(info), &theme);
+
+    press(&mut app, KeyCode::Char('C'));
+    assert!(app.pending_pick.is_none());
+    assert_eq!(app.notice.as_deref(), Some("commit: no local changes"));
+}
+
+/// The pick is staged before the placement, so the placeholder counts the
+/// files the index holds — `a.rs` here, not the two local changes.
+#[test]
+fn a_staged_commit_counts_the_files_the_index_holds() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+
+    app.enter_commit_target(CommitSource::Index, LOCAL_CHANGES_KEY.to_string());
+
+    let mut shell = Shell::new(app);
+    let backend = ratatui::backend::TestBackend::new(100, 30);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    terminal.draw(|f| shell.render(f)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let lines: Vec<String> = (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect();
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("[CREATE COMMIT] new commit (1 file)")),
+        "{lines:#?}"
+    );
+
+    // The staging already happened, so the commit itself names no files.
+    let app = &mut shell.app;
+    let Some(action) = app.confirm_commit_target() else {
+        panic!("expected a commit action");
+    };
+    assert_eq!(
+        action,
+        Action::Commit {
+            source: CommitSource::Index,
+            dest: CommitDest::Integration,
+        }
+    );
+    assert_eq!(app.command_line(&action), "loom commit -i");
+}
+
+/// The half of `C` that writes the index. The selector needs a terminal and
+/// cannot run here, so the entries it would return are built directly.
+fn picked_entries(repo: &crate::core::test_helpers::TestRepo, keep: bool) -> Vec<FileEntry> {
+    let mut entries =
+        crate::core::staging::collect_file_entries(&repo.repo, &repo.workdir(), None).unwrap();
+    for entry in &mut entries {
+        for hunk in &mut entry.hunks {
+            hunk.selected = keep;
+        }
+    }
+    entries
+}
+
+fn repo_with_one_unstaged_hunk() -> crate::core::test_helpers::TestRepo {
+    let repo = crate::core::test_helpers::TestRepo::new();
+    repo.write_file(
+        "tracked.txt",
+        "one
+",
+    );
+    repo.stage_files(&["tracked.txt"]);
+    repo.commit_staged("Add file");
+    repo.write_file(
+        "tracked.txt",
+        "one
+two
+",
+    );
+    repo
+}
+
+fn app_on<'a>(repo: &crate::core::test_helpers::TestRepo, theme: &'a TuiTheme) -> App<'a> {
+    let mut info = make_info();
+    info.working_changes = vec![file("tracked.txt", ' ', 'M')];
+    let snapshot = Snapshot {
+        workdir: repo.workdir(),
+        git_dir: repo.repo.path().to_path_buf(),
+        ..snapshot_of(info)
+    };
+    make_app(snapshot, theme)
+}
+
+#[test]
+fn a_pick_stages_the_hunks_it_kept() {
+    let repo = repo_with_one_unstaged_hunk();
+    let theme = make_theme();
+    let mut app = app_on(&repo, &theme);
+
+    let picked = picked_entries(&repo, true);
+    assert!(app.apply_pick(&["zz".to_string()], picked).unwrap());
+
+    let status = repo.status_porcelain();
+    assert!(status.contains("M  tracked.txt"), "{status}");
+    assert_eq!(app.log.last().unwrap().command, "loom add -p zz");
+}
+
+/// Keeping nothing is not a failure and not a write: the index is left exactly
+/// as it was, and no `loom add -p` is logged for a command that did nothing.
+#[test]
+fn a_pick_that_kept_nothing_leaves_the_index_alone() {
+    let repo = repo_with_one_unstaged_hunk();
+    let theme = make_theme();
+    let mut app = app_on(&repo, &theme);
+    let before = repo.status_porcelain();
+    let logged = app.log.len();
+
+    let picked = picked_entries(&repo, false);
+    assert!(!app.apply_pick(&["zz".to_string()], picked).unwrap());
+
+    assert_eq!(repo.status_porcelain(), before);
+    assert_eq!(app.log.len(), logged, "nothing ran, nothing logged");
+}
+
+/// The pane previews the index the selector staged, not the whole worktree.
+#[test]
+fn a_staged_commit_previews_the_index() {
+    let repo = crate::core::test_helpers::TestRepo::new();
+    repo.write_file("staged.txt", "original");
+    repo.stage_files(&["staged.txt"]);
+    repo.commit_staged("Add file");
+    repo.write_file("staged.txt", "picked");
+    repo.stage_files(&["staged.txt"]);
+    repo.write_file("loose.txt", "left behind");
+
+    let mut info = make_info();
+    info.working_changes = vec![file("staged.txt", 'M', ' '), file("loose.txt", '?', '?')];
+    let snapshot = Snapshot {
+        workdir: repo.workdir(),
+        git_dir: repo.repo.path().to_path_buf(),
+        ..snapshot_of(info)
+    };
+    let theme = make_theme();
+    let mut app = make_app(snapshot, &theme);
+
+    app.enter_commit_target(CommitSource::Index, LOCAL_CHANGES_KEY.to_string());
+    app.ensure_diff_cached();
+
+    let text: String = app.diff_cache[&pending_commit_key()]
+        .iter()
+        .flat_map(|line| line.spans.iter().map(|s| s.content.to_string()))
+        .collect();
+    assert!(text.contains("+picked"), "got: {text}");
+    assert!(
+        !text.contains("loose.txt"),
+        "the unstaged file is not in it: {text}"
+    );
 }
 
 #[test]
@@ -1219,14 +1435,14 @@ fn command_line_uses_the_short_ids_the_tree_shows() {
     );
     assert_eq!(
         app.command_line(&Action::Commit {
-            files: vec![ids.get_unstaged().to_string()],
+            source: CommitSource::Files(vec![ids.get_unstaged().to_string()]),
             dest: CommitDest::Integration,
         }),
         format!("loom commit -i {}", ids.get_unstaged())
     );
     assert_eq!(
         app.command_line(&Action::Commit {
-            files: vec![file.clone()],
+            source: CommitSource::Files(vec![file.clone()]),
             dest: CommitDest::Branch("feature-a".to_string()),
         }),
         format!("loom commit -b {} {}", ids.get_branch("feature-a"), file)
@@ -1676,7 +1892,7 @@ fn status_bar_matches_spec() {
         .collect();
     assert!(
         last_row.starts_with(
-            " Navigate: ↑/↓ | Fold/unfold: ←/→ | Select: space | Commit: c | Fold: f \
+            " Navigate: ↑/↓ | Fold/unfold: ←/→ | Select: space | Commit: c/C | Fold: f \
              | Branch: b | Drop: d | Reword: r | Log: L | Refresh: R | Quit: q"
         ),
         "got: {:?}",

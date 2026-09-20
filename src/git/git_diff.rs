@@ -197,6 +197,12 @@ pub fn diff_head_display(workdir: &Path) -> Result<String> {
     patch_stdout(workdir, "diff", DISPLAY, &["HEAD"])
 }
 
+/// Get the staged diff against HEAD, for display (`git diff --cached`),
+/// keeping the user's textconv filters.
+pub fn diff_cached_display(workdir: &Path) -> Result<String> {
+    patch_stdout(workdir, "diff", DISPLAY, &["--cached"])
+}
+
 /// Get the working-tree diff of one file against HEAD, for display
 /// (`git diff HEAD -- <path>`), keeping the user's textconv filters.
 pub fn diff_head_file_display(workdir: &Path, path: &str) -> Result<String> {

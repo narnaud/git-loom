@@ -510,24 +510,49 @@ impl ShellApp for HunkSelectorApp {
 /// Returns `Ok(Some(files))` with updated selection state if the user confirms,
 /// or `Ok(None)` if cancelled / empty input.
 pub fn run_hunk_selector(files: Vec<FileEntry>, theme: TuiTheme) -> Result<Option<Vec<FileEntry>>> {
-    // Backstop for agent mode. `add`/`commit` are rejected at dispatch and the
-    // commit-source pickers answer with a listing before they get here, but no
-    // future call path may open a full-screen TUI either.
+    refuse_in_agent_mode()?;
+    if files.is_empty() {
+        return Ok(None);
+    }
+
+    let (app, verdict) = Shell::new(HunkSelectorApp::new(files, theme)).run()?;
+    Ok(confirmed(app, verdict))
+}
+
+/// Backstop for agent mode. `add`/`commit` are rejected at dispatch and the
+/// commit-source pickers answer with a listing before they get here, but no
+/// call path may open a full-screen TUI either. Every entry point goes through
+/// this, nested ones included.
+fn refuse_in_agent_mode() -> Result<()> {
     if crate::core::agent_mode::enabled() {
         anyhow::bail!(
             "--patch is interactive and unavailable in agent mode\n\
              Pass explicit files instead"
         );
     }
+    Ok(())
+}
+
+/// The selector inside a host TUI: it draws on the terminal the host already
+/// set up, so the screen never switches between the two.
+pub(crate) fn run_hunk_selector_nested(
+    files: Vec<FileEntry>,
+    theme: TuiTheme,
+    terminal: &mut ratatui::DefaultTerminal,
+) -> Result<Option<Vec<FileEntry>>> {
+    refuse_in_agent_mode()?;
     if files.is_empty() {
         return Ok(None);
     }
+    let (app, verdict) = Shell::new(HunkSelectorApp::new(files, theme)).run_nested(terminal)?;
+    Ok(confirmed(app, verdict))
+}
 
-    let (app, verdict) = Shell::new(HunkSelectorApp::new(files, theme)).run()?;
-    Ok(match verdict {
+fn confirmed(app: HunkSelectorApp, verdict: Verdict) -> Option<Vec<FileEntry>> {
+    match verdict {
         Verdict::Confirm => Some(app.files),
         Verdict::Cancel => None,
-    })
+    }
 }
 
 /// Fixtures shared with the shell tests.

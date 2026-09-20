@@ -23,7 +23,7 @@ Shows the same tree as `git loom status` with files enabled, plus a live diff pa
 │ ├╯                                   ││                               │
 │ ●  9999999 (upstream) ...            ││                               │
 └──────────────────────────────────────┘└───────────────────────────────┘
- Navigate: ↑/↓ | Fold/unfold: ←/→ | Select: space | Commit: c | ...
+ Navigate: ↑/↓ | Fold/unfold: ←/→ | Select: space | Commit: c/C | ...
 ```
 
 Short IDs are displayed like in `git loom status`, so the tree doubles as a cheat-sheet for manual commands. Commit rows leave out the abbreviated hash: the short ID already names the commit for every loom command.
@@ -59,6 +59,7 @@ Every action suspends the TUI, runs the regular loom command — prompts and edi
 | Key | Command | Arguments |
 |-----|---------|-----------|
 | `c` | [`commit`](commit.md) | Two-step: the selected working files — or the `[local changes]` header for everything — become the commit, then the tree shows it where it will land. `↑`/`↓` move it between the integration branch and every woven branch, `Enter` commits, `Esc` cancels. The message is prompted as usual. What you select is what goes in: the index is never consulted, so a file staged outside the TUI is committed whole or not at all. The destinations are the branches the tree already shows — to commit to a new one, create it with `b` first. |
+| `C` | [`add -p`](add.md) + [`commit`](commit.md) | Same as `c`, but the hunk selector opens first: pick the hunks you want, confirm, and then place the commit as usual. It always shows every local change, whatever the cursor is on — the selection plays no part. Confirming stages what you kept, exactly as `loom add -p` would, and the commit then takes the index: the placeholder counts its files and the diff pane shows it. What you left out stays a working change. Cancelling the selector changes nothing; cancelling the placement afterwards leaves your hunks staged, ready for another `C` or a plain `loom commit` — not `c`, which names whole files and would replace what you picked. |
 | `f` | [`fold`](fold.md) | Two-step: `f` captures the selection (or cursor row) as sources; move the cursor to the target and press `Enter` (`Esc` cancels). While picking a target, other action keys are inactive. |
 | `b` | [`branch new`](branch.md) | The branch appears in the tree where it will land once created — at the cursor commit or branch tip (its `-t` target), else at the base — and you type its name right there. `Enter` creates it, `Esc` or an empty name cancels. |
 | `d` | [`drop`](drop.md) | Selected working files, all at once; else the cursor commit, branch, working file, or the `[local changes]` header (drops everything, like `drop zz`). A menu asks for confirmation: `Enter` on the action runs it, `Cancel` or `Esc` leaves. |
@@ -74,6 +75,7 @@ Every action suspends the TUI, runs the regular loom command — prompts and edi
 | Commit | `git show` with stats and patch |
 | Commit file | That file's change within the commit |
 | Commit being placed with `c` | The changes it will hold |
+| Commit being placed with `C` | The staged changes it will commit |
 
 ## Conflicts
 

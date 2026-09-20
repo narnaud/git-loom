@@ -5,7 +5,8 @@
 //! on a worker thread while the TUI stays up: the command's prompts become
 //! popups and its messages a log (`core::ui`), and only an editor takes the
 //! terminal over. Fold and commit pick their target in a second step inside
-//! the tree.
+//! the tree; `C` picks the commit's hunks first, in the hunk selector, which
+//! runs before any action, as a nested shell on the same terminal.
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -28,9 +29,11 @@ use crate::core::graph::{self, Section};
 use crate::core::hunk_select::HunkArgs;
 use crate::core::repo::{self, BranchInfo, CommitInfo, RemoteStatus, RepoInfo};
 use crate::core::shortid::IdAllocator;
+use crate::core::staging;
 use crate::core::transaction;
 use crate::core::ui::{self, Answer, Cancelled, Level, Request};
 use crate::git;
+use crate::tui::hunk_selector::{FileEntry, run_hunk_selector_nested};
 use crate::tui::shell::{KeyResult, PaneId, Shell, ShellApp, ShellConfig, Tick};
 use crate::tui::status_tree::{
     self, LOCAL_CHANGES_KEY, PENDING_COMMIT_OID, Row, RowKind, SelectionClass, branch_key,
@@ -95,6 +98,15 @@ impl Snapshot {
     fn is_all_changes(&self, files: &[String]) -> bool {
         files.iter().any(|f| f == self.ids.get_unstaged())
     }
+
+    /// How many files the index holds a change for — what a `C` commit takes.
+    fn staged_count(&self) -> usize {
+        self.info
+            .working_changes
+            .iter()
+            .filter(|change| matches!(change.index, 'A' | 'M' | 'D' | 'R'))
+            .count()
+    }
 }
 
 /// Insert the pending commit into `info` where `loom commit` would put it:
@@ -149,13 +161,23 @@ fn place_pending_commit(info: &mut RepoInfo, dest: &CommitDest, file_count: usiz
     }
 }
 
+/// What a commit being placed takes with it.
+#[derive(Debug, PartialEq, Eq)]
+enum CommitSource {
+    /// Working files, passed as arguments (`c`): the index decides nothing.
+    Files(Vec<String>),
+    /// Whatever the hunk selector staged (`C`), committed as it stands.
+    Index,
+}
+
 /// A loom command to run on the worker thread.
 #[derive(Debug, PartialEq, Eq)]
 enum Action {
-    /// `loom commit -i|-b <branch> <files...>`; `files` is never empty (`zz`
-    /// for everything), so the index never decides what is committed.
+    /// `loom commit -i|-b <branch> [files...]`. `c` always names files, so
+    /// the index decides nothing; only `C`, which just staged what it picked,
+    /// commits the index (no file arguments).
     Commit {
-        files: Vec<String>,
+        source: CommitSource,
         dest: CommitDest,
     },
     /// `loom fold <sources...> <target>`.
@@ -194,7 +216,7 @@ enum Mode {
     /// `↑`/`↓` move the placeholder commit through `dests`; the tree is
     /// rebuilt with it at `dests[index]`.
     CommitTarget {
-        files: Vec<String>,
+        source: CommitSource,
         dests: Vec<CommitDest>,
         index: usize,
         /// Key of the row `c` was pressed on, to go back to on cancel.
@@ -324,10 +346,14 @@ fn execute_action(
 ) -> Result<()> {
     crate::trace::init(git_dir, &format!("loom tui: {}", command));
     let result = match action {
-        Action::Commit { files, dest } => {
+        Action::Commit { source, dest } => {
             let (branch, integration) = match dest {
                 CommitDest::Integration => (None, true),
                 CommitDest::Branch(name) => (Some(name), false),
+            };
+            let files = match source {
+                CommitSource::Files(files) => files,
+                CommitSource::Index => vec![],
             };
             commit::run(branch, integration, None, false, files, vec![], theme)
         }
@@ -372,6 +398,10 @@ struct App<'a> {
     /// Row key to fall back to when the action fails and the row it ran from
     /// was only a preview (`b`, `c`), so no longer exists after the reload.
     fallback_cursor: Option<String>,
+    /// Files `C` is about to open the hunk selector over, and the row key it
+    /// was pressed on; taken by [`App::take_over`] once the shell hands the
+    /// terminal over.
+    pending_pick: Option<(Vec<String>, String)>,
     /// Transient message shown in the status bar until the next key.
     notice: Option<String>,
     /// Exit value set by deep handlers, drained after each key.
@@ -409,6 +439,7 @@ impl<'a> App<'a> {
             diff_cache: HashMap::new(),
             next_cursor: None,
             fallback_cursor: None,
+            pending_pick: None,
             notice: None,
             outcome: None,
             requests,
@@ -436,13 +467,16 @@ impl<'a> App<'a> {
                 remote: None,
             })),
             Mode::CommitTarget {
-                files,
+                source,
                 dests,
                 index,
                 ..
             } => Some(Preview::Commit {
                 dest: dests[*index].clone(),
-                file_count: self.commit_file_count(files),
+                file_count: match source {
+                    CommitSource::Files(files) => self.commit_file_count(files),
+                    CommitSource::Index => self.snapshot.staged_count(),
+                },
             }),
             _ => None,
         };
@@ -542,13 +576,16 @@ impl<'a> App<'a> {
         };
         let mut words = vec!["loom".to_string()];
         match action {
-            Action::Commit { files, dest } => {
+            Action::Commit { source, dest } => {
                 words.push("commit".into());
                 match dest {
                     CommitDest::Integration => words.push("-i".into()),
                     CommitDest::Branch(name) => words.extend(["-b".into(), sid(name)]),
                 }
-                words.extend(files.iter().map(|f| sid(f)));
+                // `C` staged what it picked, so this half names no files.
+                if let CommitSource::Files(files) = source {
+                    words.extend(files.iter().map(|f| sid(f)));
+                }
             }
             Action::Fold { sources, target } => {
                 words.push("fold".into());
@@ -841,7 +878,7 @@ impl<'a> App<'a> {
             // While picking a fold target or placing a commit only navigation,
             // Enter, and Esc apply — action keys must not fire and discard
             // the pending operation.
-            KeyCode::Char(' ' | 'c' | 'f' | 'b' | 'd' | 'r' | 'R' | '+' | '=' | '-')
+            KeyCode::Char(' ' | 'c' | 'C' | 'f' | 'b' | 'd' | 'r' | 'R' | '+' | '=' | '-')
             | KeyCode::F(5)
                 if matches!(
                     self.mode,
@@ -861,6 +898,10 @@ impl<'a> App<'a> {
             }
             KeyCode::Char('c') => {
                 self.action_commit_start();
+                None
+            }
+            KeyCode::Char('C') => {
+                self.action_commit_patch_start();
                 None
             }
             KeyCode::Char('f') => {
@@ -1035,6 +1076,36 @@ impl<'a> App<'a> {
     /// redrawn with the commit at its destination, and nothing runs until
     /// that is confirmed.
     fn action_commit_start(&mut self) {
+        let Some((files, origin)) = self.commit_sources() else {
+            return;
+        };
+        self.enter_commit_target(CommitSource::Files(files), origin);
+    }
+
+    /// `C`: every local change, whatever the cursor or selection — a picker
+    /// showing one file would hide the rest of the index it is about to
+    /// rewrite. The selector owns the terminal, which only the shell can hand
+    /// over, so the press just asks for it.
+    fn action_commit_patch_start(&mut self) {
+        if self.snapshot.info.working_changes.is_empty() {
+            self.notice = Some("commit: no local changes".to_string());
+            return;
+        }
+        let Some(origin) = self.current_row().map(|r| r.key.clone()) else {
+            return;
+        };
+        let files = vec![self.snapshot.ids.get_unstaged().to_string()];
+        // Drawn before the shell hands the terminal over, which is the only
+        // frame between here and the selector: reading the hunks spawns a git
+        // per file, so a big working tree sits on this one for seconds.
+        self.notice = Some("commit: collecting hunks…".to_string());
+        self.pending_pick = Some((files, origin));
+    }
+
+    /// The working files `c` stands for and the key of the row it came from.
+    /// `None` when there is nothing to commit, after a notice saying which of
+    /// the reasons it was — or silently, when there is no row to stand on.
+    fn commit_sources(&mut self) -> Option<(Vec<String>, String)> {
         let rows: Vec<&Row> = if self.selected.is_empty() {
             self.current_row().into_iter().collect()
         } else {
@@ -1052,14 +1123,14 @@ impl<'a> App<'a> {
             })
         {
             self.notice = Some("commit: move to local changes or select files".to_string());
-            return;
+            return None;
         }
         if rows
             .iter()
             .any(|r| matches!(r.kind, RowKind::LocalChanges { count: 0 }))
         {
             self.notice = Some("commit: no local changes".to_string());
-            return;
+            return None;
         }
         // A row of these kinds always carries a target; refuse rather than
         // fall through to an argument-less `loom commit`, which would commit
@@ -1071,11 +1142,14 @@ impl<'a> App<'a> {
             .collect::<Option<Vec<String>>>()
         else {
             self.notice = Some("commit: this row has nothing to commit".to_string());
-            return;
+            return None;
         };
-        let Some(origin) = self.current_row().map(|r| r.key.clone()) else {
-            return;
-        };
+        let origin = self.current_row().map(|r| r.key.clone())?;
+        Some((files, origin))
+    }
+
+    /// Redraw the tree with the placeholder commit and wait for a destination.
+    fn enter_commit_target(&mut self, source: CommitSource, origin: String) {
         // The destinations are read off the drawn tree, so their order is the
         // order `↑`/`↓` walk them in.
         let mut dests = vec![CommitDest::Integration];
@@ -1084,7 +1158,7 @@ impl<'a> App<'a> {
             _ => None,
         }));
         self.mode = Mode::CommitTarget {
-            files,
+            source,
             dests,
             index: 0,
             origin,
@@ -1095,6 +1169,62 @@ impl<'a> App<'a> {
         self.diff_cache.remove(&PENDING_COMMIT_OID.to_string());
         self.diff.reset();
         self.show_pending_commit();
+    }
+
+    /// Run the hunk selector over `entries` on the tree's own terminal.
+    /// Source-agnostic: the caller says which hunks to offer.
+    fn select_hunks(
+        &self,
+        entries: Vec<FileEntry>,
+        terminal: &mut ratatui::DefaultTerminal,
+    ) -> Result<Option<Vec<FileEntry>>> {
+        run_hunk_selector_nested(
+            entries,
+            TuiTheme::from_graph_theme(&self.graph_theme),
+            terminal,
+        )
+    }
+
+    /// The working-tree hunks of `files`, picked and then staged — the `loom
+    /// add -p` half of `C`. `Ok(false)` if the selector was cancelled or kept
+    /// nothing, which leaves the index as it was.
+    fn stage_picked_hunks(
+        &mut self,
+        files: &[String],
+        terminal: &mut ratatui::DefaultTerminal,
+    ) -> Result<bool> {
+        let repo = repo::open_repo()?;
+        let filter = staging::filter_paths(&repo, files)?;
+        let entries =
+            staging::collect_file_entries(&repo, &self.snapshot.workdir, filter.as_deref())?;
+        let Some(picked) = self.select_hunks(entries, terminal)? else {
+            return Ok(false);
+        };
+        self.apply_pick(files, picked)
+    }
+
+    /// Stage what the selector kept, the half of `C` that writes the index —
+    /// split from the selector, which is the only part needing a terminal.
+    /// `Ok(false)` when nothing was kept, which leaves the index as it was.
+    fn apply_pick(&mut self, files: &[String], picked: Vec<FileEntry>) -> Result<bool> {
+        if !picked
+            .iter()
+            .any(|file| file.hunks.iter().any(|hunk| hunk.selected))
+        {
+            return Ok(false);
+        }
+        // Staging is a command of its own, so the log gets the line that did
+        // it — and its messages go there instead of to the screen the TUI is
+        // drawing on. Nothing under `apply_selections` may prompt: the thread
+        // that would answer is the one sitting here.
+        self.log.push(LogEntry {
+            command: format!("loom add -p {}", files.join(" ")),
+            lines: Vec::new(),
+        });
+        ui::install(self.request_tx.clone());
+        let applied = staging::apply_selections(&self.snapshot.workdir, &picked);
+        ui::uninstall();
+        applied.map(|()| true)
     }
 
     /// Redraw the tree with the placeholder at the current destination and
@@ -1119,7 +1249,7 @@ impl<'a> App<'a> {
 
     fn confirm_commit_target(&mut self) -> Option<Action> {
         let Mode::CommitTarget {
-            files,
+            source,
             dests,
             index,
             origin,
@@ -1131,7 +1261,7 @@ impl<'a> App<'a> {
         // new commit to land on, so go back to where `c` was pressed.
         self.fallback_cursor = Some(origin);
         Some(Action::Commit {
-            files,
+            source,
             dest: dests[index].clone(),
         })
     }
@@ -1434,10 +1564,15 @@ impl<'a> App<'a> {
             let lines = match self.rows.get(self.tree.cursor()) {
                 Some(row) => {
                     let text = match &self.mode {
-                        Mode::CommitTarget { files, .. }
+                        Mode::CommitTarget { source, .. }
                             if row.key == PENDING_COMMIT_OID.to_string() =>
                         {
-                            pending_commit_diff(&self.snapshot, files)
+                            match source {
+                                CommitSource::Files(files) => {
+                                    pending_commit_diff(&self.snapshot, files)
+                                }
+                                CommitSource::Index => staged_commit_diff(&self.snapshot),
+                            }
                         }
                         _ => diff_text(&self.snapshot, row),
                     };
@@ -1581,6 +1716,14 @@ impl ShellApp for App<'_> {
                 Err(_) => break,
             }
         }
+        // After the drain, never before: a straggler from the action that just
+        // ended belongs to its own log entry, not to the `loom add -p` one the
+        // pick is about to push. No action can still be running — `C` is a tree
+        // key — and the shell hands the live terminal over without tearing it
+        // down, so the selector draws straight onto this frame.
+        if self.pending_pick.is_some() {
+            return Tick::TakeOver;
+        }
         if let Some(running) = &mut self.running {
             running.ticks += 1;
             if running.handle.is_finished() {
@@ -1600,6 +1743,31 @@ impl ShellApp for App<'_> {
             return Tick::Exit(outcome);
         }
         if changed { Tick::Redraw } else { Tick::Idle }
+    }
+
+    /// The hunk selector for `C`, drawn on the tree's own terminal. What it
+    /// keeps is staged at once, as `loom add -p` would; the commit that
+    /// follows takes the index, so the tree reloads first to show it.
+    fn take_over(&mut self, terminal: &mut ratatui::DefaultTerminal) {
+        let Some((files, origin)) = self.pending_pick.take() else {
+            return;
+        };
+        self.notice = None;
+        match self.stage_picked_hunks(&files, terminal) {
+            Ok(true) => {
+                if self.reload() {
+                    self.enter_commit_target(CommitSource::Index, origin);
+                }
+            }
+            Ok(false) => self.notice = Some("commit cancelled".to_string()),
+            Err(e) => {
+                // `apply_selections` writes the index in several steps, so a
+                // failure can leave it part-way: reload before reporting, or
+                // the tree describes an index that is no longer there.
+                self.reload();
+                self.show_error(&e.to_string(), AfterNotice::Nothing);
+            }
+        }
     }
 
     /// The worker holds the terminal (an editor); its `Resume` ends the wait.
@@ -1660,7 +1828,7 @@ impl ShellApp for App<'_> {
             "Navigate: ↑/↓".into(),
             "Fold/unfold: ←/→".into(),
             "Select: space".into(),
-            "Commit: c".into(),
+            "Commit: c/C".into(),
             "Fold: f".into(),
             "Branch: b".into(),
             "Drop: d".into(),
@@ -1916,6 +2084,15 @@ fn diff_text(snapshot: &Snapshot, row: &Row) -> String {
         RowKind::Spacer(_) => return String::new(),
     };
     match result {
+        Ok(text) if text.trim().is_empty() => "no changes".to_string(),
+        Ok(text) => text,
+        Err(e) => format!("error: {}", e),
+    }
+}
+
+/// What a `C` commit will contain: the index the selector just staged.
+fn staged_commit_diff(snapshot: &Snapshot) -> String {
+    match git::diff_cached_display(&snapshot.workdir) {
         Ok(text) if text.trim().is_empty() => "no changes".to_string(),
         Ok(text) => text,
         Err(e) => format!("error: {}", e),
