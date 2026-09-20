@@ -72,6 +72,10 @@ pub struct TuiTheme {
     /// Text cursor inside an input field (popup prompts, the in-tree branch
     /// rename).
     pub cursor: Style,
+    /// Tag standing in for the short ID of a row that exists only on screen
+    /// (`[INSERT COMMIT]`, `[INSERT BRANCH]`); inverted so it cannot be read
+    /// as an existing commit or branch.
+    pub pending_tag: Style,
 }
 
 impl TuiTheme {
@@ -123,6 +127,9 @@ impl TuiTheme {
             hint: Style::default().fg(Color::Blue),
             highlight: Style::default().fg(Color::Yellow),
             cursor: Style::default().add_modifier(Modifier::REVERSED),
+            pending_tag: Style::default()
+                .fg(map_color(theme.label))
+                .add_modifier(Modifier::REVERSED | Modifier::BOLD),
         }
     }
 }

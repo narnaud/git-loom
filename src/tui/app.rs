@@ -1752,8 +1752,9 @@ fn row_line(
         } => {
             spans.push(Span::styled(format!("{} ", connector), theme.graph));
             if row.key == branch_key(NEW_BRANCH_NAME) {
-                // A branch being created has no short ID yet; keep the column.
-                spans.push(Span::styled("··", dim));
+                // A branch being created has no short ID; say what the row is
+                // instead of faking the column.
+                spans.push(Span::styled("[CREATE BRANCH]", theme.pending_tag));
             } else {
                 spans.push(Span::styled(row.sid.clone(), theme.shortid));
             }
@@ -1791,9 +1792,10 @@ fn row_line(
                 }
             }
             if *oid == PENDING_COMMIT_OID {
-                // A commit being placed has no short ID yet; keep the column.
-                spans.push(Span::styled("··", dim));
-                spans.push(Span::raw(graph::id_pad("··")));
+                // A commit being placed has no short ID; say what the row is
+                // instead of faking the column.
+                spans.push(Span::styled("[CREATE COMMIT]", theme.pending_tag));
+                spans.push(Span::raw(" "));
                 spans.push(Span::styled(message.clone(), dim));
                 return Line::from(spans);
             }
