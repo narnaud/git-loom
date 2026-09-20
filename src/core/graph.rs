@@ -3,6 +3,7 @@ use crate::core::repo::{
 };
 use crate::core::shortid::IdAllocator;
 use colored::{Color, Colorize};
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use terminal_size::{Width, terminal_size};
@@ -379,19 +380,30 @@ pub(crate) fn build_sections(info: RepoInfo) -> Vec<Section> {
         }
     }
 
-    // Add empty sections for branches at the merge-base (no commits in range).
+    // Branches at the merge-base own no commits: they render as empty
+    // sections, above everything else, so a freshly created branch shows up
+    // next to the local changes instead of at the far end of the tree.
     let represented: HashSet<&String> = commit_to_branch.values().collect();
+    let mut empty_sections: Vec<Section> = Vec::new();
     for branches in canonical_to_names.values() {
         // canonical key is the pre-reversal first name; check if any name is represented
         if !branches.iter().any(|(n, _)| represented.contains(n)) {
-            branch_sections.push(Section::Branch {
+            empty_sections.push(Section::Branch {
                 names: branches.clone(),
                 commits: vec![],
             });
         }
     }
+    // `canonical_to_names` is a HashMap: order them alphabetically last first,
+    // as co-located names are, so the tree is stable across rebuilds.
+    empty_sections.sort_by(|a, b| match (a, b) {
+        (Section::Branch { names: a, .. }, Section::Branch { names: b, .. }) => b[0].0.cmp(&a[0].0),
+        _ => Ordering::Equal,
+    });
 
-    // Loose commits first, then feature branches.
+    // Empty branches first, so one just created sits right under the local
+    // changes, then loose commits, then the feature branches.
+    sections.extend(empty_sections);
     if !loose_commits.is_empty() {
         sections.push(Section::Loose(loose_commits));
     }

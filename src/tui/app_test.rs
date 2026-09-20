@@ -525,12 +525,11 @@ fn commit_to_an_empty_branch_forks_from_the_base() {
         dests.clone(),
         vec![
             CommitDest::Integration,
-            CommitDest::Branch("feature-a".to_string()),
             CommitDest::Branch("feature-b".to_string()),
+            CommitDest::Branch("feature-a".to_string()),
         ]
     );
 
-    press(&mut app, KeyCode::Down);
     press(&mut app, KeyCode::Down);
     let at = app.tree.cursor();
     assert_eq!(app.rows[at - 1].key, "br:feature-b");
@@ -1159,10 +1158,16 @@ fn new_branch_off_a_commit_or_branch_lands_at_the_base() {
         .iter()
         .find(|r| r.focusable)
         .expect("a row after the new branch");
-    assert!(
-        matches!(next.kind, RowKind::Upstream { .. }),
-        "an empty branch is the last section before the upstream marker"
+    assert_eq!(
+        next.key, "br:feature-a",
+        "an empty branch is drawn above the branches that own commits"
     );
+    let before = app.rows[..at]
+        .iter()
+        .rev()
+        .find(|r| r.focusable)
+        .expect("a row before the new branch");
+    assert_eq!(before.key, "wf:b.rs", "right under the local changes");
 }
 
 #[test]
