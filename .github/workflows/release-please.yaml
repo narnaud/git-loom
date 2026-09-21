@@ -11,36 +11,58 @@ jobs:
     name: Release Please
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.RELEASE_TOKEN }}
       - uses: googleapis/release-please-action@v5
         id: release
         with:
           token: ${{ secrets.RELEASE_TOKEN }}
+      # The release notes come from the pull request body, so they need the
+      # same credits applied separately from the changelog.
       - name: Credit commit authors in the release notes
         if: ${{ steps.release.outputs.release_created == 'true' }}
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          REPO: ${{ github.repository }}
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ steps.release.outputs.tag_name }}
         run: |
-          previous=$(gh api "repos/$REPO/releases?per_page=10" \
+          previous=$(gh api "repos/$GH_REPO/releases?per_page=10" \
             --jq 'map(select(.draft | not)) | map(select(.tag_name != env.TAG)) | .[0].tag_name // empty')
           if [ -z "$previous" ]; then
             echo "No previous release to compare against, skipping."
             exit 0
           fi
-          gh api --paginate "repos/$REPO/compare/$previous...$TAG" \
-            --jq '.commits[]
-                  | [.sha, (if .author.login then "@" + .author.login else .commit.author.name end)]
-                  | @tsv' > authors.tsv
-          gh release view "$TAG" --repo "$REPO" --json body --jq .body > notes.md
-          awk -F'\t' '
-            NR == FNR { author[$1] = $2; next }
-            {
-              if (match($0, /\/commit\/[0-9a-f]+\)\)$/)) {
-                sha = substr($0, RSTART + 8, RLENGTH - 10)
-                if (sha in author) $0 = $0 " by " author[sha]
-              }
-              print
-            }' authors.tsv notes.md > credited.md
-          gh release edit "$TAG" --repo "$REPO" --notes-file credited.md
+          gh release view "$TAG" --json body --jq .body > notes.md
+          bash .github/scripts/credit-authors.sh "$previous" "$TAG" notes.md
+          gh release edit "$TAG" --notes-file notes.md
+      # Credit on the release branch, not on main: the changelog is then
+      # already credited at the tag. release-please force-pushes the branch on
+      # every run, so this reapplies the credits each time.
+      - name: Credit commit authors in the changelog
+        if: ${{ steps.release.outputs.pr }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          BRANCH: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          previous=$(gh api "repos/$GH_REPO/releases?per_page=10" \
+            --jq 'map(select(.draft | not)) | .[0].tag_name // empty')
+          if [ -z "$previous" ]; then
+            echo "No previous release to compare against, skipping."
+            exit 0
+          fi
+          git fetch origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+          git checkout -B "$BRANCH" "refs/remotes/origin/$BRANCH"
+          bash .github/scripts/credit-authors.sh "$previous" "$HEAD_SHA" CHANGELOG.md
+          if git diff --quiet; then
+            echo "Authors already credited."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore(release): credit commit authors in the changelog"
+          git push origin "$BRANCH"
