@@ -236,6 +236,39 @@ enum Mode {
     },
 }
 
+/// Where a pick stands after one poll.
+enum PickTick {
+    Nothing,
+    Redraw,
+    /// `first` on the poll that read it, so a held pick redraws once rather
+    /// than every tick with nothing animating.
+    Ready {
+        first: bool,
+    },
+}
+
+/// The two halves of a `C` pick. Reading the hunks is a git per changed file,
+/// so it waits on a worker like any other slow work; only the selector that
+/// follows needs the terminal, and only that half runs on the loop.
+enum Pick {
+    Collecting {
+        handle: JoinHandle<Result<Vec<FileEntry>>>,
+        /// Key of the row `C` was pressed on, to go back to on cancel.
+        origin: String,
+        /// Ticks so far, for the status-bar animation.
+        ticks: usize,
+        /// `Esc` was pressed: drop the result when it lands. The pick is held
+        /// until then rather than abandoned, so no action can start beside a
+        /// worker still running `git` over the same repository.
+        cancelled: bool,
+    },
+    /// Read and waiting for the shell to hand the terminal over.
+    Ready {
+        entries: Vec<FileEntry>,
+        origin: String,
+    },
+}
+
 /// The action currently running on its worker thread.
 struct Running {
     handle: JoinHandle<Result<()>>,
@@ -398,10 +431,10 @@ struct App<'a> {
     /// Row key to fall back to when the action fails and the row it ran from
     /// was only a preview (`b`, `c`), so no longer exists after the reload.
     fallback_cursor: Option<String>,
-    /// Files `C` is about to open the hunk selector over, and the row key it
-    /// was pressed on; taken by [`App::take_over`] once the shell hands the
-    /// terminal over.
-    pending_pick: Option<(Vec<String>, String)>,
+    /// The `C` pick in flight, from the key press to the selector.
+    pick: Option<Pick>,
+    /// `q`/`Ctrl-C` during a pick: leave once its worker lands.
+    quit_after_pick: bool,
     /// Transient message shown in the status bar until the next key.
     notice: Option<String>,
     /// Exit value set by deep handlers, drained after each key.
@@ -439,7 +472,8 @@ impl<'a> App<'a> {
             diff_cache: HashMap::new(),
             next_cursor: None,
             fallback_cursor: None,
-            pending_pick: None,
+            pick: None,
+            quit_after_pick: false,
             notice: None,
             outcome: None,
             requests,
@@ -1084,8 +1118,8 @@ impl<'a> App<'a> {
 
     /// `C`: every local change, whatever the cursor or selection — a picker
     /// showing one file would hide the rest of the index it is about to
-    /// rewrite. The selector owns the terminal, which only the shell can hand
-    /// over, so the press just asks for it.
+    /// rewrite. The press starts the read on a worker; the selector that
+    /// follows is what asks the shell for the terminal.
     fn action_commit_patch_start(&mut self) {
         if self.snapshot.info.working_changes.is_empty() {
             self.notice = Some("commit: no local changes".to_string());
@@ -1095,11 +1129,38 @@ impl<'a> App<'a> {
             return;
         };
         let files = vec![self.snapshot.ids.get_unstaged().to_string()];
-        // Drawn before the shell hands the terminal over, which is the only
-        // frame between here and the selector: reading the hunks spawns a git
-        // per file, so a big working tree sits on this one for seconds.
-        self.notice = Some("commit: collecting hunks…".to_string());
-        self.pending_pick = Some((files, origin));
+        // Pushed before the worker starts, not when the staging happens: the
+        // read is part of this command and its messages have to land here.
+        let command = format!("loom add -p {}", files.join(" "));
+        self.log.push(LogEntry {
+            command: command.clone(),
+            lines: Vec::new(),
+        });
+        // The repository is opened here rather than from the process cwd: this
+        // runs off the loop, and the tree it must agree with is the snapshot's.
+        let workdir = self.snapshot.workdir.clone();
+        let git_dir = self.snapshot.git_dir.clone();
+        let tx = self.request_tx.clone();
+        let handle = std::thread::spawn(move || {
+            // Without the sink `msg` prints, and this thread would write onto
+            // the screen the loop is drawing at the same moment.
+            ui::install(tx);
+            crate::trace::init(&git_dir, &format!("loom tui: {command}"));
+            let result = (|| {
+                let repo = git2::Repository::open(&workdir)?;
+                let filter = staging::filter_paths(&repo, &files)?;
+                staging::collect_file_entries(&repo, &workdir, filter.as_deref())
+            })();
+            crate::trace::finalize();
+            ui::uninstall();
+            result
+        });
+        self.pick = Some(Pick::Collecting {
+            handle,
+            origin,
+            ticks: 0,
+            cancelled: false,
+        });
     }
 
     /// The working files `c` stands for and the key of the row it came from.
@@ -1171,56 +1232,145 @@ impl<'a> App<'a> {
         self.show_pending_commit();
     }
 
-    /// Run the hunk selector over `entries` on the tree's own terminal.
-    /// Source-agnostic: the caller says which hunks to offer.
-    fn select_hunks(
-        &self,
+    /// End the pick as soon as its read lands, and leave afterwards if asked.
+    /// The worker is waited for either way: it reads with `git`, and one
+    /// outliving its pick would run beside whatever comes next.
+    fn cancel_pick(&mut self, then_quit: bool) {
+        if let Some(Pick::Collecting { cancelled, .. }) = &mut self.pick {
+            *cancelled = true;
+            self.quit_after_pick |= then_quit;
+        }
+    }
+
+    /// Move a pick along one tick. A read that fails, or one `Esc` marked,
+    /// ends here too: the pick goes, and the loop only redraws.
+    ///
+    /// The worker is joined here rather than in [`App::take_over`], so the
+    /// loop keeps drawing — a spinner, the tree, a resize — while it reads.
+    fn advance_pick(&mut self) -> PickTick {
+        match self.pick.take() {
+            None => PickTick::Nothing,
+            Some(ready @ Pick::Ready { .. }) => {
+                self.pick = Some(ready);
+                PickTick::Ready { first: false }
+            }
+            Some(Pick::Collecting {
+                handle,
+                origin,
+                ticks,
+                cancelled,
+            }) if !handle.is_finished() => {
+                self.pick = Some(Pick::Collecting {
+                    handle,
+                    origin,
+                    ticks: ticks + 1,
+                    cancelled,
+                });
+                PickTick::Redraw
+            }
+            Some(Pick::Collecting {
+                handle,
+                origin,
+                cancelled,
+                ..
+            }) => {
+                let read = handle.join().unwrap_or_else(|_| {
+                    Err(anyhow::anyhow!(
+                        "reading the working tree crashed — run `loom trace` for what it did"
+                    ))
+                });
+                if cancelled {
+                    // Waited for on purpose: the result is dropped, but not the
+                    // worker, so nothing of it outlives the pick.
+                    self.log_line(Level::Warn, "Cancelled");
+                    self.notice = Some("commit cancelled".to_string());
+                    if self.quit_after_pick {
+                        self.outcome = Some(Outcome::Quit);
+                    }
+                    return PickTick::Redraw;
+                }
+                match read {
+                    Ok(entries) => {
+                        self.pick = Some(Pick::Ready { entries, origin });
+                        PickTick::Ready { first: true }
+                    }
+                    Err(e) => {
+                        // As a failed action reports: into the entry the press
+                        // opened, and without taking an open log off the reader
+                        // who is already seeing the line.
+                        let text = e.to_string();
+                        self.log_line(Level::Error, &text);
+                        if !matches!(self.popup, Some(Popup::Log { .. })) {
+                            self.show_error(&text, AfterNotice::Nothing);
+                        }
+                        PickTick::Redraw
+                    }
+                }
+            }
+        }
+    }
+
+    /// What a pick leaves behind once the selector is done with it: the
+    /// placement, or a line saying why there is none. Split from the selector
+    /// half, which cannot run without a terminal.
+    fn finish_pick(&mut self, staged: Result<bool>, origin: String) {
+        match staged {
+            Ok(true) => {
+                if self.reload() {
+                    self.enter_commit_target(CommitSource::Index, origin);
+                }
+            }
+            // Every way out of a pick leaves a line: the entry the press
+            // opened is the only record of what `C` did, and one that ends
+            // mute cannot be told from one that ran and said nothing.
+            Ok(false) => {
+                self.log_line(Level::Warn, "Cancelled");
+                self.notice = Some("commit cancelled".to_string());
+            }
+            Err(e) => {
+                let text = e.to_string();
+                self.log_line(Level::Error, &text);
+                // `apply_selections` writes the index in several steps, so a
+                // failure can leave it part-way: reload before reporting, or
+                // the tree describes an index that is no longer there.
+                self.reload();
+                self.show_error(&text, AfterNotice::Nothing);
+            }
+        }
+    }
+
+    /// Offer `entries` in the selector on the tree's own terminal and stage
+    /// what it keeps — the `loom add -p` half of `C`. `Ok(false)` if it was
+    /// cancelled or kept nothing, which leaves the index as it was.
+    fn select_and_stage(
+        &mut self,
         entries: Vec<FileEntry>,
         terminal: &mut ratatui::DefaultTerminal,
-    ) -> Result<Option<Vec<FileEntry>>> {
-        run_hunk_selector_nested(
+    ) -> Result<bool> {
+        let picked = run_hunk_selector_nested(
             entries,
             TuiTheme::from_graph_theme(&self.graph_theme),
             terminal,
-        )
-    }
-
-    /// The working-tree hunks of `files`, picked and then staged — the `loom
-    /// add -p` half of `C`. `Ok(false)` if the selector was cancelled or kept
-    /// nothing, which leaves the index as it was.
-    fn stage_picked_hunks(
-        &mut self,
-        files: &[String],
-        terminal: &mut ratatui::DefaultTerminal,
-    ) -> Result<bool> {
-        let repo = repo::open_repo()?;
-        let filter = staging::filter_paths(&repo, files)?;
-        let entries =
-            staging::collect_file_entries(&repo, &self.snapshot.workdir, filter.as_deref())?;
-        let Some(picked) = self.select_hunks(entries, terminal)? else {
+        )?;
+        let Some(picked) = picked else {
             return Ok(false);
         };
-        self.apply_pick(files, picked)
+        self.apply_pick(picked)
     }
 
     /// Stage what the selector kept, the half of `C` that writes the index —
     /// split from the selector, which is the only part needing a terminal.
     /// `Ok(false)` when nothing was kept, which leaves the index as it was.
-    fn apply_pick(&mut self, files: &[String], picked: Vec<FileEntry>) -> Result<bool> {
+    fn apply_pick(&mut self, picked: Vec<FileEntry>) -> Result<bool> {
         if !picked
             .iter()
             .any(|file| file.hunks.iter().any(|hunk| hunk.selected))
         {
             return Ok(false);
         }
-        // Staging is a command of its own, so the log gets the line that did
-        // it — and its messages go there instead of to the screen the TUI is
-        // drawing on. Nothing under `apply_selections` may prompt: the thread
-        // that would answer is the one sitting here.
-        self.log.push(LogEntry {
-            command: format!("loom add -p {}", files.join(" ")),
-            lines: Vec::new(),
-        });
+        // Into the entry the press opened, so both halves of `loom add -p`
+        // report under it. Nothing under `apply_selections` may prompt: the
+        // thread that would answer is the one sitting here.
         ui::install(self.request_tx.clone());
         let applied = staging::apply_selections(&self.snapshot.workdir, &picked);
         ui::uninstall();
@@ -1637,6 +1787,31 @@ impl ShellApp for App<'_> {
                 KeyCode::Char('L') => self.open_log(),
                 _ => self.notice = Some("an action is running…".to_string()),
             }
+        } else if self.pick.is_some() {
+            // The selector is about to own the screen, so nothing may start
+            // here — including a second `C`. Only a read still running reaches
+            // this: one that is done has taken the terminal, since the loop
+            // polls before it reads a key. Covering the whole pick regardless
+            // keeps that reasoning off the list of things to know.
+            match code {
+                KeyCode::Char('L') => self.open_log(),
+                // Marked, not dropped: the worker reads with `git`, so
+                // letting it outlive the pick would put it beside whatever
+                // action the freed keyboard starts next, over the same index.
+                // The result is thrown away when it lands instead.
+                KeyCode::Esc => self.cancel_pick(false),
+                // Queued like the cancel above rather than answered now: the
+                // worker is what the pick waits for, and leaving on top of it
+                // is what the waiting exists to prevent.
+                KeyCode::Char('q') => self.cancel_pick(true),
+                KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.cancel_pick(true)
+                }
+                // Deliberately silent: a notice outranks the mode hint, so
+                // saying "still reading" here would replace the spinner that
+                // says it, and stay there until the next key.
+                _ => {}
+            }
         } else {
             self.handle_tree_key(focused, code);
         }
@@ -1701,7 +1876,7 @@ impl ShellApp for App<'_> {
 
     fn modal_active(&self) -> bool {
         // A name field owns the keyboard too: `q` and Tab must reach it.
-        self.popup.is_some() || self.running.is_some() || self.editing_name()
+        self.popup.is_some() || self.running.is_some() || self.editing_name() || self.pick.is_some()
     }
 
     fn poll_background(&mut self) -> Tick<Outcome> {
@@ -1716,13 +1891,24 @@ impl ShellApp for App<'_> {
                 Err(_) => break,
             }
         }
-        // After the drain, never before: a straggler from the action that just
-        // ended belongs to its own log entry, not to the `loom add -p` one the
-        // pick is about to push. No action can still be running — `C` is a tree
-        // key — and the shell hands the live terminal over without tearing it
-        // down, so the selector draws straight onto this frame.
-        if self.pending_pick.is_some() {
-            return Tick::TakeOver;
+        // After the drain, never before: what the pick's own worker reported
+        // reaches its log entry before the selector covers the screen. A line
+        // the action that just ended left queued lands in that entry too —
+        // accepted, since it is misfiled rather than lost. No action can still
+        // be running — `C` is a tree key — which the early return counts on: it
+        // skips the action's own tick and join.
+        match self.advance_pick() {
+            // The shell hands the live terminal over without tearing it down,
+            // so the selector draws straight onto this frame — which must be
+            // nobody else's. A popup owns the screen and the keyboard, and
+            // would still own them once the selector returned.
+            PickTick::Ready { .. } if self.popup.is_none() => return Tick::TakeOver,
+            // Held under a popup: the frame still carries the spinner of a read
+            // that has finished — offering an `Esc` the popup now takes. One
+            // draw clears it; there is nothing to animate after that.
+            PickTick::Ready { first } => changed |= first,
+            PickTick::Redraw => changed = true,
+            PickTick::Nothing => {}
         }
         if let Some(running) = &mut self.running {
             running.ticks += 1;
@@ -1749,25 +1935,18 @@ impl ShellApp for App<'_> {
     /// keeps is staged at once, as `loom add -p` would; the commit that
     /// follows takes the index, so the tree reloads first to show it.
     fn take_over(&mut self, terminal: &mut ratatui::DefaultTerminal) {
-        let Some((files, origin)) = self.pending_pick.take() else {
-            return;
+        // Only a read that is done is this to consume. Nothing else asks for
+        // the terminal, so the other arm is a belt: it puts back rather than
+        // drops, since dropping a running read would strand its worker.
+        let (entries, origin) = match self.pick.take() {
+            Some(Pick::Ready { entries, origin }) => (entries, origin),
+            other => {
+                self.pick = other;
+                return;
+            }
         };
-        self.notice = None;
-        match self.stage_picked_hunks(&files, terminal) {
-            Ok(true) => {
-                if self.reload() {
-                    self.enter_commit_target(CommitSource::Index, origin);
-                }
-            }
-            Ok(false) => self.notice = Some("commit cancelled".to_string()),
-            Err(e) => {
-                // `apply_selections` writes the index in several steps, so a
-                // failure can leave it part-way: reload before reporting, or
-                // the tree describes an index that is no longer there.
-                self.reload();
-                self.show_error(&e.to_string(), AfterNotice::Nothing);
-            }
-        }
+        let staged = self.select_and_stage(entries, terminal);
+        self.finish_pick(staged, origin);
     }
 
     /// The worker holds the terminal (an editor); its `Resume` ends the wait.
@@ -1805,6 +1984,18 @@ impl ShellApp for App<'_> {
                 .map(|s| format!(" — {}", s))
                 .unwrap_or_default();
             return Some(format!(" {} {}{}", frame, running.command, detail));
+        }
+        if let Some(Pick::Collecting {
+            ticks, cancelled, ..
+        }) = &self.pick
+        {
+            let frame = SPINNER_FRAMES[(ticks / 2) % SPINNER_FRAMES.len()];
+            let what = if *cancelled {
+                "cancelling: waiting for the read to end"
+            } else {
+                "reading the working tree — Esc to cancel"
+            };
+            return Some(format!(" {} commit: {}", frame, what));
         }
         match &self.mode {
             Mode::FoldTarget { .. } => {

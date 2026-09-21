@@ -394,33 +394,311 @@ fn commit_on_the_local_changes_header_takes_everything_as_zz() {
     );
 }
 
+/// A repo the pick can actually read, with `make_info`'s rows over it.
+fn app_over_repo<'a>(repo: &crate::core::test_helpers::TestRepo, theme: &'a TuiTheme) -> App<'a> {
+    let snapshot = Snapshot {
+        workdir: repo.workdir(),
+        git_dir: repo.repo.path().to_path_buf(),
+        ..make_snapshot()
+    };
+    make_app(snapshot, theme)
+}
+
+/// How long a worker gets before a test calls it hung. Bounded by the clock,
+/// not by a tick count: a 1ms sleep is ~15ms on Windows, so counting tries
+/// turns a real failure into a minute of waiting.
+fn deadline() -> std::time::Instant {
+    std::time::Instant::now() + std::time::Duration::from_secs(10)
+}
+
+/// Poll as the shell does until the pick is ready, so the worker's result is
+/// taken on the loop rather than joined inline.
+fn poll_until_take_over(app: &mut App) {
+    let deadline = deadline();
+    while std::time::Instant::now() < deadline {
+        if matches!(app.poll_background(), Tick::TakeOver) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    panic!("the pick never became ready");
+}
+
+/// Reading the hunks is a git per changed file, so `C` hands it to a worker
+/// and the loop keeps drawing; only once it is read does the shell get asked
+/// for the terminal.
 #[test]
-fn commit_with_hunks_asks_for_the_terminal_before_placing_anything() {
+fn commit_with_hunks_reads_the_working_tree_off_the_loop() {
+    let repo = repo_with_one_unstaged_hunk();
     let theme = make_theme();
-    let mut app = make_app(make_snapshot(), &theme);
+    let mut app = app_over_repo(&repo, &theme);
     move_cursor_to(&mut app, "wf:a.rs");
 
     press(&mut app, KeyCode::Char('C'));
     assert!(matches!(app.mode, Mode::Normal), "no destination yet");
-    let (files, origin) = app.pending_pick.clone().expect("no pick requested");
-    assert_eq!(files, vec![app.snapshot.ids.get_unstaged().to_string()]);
+    let Some(Pick::Collecting { origin, .. }) = &app.pick else {
+        panic!("no pick requested");
+    };
     assert_eq!(origin, "wf:a.rs");
-    assert!(matches!(app.poll_background(), Tick::TakeOver));
+    assert_eq!(
+        app.log.last().unwrap().command,
+        format!("loom add -p {}", app.snapshot.ids.get_unstaged())
+    );
+    assert!(app.modal_active(), "no key may start anything meanwhile");
+    assert!(
+        app.mode_hint()
+            .is_some_and(|h| h.contains("reading the working tree")),
+        "the loop draws a spinner while the worker reads"
+    );
+
+    poll_until_take_over(&mut app);
+    let Some(Pick::Ready { entries, .. }) = &app.pick else {
+        panic!("the pick is not ready");
+    };
+    assert_eq!(
+        app.log.len(),
+        1,
+        "the read reports into the entry the press opened, not a later one"
+    );
+    assert_eq!(
+        entries.iter().map(|e| e.path.as_str()).collect::<Vec<_>>(),
+        vec!["tracked.txt"]
+    );
+}
+
+/// The read leaves the loop running, so a popup can be opened over it. The
+/// selector draws on the bare terminal and would land under that popup, which
+/// would still hold the keyboard over the placement afterwards.
+#[test]
+fn a_ready_pick_waits_for_a_popup_to_close() {
+    let repo = repo_with_one_unstaged_hunk();
+    let theme = make_theme();
+    let mut app = app_over_repo(&repo, &theme);
+    move_cursor_to(&mut app, "wf:a.rs");
+
+    press(&mut app, KeyCode::Char('C'));
+    press(&mut app, KeyCode::Char('L'));
+    assert!(app.popup.is_some(), "the log is open over the read");
+
+    let mut ready = false;
+    let deadline = deadline();
+    while std::time::Instant::now() < deadline {
+        let tick = app.poll_background();
+        assert!(
+            !matches!(tick, Tick::TakeOver),
+            "the terminal must not be taken under a popup"
+        );
+        // Held, not dropped: the read finishes and then waits.
+        if matches!(app.pick, Some(Pick::Ready { .. })) {
+            // The frame still carries the spinner of a read that is over, so
+            // the tick that ends it has to ask for one more draw.
+            assert!(
+                !matches!(tick, Tick::Idle),
+                "becoming ready must redraw, or the stale spinner stays"
+            );
+            ready = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert!(ready, "the read never finished");
+    for _ in 0..20 {
+        assert!(
+            !matches!(app.poll_background(), Tick::TakeOver),
+            "a ready pick keeps waiting while the popup is up"
+        );
+    }
+
+    press(&mut app, KeyCode::Esc);
+    assert!(app.popup.is_none(), "the log is dismissed");
+    poll_until_take_over(&mut app);
+}
+
+/// `Esc` ends the pick, but the worker is waited for rather than abandoned:
+/// it reads with `git`, and letting it outlive the pick would put it beside
+/// whatever the freed keyboard starts next, over the same index.
+#[test]
+fn a_collecting_pick_is_cancelled_by_esc() {
+    let repo = repo_with_one_unstaged_hunk();
+    let theme = make_theme();
+    let mut app = app_over_repo(&repo, &theme);
+    move_cursor_to(&mut app, "wf:a.rs");
+
+    press(&mut app, KeyCode::Char('C'));
+    press(&mut app, KeyCode::Esc);
+    assert!(
+        matches!(
+            app.pick,
+            Some(Pick::Collecting {
+                cancelled: true,
+                ..
+            })
+        ),
+        "held until the worker lands, so no action can run beside it"
+    );
+    assert!(
+        app.mode_hint().is_some_and(|h| h.contains("cancelling")),
+        "the bar says the read is winding down"
+    );
+
+    let deadline = deadline();
+    while std::time::Instant::now() < deadline && app.pick.is_some() {
+        let tick = app.poll_background();
+        assert!(
+            !matches!(tick, Tick::TakeOver),
+            "a cancelled pick never takes the terminal"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert!(app.pick.is_none(), "the pick ends with its worker");
+    assert_eq!(app.notice.as_deref(), Some("commit cancelled"));
+    assert!(matches!(app.mode, Mode::Normal), "no destination is placed");
+    // The entry the press opened says what became of it.
+    assert_eq!(app.log.len(), 1);
+    assert_eq!(
+        app.log[0].lines,
+        vec![(Level::Warn, "Cancelled".to_string())]
+    );
+}
+
+/// Spec 020 makes it normative that every way out of a pick leaves a line.
+/// The selector needs a terminal, so the outcomes are driven through the seam
+/// below it.
+#[test]
+fn every_pick_outcome_says_so_in_its_entry() {
+    let repo = repo_with_one_unstaged_hunk();
+    let theme = make_theme();
+
+    let mut app = app_on(&repo, &theme);
+    app.log.push(LogEntry {
+        command: "loom add -p zz".to_string(),
+        lines: Vec::new(),
+    });
+    app.finish_pick(Ok(false), LOCAL_CHANGES_KEY.to_string());
+    assert_eq!(
+        app.log[0].lines,
+        vec![(Level::Warn, "Cancelled".to_string())],
+        "a selector that kept nothing"
+    );
+    assert_eq!(app.notice.as_deref(), Some("commit cancelled"));
+
+    let mut app = app_on(&repo, &theme);
+    app.log.push(LogEntry {
+        command: "loom add -p zz".to_string(),
+        lines: Vec::new(),
+    });
+    app.finish_pick(
+        Err(anyhow::anyhow!("could not stage")),
+        LOCAL_CHANGES_KEY.to_string(),
+    );
+    assert_eq!(
+        app.log[0].lines,
+        vec![(Level::Error, "could not stage".to_string())],
+        "a staging that failed"
+    );
+    assert!(matches!(app.popup, Some(Popup::Notice { .. })));
+}
+
+/// `q` is queued like `Esc`, not dropped: the pick still waits for its worker,
+/// and the session ends once it lands.
+#[test]
+fn quitting_during_a_read_leaves_once_the_worker_lands() {
+    let repo = repo_with_one_unstaged_hunk();
+    let theme = make_theme();
+    let mut app = app_over_repo(&repo, &theme);
+    move_cursor_to(&mut app, "wf:a.rs");
+
+    press(&mut app, KeyCode::Char('C'));
+    press(&mut app, KeyCode::Char('q'));
+    assert!(
+        matches!(
+            app.pick,
+            Some(Pick::Collecting {
+                cancelled: true,
+                ..
+            })
+        ),
+        "the read is still waited for"
+    );
+
+    let deadline = deadline();
+    let mut left = false;
+    while std::time::Instant::now() < deadline {
+        if matches!(app.poll_background(), Tick::Exit(Outcome::Quit)) {
+            left = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert!(left, "the queued quit never happened");
+    assert!(app.pick.is_none(), "the pick ended with its worker");
+}
+
+/// A worker that cannot read the tree reports through a popup and drops the
+/// pick, rather than handing the terminal over to a selector with nothing in
+/// it: the loop must not be left asking for `TakeOver` forever.
+#[test]
+fn a_pick_that_cannot_read_the_working_tree_reports_and_stops() {
+    let dir = tempfile::tempdir().unwrap();
+    let theme = make_theme();
+    let snapshot = Snapshot {
+        workdir: dir.path().to_path_buf(),
+        git_dir: dir.path().to_path_buf(),
+        ..make_snapshot()
+    };
+    let mut app = make_app(snapshot, &theme);
+    move_cursor_to(&mut app, "wf:a.rs");
+
+    press(&mut app, KeyCode::Char('C'));
+    let deadline = deadline();
+    while std::time::Instant::now() < deadline {
+        if app.pick.is_none() {
+            break;
+        }
+        let tick = app.poll_background();
+        assert!(
+            !matches!(tick, Tick::TakeOver),
+            "a failed read must never take the terminal"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert!(app.pick.is_none(), "the pick never ended");
+    assert!(matches!(
+        app.popup,
+        Some(Popup::Notice {
+            then: AfterNotice::Nothing,
+            ..
+        })
+    ));
+    // Into the entry the press opened, as a failed action reports.
+    assert_eq!(
+        app.log.last().unwrap().lines.first().map(|(l, _)| *l),
+        Some(Level::Error),
+        "the failure is on record, not only on screen"
+    );
 }
 
 /// The selector rewrites the whole index, so it opens over every local change
 /// — the cursor row and the selection only decide where the cursor goes back.
 #[test]
 fn commit_with_hunks_picks_from_every_local_change() {
+    let repo = repo_with_one_unstaged_hunk();
     let theme = make_theme();
-    let mut app = make_app(make_snapshot(), &theme);
+    let mut app = app_over_repo(&repo, &theme);
     move_cursor_to(&mut app, "wf:a.rs");
     app.toggle_selection();
     move_cursor_to(&mut app, &oid('a').to_string());
 
     press(&mut app, KeyCode::Char('C'));
-    let (files, _) = app.pending_pick.clone().expect("no pick requested");
-    assert_eq!(files, vec![app.snapshot.ids.get_unstaged().to_string()]);
+    assert!(matches!(app.pick, Some(Pick::Collecting { .. })));
+    assert_eq!(
+        app.log.last().unwrap().command,
+        format!("loom add -p {}", app.snapshot.ids.get_unstaged()),
+        "the pick covers every local change, not the cursor row"
+    );
+    // Drained before the fixture goes: a worker still reading it would race
+    // the tempdir's removal.
+    poll_until_take_over(&mut app);
 }
 
 /// `C` is in the key list that is inert while a commit is being placed, so it
@@ -434,7 +712,7 @@ fn commit_with_hunks_is_inert_while_a_commit_is_being_placed() {
     assert!(matches!(app.mode, Mode::CommitTarget { .. }));
 
     press(&mut app, KeyCode::Char('C'));
-    assert!(app.pending_pick.is_none(), "no pick may start");
+    assert!(app.pick.is_none(), "no pick may start");
     assert!(
         matches!(app.mode, Mode::CommitTarget { .. }),
         "still placing"
@@ -449,7 +727,7 @@ fn commit_with_hunks_refuses_an_empty_working_tree() {
     let mut app = make_app(snapshot_of(info), &theme);
 
     press(&mut app, KeyCode::Char('C'));
-    assert!(app.pending_pick.is_none());
+    assert!(app.pick.is_none());
     assert_eq!(app.notice.as_deref(), Some("commit: no local changes"));
 }
 
@@ -545,28 +823,28 @@ fn a_pick_stages_the_hunks_it_kept() {
     let mut app = app_on(&repo, &theme);
 
     let picked = picked_entries(&repo, true);
-    assert!(app.apply_pick(&["zz".to_string()], picked).unwrap());
+    let logged = app.log.len();
+    assert!(app.apply_pick(picked).unwrap());
 
     let status = repo.status_porcelain();
     assert!(status.contains("M  tracked.txt"), "{status}");
-    assert_eq!(app.log.last().unwrap().command, "loom add -p zz");
+    // The press opens the entry; staging reports into it rather than a second.
+    assert_eq!(app.log.len(), logged, "no second `loom add -p` entry");
 }
 
 /// Keeping nothing is not a failure and not a write: the index is left exactly
-/// as it was, and no `loom add -p` is logged for a command that did nothing.
+/// as it was.
 #[test]
 fn a_pick_that_kept_nothing_leaves_the_index_alone() {
     let repo = repo_with_one_unstaged_hunk();
     let theme = make_theme();
     let mut app = app_on(&repo, &theme);
     let before = repo.status_porcelain();
-    let logged = app.log.len();
 
     let picked = picked_entries(&repo, false);
-    assert!(!app.apply_pick(&["zz".to_string()], picked).unwrap());
+    assert!(!app.apply_pick(picked).unwrap());
 
     assert_eq!(repo.status_porcelain(), before);
-    assert_eq!(app.log.len(), logged, "nothing ran, nothing logged");
 }
 
 /// The pane previews the index the selector staged, not the whole worktree.
