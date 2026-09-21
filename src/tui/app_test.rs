@@ -2170,7 +2170,7 @@ fn status_bar_matches_spec() {
         .collect();
     assert!(
         last_row.starts_with(
-            " Navigate: ↑/↓ | Fold/unfold: ←/→ | Select: space | Commit: c/C | Fold: f \
+            " Navigate: ↑/↓ | Close/open: ←/→ | Select: space | Commit: c/C | Fold: f \
              | Branch: b | Drop: d | Reword: r | Log: L | Refresh: R | Quit: q"
         ),
         "got: {:?}",

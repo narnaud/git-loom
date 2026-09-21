@@ -23,7 +23,7 @@ Shows the same tree as `git loom status` with files enabled, plus a live diff pa
 │ ├╯                                   ││                               │
 │ ●  9999999 (upstream) ...            ││                               │
 └──────────────────────────────────────┘└───────────────────────────────┘
- Navigate: ↑/↓ | Fold/unfold: ←/→ | Select: space | Commit: c/C | ...
+ Navigate: ↑/↓ | Close/open: ←/→ | Select: space | Commit: c/C | ...
 ```
 
 Short IDs are displayed like in `git loom status`, so the tree doubles as a cheat-sheet for manual commands. Commit rows leave out the abbreviated hash: the short ID already names the commit for every loom command.
@@ -33,8 +33,8 @@ Short IDs are displayed like in `git loom status`, so the tree doubles as a chea
 | Key | Effect |
 |-----|--------|
 | `↑`/`k`, `↓`/`j` | Move the cursor (tree focused) or scroll the diff (diff focused) |
-| `→`/`l` / `←`/`h` | Unfold / fold the current row; `←` on a file row jumps to its parent |
-| `Enter` | Toggle fold (or confirm a fold target — see below) |
+| `←`/`h` / `→`/`l` | Close / open the current row; `←` on a file row jumps to its parent |
+| `Enter` | Toggle open/close (or confirm a fold target — see below) |
 | `Tab` | Switch focus between tree and diff pane |
 | `Ctrl-←` / `Ctrl-→` | Narrow / widen the left pane (2% per press, clamped to 10–90%) |
 | `PgUp`/`PgDn` | Scroll the diff by a page |
@@ -44,7 +44,7 @@ Short IDs are displayed like in `git loom status`, so the tree doubles as a chea
 | `Esc` | Cancel fold, commit, rename, or new-branch mode → clear selection → quit (first that applies) |
 | `q` / `Ctrl-C` | Quit |
 
-Commits are collapsed by default; unfolding reveals one row per changed file. Local changes start expanded. Expansion state survives reloads.
+Commits are collapsed by default; opening one reveals a row per changed file. Local changes start expanded. Expansion state survives reloads.
 
 ### Selection
 

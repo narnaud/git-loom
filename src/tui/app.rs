@@ -2017,7 +2017,7 @@ impl ShellApp for App<'_> {
     fn status_hints(&self, _focused: PaneId) -> Vec<Cow<'static, str>> {
         vec![
             "Navigate: ↑/↓".into(),
-            "Fold/unfold: ←/→".into(),
+            "Close/open: ←/→".into(),
             "Select: space".into(),
             "Commit: c/C".into(),
             "Fold: f".into(),
