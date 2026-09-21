@@ -289,6 +289,31 @@ fn working_tree_changes_detected() {
     assert_eq!(untracked.worktree, '?');
 }
 
+/// Git reports a file swapped for a symlink as a typechange, not a
+/// modification: unless both bits map to 'M' the change reads as unchanged.
+#[cfg(unix)]
+#[test]
+fn a_typechange_reports_as_modified() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("base", "tracked.txt");
+
+    let path = test_repo.workdir().join("tracked.txt");
+    std::fs::remove_file(&path).unwrap();
+    std::os::unix::fs::symlink("elsewhere.txt", &path).unwrap();
+
+    let changes = get_working_changes(&test_repo.repo).unwrap();
+    let change = changes.iter().find(|c| c.path == "tracked.txt").unwrap();
+    assert_eq!(change.index, ' ');
+    assert_eq!(change.worktree, 'M');
+
+    test_repo.stage_files(&["tracked.txt"]);
+
+    let changes = get_working_changes(&test_repo.repo).unwrap();
+    let change = changes.iter().find(|c| c.path == "tracked.txt").unwrap();
+    assert_eq!(change.index, 'M');
+    assert_eq!(change.worktree, ' ');
+}
+
 #[test]
 fn recurse_untracked_subdirs() {
     let test_repo = TestRepo::new_with_remote();

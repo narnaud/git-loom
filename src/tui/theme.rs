@@ -57,6 +57,9 @@ pub struct TuiTheme {
     pub remote_gone: Style,
     /// Marker for multi-selected rows in the status tree.
     pub selection: Style,
+    /// Marker for the source rows of a fold or commit being placed; distinct
+    /// from [`TuiTheme::selection`] so it does not read as a selection.
+    pub source: Style,
     /// Rotating colors for commit dots on feature branches.
     pub branch_dots: Vec<Style>,
     /// `✓` success lines in the log and popups.
@@ -115,6 +118,9 @@ impl TuiTheme {
             remote_gone: Style::default().fg(map_color(theme.remote_gone)),
             selection: Style::default()
                 .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+            source: Style::default()
+                .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
             branch_dots: theme
                 .branch_dots

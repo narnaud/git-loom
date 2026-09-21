@@ -1114,7 +1114,7 @@ fn get_working_changes_opts(repo: &Repository, recurse_untracked: bool) -> Resul
             '!'
         } else if status.is_index_new() {
             'A'
-        } else if status.is_index_modified() {
+        } else if status.is_index_modified() || status.is_index_typechange() {
             'M'
         } else if status.is_index_deleted() {
             'D'
@@ -1130,7 +1130,7 @@ fn get_working_changes_opts(repo: &Repository, recurse_untracked: bool) -> Resul
             '?'
         } else if status.is_conflicted() {
             '!'
-        } else if status.is_wt_modified() {
+        } else if status.is_wt_modified() || status.is_wt_typechange() {
             'M'
         } else if status.is_wt_deleted() {
             'D'

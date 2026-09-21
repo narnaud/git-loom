@@ -27,7 +27,7 @@ use ratatui::{
 
 use crate::core::graph::{self, Section};
 use crate::core::hunk_select::HunkArgs;
-use crate::core::repo::{self, BranchInfo, CommitInfo, RemoteStatus, RepoInfo};
+use crate::core::repo::{self, BranchInfo, CommitInfo, FileChange, RemoteStatus, RepoInfo};
 use crate::core::shortid::IdAllocator;
 use crate::core::staging;
 use crate::core::transaction;
@@ -36,7 +36,8 @@ use crate::git;
 use crate::tui::hunk_selector::{FileEntry, run_hunk_selector_nested};
 use crate::tui::shell::{KeyResult, PaneId, Shell, ShellApp, ShellConfig, Tick};
 use crate::tui::status_tree::{
-    self, LOCAL_CHANGES_KEY, PENDING_COMMIT_OID, Row, RowKind, SelectionClass, branch_key,
+    self, LOCAL_CHANGES_KEY, PENDING_COMMIT_OID, Row, RowKind, RowMark, SelectionClass, branch_key,
+    working_file_key,
 };
 use crate::tui::theme::TuiTheme;
 use crate::tui::widgets::common::{colorize_diff, pane_block};
@@ -104,7 +105,7 @@ impl Snapshot {
         self.info
             .working_changes
             .iter()
-            .filter(|change| matches!(change.index, 'A' | 'M' | 'D' | 'R'))
+            .filter(|c| is_staged(c))
             .count()
     }
 }
@@ -212,11 +213,13 @@ enum Mode {
     Normal,
     FoldTarget {
         sources: Vec<String>,
+        source_rows: Sources,
     },
     /// `↑`/`↓` move the placeholder commit through `dests`; the tree is
     /// rebuilt with it at `dests[index]`.
     CommitTarget {
         source: CommitSource,
+        source_rows: Sources,
         dests: Vec<CommitDest>,
         index: usize,
         /// Key of the row `c` was pressed on, to go back to on cancel.
@@ -234,6 +237,26 @@ enum Mode {
         origin: String,
         field: TextField,
     },
+}
+
+/// The rows a pending fold or commit takes its content from, marked in the
+/// gutter for as long as its target is being picked. Row keys rather than
+/// command arguments: keys survive the rebuilds `↑`/`↓` trigger, and a row
+/// subsumed by `zz` or by the index carries no argument of its own.
+#[derive(Default)]
+struct Sources {
+    /// Rows the command names.
+    named: HashSet<String>,
+    /// Rows a named source subsumes: the files under a `zz` header, or the
+    /// staged files `C` commits through the index.
+    covered: HashSet<String>,
+}
+
+/// Whether the index holds something of `change` for a `C` commit to take.
+/// The one spelling of it: the placeholder's file count and the rows marked
+/// as covered must not be able to disagree.
+fn is_staged(change: &FileChange) -> bool {
+    matches!(change.index, 'A' | 'M' | 'D' | 'R')
 }
 
 /// Where a pick stands after one poll.
@@ -598,16 +621,43 @@ impl<'a> App<'a> {
 
     // -- running an action ------------------------------------------------------
 
+    /// The short ID the tree shows for `target`, or `target` itself when no
+    /// row carries one.
+    fn sid_of(&self, target: &str) -> String {
+        self.rows
+            .iter()
+            .find(|r| r.target.as_deref() == Some(target) && !r.sid.is_empty())
+            .map(|r| r.sid.clone())
+            .unwrap_or_else(|| target.to_string())
+    }
+
+    /// `title` built from the sources' short IDs, or from a count when that
+    /// would not fit the pane: the title is what still names the sources
+    /// once they scroll off the tree.
+    fn title_sources(
+        &self,
+        targets: &[String],
+        width: u16,
+        title: impl Fn(&str) -> String,
+    ) -> String {
+        let joined = targets
+            .iter()
+            .map(|t| self.sid_of(t))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let full = title(&joined);
+        // Two columns for the corners the title sits between.
+        if full.chars().count() + 2 <= width as usize {
+            full
+        } else {
+            title(&format!("{} item(s)", targets.len()))
+        }
+    }
+
     /// The CLI line equivalent to `action`, with the short IDs the tree
     /// shows, for the log.
     fn command_line(&self, action: &Action) -> String {
-        let sid = |target: &str| -> String {
-            self.rows
-                .iter()
-                .find(|r| r.target.as_deref() == Some(target) && !r.sid.is_empty())
-                .map(|r| r.sid.clone())
-                .unwrap_or_else(|| target.to_string())
-        };
+        let sid = |target: &str| self.sid_of(target);
         let mut words = vec!["loom".to_string()];
         match action {
             Action::Commit { source, dest } => {
@@ -1089,20 +1139,85 @@ impl<'a> App<'a> {
 
     // -- actions ----------------------------------------------------------------
 
-    /// Targets of the selected rows, in tree order; falls back to the cursor row.
-    fn selection_targets(&self) -> Vec<String> {
-        if self.selected.is_empty() {
-            return self
-                .current_row()
-                .and_then(|r| r.target.clone())
-                .into_iter()
-                .collect();
-        }
-        self.rows
+    /// Targets of the selected rows, in tree order, and the rows they mark;
+    /// falls back to the cursor row.
+    fn selection_sources(&self) -> (Vec<String>, Sources) {
+        let rows: Vec<&Row> = if self.selected.is_empty() {
+            self.current_row().into_iter().collect()
+        } else {
+            self.rows
+                .iter()
+                .filter(|r| self.selected.contains(&r.key))
+                .collect()
+        };
+        let targets = rows.iter().filter_map(|r| r.target.clone()).collect();
+        (targets, self.mark_sources(&rows))
+    }
+
+    /// The gutter marks for `rows` as the sources of a pending command: the
+    /// rows themselves, plus the working files a `zz` header among them
+    /// subsumes.
+    fn mark_sources(&self, rows: &[&Row]) -> Sources {
+        let covers_all = rows
             .iter()
-            .filter(|r| self.selected.contains(&r.key))
-            .filter_map(|r| r.target.clone())
+            .any(|r| matches!(r.kind, RowKind::LocalChanges { .. }));
+        Sources {
+            named: rows.iter().map(|r| r.key.clone()).collect(),
+            covered: if covers_all {
+                self.working_file_keys(|_| true)
+            } else {
+                HashSet::new()
+            },
+        }
+    }
+
+    /// Keys of the working-file rows matching `keep`, read off the snapshot
+    /// rather than the drawn rows: `[local changes]` may be closed, and the
+    /// files it hides are covered all the same.
+    fn working_file_keys(&self, keep: impl Fn(&FileChange) -> bool) -> HashSet<String> {
+        self.snapshot
+            .info
+            .working_changes
+            .iter()
+            .filter(|c| keep(c))
+            .map(|c| working_file_key(&c.path))
             .collect()
+    }
+
+    /// The gutter marks for a `C` commit: the index is the source, so the
+    /// staged files are all there is to point at — no row names it.
+    fn index_sources(&self) -> Sources {
+        let mut covered = self.working_file_keys(is_staged);
+        // The one row that is drawn whether `[local changes]` is open or
+        // closed, so a `C` placement is never left with no mark at all.
+        covered.insert(LOCAL_CHANGES_KEY.to_string());
+        Sources {
+            named: HashSet::new(),
+            covered,
+        }
+    }
+
+    /// The gutter mark for `row`. A pending command's sources outrank the
+    /// selection, which `Space` cannot change while a target is being picked.
+    fn row_mark(&self, row: &Row) -> RowMark {
+        let source_rows = match &self.mode {
+            Mode::CommitTarget { source_rows, .. } | Mode::FoldTarget { source_rows, .. } => {
+                Some(source_rows)
+            }
+            _ => None,
+        };
+        if let Some(sources) = source_rows {
+            if sources.named.contains(&row.key) {
+                return RowMark::Source;
+            }
+            if sources.covered.contains(&row.key) {
+                return RowMark::Covered;
+            }
+        }
+        if self.selected.contains(&row.key) {
+            return RowMark::Selected;
+        }
+        RowMark::None
     }
 
     /// `c`: the selected working files or `[local changes]` header (else the
@@ -1110,10 +1225,10 @@ impl<'a> App<'a> {
     /// redrawn with the commit at its destination, and nothing runs until
     /// that is confirmed.
     fn action_commit_start(&mut self) {
-        let Some((files, origin)) = self.commit_sources() else {
+        let Some((files, source_rows, origin)) = self.commit_sources() else {
             return;
         };
-        self.enter_commit_target(CommitSource::Files(files), origin);
+        self.enter_commit_target(CommitSource::Files(files), source_rows, origin);
     }
 
     /// `C`: every local change, whatever the cursor or selection — a picker
@@ -1163,10 +1278,11 @@ impl<'a> App<'a> {
         });
     }
 
-    /// The working files `c` stands for and the key of the row it came from.
-    /// `None` when there is nothing to commit, after a notice saying which of
-    /// the reasons it was — or silently, when there is no row to stand on.
-    fn commit_sources(&mut self) -> Option<(Vec<String>, String)> {
+    /// The working files `c` stands for, their gutter marks, and the key of
+    /// the row it came from. `None` when there is nothing to commit, after a
+    /// notice saying which of the reasons it was — or silently, when there is
+    /// no row to stand on.
+    fn commit_sources(&mut self) -> Option<(Vec<String>, Sources, String)> {
         let rows: Vec<&Row> = if self.selected.is_empty() {
             self.current_row().into_iter().collect()
         } else {
@@ -1205,12 +1321,13 @@ impl<'a> App<'a> {
             self.notice = Some("commit: this row has nothing to commit".to_string());
             return None;
         };
+        let source_rows = self.mark_sources(&rows);
         let origin = self.current_row().map(|r| r.key.clone())?;
-        Some((files, origin))
+        Some((files, source_rows, origin))
     }
 
     /// Redraw the tree with the placeholder commit and wait for a destination.
-    fn enter_commit_target(&mut self, source: CommitSource, origin: String) {
+    fn enter_commit_target(&mut self, source: CommitSource, source_rows: Sources, origin: String) {
         // The destinations are read off the drawn tree, so their order is the
         // order `↑`/`↓` walk them in.
         let mut dests = vec![CommitDest::Integration];
@@ -1220,6 +1337,7 @@ impl<'a> App<'a> {
         }));
         self.mode = Mode::CommitTarget {
             source,
+            source_rows,
             dests,
             index: 0,
             origin,
@@ -1317,7 +1435,8 @@ impl<'a> App<'a> {
         match staged {
             Ok(true) => {
                 if self.reload() {
-                    self.enter_commit_target(CommitSource::Index, origin);
+                    let source_rows = self.index_sources();
+                    self.enter_commit_target(CommitSource::Index, source_rows, origin);
                 }
             }
             // Every way out of a pick leaves a line: the entry the press
@@ -1403,6 +1522,7 @@ impl<'a> App<'a> {
             dests,
             index,
             origin,
+            ..
         } = std::mem::replace(&mut self.mode, Mode::Normal)
         else {
             return None;
@@ -1428,12 +1548,15 @@ impl<'a> App<'a> {
 
     /// `f`: remember the sources, then let the user pick the target in the tree.
     fn action_fold_start(&mut self) {
-        let sources = self.selection_targets();
+        let (sources, source_rows) = self.selection_sources();
         if sources.is_empty() {
             self.notice = Some("fold: select source rows first".to_string());
             return;
         }
-        self.mode = Mode::FoldTarget { sources };
+        self.mode = Mode::FoldTarget {
+            sources,
+            source_rows,
+        };
     }
 
     fn confirm_fold_target(&mut self) -> Option<Action> {
@@ -1442,11 +1565,18 @@ impl<'a> App<'a> {
             self.notice = Some("fold: this row cannot be a target".to_string());
             return None;
         };
-        let Mode::FoldTarget { sources } = std::mem::replace(&mut self.mode, Mode::Normal) else {
+        let Mode::FoldTarget {
+            sources,
+            source_rows,
+        } = std::mem::replace(&mut self.mode, Mode::Normal)
+        else {
             return None;
         };
         if sources.contains(&target) {
-            self.mode = Mode::FoldTarget { sources };
+            self.mode = Mode::FoldTarget {
+                sources,
+                source_rows,
+            };
             self.notice = Some("fold: target is one of the sources".to_string());
             return None;
         }
@@ -1665,7 +1795,7 @@ impl<'a> App<'a> {
                     row,
                     self.theme,
                     &self.snapshot.cwd_prefix,
-                    self.selected.contains(&row.key),
+                    self.row_mark(row),
                     i == cursor,
                     editing
                         .as_ref()
@@ -1677,15 +1807,24 @@ impl<'a> App<'a> {
 
         let title = match &self.mode {
             Mode::Normal => " Status ".to_string(),
-            Mode::FoldTarget { sources } => {
-                format!(" Fold {} item(s) into... ", sources.len())
-            }
-            Mode::CommitTarget { dests, index, .. } => {
+            Mode::FoldTarget { sources, .. } => self.title_sources(sources, area.width, |what| {
+                format!(" Fold {} into... ", what)
+            }),
+            Mode::CommitTarget {
+                source,
+                dests,
+                index,
+                ..
+            } => {
                 let dest = match &dests[*index] {
                     CommitDest::Integration => &self.snapshot.info.branch_name,
                     CommitDest::Branch(name) => name,
                 };
-                format!(" Commit to [{}] ", dest)
+                let title = |what: &str| format!(" Commit {} → [{}] ", what, dest);
+                match source {
+                    CommitSource::Files(files) => self.title_sources(files, area.width, title),
+                    CommitSource::Index => title("the index"),
+                }
             }
             Mode::RenameBranch { .. } => " Rename branch ".to_string(),
             Mode::NewBranch { .. } => " New branch ".to_string(),
@@ -2046,12 +2185,12 @@ fn nearest_focusable(rows: &[Row], index: usize) -> Option<usize> {
 // ── Row rendering ────────────────────────────────────────────────────────
 
 /// Render one tree row as a styled line; `editing` replaces the branch name
-/// with the field being typed. The first span is the multi-select gutter.
+/// with the field being typed. The first span is the selection/source gutter.
 fn row_line(
     row: &Row,
     theme: &TuiTheme,
     cwd_prefix: &str,
-    selected: bool,
+    mark: RowMark,
     is_cursor: bool,
     editing: Option<&TextField>,
 ) -> Line<'static> {
@@ -2061,10 +2200,12 @@ fn row_line(
     } else {
         theme.dim
     };
-    let mut spans: Vec<Span<'static>> = vec![if selected {
-        Span::styled("✓ ", theme.selection)
-    } else {
-        Span::raw("  ")
+    let mut spans: Vec<Span<'static>> = vec![match mark {
+        RowMark::Selected => Span::styled("✓ ", theme.selection),
+        RowMark::Source => Span::styled("▸ ", theme.source),
+        // Covered, not named: the same glyph, without the source's weight.
+        RowMark::Covered => Span::styled("▸ ", dim),
+        RowMark::None => Span::raw("  "),
     }];
 
     let display = |path: &str| crate::core::repo::cwd_relative_path(path, cwd_prefix);

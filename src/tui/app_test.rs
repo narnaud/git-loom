@@ -107,6 +107,33 @@ fn press(app: &mut App, code: KeyCode) -> KeyResult<Outcome> {
     app.handle_key(PaneId::Left, code, KeyModifiers::NONE)
 }
 
+/// Draw the whole shell and read the screen back as text.
+fn rendered_lines(shell: &mut Shell<App>) -> Vec<String> {
+    rendered_lines_at(shell, 100)
+}
+
+fn rendered_lines_at(shell: &mut Shell<App>, width: u16) -> Vec<String> {
+    let backend = ratatui::backend::TestBackend::new(width, 30);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    terminal.draw(|f| shell.render(f)).unwrap();
+    let buffer = terminal.backend().buffer();
+    (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect()
+}
+
+/// The tree line naming `needle`, gutter included.
+fn tree_line<'a>(lines: &'a [String], needle: &str) -> &'a str {
+    lines
+        .iter()
+        .find(|l| l.contains(needle))
+        .unwrap_or_else(|| panic!("no row for {needle}: {lines:#?}"))
+}
+
 /// A worker that blocks until `release` is dropped, then ends as cancelled
 /// (so finishing it touches no repository).
 fn blocked_worker(app: &mut App) -> std::sync::mpsc::Sender<()> {
@@ -738,7 +765,12 @@ fn a_staged_commit_counts_the_files_the_index_holds() {
     let theme = make_theme();
     let mut app = make_app(make_snapshot(), &theme);
 
-    app.enter_commit_target(CommitSource::Index, LOCAL_CHANGES_KEY.to_string());
+    let source_rows = app.index_sources();
+    app.enter_commit_target(
+        CommitSource::Index,
+        source_rows,
+        LOCAL_CHANGES_KEY.to_string(),
+    );
 
     let mut shell = Shell::new(app);
     let backend = ratatui::backend::TestBackend::new(100, 30);
@@ -868,7 +900,12 @@ fn a_staged_commit_previews_the_index() {
     let theme = make_theme();
     let mut app = make_app(snapshot, &theme);
 
-    app.enter_commit_target(CommitSource::Index, LOCAL_CHANGES_KEY.to_string());
+    let source_rows = app.index_sources();
+    app.enter_commit_target(
+        CommitSource::Index,
+        source_rows,
+        LOCAL_CHANGES_KEY.to_string(),
+    );
     app.ensure_diff_cached();
 
     let text: String = app.diff_cache[&pending_commit_key()]
@@ -2109,8 +2146,163 @@ fn commit_draws_a_placeholder_row_at_its_destination() {
         .expect("no placeholder commit row");
     assert!(lines[at - 1].contains("[feature-a]"), "{lines:#?}");
     assert!(lines[at + 1].contains("Add parser"), "{lines:#?}");
-    assert!(lines.iter().any(|l| l.contains(" Commit to [feature-a] ")));
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.contains(" Commit zz → [feature-a] "))
+    );
     assert!(lines.iter().any(|l| l.contains("Enter to commit")));
+}
+
+#[test]
+fn commit_marks_the_header_and_the_files_it_covers() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, LOCAL_CHANGES_KEY);
+    press(&mut app, KeyCode::Char('c'));
+
+    let mut shell = Shell::new(app);
+    let lines = rendered_lines(&mut shell);
+    assert!(
+        tree_line(&lines, "[local changes]").contains("▸ "),
+        "{lines:#?}"
+    );
+    assert!(tree_line(&lines, "a.rs").contains("▸ "), "{lines:#?}");
+    assert!(tree_line(&lines, "b.rs").contains("▸ "), "{lines:#?}");
+    assert!(
+        !tree_line(&lines, "[feature-a]").contains("▸ "),
+        "{lines:#?}"
+    );
+}
+
+#[test]
+fn commit_marks_the_cursor_row_when_nothing_is_selected() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, "wf:a.rs");
+    press(&mut app, KeyCode::Char('c'));
+
+    let mut shell = Shell::new(app);
+    let lines = rendered_lines(&mut shell);
+    assert!(tree_line(&lines, "a.rs").contains("▸ "), "{lines:#?}");
+    // The sibling is neither named nor covered: `c` took one file.
+    assert!(!tree_line(&lines, "b.rs").contains("▸ "), "{lines:#?}");
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.contains(" Commit aa1 → [integration] ")),
+        "{lines:#?}"
+    );
+}
+
+#[test]
+fn cancelling_a_commit_takes_the_source_marks_with_it() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, "wf:a.rs");
+    press(&mut app, KeyCode::Char('c'));
+    app.handle_escape();
+
+    let mut shell = Shell::new(app);
+    let lines = rendered_lines(&mut shell);
+    assert!(!tree_line(&lines, "a.rs").contains("▸ "), "{lines:#?}");
+    assert!(lines.iter().any(|l| l.contains(" Status ")), "{lines:#?}");
+}
+
+#[test]
+fn fold_marks_its_sources_while_the_target_is_picked() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, "wf:a.rs");
+    app.toggle_selection();
+    app.action_fold_start();
+    move_cursor_to(&mut app, &oid('a').to_string());
+
+    let mut shell = Shell::new(app);
+    let lines = rendered_lines(&mut shell);
+    // The source outranks its own `✓`: the cursor is on the target now.
+    assert!(tree_line(&lines, "a.rs").contains("▸ "), "{lines:#?}");
+    assert!(!tree_line(&lines, "a.rs").contains("✓ "), "{lines:#?}");
+    assert!(
+        lines.iter().any(|l| l.contains(" Fold aa1 into... ")),
+        "{lines:#?}"
+    );
+}
+
+#[test]
+fn a_title_too_narrow_for_the_sources_counts_them_instead() {
+    let theme = make_theme();
+    let mut info = make_info();
+    info.working_changes = (0..6)
+        .map(|i| file(&format!("f{i}.rs"), ' ', 'M'))
+        .collect();
+    let mut app = make_app(snapshot_of(info), &theme);
+    for i in 0..6 {
+        move_cursor_to(&mut app, &format!("wf:f{i}.rs"));
+        app.toggle_selection();
+    }
+    press(&mut app, KeyCode::Char('c'));
+
+    let mut shell = Shell::new(app);
+    // Wide enough for the count, too narrow for the six short IDs.
+    let lines = rendered_lines_at(&mut shell, 90);
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.contains(" Commit 6 item(s) → [integration] ")),
+        "{lines:#?}"
+    );
+}
+
+/// The staged files are hidden behind a closed header, so the header itself
+/// has to carry the mark: a `C` placement with nothing marked is the case the
+/// marks exist for.
+#[test]
+fn a_staged_commit_marks_the_closed_header() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    app.expanded.remove(LOCAL_CHANGES_KEY);
+    app.rebuild_rows(LOCAL_CHANGES_KEY);
+    let source_rows = app.index_sources();
+    app.enter_commit_target(
+        CommitSource::Index,
+        source_rows,
+        LOCAL_CHANGES_KEY.to_string(),
+    );
+
+    let mut shell = Shell::new(app);
+    let lines = rendered_lines(&mut shell);
+    assert!(
+        tree_line(&lines, "[local changes]").contains("▸ "),
+        "{lines:#?}"
+    );
+}
+
+/// `C` commits the index, which no row names — only the staged files it
+/// carries can be pointed at.
+#[test]
+fn a_staged_commit_marks_the_files_the_index_holds() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    let source_rows = app.index_sources();
+    app.enter_commit_target(
+        CommitSource::Index,
+        source_rows,
+        LOCAL_CHANGES_KEY.to_string(),
+    );
+
+    let mut shell = Shell::new(app);
+    let lines = rendered_lines(&mut shell);
+    assert!(tree_line(&lines, "a.rs").contains("▸ "), "{lines:#?}");
+    assert!(!tree_line(&lines, "b.rs").contains("▸ "), "{lines:#?}");
+    assert!(
+        tree_line(&lines, "[local changes]").contains("▸ "),
+        "{lines:#?}"
+    );
+    assert!(
+        lines.iter().any(|l| l.contains(" Commit the index → ")),
+        "{lines:#?}"
+    );
 }
 
 #[test]

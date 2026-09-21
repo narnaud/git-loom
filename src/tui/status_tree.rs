@@ -23,6 +23,25 @@ pub(crate) fn branch_key(name: &str) -> String {
     format!("br:{}", name)
 }
 
+/// [`Row::key`] of the row naming the working file at `path`.
+pub(crate) fn working_file_key(path: &str) -> String {
+    format!("wf:{}", path)
+}
+
+/// What the gutter marker on a row says. `Source` and `Covered` occur only
+/// while a target is being picked, and outrank `Selected`: what the pending
+/// command takes matters more than what is selected (Spec 020).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum RowMark {
+    None,
+    Selected,
+    /// A row the pending command names.
+    Source,
+    /// A row a named source subsumes without naming it: a file under a `zz`
+    /// header, or a staged file the index carries in.
+    Covered,
+}
+
 /// The kind of thing a selection holds. A selection never mixes classes: no
 /// loom command takes a heterogeneous target list (Spec 020).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -192,7 +211,7 @@ pub(crate) fn build_rows(
                             },
                             sid: ids.get_file(&change.path).to_string(),
                             target: Some(ids.get_file(&change.path).to_string()),
-                            key: format!("wf:{}", change.path),
+                            key: working_file_key(&change.path),
                             focusable: true,
                             expandable: false,
                             expanded: false,
