@@ -613,3 +613,106 @@ fn restore_loom_unstaged_restores_when_no_rebase_is_on_disk() {
 
     assert_eq!(git::diff_cached(&workdir).unwrap(), patch);
 }
+
+/// Builds the conflict the hint is about: every file in `files` is changed on
+/// both sides, so the merge leaves them all with stages in the index.
+fn conflict_on(t: &TestRepo, files: &[&str]) {
+    let workdir = t.workdir();
+    for file in files {
+        if let Some(dir) = workdir.join(file).parent() {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+    }
+    let commit = |content: &str| {
+        for file in files {
+            t.write_file(file, content);
+        }
+        t.stage_files(files);
+        t.commit_staged(content);
+        t.head_oid().to_string()
+    };
+    let base = commit("base");
+    let theirs = commit("theirs");
+    git::run_git(&workdir, &["checkout", "-q", "-b", "ours", &base]).unwrap();
+    commit("ours");
+    git::run_git(&workdir, &["merge", "--no-commit", &theirs]).unwrap_err();
+}
+
+/// The hint is a command line the user retypes, so every path in it has to
+/// survive a shell: bare, `my file.txt` reaches git as two pathspecs that
+/// match nothing, and git reports success having cleared no stage at all.
+#[test]
+fn the_unmerged_reset_hint_quotes_every_path_it_names() {
+    let t = TestRepo::new();
+    let workdir = t.workdir();
+    conflict_on(&t, &["a.txt", "my file.txt", "été.txt", "weird;&name.txt"]);
+
+    // Index order is byte order, so the whole line is fixed: every entry is
+    // there, in that order, rooted, and quoted against the shell.
+    assert_eq!(
+        super::unmerged_reset_hint(&workdir).expect("the merge left stages behind"),
+        "it left unmerged entries in the index — `git reset -- \
+         ':(top,literal)a.txt' ':(top,literal)my file.txt' \
+         ':(top,literal)weird;&name.txt' ':(top,literal)été.txt'` clears them"
+    );
+}
+
+/// The whole point of the hint: running it clears the stages it names and
+/// leaves the rest of the index alone. Run from a subdirectory, because that
+/// is where the user usually is and git reports these paths from the root.
+#[test]
+fn the_hinted_reset_clears_the_stages_and_spares_the_rest() {
+    let t = TestRepo::new();
+    let workdir = t.workdir();
+    conflict_on(&t, &["sub/a.txt", "sub/g[1].txt"]);
+
+    t.write_file(
+        "keep.txt",
+        "the user staged this
+",
+    );
+    t.stage_files(&["keep.txt"]);
+
+    let specs = super::unmerged_pathspecs(&workdir);
+    let mut args = vec!["reset", "--"];
+    args.extend(specs.iter().map(String::as_str));
+    git::run_git(&workdir.join("sub"), &args).unwrap();
+
+    assert!(
+        git::unmerged_paths(&workdir).is_empty(),
+        "the hinted reset must clear every stage it names, from a subdirectory"
+    );
+    assert_eq!(
+        crate::core::repo::get_staged_files(&t.repo).unwrap(),
+        vec!["keep.txt".to_string()],
+        "staging the patch has no copy of must survive the reset"
+    );
+}
+
+/// A name git reports in bytes loom cannot decode arrives holding U+FFFD, and
+/// a pathspec built from it matches nothing — git would exit 0 having cleared
+/// no stage. So the hint names nothing, and still does not send the user to an
+/// unscoped `git reset`, which unstages what the parked patch has no copy of.
+#[test]
+fn the_unmerged_reset_hint_names_no_path_it_could_not_decode() {
+    let specs = vec![
+        ":(top,literal)a.txt".to_string(),
+        ":(top,literal)caf\u{fffd}.txt".to_string(),
+    ];
+
+    assert_eq!(
+        super::reset_hint_for(&specs).expect("the index is unmerged"),
+        "it left unmerged entries in the index — `git status` names them, and a \
+         `git reset` limited to those paths clears them"
+    );
+}
+
+/// No stages, no hint: the caller must not warn about an index it did not
+/// leave conflicted.
+#[test]
+fn the_unmerged_reset_hint_is_none_on_a_clean_index() {
+    let t = TestRepo::new();
+    t.commit("only", "a.txt");
+
+    assert!(super::unmerged_reset_hint(&t.workdir()).is_none());
+}

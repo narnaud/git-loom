@@ -608,3 +608,45 @@ fn a_protected_commit_is_refused_even_with_local_changes() {
     );
     crate::git::rebase_abort(&workdir).unwrap();
 }
+
+/// The hint that names them builds a `git reset -- <paths>` out of this, so a
+/// name git would escape has to come back raw: `core.quotePath` defaults to on.
+#[test]
+fn unmerged_paths_names_every_conflicted_entry_unescaped() {
+    let test_repo = TestRepo::new();
+    let workdir = test_repo.workdir();
+    let files = ["a.txt", "my file.txt", "été.txt"];
+
+    let commit = |content: &str| {
+        for file in files {
+            test_repo.write_file(file, content);
+        }
+        test_repo.stage_files(&files);
+        test_repo.commit_staged(content);
+        test_repo.head_oid().to_string()
+    };
+    let base = commit("base");
+    let theirs = commit("theirs");
+    crate::git::run_git(&workdir, &["checkout", "-q", "-b", "ours", &base]).unwrap();
+    commit("ours");
+
+    crate::git::run_git(&workdir, &["merge", "--no-commit", &theirs]).unwrap_err();
+
+    let mut found = super::unmerged_paths(&workdir);
+    found.sort();
+    let mut want: Vec<String> = files.iter().map(|f| f.to_string()).collect();
+    want.sort();
+    assert_eq!(found, want);
+    assert!(super::has_unmerged_paths(&workdir));
+}
+
+/// A clean index has no stages to name, and the empty stdout git answers with
+/// must not read as one conflicted path with an empty name.
+#[test]
+fn unmerged_paths_is_empty_without_a_conflict() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("only", "a.txt");
+
+    assert!(super::unmerged_paths(&test_repo.workdir()).is_empty());
+    assert!(!super::has_unmerged_paths(&test_repo.workdir()));
+}

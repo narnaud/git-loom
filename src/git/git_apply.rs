@@ -5,6 +5,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 
+use crate::core::hunk_select;
 use crate::core::msg;
 use crate::trace as loom_trace;
 
@@ -286,8 +287,8 @@ pub fn restore_staged_after_rebase(workdir: &Path, patch: &str) {
                 msg::warn(&format!("could not restore your staged changes: {e}"));
                 // The rehearsal said this would land, so something moved the
                 // index in between and it may have left stages behind.
-                if super::has_unmerged_paths(workdir) {
-                    msg::warn("it left unmerged entries in the index — `git reset` clears them");
+                if let Some(hint) = unmerged_reset_hint(workdir) {
+                    msg::warn(&hint);
                 }
                 park(workdir, patch);
             }
@@ -331,6 +332,61 @@ pub fn restore_staged_after_rebase(workdir: &Path, patch: &str) {
             park(workdir, patch);
         }
     }
+}
+
+/// The pathspecs naming exactly the index entries a failed restore left
+/// conflicted.
+///
+/// `:(top)` because git reports these from the repository root while the user
+/// is wherever they ran loom: a bare `sub/a.txt` retyped in `sub/` resolves to
+/// `sub/sub/a.txt`, matching nothing and reporting success. `:(literal)` for
+/// the reason `ls_files` gives: a real file named `a[12].txt` is otherwise a
+/// glob.
+fn unmerged_pathspecs(workdir: &Path) -> Vec<String> {
+    super::unmerged_paths(workdir)
+        .iter()
+        .map(|p| format!(":(top,literal){p}"))
+        .collect()
+}
+
+/// How to clear conflict stages a failed restore left in the index, or `None`
+/// when it left none.
+///
+/// Scoped to those entries: an unscoped `git reset` would also unstage
+/// whatever else the index holds by then, which the parked patch has no copy
+/// of. Each one is quoted because this is a command line the user retypes —
+/// bare, a pathspec with a space in it reaches git as two.
+fn unmerged_reset_hint(workdir: &Path) -> Option<String> {
+    reset_hint_for(&unmerged_pathspecs(workdir))
+}
+
+/// Split out of [`unmerged_reset_hint`] so the undecodable name can be tested,
+/// which no Windows filesystem can hold.
+fn reset_hint_for(specs: &[String]) -> Option<String> {
+    if specs.is_empty() {
+        return None;
+    }
+    // `unmerged_paths` decodes git's bytes lossily, so a name that is not UTF-8
+    // arrives holding U+FFFD, and a pathspec built from it matches nothing: git
+    // exits 0 having cleared no stage, the silent success this hint exists to
+    // avoid. An unscoped `git reset` is no fallback either — it unstages what
+    // the parked patch has no copy of. A name really holding U+FFFD lands here
+    // too and only loses the precision.
+    if specs
+        .iter()
+        .any(|s| s.contains(char::REPLACEMENT_CHARACTER))
+    {
+        return Some(
+            "it left unmerged entries in the index — `git status` names them, and a \
+             `git reset` limited to those paths clears them"
+                .to_string(),
+        );
+    }
+    let quoted: Vec<String> = specs.iter().map(|s| hunk_select::quoted(s)).collect();
+    Some(format!(
+        "it left unmerged entries in the index — `git reset -- {}` clears them",
+        quoted.join(" ")
+    ))
 }
 
 /// Put back a patch loom unstaged itself, wherever the call ended.

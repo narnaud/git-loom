@@ -36,7 +36,7 @@ pub use git_rebase::{
     before_rebase_starts, continue_rebase, continue_rebase_expecting_edit,
     finished_without_stopping, has_unmerged_paths, rebase, rebase_abort, rebase_abort_then_cleanup,
     rebase_is_in_progress, rebase_is_over, rebase_never_started, rebase_outcome, rebase_progress,
-    replayed_empty_hash, skip_empty_stops, verify_paused_at,
+    replayed_empty_hash, skip_empty_stops, unmerged_paths, verify_paused_at,
 };
 pub use git_worktree::ensure_not_checked_out_elsewhere;
 

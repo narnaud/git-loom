@@ -447,8 +447,24 @@ pub fn abort_after_failure(workdir: &Path) -> anyhow::Error {
 /// Whether the index has unmerged entries — i.e. the operation really did stop
 /// on a conflict.
 pub fn has_unmerged_paths(workdir: &Path) -> bool {
-    super::run_git_stdout(workdir, &["diff", "--name-only", "--diff-filter=U"])
-        .is_ok_and(|out| !out.trim().is_empty())
+    !unmerged_paths(workdir).is_empty()
+}
+
+/// The paths the index holds conflict stages for. Empty when git cannot be
+/// asked, so a caller that cannot tell reads it as no conflict, as the check
+/// above always has.
+///
+/// `-z` because the default `core.quotePath` would otherwise escape and quote
+/// a non-ASCII path into something no other git command takes.
+pub fn unmerged_paths(workdir: &Path) -> Vec<String> {
+    super::run_git_stdout(workdir, &["diff", "-z", "--name-only", "--diff-filter=U"])
+        .map(|out| {
+            out.split('\0')
+                .filter(|p| !p.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// The id of `AUTO_MERGE`, the ref git keeps while a conflicted merge is
