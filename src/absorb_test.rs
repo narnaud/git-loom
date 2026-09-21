@@ -466,3 +466,55 @@ fn absorb_abort_preserves_working_state() {
     );
     assert_eq!(test_repo.read_file("new-file.txt"), "new-content");
 }
+
+/// Absorb makes its `fixup!` commits before the rebase, so a rebase that
+/// refuses to start — a branch it would move is checked out in another
+/// worktree — still has them to take back, along with the working tree they
+/// consumed. The state file holding that undo goes here, so nothing later can.
+#[test]
+fn absorb_rolls_back_when_the_rebase_refuses_to_start() {
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    let base = test_repo
+        .find_remote_branch_target("origin/main")
+        .to_string();
+
+    test_repo.create_branch_at("feature", &base);
+    test_repo.switch_branch("feature");
+    test_repo.commit("A1", "a1.txt");
+    test_repo.switch_branch("integration");
+    test_repo.merge_no_ff("feature");
+
+    let wt = workdir.parent().unwrap().join("wt");
+    crate::git::run_git(
+        &workdir,
+        &["worktree", "add", wt.to_str().unwrap(), "feature"],
+    )
+    .unwrap();
+
+    let head_before = test_repo.head_oid();
+    test_repo.write_file(
+        "a1.txt",
+        "the change to absorb
+",
+    );
+    let worktree_before = test_repo.read_file("a1.txt");
+
+    let result = test_repo.in_dir(|| super::run(false, vec![]));
+
+    assert!(result.is_err(), "the rebase cannot start, so absorb fails");
+    assert_eq!(
+        test_repo.head_oid(),
+        head_before,
+        "the `fixup!` commits must be gone"
+    );
+    assert_eq!(
+        test_repo.read_file("a1.txt"),
+        worktree_before,
+        "the change absorb took out of the working tree comes back"
+    );
+    assert!(
+        !test_repo.repo.path().join("loom/state.json").exists(),
+        "the state file goes with the rollback"
+    );
+}

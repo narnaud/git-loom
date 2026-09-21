@@ -76,6 +76,13 @@ Every new resumable `weave::run_rebase` caller must populate `Rollback` before
 saving `LoomState` and register in `transaction::dispatch_after_continue`.
 There is no abort dispatcher; `Rollback::apply_abort()` owns cleanup.
 
+`roll_back_failed_rebase` skips that cleanup when the rebase never started,
+because nothing was autostashed — unless `reset_mixed_to` or `reset_hard_to` is
+set, which marks a caller that moved HEAD before the rebase existed (`commit`,
+`absorb`) and so has its own work to take back. A caller that unstages before
+its rebase without moving HEAD keeps a `staging::StagedAside` guard instead
+(Spec 014).
+
 Every rebase autostashes, and that replay reaches the working tree only: a
 staged modification comes back unstaged on a rebase that completed just as it
 does on one that was aborted. So a caller must also put `saved_staged_patch`

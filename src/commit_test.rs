@@ -1301,3 +1301,67 @@ fn commit_dry_run_does_not_amend_head() {
     assert_eq!(test_repo.head_oid(), head);
     assert!(!full_message(&test_repo, "HEAD").contains("Change-Id"));
 }
+
+/// A rebase that refuses to start — the target branch is checked out in another
+/// worktree — still has `commit`'s own commit to take back: it was made before
+/// the rebase existed, and the state file that holds the undo is deleted here,
+/// so nothing later can. Guards the commit being stranded on integration with
+/// the user's staging left behind it.
+#[test]
+fn commit_rolls_back_when_the_rebase_refuses_to_start() {
+    let test_repo = setup_with_two_branches();
+    let workdir = test_repo.workdir();
+
+    let wt = workdir.parent().unwrap().join("wt");
+    crate::git::run_git(
+        &workdir,
+        &["worktree", "add", wt.to_str().unwrap(), "feature-a"],
+    )
+    .unwrap();
+
+    let head_before = test_repo.head_oid();
+    test_repo.write_file(
+        "other.txt",
+        "staged by the user
+",
+    );
+    test_repo.stage_files(&["other.txt"]);
+    let staged_before = crate::git::diff_cached(&workdir).unwrap();
+    test_repo.write_file(
+        "new.txt",
+        "for the commit
+",
+    );
+
+    let result = test_repo.in_dir(|| {
+        run(
+            Some("feature-a".to_string()),
+            Some("Add new file".to_string()),
+            vec!["new.txt".to_string()],
+        )
+    });
+
+    assert!(
+        result.is_err(),
+        "the rebase cannot start, so the commit fails"
+    );
+    assert_eq!(
+        test_repo.head_oid(),
+        head_before,
+        "the commit must not be left on integration"
+    );
+    assert_eq!(
+        crate::git::diff_cached(&workdir).unwrap(),
+        staged_before,
+        "the user's own staging comes back exactly as it was"
+    );
+    assert_eq!(
+        test_repo.read_file("new.txt"),
+        "for the commit\n",
+        "the content loom committed comes back to the working tree"
+    );
+    assert!(
+        !test_repo.repo.path().join("loom/state.json").exists(),
+        "the state file goes with the rollback"
+    );
+}

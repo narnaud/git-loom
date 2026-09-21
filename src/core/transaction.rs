@@ -47,6 +47,13 @@ pub struct Rollback {
 }
 
 impl Rollback {
+    /// Whether this undo takes HEAD back, which only a caller that moved it
+    /// itself, before the rebase, records. A caller that unstages before the
+    /// rebase without moving HEAD must keep its own guard instead (Spec 014).
+    pub fn takes_head_back(&self) -> bool {
+        !self.reset_mixed_to.is_empty() || !self.reset_hard_to.is_empty()
+    }
+
     /// Remove the refs the operation created, and nothing else.
     ///
     /// For a failure that rewrote nothing: the temp branches are still loom's
@@ -432,10 +439,13 @@ pub fn roll_back_failed_rebase(
         );
         return cause;
     }
-    // A pre-flight refusal never autostashed, so that index was never loom's:
-    // replaying a saved patch over it would put back staging the user still
-    // has. The refs loom made are still its own to take back.
-    if git::rebase_never_started(&cause) {
+    // A pre-flight refusal only has something to undo where loom moved HEAD
+    // itself before the rebase existed — `commit`'s commit, `absorb`'s fixups —
+    // which is what a recorded reset target means. With none, nothing was
+    // autostashed and the index is still the user's: replaying a saved patch
+    // over it would put back staging they never lost. The refs loom made are
+    // its own to take back either way.
+    if git::rebase_never_started(&cause) && !state.rollback.takes_head_back() {
         state.rollback.delete_temp_branches(workdir);
         if let Err(e) = delete(git_dir) {
             crate::core::msg::warn(&format!("could not remove the loom state file: {e}"));
@@ -842,6 +852,41 @@ mod tests {
         assert!(state_path(&git_dir).exists());
         assert!(t.branch_exists("topic"), "the rollback must not have run");
         git::rebase_abort(&workdir).unwrap();
+    }
+
+    /// The other half of the rule: with no reset recorded, loom moved nothing
+    /// before the rebase, so the index is still the user's and replaying the
+    /// saved patch over it would double their staging.
+    #[test]
+    fn a_pre_flight_refusal_leaves_an_untouched_index_alone() {
+        let t = crate::core::test_helpers::TestRepo::new();
+        let workdir = t.workdir();
+        let git_dir = t.repo.path().to_path_buf();
+        t.write_file(
+            "staged.txt",
+            "the user's own
+",
+        );
+        t.stage_files(&["staged.txt"]);
+        let staged = git::diff_cached(&workdir).unwrap();
+
+        let state = LoomState {
+            command: "fold".to_string(),
+            rollback: Rollback {
+                saved_staged_patch: staged.clone(),
+                ..Default::default()
+            },
+            context: serde_json::Value::Null,
+            protect: Vec::new(),
+        };
+        save(&git_dir, &state).unwrap();
+
+        let cause = git::before_rebase_starts::<()>(Err(anyhow::anyhow!("checked out elsewhere")))
+            .expect_err("tagged as raised before the rebase started");
+        roll_back_failed_rebase(&workdir, &git_dir, &state, cause);
+
+        assert_eq!(git::diff_cached(&workdir).unwrap(), staged);
+        assert!(!state_path(&git_dir).exists());
     }
 
     /// A half-applied undo is `loom abort`'s to finish, so the state stays.

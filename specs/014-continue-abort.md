@@ -253,6 +253,16 @@ still in progress — a failed abort, or the refusal above declining to reset ov
 uncommitted work: the rollback would make that worse, so both stay for
 `loom abort`.
 
+A refusal that never started the rebase is the other exception, and only in
+part. Nothing was autostashed, so a command that moved nothing before it takes
+back only the refs it made: the index and working tree are the user's, and
+replaying a saved patch over them would double their staging. One that did move
+something first MUST apply the whole rollback — its commits are already in
+history and the state file recording the undo is deleted here. A recorded
+`reset_mixed_to` or `reset_hard_to` is what tells the two apart. A command that
+unstages before its rebase without moving HEAD MUST restore that itself
+(Specs 006 and 007).
+
 The same rule holds outside `loom abort`. Wherever a command aborts its own
 rebase and then cleans up after itself — deleting a temp branch, resetting
 refs, restoring a saved patch, removing the state file — the cleanup is skipped
@@ -494,9 +504,10 @@ and the patch's context is untouched. So may one restoring after
 reset makes the index exactly what the patch expects, at the cost of dropping
 whatever the abort left staged outside it.
 
-Two exceptions: a refusal that never started the rebase autostashed nothing, and
-an abort that failed leaves the rebase on disk — neither index is loom's to
-touch. An unmerged index is left alone for the same reason: the autostash replay
+Two exceptions: a refusal that never started the rebase autostashed nothing, so
+unless its rollback records a reset target that index is the user's, and an
+abort that failed leaves the rebase on disk — neither index is loom's to touch.
+An unmerged index is left alone for the same reason: the autostash replay
 conflicted, so those stages are the user's to resolve and git kept the stash.
 
 ### Rollback Restores Pre-Existing State
