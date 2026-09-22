@@ -2575,6 +2575,10 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
             })?;
         let staged = match outcome {
             RebaseOutcome::Completed => {
+                // Not restore-then-delete as elsewhere (Spec 014): the apply
+                // below undoes itself by diffing the working tree against the
+                // index, so staged work put back first would change what it
+                // reads as its own.
                 transaction::delete(&git_dir)?;
                 if !diff.is_empty()
                     && let Err(e) = git::apply_patch_to_worktree(workdir, &diff)

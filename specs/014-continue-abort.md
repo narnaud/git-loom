@@ -481,14 +481,17 @@ entry either way.)
 
 A command that saves `saved_staged_patch` MUST therefore restore it on every
 exit: the `RebaseOutcome::Completed` arm, its `after_continue` handler, and the
-abort. The restore applies three-way, never resetting the index first: the patch
-is a HEAD-to-index diff, and a plain apply would refuse the whole of it over
-either a staged *new* file whose entry survived the autostash or a hunk whose
-context the rebase rewrote. Resetting to make it apply does not help and can
-lose work: on the success path HEAD has moved, so the reset lands the index on
-the *new* HEAD while the patch is against the old one — and it has already
-dropped what the autostash preserved, which the failing apply then cannot put
-back.
+abort. On that arm the restore MUST precede `transaction::delete`, so a delete
+that fails still leaves the index as the user had it; the exception is an arm
+whose own work reads the index to undo itself, which fold's uncommit does, and
+there the restore follows that work. The restore applies three-way, never
+resetting the index first: the patch is a HEAD-to-index diff, and a plain apply
+would refuse the whole of it over either a staged *new* file whose entry
+survived the autostash or a hunk whose context the rebase rewrote. Resetting to
+make it apply does not help and can lose work: on the success path HEAD has
+moved, so the reset lands the index on the *new* HEAD while the patch is
+against the old one — and it has already dropped what the autostash preserved,
+which the failing apply then cannot put back.
 
 The restore is best-effort and MUST NOT fail its caller: it runs after that
 command's own rewrite has landed, so an error here would report a rewrite that

@@ -188,8 +188,8 @@ pub fn run(
         protect: vec![head_oid.to_string()],
     };
     transaction::save(&git_dir, &state)?;
-    // The state file owns the patch from here: `post_commit` puts it back on
-    // success, `Rollback` on abort.
+    // The state file owns the patch from here: the `Completed` arm puts it
+    // back on success, `Rollback` on abort.
     let saved_staged = staged_aside.release();
 
     let base = graph.base_oid.to_string();
@@ -200,8 +200,9 @@ pub fn run(
         .map_err(|e| transaction::roll_back_failed_rebase(&workdir, &git_dir, &state, e))?;
     match outcome {
         RebaseOutcome::Completed => {
+            git::restore_staged_after_rebase(&workdir, &saved_staged);
             transaction::delete(&git_dir)?;
-            post_commit(&workdir, &branch_name, &saved_staged)?;
+            post_commit(&workdir, &branch_name)?;
         }
         RebaseOutcome::Stopped => {
             transaction::warn_paused(&workdir, "commit");
@@ -225,13 +226,13 @@ pub fn after_continue(
     let saved_staged = ctx
         .saved_staged
         .unwrap_or_else(|| rollback.saved_staged_patch.clone());
-    post_commit(workdir, &ctx.branch_name, &saved_staged)
+    git::restore_staged_after_rebase(workdir, &saved_staged);
+    post_commit(workdir, &ctx.branch_name)
 }
 
-/// Post-rebase work: restore staged changes and print success message.
-fn post_commit(workdir: &Path, branch_name: &str, saved_staged: &str) -> Result<()> {
-    git::restore_staged_after_rebase(workdir, saved_staged);
-
+/// Post-rebase work: print the success message. The restore runs before the
+/// state file goes, so both callers do it themselves.
+fn post_commit(workdir: &Path, branch_name: &str) -> Result<()> {
     let new_hash = git::rev_parse(workdir, branch_name)?;
 
     msg::success(&format!(

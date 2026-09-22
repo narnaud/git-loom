@@ -92,8 +92,9 @@ does on one that was aborted. So a caller must also put `saved_staged_patch`
 back on the paths `apply_abort()` never sees — the `RebaseOutcome::Completed`
 arm and its `after_continue` handler — through
 `git::restore_staged_after_rebase`, which applies three-way and never fails its
-caller. `weave::run_rebase_or_abort` does it for its own callers (Specs 004 and
-014).
+caller, and on that arm goes before `transaction::delete` so a failed delete
+leaves the index as the user had it — with one exception (Spec 014).
+`weave::run_rebase_or_abort` does it for its own callers (Specs 004 and 014).
 
 A `weave::run_rebase_protecting` caller that can pause must also record its
 protected commits in `LoomState.protect`, as full object names; `loom continue`

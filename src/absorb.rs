@@ -302,10 +302,10 @@ fn apply_plan(repo: &Repository, workdir: &Path, git_dir: &Path, plan: AbsorbPla
         .map_err(|e| transaction::roll_back_failed_rebase(workdir, git_dir, &state, e))?;
     match outcome {
         RebaseOutcome::Completed => {
+            git::restore_staged_after_rebase(workdir, &saved_staged);
             transaction::delete(git_dir)?;
             post_absorb(
                 workdir,
-                &saved_staged,
                 skipped_patch.as_deref(),
                 plan.num_hunks,
                 plan.num_files,
@@ -422,9 +422,9 @@ pub fn after_continue(
 ) -> Result<()> {
     let ctx: AbsorbContext =
         serde_json::from_value(context.clone()).context("Failed to parse absorb resume context")?;
+    git::restore_staged_after_rebase(workdir, &rollback.saved_staged_patch);
     post_absorb(
         workdir,
-        &rollback.saved_staged_patch,
         ctx.skipped_patch.as_deref(),
         ctx.num_hunks,
         ctx.num_files,
@@ -432,17 +432,16 @@ pub fn after_continue(
     )
 }
 
-/// Post-rebase work: restore staged/skipped patches and print success message.
+/// Post-rebase work: re-apply the skipped patch and print the success message.
+/// The staged patch goes back before the state file does, so both callers
+/// restore it themselves.
 fn post_absorb(
     workdir: &Path,
-    saved_staged: &str,
     skipped_patch: Option<&str>,
     num_hunks: usize,
     num_files: usize,
     num_commits: usize,
 ) -> Result<()> {
-    git::restore_staged_after_rebase(workdir, saved_staged);
-
     if let Some(patch) = skipped_patch
         && let Err(e) = git::apply_patch(workdir, patch)
     {
