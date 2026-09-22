@@ -1616,7 +1616,7 @@ pub fn run_rebase_expecting_edit(
 ///
 /// Does NOT abort on a conflict — the outcome is the caller's, and a resumable
 /// one must carry `protected` in its `LoomState` so `loom continue` keeps
-/// protecting them. `protected` holds full object names: `skip_empty_stops`
+/// protecting them. `protected` holds full object names: the empty-stop skip
 /// matches on the shorter string, so a short ID would over-protect.
 pub fn run_rebase_protecting(
     workdir: &Path,
@@ -1649,10 +1649,11 @@ fn halt_on_empty(
     protected: git::Protected<'_>,
 ) -> Result<RebaseOutcome> {
     let git_dir = git::absolute_git_dir(workdir)?;
-    git::skip_empty_stops(
+    git::carry_past_known_stops(
         workdir,
         &git_dir,
         protected,
+        None,
         run_rebase_with_empty(workdir, upstream, todo_content, git::empty_stop_value())?,
     )
 }
@@ -1707,17 +1708,22 @@ pub fn not_in_the_weave(oid: Oid) -> anyhow::Error {
 ///
 /// Returns `Paused` when it stopped at an `edit` the todo asked for and
 /// `Stopped` when it stopped part-way. Does NOT abort. A commit whose changes
-/// the new base already has is dropped by the sequencer.
+/// the new base already has is dropped by the sequencer, and a conflict
+/// `rerere` already resolved is carried past (see
+/// [`git::continue_rerere_stops`]).
 pub fn run_rebase(
     workdir: &Path,
     upstream: Option<&str>,
     todo_content: &str,
 ) -> Result<RebaseOutcome> {
-    run_rebase_with_empty(workdir, upstream, todo_content, "drop")
+    // Tagged: a caller's undo must know this failure rewrote nothing.
+    let git_dir = git::before_rebase_starts(git::absolute_git_dir(workdir))?;
+    let outcome = run_rebase_with_empty(workdir, upstream, todo_content, "drop")?;
+    git::continue_rerere_stops(workdir, &git_dir, None, outcome)
 }
 
 /// [`run_rebase`] with git's `--empty` mode chosen: `stop` reports a commit
-/// that replayed empty instead of dropping it (see [`git::skip_empty_stops`]).
+/// that replayed empty instead of dropping it (see [`git::carry_past_known_stops`]).
 fn run_rebase_with_empty(
     workdir: &Path,
     upstream: Option<&str>,

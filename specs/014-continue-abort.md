@@ -72,7 +72,19 @@ A clean index can also mean the opposite of a breakdown: `rerere` replays a
 recorded resolution, and with `rerere.autoUpdate` it stages the result, so the
 rebase stops on a conflict that is already resolved.
 
-Loom therefore describes the pause from what it finds:
+Loom carries a rebase past that stop itself and reports each one: a conflict
+already resolved leaves nothing to ask about. It follows the user's setting and
+stages nothing itself: without `rerere.autoUpdate` the replay reaches the
+working tree only, and the stop is a conflict like any other. Nor does it carry
+a resolution that leaves HEAD's tree unchanged: `--continue` would then drop the
+commit silently, even under `--empty=stop`, past the protection of Spec 004.
+Loom keeps the stops it has continued past, each one the `AUTO_MERGE` id
+together with the step it belongs to — two steps can conflict into the same
+tree — so a step failing for another reason — a hook turning the commit down —
+ends the carry instead of repeating for ever, and is not reported as carried. A
+merge outside a rebase is not carried at all.
+
+Loom describes whatever pause is left from what it finds:
 
 | State | Message |
 |-------|---------|

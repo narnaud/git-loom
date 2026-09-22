@@ -167,10 +167,9 @@ fn a_failed_abort_skips_the_cleanup_and_keeps_the_cause() {
     super::rebase_abort(&workdir).unwrap();
 }
 
-/// Build a repo where `rerere` has recorded a resolution for a conflict, then
-/// replay that same conflict in a rebase. With `rerere.autoUpdate` on, git
-/// stages the recorded resolution and the stop leaves a clean index — which
-/// must not be mistaken for a rebase that broke down.
+/// With `rerere.autoUpdate` on, git stages the recorded resolution and the stop
+/// leaves a clean index — which must not be mistaken for a rebase that broke
+/// down when an out-of-scope command reports why it aborted.
 #[test]
 fn rerere_resolved_stop_is_still_a_conflict() {
     let test_repo = TestRepo::new();
@@ -178,48 +177,14 @@ fn rerere_resolved_stop_is_still_a_conflict() {
     test_repo.set_config("rerere.autoUpdate", "true");
     let workdir = test_repo.workdir();
 
-    test_repo.write_file("f.txt", "base\n");
-    test_repo.stage_files(&["f.txt"]);
-    test_repo.commit_staged("base");
-    let base = test_repo.head_oid().to_string();
+    let (onto, base) = conflicting_base(&test_repo);
+    record_resolution(&test_repo, &onto, &base, "topic1");
+    replay_conflict(&test_repo, &onto, &base, "topic2");
 
-    test_repo.write_file("f.txt", "onto side\n");
-    test_repo.stage_files(&["f.txt"]);
-    test_repo.commit_staged("onto side");
-    let onto = test_repo.head_oid().to_string();
-
-    // The same conflicting topic twice: the first rebase records the
-    // resolution, the second one has rerere replay it.
-    let conflict_on = |topic: &str| {
-        test_repo.create_branch_at(topic, &base);
-        test_repo.switch_branch(topic);
-        test_repo.write_file("f.txt", "topic side\n");
-        test_repo.stage_files(&["f.txt"]);
-        test_repo.commit_staged("topic side");
-        crate::git::run_git(&workdir, &["rebase", &onto]).unwrap_err();
-        assert!(
-            super::rebase_is_in_progress(test_repo.repo.path()),
-            "the conflict must be what stopped the rebase"
-        );
-    };
-
-    conflict_on("topic1");
-    test_repo.write_file("f.txt", "resolved\n");
-    crate::git::run_git(&workdir, &["add", "f.txt"]).unwrap();
-    assert_eq!(
-        super::continue_rebase(&workdir).unwrap(),
-        super::RebaseOutcome::Completed
-    );
-
-    conflict_on("topic2");
-
-    assert!(
-        super::rebase_is_in_progress(test_repo.repo.path()),
-        "the replayed conflict still stops the rebase"
-    );
     assert_eq!(
         test_repo.read_file("f.txt"),
-        "resolved\n",
+        "resolved
+",
         "rerere should have replayed the recorded resolution"
     );
     assert!(
@@ -235,6 +200,354 @@ fn rerere_resolved_stop_is_still_a_conflict() {
     assert!(
         err.contains("Rebase failed with conflicts"),
         "a stop rerere resolved is still a conflict to report: {err}"
+    );
+}
+
+/// A conflict `rerere` replayed and `rerere.autoUpdate` staged leaves nothing
+/// to resolve, so the rebase is carried to the end instead of handed back.
+#[test]
+fn rerere_resolved_stop_is_carried_past() {
+    let test_repo = TestRepo::new();
+    test_repo.set_config("rerere.enabled", "true");
+    test_repo.set_config("rerere.autoUpdate", "true");
+    let workdir = test_repo.workdir();
+    let git_dir = test_repo.repo.path().to_path_buf();
+
+    let (onto, base) = conflicting_base(&test_repo);
+    record_resolution(&test_repo, &onto, &base, "topic1");
+    replay_conflict(&test_repo, &onto, &base, "topic2");
+
+    assert_eq!(
+        super::carry_past_known_stops(
+            &workdir,
+            &git_dir,
+            Default::default(),
+            None,
+            super::RebaseOutcome::Stopped
+        )
+        .unwrap(),
+        super::RebaseOutcome::Completed
+    );
+    assert_eq!(
+        test_repo.read_file("f.txt"),
+        "resolved
+"
+    );
+    assert!(!super::rebase_is_in_progress(&git_dir));
+}
+
+/// Without `rerere.autoUpdate` the user reviews each replayed resolution
+/// before it is taken, so loom must not stage it for them.
+#[test]
+fn rerere_resolved_stop_is_not_carried_past_without_autoupdate() {
+    let test_repo = TestRepo::new();
+    test_repo.set_config("rerere.enabled", "true");
+    test_repo.set_config("rerere.autoUpdate", "false");
+    let workdir = test_repo.workdir();
+    let git_dir = test_repo.repo.path().to_path_buf();
+
+    let (onto, base) = conflicting_base(&test_repo);
+    record_resolution(&test_repo, &onto, &base, "topic1");
+    replay_conflict(&test_repo, &onto, &base, "topic2");
+
+    assert_eq!(
+        super::carry_past_known_stops(
+            &workdir,
+            &git_dir,
+            Default::default(),
+            None,
+            super::RebaseOutcome::Stopped
+        )
+        .unwrap(),
+        super::RebaseOutcome::Stopped
+    );
+    assert_eq!(
+        test_repo.read_file("f.txt"),
+        "resolved
+"
+    );
+    assert!(super::has_unmerged_paths(&workdir));
+    super::rebase_abort(&workdir).unwrap();
+}
+
+/// A resolution that keeps HEAD's side leaves the commit with nothing to add,
+/// and `--continue` would then drop it silently, even under `--empty=stop` —
+/// losing a commit the empty-stop check would have protected.
+#[test]
+fn rerere_resolution_to_head_is_not_carried_past() {
+    let test_repo = TestRepo::new();
+    test_repo.set_config("rerere.enabled", "true");
+    test_repo.set_config("rerere.autoUpdate", "true");
+    let workdir = test_repo.workdir();
+    let git_dir = test_repo.repo.path().to_path_buf();
+
+    let (onto, base) = conflicting_base(&test_repo);
+    record_resolution_as(
+        &test_repo,
+        &onto,
+        &base,
+        "topic1",
+        "onto side
+",
+    );
+    replay_conflict(&test_repo, &onto, &base, "topic2");
+    assert!(!super::has_unmerged_paths(&workdir));
+
+    assert_eq!(
+        super::carry_past_known_stops(
+            &workdir,
+            &git_dir,
+            Default::default(),
+            None,
+            super::RebaseOutcome::Stopped
+        )
+        .unwrap(),
+        super::RebaseOutcome::Stopped
+    );
+    assert!(super::rebase_is_in_progress(&git_dir));
+    super::rebase_abort(&workdir).unwrap();
+}
+
+/// A commit a hook turns down leaves git on the same stop: that is no carry,
+/// and reporting one would pass the rejection off as `rerere`'s doing.
+#[test]
+fn rejected_rerere_commit_is_not_counted_as_carried() {
+    let test_repo = TestRepo::new();
+    test_repo.set_config("rerere.enabled", "true");
+    test_repo.set_config("rerere.autoUpdate", "true");
+    let workdir = test_repo.workdir();
+    let git_dir = test_repo.repo.path().to_path_buf();
+
+    let (onto, base) = conflicting_base(&test_repo);
+    record_resolution(&test_repo, &onto, &base, "topic1");
+    replay_conflict(&test_repo, &onto, &base, "topic2");
+    // The one commit hook `rebase --continue` runs for a staged resolution.
+    let hook = git_dir.join("hooks/prepare-commit-msg");
+    std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
+    std::fs::write(
+        &hook,
+        "#!/bin/sh
+exit 1
+",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    let mut carried = super::carried_set(None);
+    let (outcome, resolved) = super::rerere_continue_loop(
+        &workdir,
+        &git_dir,
+        &mut carried,
+        super::RebaseOutcome::Stopped,
+    )
+    .unwrap();
+    assert_eq!(outcome, super::RebaseOutcome::Stopped);
+    assert_eq!(resolved, 0);
+    super::rebase_abort(&workdir).unwrap();
+}
+
+/// Two stops can share one `AUTO_MERGE`, and the second is still a stop of its
+/// own to carry past — it is the step that tells them apart.
+#[test]
+fn two_stops_sharing_one_auto_merge_are_both_carried_past() {
+    let test_repo = TestRepo::new();
+    test_repo.set_config("rerere.enabled", "true");
+    test_repo.set_config("rerere.autoUpdate", "true");
+    let workdir = test_repo.workdir();
+    let git_dir = test_repo.repo.path().to_path_buf();
+
+    let (onto, base) = conflicting_base(&test_repo);
+    record_resolution(&test_repo, &onto, &base, "topic1");
+    test_repo.create_branch_at("topic2", &base);
+    test_repo.switch_branch("topic2");
+    test_repo.write_file(
+        "f.txt",
+        "topic side
+",
+    );
+    test_repo.stage_files(&["f.txt"]);
+    test_repo.commit_staged("topic side");
+    let pick = test_repo.head_oid().to_string();
+
+    // Picking one commit twice off the same reset makes both conflicts merge
+    // the same commit into the same tree, down to the marker labels, so git
+    // writes one AUTO_MERGE for the two stops.
+    let todo = format!(
+        "f() {{ printf '%s\n' 'reset {onto}' 'pick {pick}' 'reset {onto}' 'pick {pick}' > \"$1\"; }}; f"
+    );
+    let start = || {
+        let ran = std::process::Command::new("git")
+            .current_dir(&workdir)
+            .args(["rebase", "--interactive", "--rebase-merges", &onto])
+            .env("GIT_SEQUENCE_EDITOR", &todo)
+            .env("GIT_EDITOR", "true")
+            .output()
+            .unwrap();
+        assert!(!ran.status.success(), "the first conflict must stop it");
+    };
+
+    start();
+    let first = super::stop_id(&workdir, &git_dir).expect("stopped on a conflict");
+    assert_eq!(
+        super::continue_rebase(&workdir).unwrap(),
+        super::RebaseOutcome::Stopped
+    );
+    let second = super::stop_id(&workdir, &git_dir).expect("stopped on a conflict");
+    assert_eq!(first.auto_merge(), second.auto_merge());
+    assert_ne!(first, second, "two steps, so two stops");
+    super::rebase_abort(&workdir).unwrap();
+
+    start();
+    assert_eq!(
+        super::carry_past_known_stops(
+            &workdir,
+            &git_dir,
+            Default::default(),
+            None,
+            super::RebaseOutcome::Stopped
+        )
+        .unwrap(),
+        super::RebaseOutcome::Completed
+    );
+    assert!(!super::rebase_is_in_progress(&git_dir));
+    assert_eq!(
+        test_repo.read_file("f.txt"),
+        "resolved
+"
+    );
+}
+
+/// `rerere.autoUpdate` alone must never carry a tree full of conflict markers.
+#[test]
+fn conflict_with_rerere_off_is_not_carried_past() {
+    let test_repo = TestRepo::new();
+    test_repo.set_config("rerere.enabled", "false");
+    test_repo.set_config("rerere.autoUpdate", "true");
+    let workdir = test_repo.workdir();
+    let git_dir = test_repo.repo.path().to_path_buf();
+
+    let (onto, base) = conflicting_base(&test_repo);
+    replay_conflict(&test_repo, &onto, &base, "topic");
+
+    assert_eq!(
+        super::carry_past_known_stops(
+            &workdir,
+            &git_dir,
+            Default::default(),
+            None,
+            super::RebaseOutcome::Stopped
+        )
+        .unwrap(),
+        super::RebaseOutcome::Stopped
+    );
+    assert!(test_repo.read_file("f.txt").contains("<<<<<<<"));
+    assert!(super::has_unmerged_paths(&workdir));
+    super::rebase_abort(&workdir).unwrap();
+}
+
+/// A conflict with no recorded resolution is the user's to settle: `rerere`
+/// leaves the index unmerged, and nothing may continue over that.
+#[test]
+fn unresolved_conflict_is_not_carried_past() {
+    let test_repo = TestRepo::new();
+    test_repo.set_config("rerere.enabled", "true");
+    test_repo.set_config("rerere.autoUpdate", "true");
+    let workdir = test_repo.workdir();
+    let git_dir = test_repo.repo.path().to_path_buf();
+
+    let (onto, base) = conflicting_base(&test_repo);
+    replay_conflict(&test_repo, &onto, &base, "topic");
+
+    assert_eq!(
+        super::carry_past_known_stops(
+            &workdir,
+            &git_dir,
+            Default::default(),
+            None,
+            super::RebaseOutcome::Stopped
+        )
+        .unwrap(),
+        super::RebaseOutcome::Stopped
+    );
+    assert!(super::has_unmerged_paths(&workdir));
+    super::rebase_abort(&workdir).unwrap();
+}
+
+/// A base commit and a tip that every topic branch built on the base conflicts
+/// with, as `(onto, base)`.
+fn conflicting_base(test_repo: &TestRepo) -> (String, String) {
+    test_repo.write_file(
+        "f.txt", "base
+",
+    );
+    test_repo.stage_files(&["f.txt"]);
+    test_repo.commit_staged("base");
+    let base = test_repo.head_oid().to_string();
+
+    test_repo.write_file(
+        "f.txt",
+        "onto side
+",
+    );
+    test_repo.stage_files(&["f.txt"]);
+    test_repo.commit_staged("onto side");
+    (test_repo.head_oid().to_string(), base)
+}
+
+/// Rebase a fresh topic onto `onto` and leave the rebase stopped on the
+/// conflict, with the repo checked out on that topic.
+fn replay_conflict(test_repo: &TestRepo, onto: &str, base: &str, topic: &str) {
+    let workdir = test_repo.workdir();
+    test_repo.create_branch_at(topic, base);
+    test_repo.switch_branch(topic);
+    test_repo.write_file(
+        "f.txt",
+        "topic side
+",
+    );
+    test_repo.stage_files(&["f.txt"]);
+    test_repo.commit_staged("topic side");
+    crate::git::run_git(&workdir, &["rebase", onto]).unwrap_err();
+    assert!(
+        super::rebase_is_in_progress(test_repo.repo.path()),
+        "the conflict must be what stopped the rebase"
+    );
+}
+
+/// Teach `rerere` how this conflict is resolved, by resolving it once.
+fn record_resolution(test_repo: &TestRepo, onto: &str, base: &str, topic: &str) {
+    record_resolution_as(
+        test_repo,
+        onto,
+        base,
+        topic,
+        "resolved
+",
+    );
+}
+
+/// [`record_resolution`], resolving `f.txt` to `resolution`.
+fn record_resolution_as(
+    test_repo: &TestRepo,
+    onto: &str,
+    base: &str,
+    topic: &str,
+    resolution: &str,
+) {
+    let workdir = test_repo.workdir();
+    replay_conflict(test_repo, onto, base, topic);
+    test_repo.write_file("f.txt", resolution);
+    crate::git::run_git(&workdir, &["add", "f.txt"]).unwrap();
+    // Recorded now: a resolution to HEAD's side makes the pick empty, so no
+    // commit would record it, and the next one would record its own tree.
+    crate::git::run_git(&workdir, &["rerere"]).unwrap();
+    assert_eq!(
+        super::continue_rebase(&workdir).unwrap(),
+        super::RebaseOutcome::Completed
     );
 }
 
@@ -426,7 +739,7 @@ fn an_empty_stop_is_not_skipped_over_local_changes() {
 
     test_repo.write_file("other.txt", "edited while paused\n");
 
-    let outcome = crate::git::skip_empty_stops(
+    let outcome = super::skip_empty_stops(
         &workdir,
         &git_dir,
         Default::default(),
@@ -592,7 +905,7 @@ fn a_protected_commit_is_refused_even_with_local_changes() {
     );
 
     let protect = [stopped];
-    let err = crate::git::skip_empty_stops(
+    let err = super::skip_empty_stops(
         &workdir,
         &git_dir,
         crate::git::Protected::named(&protect),

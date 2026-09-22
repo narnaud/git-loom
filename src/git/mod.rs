@@ -33,11 +33,12 @@ pub use git_merge::{MergeOutcome, continue_merge, merge_abort, merge_is_in_progr
 #[cfg(test)]
 pub use git_rebase::rebase_onto;
 pub use git_rebase::{
-    AfterStop, Protected, REPLAYS_EMPTY, RebaseOutcome, abort_after_failure, auto_merge_id,
-    before_rebase_starts, continue_rebase, continue_rebase_expecting_edit,
-    finished_without_stopping, has_unmerged_paths, rebase, rebase_abort, rebase_abort_then_cleanup,
-    rebase_is_in_progress, rebase_is_over, rebase_never_started, rebase_outcome, rebase_progress,
-    replayed_empty_hash, skip_empty_stops, unmerged_paths, verify_paused_at,
+    AfterStop, Protected, REPLAYS_EMPTY, RebaseOutcome, StopId, abort_after_failure, auto_merge_id,
+    before_rebase_starts, carry_past_known_stops, continue_rebase, continue_rebase_expecting_edit,
+    continue_rerere_stops, finished_without_stopping, has_unmerged_paths, rebase, rebase_abort,
+    rebase_abort_then_cleanup, rebase_is_in_progress, rebase_is_over, rebase_never_started,
+    rebase_outcome, rebase_progress, replayed_empty_hash, stop_id, unmerged_paths,
+    verify_paused_at,
 };
 pub use git_worktree::ensure_not_checked_out_elsewhere;
 

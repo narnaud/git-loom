@@ -155,10 +155,11 @@ pub fn reword_commit(repo: &Repository, commit_hash: &str, message: Option<Strin
     // The rebase runs with `--empty=stop`, so a commit above the target whose
     // changes are already in the base halts it: drop it and carry on, the way
     // `--empty=drop` did, rather than report it as a conflict.
-    let outcome = git::skip_empty_stops(
+    let outcome = git::carry_past_known_stops(
         workdir,
         &git_dir,
         git::Protected::default(),
+        None,
         git::continue_rebase(workdir)?,
     )
     .inspect_err(|_| {

@@ -377,9 +377,10 @@ pub fn continue_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
         return continue_without_state(workdir, git_dir);
     };
 
-    // Read before continuing: `AUTO_MERGE` only says which conflict git is on
-    // once there is something to compare it against.
-    let auto_merge_before = git::auto_merge_id(workdir);
+    // Read before continuing: the stop git is on only says which conflict the
+    // user was already looking at while it is still the current one.
+    let stop_before = git::stop_id(workdir, git_dir);
+    let auto_merge_before = stop_before.as_ref().map(git::StopId::auto_merge);
     if git::rebase_is_in_progress(git_dir) {
         // A stop on a commit the new history already contains is not a conflict
         // to resolve (`skip_empty_stops` establishes that before skipping
@@ -391,10 +392,11 @@ pub fn continue_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
         // tree is dirty, and its message says to save that work before undoing
         // anything. Everything else is the user's to look at, with the state
         // still describing what `loom abort` would undo.
-        let outcome = git::skip_empty_stops(
+        let outcome = git::carry_past_known_stops(
             workdir,
             git_dir,
             state.protected(),
+            stop_before.as_ref(),
             git::continue_rebase(workdir)?,
         )
         .map_err(|e| match git::replayed_empty_hash(&e) {
@@ -409,7 +411,7 @@ pub fn continue_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
                 return Ok(());
             }
             git::RebaseOutcome::Stopped => {
-                warn_still_paused(workdir, "operation", auto_merge_before.as_deref());
+                warn_still_paused(workdir, "operation", auto_merge_before);
                 return Ok(());
             }
             git::RebaseOutcome::Completed => {}
@@ -417,7 +419,7 @@ pub fn continue_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
     } else if git::merge_is_in_progress(git_dir) {
         match git::continue_merge(workdir, git_dir)? {
             git::MergeOutcome::Stopped => {
-                warn_still_paused(workdir, "operation", auto_merge_before.as_deref());
+                warn_still_paused(workdir, "operation", auto_merge_before);
                 return Ok(());
             }
             git::MergeOutcome::Completed => {}

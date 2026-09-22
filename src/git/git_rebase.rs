@@ -244,6 +244,147 @@ impl<'a> Protected<'a> {
     }
 }
 
+/// Carry a rebase past every stop loom can account for on its own: a commit the
+/// new history already has, and a conflict `rerere` had already resolved.
+///
+/// The two uncover each other — a skip can land on a replayed resolution and
+/// the other way round — so they alternate until neither moves.
+/// `before` identifies the stop the caller was already on, if there was one
+/// (Spec 014).
+pub fn carry_past_known_stops(
+    workdir: &Path,
+    git_dir: &Path,
+    protected: Protected<'_>,
+    before: Option<&StopId>,
+    outcome: RebaseOutcome,
+) -> Result<RebaseOutcome> {
+    let mut carried = carried_set(before);
+    let mut outcome = outcome;
+    loop {
+        outcome = skip_empty_stops(workdir, git_dir, protected, outcome)?;
+        let (next, resolved) = rerere_continue_loop(workdir, git_dir, &mut carried, outcome)?;
+        outcome = next;
+        if resolved == 0 {
+            return Ok(outcome);
+        }
+    }
+}
+
+/// Carry a rebase past every stop `rerere` already resolved, for a caller with
+/// no empty stops to skip — its todo ran under `--empty=drop`.
+pub fn continue_rerere_stops(
+    workdir: &Path,
+    git_dir: &Path,
+    before: Option<&StopId>,
+    outcome: RebaseOutcome,
+) -> Result<RebaseOutcome> {
+    let mut carried = carried_set(before);
+    Ok(rerere_continue_loop(workdir, git_dir, &mut carried, outcome)?.0)
+}
+
+/// Which conflict stop a rebase is on: the `AUTO_MERGE` id git wrote for it and
+/// the step that produced it.
+///
+/// The id alone does not name a stop — two steps merging the same commit into
+/// the same tree write the same `AUTO_MERGE` — and neither does the step
+/// number, which a step that fails to commit keeps.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct StopId {
+    auto_merge: String,
+    step: Option<usize>,
+}
+
+impl StopId {
+    /// The `AUTO_MERGE` id alone, for callers that only ask whether git moved
+    /// on to another conflict.
+    pub fn auto_merge(&self) -> &str {
+        &self.auto_merge
+    }
+}
+
+/// The stop git is on, `None` when it is on none: a stop without an
+/// `AUTO_MERGE` did not come from a conflict (Spec 014).
+pub fn stop_id(workdir: &Path, git_dir: &Path) -> Option<StopId> {
+    Some(StopId {
+        auto_merge: auto_merge_id(workdir)?,
+        step: rebase_progress(git_dir).map(|(current, _)| current),
+    })
+}
+
+/// The stops a rerere continue must not count as news, seeded with the one the
+/// caller was already on.
+fn carried_set(before: Option<&StopId>) -> std::collections::HashSet<StopId> {
+    before.cloned().into_iter().collect()
+}
+
+/// Continue past every stop `rerere` resolved, reporting each one; returns the
+/// outcome and how many stops it carried past.
+///
+/// A stop with an `AUTO_MERGE` came from a conflict (Spec 014), and with
+/// `rerere.autoUpdate` one left with nothing unmerged is a resolution `rerere`
+/// replayed and staged, so loom takes it and carries on. Without that setting
+/// the user asked to review each replay, so the stop is theirs. `carried`
+/// holds the stops already continued past, so a step that fails for another
+/// reason — a hook turning the commit down — stays on the same stop and is
+/// handed back rather than retried for ever.
+fn rerere_continue_loop(
+    workdir: &Path,
+    git_dir: &Path,
+    carried: &mut std::collections::HashSet<StopId>,
+    mut outcome: RebaseOutcome,
+) -> Result<(RebaseOutcome, usize)> {
+    let mut resolved = 0;
+    while outcome == RebaseOutcome::Stopped {
+        let Some(id) = stop_id(workdir, git_dir) else {
+            break;
+        };
+        if !carried.insert(id.clone()) {
+            break;
+        }
+        if has_unmerged_paths(workdir) || !rerere_auto_updates(workdir) || resolves_to_head(workdir)
+        {
+            break;
+        }
+        // Read before the continue, which is about to leave that stop behind.
+        let on =
+            stopped_sha(git_dir).map(|sha| format!(" replaying `{}`", super::short_hash(&sha)));
+        outcome = match continue_rebase(workdir) {
+            Ok(next) => next,
+            Err(e) => return Err(rebase_abort_then_cleanup(workdir, e, || {})),
+        };
+        // Still on that stop: the commit was turned down, so nothing was carried.
+        if outcome == RebaseOutcome::Stopped && stop_id(workdir, git_dir).as_ref() == Some(&id) {
+            break;
+        }
+        resolved += 1;
+        crate::core::msg::warn(&format!(
+            "`rerere` resolved the conflicts{} — carried on with its recorded resolution",
+            on.unwrap_or_default()
+        ));
+    }
+    Ok((outcome, resolved))
+}
+
+/// Whether the staged resolution leaves HEAD's tree as it is: git would then
+/// drop the commit on `--continue`, even under `--empty=stop`, so a protected
+/// commit (Spec 004) could vanish unseen. Anything git cannot answer says yes.
+fn resolves_to_head(workdir: &Path) -> bool {
+    match (
+        super::write_tree(workdir),
+        super::rev_parse(workdir, "HEAD^{tree}"),
+    ) {
+        (Ok(index), Ok(head)) => index == head,
+        _ => true,
+    }
+}
+
+/// Whether `rerere.autoUpdate` is on: then git stages each resolution it
+/// replays, and the user has opted out of reviewing one before it is taken.
+fn rerere_auto_updates(workdir: &Path) -> bool {
+    super::run_git_stdout(workdir, &["config", "--bool", "--get", "rerere.autoUpdate"])
+        .is_ok_and(|value| value.trim() == "true")
+}
+
 /// Carry a rebase past every commit whose changes the new history already has,
 /// refusing when one of them is in `protected` (Spec 004).
 ///
@@ -528,10 +669,11 @@ pub fn continue_rebase_expecting_edit(workdir: &Path, after: AfterStop<'_>) -> R
     let git_dir = super::absolute_git_dir(workdir)?;
     let mut named = after.protect.to_vec();
     named.extend(after.expect.map(str::to_string));
-    let outcome = skip_empty_stops(
+    let outcome = carry_past_known_stops(
         workdir,
         &git_dir,
         Protected::named(&named).targeting(after.targets),
+        None,
         continue_rebase(workdir)?,
     )?;
 

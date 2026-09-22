@@ -68,7 +68,7 @@ Emit branch sections first in dependency order. Each resets to its fork and ends
 
 Replay the complete base-to-HEAD range with `--rebase-merges`. Preserve/create merge topology, branch refs, uncommitted changes, and empty commits.
 
-Conflict policy belongs to the caller:
+Conflict policy belongs to the caller, except for a stop `rerere` resolved in full under `rerere.autoUpdate`: every weave rebase carries past that one itself (Spec 014), so no caller ever sees it.
 
 - Resumable owners (`update`, `commit`, `absorb`, `drop commit`, `swap`, `branch merge`, supported `reword` replay, and simple supported `fold` paths) return `Stopped`, save `.git/loom/state.json`, and allow `loom continue` or `loom abort`.
 - Out-of-scope paths (including `split`, excluded `fold` paths, and non-pausing reword failures) explicitly abort and restore the original repository. Reword's supported replay conflict is governed by Spec 003.
