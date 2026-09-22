@@ -32,7 +32,7 @@ Change the target message and replay descendants with native interactive rebase.
   (Spec 014);
 - keep the commit's `Change-Id` (Spec 002): with `-m` it is re-appended to the new message unless that message already carries one; with the editor it is restored after editing. A commit without one receives a fresh one when generation is enabled.
 
-Rebuilding a descendant merge can conflict, including a merge previously resolved manually. With `rerere`, Git may replay the resolution but rebase still stops; `rerere.autoUpdate` may also stage it.
+Rebuilding a descendant merge can conflict, including a merge previously resolved manually. With `rerere`, Git replays the resolution but the rebase still stops; with `rerere.autoUpdate` the reword then carries on by itself, and otherwise it pauses for the user to stage it (Spec 014).
 
 On replay conflict, retain the amended message and pause with exactly this guidance:
 
