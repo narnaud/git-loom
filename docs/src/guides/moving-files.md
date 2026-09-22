@@ -13,13 +13,13 @@ $ git loom status -f
 
 ```
 │╭─ fd [feature-dashboard]
-│●    rsv  add dashboard layout 147aa31
+│●    rsv  147aa31 add dashboard layout
 │┊      rsv:0 A  src/dashboard.rs
 │┊      rsv:1 A  templates/dashboard.html
 ├╯
 │
 │╭─ fa [feature-auth]
-│●    mqt  add login form c32bc09
+│●    mqt  c32bc09 add login form
 │┊      mqt:0 M  src/auth.rs
 │┊      mqt:1 A  templates/login.html
 ├╯
@@ -37,14 +37,14 @@ The file's changes are removed from `mqt` and applied to `rsv`:
 
 ```
 │╭─ fd [feature-dashboard]
-│●    rsv  add dashboard layout a3b2ef8
+│●    rsv  a3b2ef8 add dashboard layout
 │┊      rsv:0 A  src/dashboard.rs
 │┊      rsv:1 A  templates/dashboard.html
 │┊      rsv:2 A  templates/login.html
 ├╯
 │
 │╭─ fa [feature-auth]
-│●    mqt  add login form cb15064
+│●    mqt  cb15064 add login form
 │┊      mqt:0 M  src/auth.rs
 ├╯
 │

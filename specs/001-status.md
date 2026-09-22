@@ -26,7 +26,7 @@ Output runs top-to-bottom in this order:
 4. Upstream or common-base marker.
 5. Optional context commits.
 
-Commits use `<short-id> <commit-message-first-line> <short-hash>`: the commit's short ID (Spec 002) in the fixed column defined by Spec 002, then the subject, then the abbreviated hash at the end of the line. Hashes are unique abbreviations respecting `core.abbrev`. Merge commits have no special treatment.
+Commits use `<short-id> <short-hash> <commit-message-first-line>`: the commit's short ID (Spec 002) in the fixed column defined by Spec 002, then the abbreviated hash, then the subject. Hashes are unique abbreviations respecting `core.abbrev`. Merge commits have no special treatment.
 
 | Symbol | Normative meaning |
 | --- | --- |
@@ -81,9 +81,9 @@ Minimal topology examples:
 
 ```text
 │╭─ [feature-b]          │╭─ [feature-a-v2]     │╭─ [feature-stale]
-│●   pkz  B bbbbbbb      │├─ [feature-a]        ├╯
-│├─ [feature-a]          │●   mqt  A aaaaaaa    │
-│●   mqt  A aaaaaaa      ├╯                     ● base (upstream) [origin/main]
+│●   pkz  bbbbbbb B      │├─ [feature-a]        ├╯
+│├─ [feature-a]          │●   mqt  aaaaaaa A    │
+│●   mqt  aaaaaaa A      ├╯                     ● base (upstream) [origin/main]
 ├╯
 ```
 

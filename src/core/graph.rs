@@ -449,7 +449,8 @@ pub(crate) fn is_stacked_with_next(sections: &[Section], idx: usize) -> bool {
 /// right rather than the whole tree.
 const COMMIT_ID_SLOT: usize = 4;
 
-/// Spaces between a commit short ID and the subject: always at least one.
+/// Spaces between a commit short ID and the hash that follows it: always at
+/// least one.
 pub(crate) fn id_pad(sid: &str) -> String {
     " ".repeat(COMMIT_ID_SLOT.saturating_sub(sid.chars().count()) + 1)
 }
@@ -726,8 +727,8 @@ fn render_branch(
             "●".color(dot_color),
             sid.color(theme.shortid).underline(),
             id_pad(sid),
+            commit.short_id.color(theme.dim),
             commit.message,
-            commit.short_id.color(theme.dim)
         )
         .unwrap();
         for (i, file) in commit.files.iter().enumerate() {
@@ -771,8 +772,8 @@ fn render_loose(
             "●".color(theme.graph),
             sid.color(theme.shortid).underline(),
             id_pad(sid),
+            commit.short_id.color(theme.dim),
             commit.message,
-            commit.short_id.color(theme.dim)
         )
         .unwrap();
         for (i, file) in commit.files.iter().enumerate() {
