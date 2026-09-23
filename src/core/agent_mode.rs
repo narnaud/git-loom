@@ -2,20 +2,25 @@
 //!
 //! When enabled (global `--agent` flag or the `LOOM_AGENT` environment
 //! variable), every invocation ends with exactly one single-line JSON status
-//! on stderr, and interactive prompts return structured answers instead of
-//! rendering. Activation is explicit only — never inferred from a missing
-//! terminal, which would change behavior for pipelines and tests.
+//! as the last line of stdout, and interactive prompts return structured
+//! answers instead of rendering. Activation is explicit only — never inferred
+//! from a missing terminal, which would change behavior for pipelines and tests.
 
+use std::io::Write;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::Serialize;
+
+use crate::core::status_json::StatusGraph;
 
 static ENABLED: AtomicBool = AtomicBool::new(false);
 /// Success/warning lines collected for the final `ok` response.
 static MESSAGES: Mutex<Vec<String>> = Mutex::new(Vec::new());
 /// Response stored by a prompt site or a conflict pause, emitted by `finish`.
 static PENDING: Mutex<Option<AgentResponse>> = Mutex::new(None);
+/// The status graph, stored by `loom status` and emitted by `finish`.
+static GRAPH: Mutex<Option<StatusGraph>> = Mutex::new(None);
 
 /// Enable or disable agent mode. Called once from `main()` before dispatch.
 pub fn set(enabled: bool) {
@@ -65,13 +70,16 @@ pub enum InputKind {
     Multiselect,
 }
 
-/// The JSON status emitted as the last line of stderr in agent mode.
+/// The JSON status emitted as the last line of stdout in agent mode.
 #[derive(Serialize, Debug)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum AgentResponse {
     Ok {
         #[serde(skip_serializing_if = "Vec::is_empty")]
         messages: Vec<String>,
+        /// The status graph; `loom status` only (spec 019).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        graph: Option<Box<StatusGraph>>,
     },
     NeedsInput {
         kind: InputKind,
@@ -124,6 +132,15 @@ impl AgentResponse {
 pub fn record_message(message: &str) {
     if enabled() {
         MESSAGES.lock().unwrap().push(message.to_string());
+    }
+}
+
+/// Store the status graph for the final `ok` response (spec 019).
+///
+/// No-op when agent mode is off.
+pub fn set_graph(graph: StatusGraph) {
+    if enabled() {
+        *GRAPH.lock().unwrap() = Some(graph);
     }
 }
 
@@ -190,12 +207,16 @@ pub fn note_paused(message: &str, hint: &str) {
     }
 }
 
-/// Emit the final JSON status line to stderr and return the exit code.
+/// Emit the final JSON status line to stdout and return the exit code.
 ///
 /// Called exactly once, at the very end of `main()`, when agent mode is on.
+/// Stdout is the machine stream: this line is its last, and for most commands
+/// its only one (spec 019). What the command was asked for (`show`, `diff`,
+/// `trace`, `absorb`) prints there first.
 pub fn finish(result: &anyhow::Result<()>) -> i32 {
     let pending = PENDING.lock().unwrap().take();
     let collected = std::mem::take(&mut *MESSAGES.lock().unwrap());
+    let graph = GRAPH.lock().unwrap().take().map(Box::new);
     let response = match result {
         // Only a conflict pause overrides success; a leftover `needs_*`
         // response here means its marker error was swallowed and the command
@@ -208,6 +229,7 @@ pub fn finish(result: &anyhow::Result<()>) -> i32 {
             },
             _ => AgentResponse::Ok {
                 messages: collected,
+                graph,
             },
         },
         Err(e) if e.downcast_ref::<NeedsInput>().is_some() => {
@@ -219,7 +241,10 @@ pub fn finish(result: &anyhow::Result<()>) -> i32 {
             message: e.to_string(),
         },
     };
-    eprintln!("{}", response.to_json());
+    // Not `println!`: it panics if the reader is gone, and a tool that takes
+    // the last line and closes the pipe would turn the status into a panic and
+    // a meaningless exit code. The code below is the answer either way.
+    let _ = writeln!(std::io::stdout(), "{}", response.to_json());
     response.exit_code()
 }
 
@@ -231,6 +256,7 @@ mod tests {
     fn ok_with_messages() {
         let r = AgentResponse::Ok {
             messages: vec!["Created commit `1a2b3c4`".to_string()],
+            graph: None,
         };
         assert_eq!(
             r.to_json(),
@@ -241,8 +267,25 @@ mod tests {
 
     #[test]
     fn ok_without_messages_omits_field() {
-        let r = AgentResponse::Ok { messages: vec![] };
+        let r = AgentResponse::Ok {
+            messages: vec![],
+            graph: None,
+        };
         assert_eq!(r.to_json(), r#"{"status":"ok"}"#);
+    }
+
+    #[test]
+    fn ok_carries_the_status_graph_after_messages() {
+        let r = AgentResponse::Ok {
+            messages: vec!["Done".to_string()],
+            graph: Some(Box::new(crate::core::test_helpers::status_graph(
+                crate::core::test_helpers::base_info(),
+            ))),
+        };
+        let json = r.to_json();
+        assert!(json.starts_with(r#"{"status":"ok","messages":["Done"],"graph":{"#));
+        assert!(!json.contains('\n'));
+        assert_eq!(r.exit_code(), 0);
     }
 
     #[test]

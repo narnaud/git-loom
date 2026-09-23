@@ -68,7 +68,7 @@ local branch_matcher = clink.argmatcher()
 
 local agent_init_matcher = clink.argmatcher()
     :addarg("claude")
-    :addflags("--project", "--agent", "--help", "-h")
+    :addflags("--project", "--help", "-h")
 
 local agent_matcher = clink.argmatcher()
     :addarg(
@@ -115,4 +115,4 @@ clink.argmatcher("git-loom")
         "continue"  .. plain_matcher,
         "abort"     .. plain_matcher
     )
-    :addflags("--no-color", "--theme" .. theme_matcher, "--agent", "--version", "--help", "-h")
+    :addflags("--no-color", "--theme" .. theme_matcher, "--version", "--help", "-h")

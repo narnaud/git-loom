@@ -156,7 +156,31 @@ write_file() { echo "$2" > "$WORK/$1"; }
 
 # Run gl, capturing stdout+stderr into OUT and exit code into CODE.
 # Prevents set -e from aborting the script on failure.
-gl_capture() { OUT=$(gl "$@" 2>&1) && CODE=$? || CODE=$?; }
+# Clears the variables gl_capture_json owns, as it clears OUT: whichever helper
+# ran last, a stale read from the other one must not look like this command's.
+gl_capture() {
+    JSON=""
+    STDERR=""
+    OUT=$(gl "$@" 2>&1) && CODE=$? || CODE=$?
+}
+
+# Run gl in agent mode, capturing stdout into JSON, stderr into STDERR, and the
+# exit code into CODE. Agent mode splits the streams: stdout is the JSON status
+# object (its last line), stderr the human output; use this to assert which
+# stream a line lands on. Stderr is kept rather than dropped, so a failing
+# assertion still has the human output that explains it.
+gl_capture_json() {
+    local err="${TMPROOT:-${TMPDIR:-/tmp}}/agent-stderr.$$"
+    # OUT belongs to gl_capture; clearing it keeps a later assertion from
+    # reading the previous command's output as if this one had set it.
+    OUT=""
+    JSON=$(gl "$@" 2>"$err") && CODE=$? || CODE=$?
+    STDERR=$(cat "$err")
+    rm -f "$err"
+}
+
+# The JSON status object: the last line of stdout in agent mode.
+json_line() { tail -1 <<< "$JSON"; }
 
 # ── Git query helpers ─────────────────────────────────────────────────────
 

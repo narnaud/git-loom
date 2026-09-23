@@ -42,6 +42,13 @@ pub struct IdAllocator {
     commits: HashMap<git2::Oid, CommitId>,
 }
 
+/// The short ID of file `index` inside the commit with short ID `sid`, the
+/// `<commit id>:<n>` form `status -f`, the TUI and the agent JSON all print
+/// and all accept back (Spec 002, Spec 019).
+pub fn commit_file_id(sid: &str, index: usize) -> String {
+    format!("{sid}:{index}")
+}
+
 impl IdAllocator {
     /// Create a new allocator from a list of entities.
     /// IDs are deterministic: same entities in same order produce same IDs.

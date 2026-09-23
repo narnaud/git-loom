@@ -8,20 +8,26 @@ description: Use git-loom (loom) instead of raw git in repositories managed by g
 Loom manages feature branches woven into an integration branch. Raw Git history
 rewrites desynchronize the weave.
 
+**MUST: never read stderr.** It carries text rendered for a person (the status
+tree included) and is not part of the interface. Everything you need is on
+stdout.
+
 ## Detect and operate
 
-Run `git loom status --agent` once. If it succeeds with a branch graph, use loom
-for every history mutation; read-only Git (`status`, `log`, `blame`, etc.) is
-allowed. Letter commit IDs (`mqt`) are persistent: they survive every rewrite,
-and `commit`, `split`, `reword`, and `fold` name the commits they create or
-rewrite by them, so chain commands on those IDs. Re-run
-`git loom status --agent` to learn the IDs of new files or branches, after
-`update`, or when a command reports an ambiguous ID.
+Run `git loom status --agent` once. If it succeeds, use loom for every history
+mutation; read-only Git (`status`, `log`, `blame`, etc.) is allowed. Its stdout
+is a single JSON object whose `graph` field is the whole branch graph. Letter
+commit IDs (`mqt`) are persistent: they survive every rewrite, and `commit`,
+`split`, `reword`, and `fold` name the commits they create or rewrite by them,
+so chain commands on those IDs. Re-run `git loom status --agent` to learn the
+IDs of new files or branches, after `update`, or when a command reports an
+ambiguous ID.
 
 Rules:
 
-1. Always pass `--agent` (or set `LOOM_AGENT=1`). Each invocation ends with one
-   JSON status as stderr's last line.
+1. Always pass `--agent` (or set `LOOM_AGENT=1`). Take the JSON status from the
+   **last line** of stdout, never the whole stream: `show`, `diff`, `trace`
+   and `absorb` print their own output there first.
 2. Use `-p`/`--patch` only on `split` and `fold` with a commit source, where it
    answers with a hunk listing (see Hunk selection). On `add`, `commit`, and
    `fold` over working-tree changes it opens a full-screen UI and is rejected.
@@ -46,12 +52,35 @@ Rules:
 
 ## IDs and inspection
 
-Status shows: `zz` = all local changes; two letters such as `fa` = branch or
-file; three or more letters `k`–`z` such as `mqt` = commit with a Change-Id
-(persistent; any longer prefix of it also works); hex prefix such as `3ac` =
-commit without one (changes on every rewrite); `mqt:1` = file 1 in commit
-`mqt` (with `status -f`). Short IDs work wherever that entity is accepted;
-names, paths, and hashes also work. `status -a` includes hidden branches.
+Every entity in `graph` carries the `id` to pass back: `zz` = all local changes
+(`local_changes.id`); two letters such as `fa` = branch or file; three or more
+letters `k`–`z` such as `mqt` = commit with a Change-Id (persistent; any longer
+prefix of it also works); hex prefix such as `3ac` = commit without one
+(changes on every rewrite); `mqt:0` = the first file of commit `mqt`
+(with `status -f`, ids count from 0). Short IDs work wherever that entity is
+accepted; names, paths, and hashes also work. `status -a` includes hidden
+branches.
+
+The `graph` fields:
+
+- `schema` (bumped on breaking changes), `integration_branch`, and
+  `cwd_prefix`, the directory every path is relative to.
+- `branches[]` — branch groups, top of stack first. `names[]` holds the
+  co-located branches sharing one tip, each with `id`, `name` and `remote`
+  (`synced` / `different` / `gone` / `null` when never pushed).
+- `stacked_on` — the branch directly below in the stack, or `null`. A stacked
+  push includes it. Each group's `commits[]` already excludes what the branch
+  below owns. `stacked_on_hidden: true` means the branch below is hidden:
+  `push` refuses this group, and `stacked_on` is `null` unless `status -a`.
+- `commits[]` — newest first, with `id`, `hash`, `oid`, `subject`,
+  `change_id`, and `files[]` under `-f`.
+- `local_changes.files[]` — `state` is `conflicted`, `tracked` or `untracked`;
+  `index`/`worktree` are the raw `XY` characters.
+- `loose_commits[]` — commits on the integration line owning no branch.
+- `upstream` — `label`, `base_hash`, `base_oid`, `base_subject`, `base_date`,
+  `commits_ahead`.
+- `context_commits[]` — display-only history below the base: `hash`, `date`,
+  `subject`.
 
 ## Commands
 
@@ -122,6 +151,8 @@ only updates `refs/heads/`.
 4. Or run `git loom abort --agent`, which restores the original state,
    including staged and working-tree changes.
 
-Context recovery: `git loom status --agent -f`, `git loom status --agent -a`,
-`git loom show <target> --agent`, `git loom diff <target> --agent`, and
-`git loom trace` (underlying Git commands from the last invocation).
+Context recovery: `git loom status --agent -f` (adds `files[]` to every
+commit), `git loom status --agent -a` (includes hidden branches),
+`git loom show <target> --agent`, `git loom diff <target> --agent` (patch on
+stdout, JSON object last), and `git loom trace` (underlying Git commands from
+the last invocation, on stdout before the JSON object).

@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 
-use crate::core::{graph, repo, shortid};
+use crate::core::{agent_mode, graph, msg, repo, shortid, status_json};
 
 pub fn run(
     file_filter: Option<Vec<String>>,
@@ -22,6 +22,10 @@ pub fn run(
     // are stable regardless of which branches are hidden.
     let ids = shortid::IdAllocator::new(info.collect_entities());
 
+    // Before hiding: it cuts the edge to a hidden branch, which `push` still
+    // walks and refuses.
+    let stacks = agent_mode::enabled().then(|| stack_edges(&repo, &info, show_all));
+
     if !show_all {
         apply_hidden_branches(&repo, &mut info);
     }
@@ -38,9 +42,43 @@ pub fn run(
         }
     }
 
-    let output = graph::render(info, &ids, &opts);
-    print!("{}", output);
+    // One section list feeds both surfaces (spec 019).
+    let branch_name = info.branch_name.clone();
+    let sections = graph::build_sections(info);
+
+    if let Some(stacks) = stacks {
+        agent_mode::set_graph(status_json::build(
+            &sections,
+            &branch_name,
+            &stacks,
+            &ids,
+            &opts.cwd_prefix,
+        ));
+    }
+
+    msg::human(graph::render_sections(&sections, &ids, &opts));
     Ok(())
+}
+
+/// Every branch's edge to the one below, with a hidden one flagged, and named
+/// only when `show_all` keeps it in the graph.
+fn stack_edges(
+    repo: &git2::Repository,
+    info: &repo::RepoInfo,
+    show_all: bool,
+) -> HashMap<String, status_json::StackEdge> {
+    let pattern = hide_pattern(repo);
+    graph::stack_parents(info)
+        .into_iter()
+        .map(|(branch, below)| {
+            let below_hidden = is_hidden(&below, &pattern);
+            let edge = status_json::StackEdge {
+                below: (show_all || !below_hidden).then_some(below),
+                below_hidden,
+            };
+            (branch, edge)
+        })
+        .collect()
 }
 
 /// The context depth to display: the argument, else git config

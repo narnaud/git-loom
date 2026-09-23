@@ -334,7 +334,7 @@ fn push_commit_rows(
         });
         if is_expanded {
             for (i, file) in commit.files.iter().enumerate() {
-                let file_sid = format!("{}:{}", sid, i);
+                let file_sid = crate::core::shortid::commit_file_id(&sid, i);
                 rows.push(Row {
                     kind: RowKind::CommitFile {
                         oid: commit.oid,

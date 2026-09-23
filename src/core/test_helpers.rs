@@ -1,9 +1,15 @@
 /// Shared test utilities for creating and manipulating test repositories.
 use git2::{BranchType, Repository, Signature};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tempfile::TempDir;
+
+use crate::core::graph;
+use crate::core::repo::{BranchInfo, CommitInfo, RemoteStatus, RepoInfo, UpstreamInfo};
+use crate::core::shortid::IdAllocator;
+use crate::core::status_json;
 
 /// Global mutex to serialize `in_dir` calls: `set_current_dir` mutates
 /// process-global state, and Cargo runs tests in parallel threads.
@@ -931,6 +937,105 @@ fn weave_over_upstream(t: &TestRepo) {
     t.switch_branch("integration");
     t.reset_hard(t.find_remote_branch_target("origin/main"));
     t.merge_no_ff("alpha");
+}
+
+// ── In-memory status graphs ──
+
+/// Drop ANSI escapes so rendered output can be compared as plain text.
+pub fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            for inner in chars.by_ref() {
+                if inner == 'm' {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// A fake OID whose first byte is `byte`.
+pub fn oid(byte: u8) -> git2::Oid {
+    let mut bytes = [0u8; 20];
+    bytes[0] = byte;
+    git2::Oid::from_bytes(&bytes).unwrap()
+}
+
+pub fn commit(byte: u8, message: &str, parent: Option<u8>) -> CommitInfo {
+    CommitInfo {
+        oid: oid(byte),
+        short_id: format!("{:07x}", byte),
+        message: message.to_string(),
+        change_id: None,
+        parent_oid: parent.map(oid),
+        files: vec![],
+    }
+}
+
+pub fn branch(name: &str, tip: u8, remote: Option<RemoteStatus>) -> BranchInfo {
+    BranchInfo {
+        name: name.to_string(),
+        tip_oid: oid(tip),
+        remote,
+    }
+}
+
+/// An `integration` branch at its upstream base `0xAA`, with nothing on it.
+pub fn base_info() -> RepoInfo {
+    RepoInfo {
+        branch_name: "integration".to_string(),
+        upstream: UpstreamInfo {
+            label: "origin/main".to_string(),
+            tip_oid: oid(0xAA),
+            base_short_id: "aaa0000".to_string(),
+            base_message: "Initial commit".to_string(),
+            base_date: "2025-07-06".to_string(),
+            commits_ahead: 0,
+            merge_base_oid: oid(0xAA),
+        },
+        commits: vec![],
+        branches: vec![],
+        working_changes: vec![],
+        context_commits: vec![],
+    }
+}
+
+/// The JSON graph the way `status::run` builds it, with nothing hidden.
+pub fn status_graph(info: RepoInfo) -> status_json::StatusGraph {
+    status_graph_in(info, "")
+}
+
+/// [`status_graph`] run from the `cwd_prefix` subdirectory.
+pub fn status_graph_in(info: RepoInfo, cwd_prefix: &str) -> status_json::StatusGraph {
+    let ids = IdAllocator::new(info.collect_entities());
+    let branch = info.branch_name.clone();
+    let stacks = stack_edges(&info);
+    status_json::build(
+        &graph::build_sections(info),
+        &branch,
+        &stacks,
+        &ids,
+        cwd_prefix,
+    )
+}
+
+/// Every branch's stack edge, with nothing hidden.
+pub fn stack_edges(info: &RepoInfo) -> HashMap<String, status_json::StackEdge> {
+    graph::stack_parents(info)
+        .into_iter()
+        .map(|(b, below)| {
+            let edge = status_json::StackEdge {
+                below: Some(below),
+                below_hidden: false,
+            };
+            (b, edge)
+        })
+        .collect()
 }
 
 #[cfg(test)]

@@ -496,14 +496,18 @@ fn main() {
     // Explicit opt-in only — never inferred from a missing terminal. The
     // sequence-editor subprocess is excluded: it inherits LOOM_AGENT from its
     // parent loom process, but its stderr flows through git and must stay clean.
-    let is_subprocess = matches!(cli.command, Some(Command::InternalWriteTodo { .. }));
+    // `completions` too: its script is for a shell to source, never an agent.
+    let never_agent = matches!(
+        cli.command,
+        Some(Command::InternalWriteTodo { .. }) | Some(Command::Completions { .. })
+    );
     agent_mode::set(
-        !is_subprocess
+        !never_agent
             && (cli.agent
                 || std::env::var_os("LOOM_AGENT").is_some_and(|v| !v.is_empty() && v != "0")),
     );
 
-    if !colors_enabled(cli.no_color) {
+    if !colors_enabled(cli.no_color, msg::human_stream_is_terminal()) {
         control::set_override(false);
     }
 
@@ -710,7 +714,7 @@ fn rejects_patch_in_agent_mode(command: &Option<Command>) -> bool {
 
 /// Report the command result and exit.
 ///
-/// In agent mode the last line of stderr is always a single JSON status (see
+/// In agent mode the last line of stdout is always a single JSON status (see
 /// spec 019); prompts answered structurally (the `NeedsInput` marker) skip the
 /// human error line because the JSON is the message.
 fn finish_and_exit(result: anyhow::Result<()>) -> ! {
@@ -737,8 +741,20 @@ fn finish_and_exit(result: anyhow::Result<()>) -> ! {
 /// in the derive attributes because clap renders it while parsing, before
 /// `main` gets a chance to look at `--no-color` or the terminal background.
 fn parse_cli(args: &[OsString]) -> Cli {
-    let color = colors_enabled(args.iter().any(|arg| arg == "--no-color"));
-    let styles = help_styles(resolve_theme_mode(early_theme(args)), color);
+    // Clap renders help on stdout whatever agent mode does with the rest.
+    let color = colors_enabled(
+        args.iter().any(|arg| arg == "--no-color"),
+        std::io::stdout().is_terminal(),
+    );
+    // Only a colored help needs a theme. Resolving it unconditionally would
+    // also pin the one-shot detection here, before `main` has read `--agent`,
+    // and make every piped run pay a terminal query for a color it discards.
+    let mode = if color {
+        resolve_theme_mode(early_theme(args))
+    } else {
+        ThemeMode::Dark
+    };
+    let styles = help_styles(mode, color);
     let mut command = Cli::command()
         .styles(styles.clone())
         .about(apply_styles(ABOUT, &styles))
@@ -754,12 +770,14 @@ fn parse_cli(args: &[OsString]) -> Cli {
     }
 }
 
-/// Whether colored output should be emitted at all.
-fn colors_enabled(no_color: bool) -> bool {
+/// Whether colored output should be emitted at all. `is_terminal` is the
+/// probe of whichever stream the text goes to: help is always stdout, while
+/// runtime output follows agent mode onto stderr.
+fn colors_enabled(no_color: bool, is_terminal: bool) -> bool {
     !no_color
         && std::env::var_os("NO_COLOR").is_none()
         && std::env::var_os("TERM").is_none_or(|v| v != "dumb")
-        && std::io::stdout().is_terminal()
+        && is_terminal
 }
 
 /// Read `--theme` from the raw args, for the same reason as `parse_cli`.
@@ -793,7 +811,11 @@ fn resolve_theme_mode(arg: ThemeArg) -> ThemeMode {
 fn detect_theme_mode() -> ThemeMode {
     static DETECTED: OnceLock<ThemeMode> = OnceLock::new();
     *DETECTED.get_or_init(|| {
-        if !std::io::stdout().is_terminal() {
+        // The stream the colors it picks are written to: stderr in agent mode
+        // (spec 019). Reached from `parse_cli` only for a colored help, which
+        // is stdout and not in agent mode, so the answer is the right one
+        // whichever call gets here first.
+        if !msg::human_stream_is_terminal() {
             return ThemeMode::Dark;
         }
         use terminal_colorsaurus::{QueryOptions, ThemeMode as Detected, theme_mode};

@@ -58,17 +58,12 @@ $_gitLoomCompleter = {
         @{ Name = '--help'; Description = 'Show help information' }
     )
 
-    # Valid anywhere (global flags).
-    $globalFlags = @(
-        @{ Name = '--agent'; Description = 'Machine-readable JSON status output for AI agents' }
-    )
-
     # Only valid before the subcommand.
     $topFlags = @(
         @{ Name = '--no-color'; Description = 'Disable colored output' },
         @{ Name = '--theme'; Description = 'Color theme: auto, dark, or light' },
         @{ Name = '--version'; Description = 'Show version information' }
-    ) + $globalFlags + $helpFlags
+    ) + $helpFlags
 
     $themeValues = @('auto', 'dark', 'light')
 
@@ -264,7 +259,7 @@ $_gitLoomCompleter = {
     # back to PowerShell's file completion (commit, add, fold, ... take paths).
     if (-not ($wordToComplete -match '^-')) { return }
 
-    $allFlags = $subFlags + $globalFlags + $helpFlags
+    $allFlags = $subFlags + $helpFlags
     $allFlags | Where-Object { $_.Name -like "$wordToComplete*" } | ForEach-Object {
         [System.Management.Automation.CompletionResult]::new($_.Name, $_.Name, 'ParameterValue', $_.Description)
     }

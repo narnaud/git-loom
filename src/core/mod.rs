@@ -7,6 +7,7 @@ pub mod msg;
 pub mod repo;
 pub mod shortid;
 pub mod staging;
+pub mod status_json;
 pub mod transaction;
 pub mod ui;
 pub mod weave;

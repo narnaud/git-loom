@@ -2230,9 +2230,10 @@ fn row_line(
         } => {
             spans.push(Span::styled("│   ", theme.graph));
             spans.push(Span::styled(row.sid.clone(), theme.shortid));
-            if *index == '?' && *worktree == '?' {
+            let group = graph::file_group(*index, *worktree);
+            if group == graph::FileGroup::Untracked {
                 spans.push(Span::styled(" ⁕ ", theme.untracked));
-            } else if *index == '!' && *worktree == '!' {
+            } else if group == graph::FileGroup::Conflicted {
                 spans.push(Span::styled(
                     " !! ",
                     theme.unstaged_status.add_modifier(Modifier::BOLD),
@@ -2385,7 +2386,7 @@ fn diff_text(snapshot: &Snapshot, row: &Row) -> String {
             index,
             worktree,
         } => {
-            if *index == '?' && *worktree == '?' {
+            if graph::file_group(*index, *worktree) == graph::FileGroup::Untracked {
                 return untracked_file_text(workdir, path);
             }
             git::diff_head_file_display(workdir, path)
@@ -2446,6 +2447,9 @@ fn pending_commit_diff(snapshot: &Snapshot, files: &[String]) -> String {
         Ok(text) => text,
         Err(e) => format!("error: {}", e),
     };
+    // A yes/no question about one file, not the three-way grouping the tree
+    // and the JSON share, so this stays local rather than going through
+    // `graph::file_group`.
     let untracked = |c: &repo::FileChange| c.index == '?' && c.worktree == '?';
     let wanted = |c: &repo::FileChange| all || files.iter().any(|f| f == ids.get_file(&c.path));
     let mut out = String::new();

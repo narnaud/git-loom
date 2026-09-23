@@ -2802,3 +2802,33 @@ fn context_keys_add_and_remove_one_commit_before_the_base() {
         assert_eq!(context_messages(&app), ["Older"]);
     });
 }
+
+/// A conflicted add is `!` on the index side and `?` on the worktree side
+/// (`repo::gather`). The tree and the agent JSON both call it conflicted, and
+/// the TUI row must agree rather than falling through to the plain branch.
+#[test]
+fn tui_row_marks_a_one_sided_conflict_as_conflicted() {
+    let theme = make_theme();
+    let line_text = |index: char, worktree: char| {
+        let kind = RowKind::WorkingFile {
+            path: "both_added.rs".to_string(),
+            index,
+            worktree,
+        };
+        row_line(&row(kind, "wf"), &theme, "", RowMark::None, false, None)
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect::<String>()
+    };
+
+    assert!(
+        line_text('!', '?').contains("!!"),
+        "{}",
+        line_text('!', '?')
+    );
+    // The plain cases keep their markers.
+    assert!(line_text('!', '!').contains("!!"));
+    assert!(line_text('?', '?').contains("⁕"));
+    assert!(line_text('M', ' ').contains("M"));
+}

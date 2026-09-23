@@ -1,12 +1,11 @@
 use crate::core::repo::{
     CommitInfo, ContextCommit, FileChange, RemoteStatus, RepoInfo, UpstreamInfo,
 };
-use crate::core::shortid::IdAllocator;
+use crate::core::shortid::{self, IdAllocator};
 use colored::{Color, Colorize};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
-use terminal_size::{Width, terminal_size};
 
 // ── Theme ────────────────────────────────────────────────────────────────
 
@@ -144,16 +143,11 @@ pub(crate) enum Section {
 
 // ── Public API ──────────────────────────────────────────────────────────
 
-/// Build sections from repo data and render them as a UTF-8 graph string.
-pub fn render(info: RepoInfo, ids: &IdAllocator, opts: &RenderOpts) -> String {
-    let sections = build_sections(info);
-    render_sections(&sections, ids, opts)
-}
-
-/// Detect terminal width and build render options for the given theme.
+/// Detect terminal width and build render options for the given theme. The
+/// width is the one of the stream the tree is written to, which `msg` owns.
 pub fn default_render_opts(theme: Theme, cwd_prefix: String) -> RenderOpts {
     RenderOpts {
-        terminal_width: terminal_size().map(|(Width(w), _)| w),
+        terminal_width: crate::core::msg::human_stream_width(),
         theme,
         cwd_prefix,
     }
@@ -162,6 +156,31 @@ pub fn default_render_opts(theme: Theme, cwd_prefix: String) -> RenderOpts {
 /// Convert a repo-relative path to CWD-relative for display.
 fn display_path(repo_path: &str, cwd_prefix: &str) -> String {
     crate::core::repo::cwd_relative_path(repo_path, cwd_prefix)
+}
+
+/// The three groups the local-changes section renders, in that order
+/// (Spec 001). The renderer partitions by it and the agent JSON reports it, so
+/// the two classifications cannot drift.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum FileGroup {
+    Conflicted,
+    Tracked,
+    Untracked,
+}
+
+/// Classify a working-tree change from its `XY` status characters. A conflict
+/// wins over every other marker: `gather` sets `?` on the worktree side of a
+/// conflicted add, and such a file belongs with the conflicts rather than
+/// vanishing between the groups. Takes the two characters rather than a
+/// [`FileChange`] so the TUI, which carries them loose, classifies here too.
+pub(crate) fn file_group(index: char, worktree: char) -> FileGroup {
+    if index == '!' || worktree == '!' {
+        FileGroup::Conflicted
+    } else if index == '?' && worktree == '?' {
+        FileGroup::Untracked
+    } else {
+        FileGroup::Tracked
+    }
 }
 
 // ── Section building ────────────────────────────────────────────────────
@@ -264,12 +283,57 @@ fn canonical_name<'a>(info: &'a RepoInfo, branch: &'a str) -> &'a str {
 ///
 /// Co-located tips resolve to their canonical name, like the status graph.
 pub fn stack_parent(info: &RepoInfo, branch: &str) -> Option<String> {
-    let oldest = *commits_in_branch(info, branch).last()?;
-    let parent = info.commits.iter().find(|c| c.oid == oldest)?.parent_oid?;
+    let tip = info.branches.iter().find(|b| b.name == branch)?.tip_oid;
+    StackIndex::new(info).parent(tip).map(str::to_string)
+}
+
+/// Every branch's [`stack_parent`], keyed by branch name — co-located names
+/// included, each resolving to the same parent as its canonical one.
+///
+/// Lets a caller holding only the section list answer what that list cannot:
+/// an empty branch below a stack owns no commits, so section adjacency misses
+/// the edge (Spec 011).
+pub(crate) fn stack_parents(info: &RepoInfo) -> HashMap<String, String> {
+    let index = StackIndex::new(info);
     info.branches
         .iter()
-        .any(|b| b.tip_oid == parent)
-        .then(|| canonical_branch_name(info, parent).to_string())
+        .filter_map(|b| Some((b.name.clone(), index.parent(b.tip_oid)?.to_string())))
+        .collect()
+}
+
+/// The one assignment pass both stack-parent lookups share, so a whole-graph
+/// query stays linear instead of re-assigning commits per branch.
+struct StackIndex<'a> {
+    /// Branch tip → canonical name, the first branch listed at that tip.
+    canonical: HashMap<git2::Oid, &'a str>,
+    /// Canonical owner → the oldest commit it owns.
+    oldest: HashMap<String, &'a CommitInfo>,
+}
+
+impl<'a> StackIndex<'a> {
+    fn new(info: &'a RepoInfo) -> Self {
+        let mut canonical: HashMap<git2::Oid, &str> = HashMap::new();
+        for b in &info.branches {
+            canonical.entry(b.tip_oid).or_insert(b.name.as_str());
+        }
+        // `info.commits` is newest first, so the last commit seen for an owner
+        // is the oldest it owns — the one whose parent leaves the branch.
+        let mut commit_to_branch = assign_commits_to_branches(info);
+        let mut oldest = HashMap::new();
+        for c in &info.commits {
+            if let Some(owner) = commit_to_branch.remove(&c.oid) {
+                oldest.insert(owner, c);
+            }
+        }
+        Self { canonical, oldest }
+    }
+
+    /// The canonical name of the branch the one at `tip` is stacked on.
+    fn parent(&self, tip: git2::Oid) -> Option<&'a str> {
+        let owner = *self.canonical.get(&tip)?;
+        let parent = self.oldest.get(owner)?.parent_oid?;
+        self.canonical.get(&parent).copied()
+    }
 }
 
 /// The branches `branch` depends on, bottom first, ending with `branch`
@@ -458,7 +522,11 @@ pub(crate) fn id_pad(sid: &str) -> String {
 /// Render sections as a UTF-8 graph. Stacked branches (where the last commit
 /// of a branch is a parent of the first commit of the next) are connected
 /// with `││` and `│├─`, while independent branches get `├╯` then `│╭─`.
-fn render_sections(sections: &[Section], ids: &IdAllocator, opts: &RenderOpts) -> String {
+pub(crate) fn render_sections(
+    sections: &[Section],
+    ids: &IdAllocator,
+    opts: &RenderOpts,
+) -> String {
     let mut out = String::new();
     let last_idx = sections.len() - 1;
     let mut branch_color_idx: usize = 0;
@@ -529,18 +597,15 @@ fn render_working_changes(
     )
     .unwrap();
 
-    let conflicted: Vec<&FileChange> = changes
-        .iter()
-        .filter(|f| f.index == '!' && f.worktree == '!')
-        .collect();
-    let tracked: Vec<&FileChange> = changes
-        .iter()
-        .filter(|f| f.index != '!' && !(f.index == '?' && f.worktree == '?'))
-        .collect();
-    let untracked: Vec<&FileChange> = changes
-        .iter()
-        .filter(|f| f.index == '?' && f.worktree == '?')
-        .collect();
+    let group_of = |g: FileGroup| -> Vec<&FileChange> {
+        changes
+            .iter()
+            .filter(|f| file_group(f.index, f.worktree) == g)
+            .collect()
+    };
+    let conflicted = group_of(FileGroup::Conflicted);
+    let tracked = group_of(FileGroup::Tracked);
+    let untracked = group_of(FileGroup::Untracked);
 
     if conflicted.is_empty() && tracked.is_empty() && untracked.is_empty() {
         writeln!(
@@ -732,7 +797,7 @@ fn render_branch(
         )
         .unwrap();
         for (i, file) in commit.files.iter().enumerate() {
-            let file_sid = format!("{}:{}", sid, i);
+            let file_sid = shortid::commit_file_id(sid, i);
             writeln!(
                 out,
                 "{}{}      {} {}{} {}",
@@ -777,7 +842,7 @@ fn render_loose(
         )
         .unwrap();
         for (i, file) in commit.files.iter().enumerate() {
-            let file_sid = format!("{}:{}", sid, i);
+            let file_sid = shortid::commit_file_id(sid, i);
             writeln!(
                 out,
                 "{}       {} {}{} {}",

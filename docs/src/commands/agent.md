@@ -46,7 +46,12 @@ Because the comparison is byte-for-byte, the installed skill is not a file to ed
 
 ### Agent mode (`--agent`)
 
-The global `--agent` flag (or the `LOOM_AGENT` environment variable, any value except `0`) makes every loom invocation end with exactly one JSON status as the **last line of stderr**; stdout stays reserved for command payload (status graph, `show`/`diff` output).
+The global `--agent` flag (or the `LOOM_AGENT` environment variable, any value except `0`) splits loom's output by audience:
+
+- **stdout is the machine stream**: exactly one JSON status object, always as the **last line** — read that line, not the whole stream. The output you asked for comes there first — the patch from `show` and `diff`, the log from `trace`, the plan from `absorb`. For everything else the last line is the only line.
+- **stderr is the human stream**: the `✓`/`!`/`✗` progress lines, the rendered status tree (its data is in the JSON), and `update`'s fetch summaries. No JSON is written there.
+
+`completions` ignores agent mode: it always prints the script alone.
 
 | Status | Exit code | Meaning |
 |--------|-----------|---------|
@@ -64,6 +69,7 @@ In agent mode:
 - `push` never opens a browser: PR creation is skipped and reported in `messages`.
 - `update` skips the gone-branch pruning question (use `-y` to prune).
 - `show`/`diff` disable the git pager.
+- `status` attaches the whole branch graph to its `ok` object as `graph` — see [status](status.md#agent-mode).
 
 Agent mode is never inferred from a missing terminal — it must be requested explicitly.
 

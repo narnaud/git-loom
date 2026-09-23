@@ -114,9 +114,9 @@ fn colorize_backticks(message: &str) -> String {
 
 /// Print a symbol-prefixed message; hint lines get the blue arrow prefix.
 ///
-/// In agent mode everything goes to stderr so stdout stays pure payload and
-/// the final JSON status is the last line of stderr (see spec 019). In TUI
-/// mode the line goes to the TUI log instead.
+/// In agent mode everything goes to stderr, the human stream: stdout carries
+/// the JSON status and nothing else (see spec 019). In TUI mode the line goes
+/// to the TUI log instead.
 fn print_message(symbol: ColoredString, message: &str, to_stderr: bool, level: Level) {
     if ui::active() {
         ui::message(level, message);
@@ -139,6 +139,49 @@ fn print_message(symbol: ColoredString, message: &str, to_stderr: bool, level: L
                 println!("{}", cont);
             }
         }
+    }
+}
+
+/// Whether the stream human output lands on is a terminal: stderr in agent
+/// mode, where stdout is the machine stream (spec 019), stdout otherwise.
+/// Color and terminal width follow the text, so they must probe the stream it
+/// is written to rather than stdout always.
+pub fn human_stream_is_terminal() -> bool {
+    if agent_mode::enabled() {
+        io::stderr().is_terminal()
+    } else {
+        io::stdout().is_terminal()
+    }
+}
+
+/// Width of the stream [`human_stream_is_terminal`] names, so a caller never
+/// has to know which one that is; `None` when it is not a terminal.
+pub fn human_stream_width() -> Option<u16> {
+    let (terminal_size::Width(w), _) = if agent_mode::enabled() {
+        terminal_size::terminal_size_of(io::stderr())?
+    } else {
+        terminal_size::terminal_size()?
+    };
+    Some(w)
+}
+
+/// Print text meant only for a person, which the JSON already carries or an
+/// agent has no use for: the status tree, `update`'s fetch summaries. Stderr in
+/// agent mode (spec 019); never reached from the TUI.
+pub fn human(text: impl std::fmt::Display) {
+    if agent_mode::enabled() {
+        eprint!("{}", text);
+    } else {
+        print!("{}", text);
+    }
+}
+
+/// Like [`human`], for a single line.
+pub fn human_line(text: impl std::fmt::Display) {
+    if agent_mode::enabled() {
+        eprintln!("{}", text);
+    } else {
+        println!("{}", text);
     }
 }
 

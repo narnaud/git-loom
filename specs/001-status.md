@@ -14,6 +14,8 @@ The current checkout MUST be a local branch with an upstream tracking branch.
 | `git-loom status -f`, `--files` | Show changed files under every displayed commit. |
 | `git-loom status -f <id>...` | Show files only for identified commits/branches; accept loom commit short IDs and any hash accepted by `git rev-parse`; silently ignore unknown IDs. |
 
+In agent mode the tree is rendered to stderr and the same graph is emitted as JSON on stdout (Spec 019); the rules below define its content either way.
+
 ANSI color is enabled unless `--no-color` or `NO_COLOR` disables it. Paths are relative to the current working directory, as in `git status`: from `<repo>/src`, `src/main.rs` is `main.rs`.
 
 ## Rendering

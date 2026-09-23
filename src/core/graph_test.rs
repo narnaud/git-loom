@@ -1,28 +1,8 @@
-use git2::Oid;
-
 use crate::core::graph::{self, RenderOpts, Theme};
 use crate::core::repo::{
-    BranchInfo, CommitInfo, ContextCommit, FileChange, RemoteStatus, RepoInfo, UpstreamInfo,
+    BranchInfo, CommitInfo, ContextCommit, FileChange, RemoteStatus, RepoInfo,
 };
-
-/// Strip ANSI escape codes so tests can compare plain text.
-fn strip_ansi(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars();
-    while let Some(c) = chars.next() {
-        if c == '\x1b' {
-            // Skip until 'm' (end of ANSI escape sequence)
-            for inner in chars.by_ref() {
-                if inner == 'm' {
-                    break;
-                }
-            }
-        } else {
-            out.push(c);
-        }
-    }
-    out
-}
+use crate::core::test_helpers::{base_info, commit, oid, strip_ansi};
 
 fn default_opts() -> RenderOpts {
     RenderOpts {
@@ -35,7 +15,11 @@ fn default_opts() -> RenderOpts {
 /// Render and strip ANSI codes for plain-text comparison.
 fn render_plain(info: RepoInfo) -> String {
     let ids = crate::core::shortid::IdAllocator::new(info.collect_entities());
-    strip_ansi(&graph::render(info, &ids, &default_opts()))
+    strip_ansi(&graph::render_sections(
+        &graph::build_sections(info),
+        &ids,
+        &default_opts(),
+    ))
 }
 
 /// Render with a specific terminal width for multi-column tests.
@@ -46,25 +30,11 @@ fn render_plain_with_width(info: RepoInfo, width: u16) -> String {
         cwd_prefix: String::new(),
     };
     let ids = crate::core::shortid::IdAllocator::new(info.collect_entities());
-    strip_ansi(&graph::render(info, &ids, &opts))
-}
-
-/// Helper to create a fake OID from a single byte (padded to 20 bytes).
-fn oid(byte: u8) -> Oid {
-    let mut bytes = [0u8; 20];
-    bytes[0] = byte;
-    Oid::from_bytes(&bytes).unwrap()
-}
-
-fn commit(byte: u8, message: &str, parent: Option<u8>) -> CommitInfo {
-    CommitInfo {
-        oid: oid(byte),
-        short_id: format!("{:07x}", byte),
-        message: message.to_string(),
-        change_id: None,
-        parent_oid: parent.map(oid),
-        files: vec![],
-    }
+    strip_ansi(&graph::render_sections(
+        &graph::build_sections(info),
+        &ids,
+        &opts,
+    ))
 }
 
 fn commit_with_files(
@@ -74,31 +44,8 @@ fn commit_with_files(
     files: Vec<FileChange>,
 ) -> CommitInfo {
     CommitInfo {
-        oid: oid(byte),
-        short_id: format!("{:07x}", byte),
-        message: message.to_string(),
-        change_id: None,
-        parent_oid: parent.map(oid),
         files,
-    }
-}
-
-fn base_info() -> RepoInfo {
-    RepoInfo {
-        branch_name: "main".to_string(),
-        upstream: UpstreamInfo {
-            label: "origin/main".to_string(),
-            tip_oid: oid(0xAA),
-            base_short_id: "aaa0000".to_string(),
-            base_message: "Initial commit".to_string(),
-            base_date: "2025-07-06".to_string(),
-            commits_ahead: 0,
-            merge_base_oid: oid(0xAA),
-        },
-        commits: vec![],
-        branches: vec![],
-        working_changes: vec![],
-        context_commits: vec![],
+        ..commit(byte, message, parent)
     }
 }
 
@@ -114,6 +61,22 @@ fn no_commits_no_changes() {
 ● aaa0000 (upstream) [origin/main] Initial commit
 "
     );
+}
+
+/// A conflicted add is `!` on the index side and `?` on the worktree side
+/// (`repo::gather`): it belongs with the conflicts, not dropped between the
+/// groups as the old three-way filter did.
+#[test]
+fn a_conflict_marked_on_one_side_only_still_renders() {
+    let mut info = base_info();
+    info.working_changes = vec![FileChange {
+        path: "both_added.rs".to_string(),
+        index: '!',
+        worktree: '?',
+    }];
+
+    let output = render_plain(info);
+    assert!(output.contains("!! both_added.rs"), "{output}");
 }
 
 #[test]
@@ -1228,4 +1191,65 @@ fn loose_commit_puts_the_hash_before_the_subject() {
 
     let output = render_plain(info);
     assert!(output.contains("●    osy  0000002 Fix typo\n"), "{output}");
+}
+
+#[test]
+fn stack_parents_maps_every_stacked_name() {
+    let mut info = base_info();
+    info.commits = vec![
+        commit(0x05, "e", Some(0x04)),
+        commit(0x04, "d", Some(0x03)),
+        commit(0x03, "c", Some(0x02)),
+        commit(0x02, "b", Some(0x01)),
+        commit(0x01, "a", Some(0xAA)),
+    ];
+    info.branches = vec![
+        // A three-high stack, a co-located pair on its middle, a branch at
+        // the merge base below it all, and one parallel branch.
+        BranchInfo {
+            name: "feature-bottom".to_string(),
+            tip_oid: oid(0x02),
+            remote: None,
+        },
+        BranchInfo {
+            name: "feature-bottom-v2".to_string(),
+            tip_oid: oid(0x02),
+            remote: None,
+        },
+        BranchInfo {
+            name: "feature-middle".to_string(),
+            tip_oid: oid(0x04),
+            remote: None,
+        },
+        BranchInfo {
+            name: "feature-top".to_string(),
+            tip_oid: oid(0x05),
+            remote: None,
+        },
+        BranchInfo {
+            name: "feature-base".to_string(),
+            tip_oid: oid(0xAA),
+            remote: None,
+        },
+    ];
+
+    let parents = graph::stack_parents(&info);
+    let expected: std::collections::HashMap<String, String> = [
+        ("feature-bottom", "feature-base"),
+        ("feature-bottom-v2", "feature-base"),
+        ("feature-middle", "feature-bottom"),
+        ("feature-top", "feature-middle"),
+    ]
+    .into_iter()
+    .map(|(b, p)| (b.to_string(), p.to_string()))
+    .collect();
+    assert_eq!(parents, expected);
+    for b in &info.branches {
+        assert_eq!(
+            parents.get(&b.name).cloned(),
+            graph::stack_parent(&info, &b.name),
+            "{}",
+            b.name
+        );
+    }
 }

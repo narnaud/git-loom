@@ -201,6 +201,58 @@ git loom --theme auto status    # Auto-detect (default)
 
 See [Configuration](../configuration.md#--theme) for details.
 
+## Agent mode
+
+With the global `--agent` flag, `status` emits the graph as JSON on stdout — one
+line, nothing else — while the rendered tree goes to stderr with the rest of the
+human output. Tools read stdout alone; see [agent](agent.md#agent-mode---agent).
+
+```bash
+git loom status --agent            # one JSON line on stdout, the tree on stderr
+git loom status --agent 2>/dev/null | jq   # machine stream only
+```
+
+The graph sits under `graph` in the `ok` object and mirrors the tree — same
+sections, same order, same short IDs:
+
+```json
+{"status":"ok","graph":{
+  "schema": 1,
+  "integration_branch": "integration",
+  "cwd_prefix": "",
+  "local_changes": {
+    "id": "zz",
+    "files": [{"id":"ma","path":"src/main.rs","index":"M","worktree":" ",
+               "state":"tracked"}]
+  },
+  "branches": [
+    {"names": [{"id":"fu","name":"feature-ui","remote":null}],
+     "stacked_on": "feature-api", "stacked_on_hidden": false,
+     "commits": [{"id":"qvn","hash":"9c1d044","oid":"9c1d0448…",
+                  "subject":"feat(ui): settings panel","change_id":"I9c1d…",
+                  "files":[]}]}
+  ],
+  "loose_commits": [],
+  "upstream": {"label":"origin/main","base_hash":"7f3e9b0","base_oid":"7f3e9b0c…",
+               "base_subject":"chore(release): 2.4.0","base_date":"2026-09-14",
+               "commits_ahead":0},
+  "context_commits": []
+}}
+```
+
+| Field | Meaning |
+|---|---|
+| `schema` | Bumped on any breaking change to this shape. |
+| `branches[]` | Branch groups in render order: empty ones first, then each stack top-down. `names[]` holds co-located branches sharing one tip. |
+| `stacked_on` | The branch directly below in the stack, or `null` — named as a [stacked push](push.md) names it (a co-located group's last `names` entry). |
+| `stacked_on_hidden` | `true` when the branch below is [hidden](#hidden-branches): a push refuses this group, and `stacked_on` is `null` unless `--all` shows it. |
+| `remote` | `synced` / `different` / `gone`, or `null` when never pushed — the `✓` / `↑` / `✗` indicators. |
+| `state` | `conflicted`, `tracked` or `untracked`; `index`/`worktree` carry the raw `XY` characters. |
+| `commits[]` | Newest first. Each branch lists only the commits it owns. |
+| `files[]` | Populated by `-f`; ids are `<commit id>:<n>` counting from 0. |
+
+`-f`, `--all` and the context count work exactly as they do on the tree.
+
 ## Prerequisites
 
 - Must be on a local branch (not detached HEAD)

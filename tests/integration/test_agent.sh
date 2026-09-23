@@ -3,8 +3,9 @@
 set -euo pipefail
 source "$(dirname "$0")/helpers.sh"
 
-# The JSON status is the last line of stderr; gl_capture merges stdout+stderr,
-# so assertions grep for the JSON fragments rather than compare whole output.
+# The JSON status is the last line of stdout. gl_capture merges the streams, so
+# its assertions grep for JSON fragments; gl_capture_json keeps them apart for
+# the ones about which stream a line lands on.
 
 # ── agent init ────────────────────────────────────────────────────────────────
 
@@ -73,15 +74,18 @@ write_file "b.txt" "content b"
 gl commit --agent -b feature-b -m "B1" zz > /dev/null 2>&1
 
 write_file "c.txt" "content c"
-gl_capture commit --agent -m "C1" zz
+gl_capture_json commit --agent -m "C1" zz
 assert_eq "10" "$CODE" "commit_needs_input_exit"
-assert_contains "$OUT" '"status":"needs_input"' "commit_needs_input_status"
-assert_contains "$OUT" '"kind":"select"' "commit_needs_input_kind"
-assert_contains "$OUT" "feature-a" "commit_needs_input_option_a"
-assert_contains "$OUT" "feature-b" "commit_needs_input_option_b"
-assert_contains "$OUT" '"allow_other":true' "commit_needs_input_allow_other"
-assert_contains "$OUT" '"hint":' "commit_needs_input_hint"
-assert_contains "$OUT" "or -i for the integration branch itself" \
+# Every status reaches the machine stream, not just `ok`: assert the stream,
+# not merged output, or a regression back onto stderr would pass unnoticed.
+assert_contains "$(json_line)" '"status":"needs_input"' "commit_needs_input_status"
+assert_not_contains "$STDERR" '"status":"needs_input"' "commit_needs_input_not_on_stderr"
+assert_contains "$JSON" '"kind":"select"' "commit_needs_input_kind"
+assert_contains "$JSON" "feature-a" "commit_needs_input_option_a"
+assert_contains "$JSON" "feature-b" "commit_needs_input_option_b"
+assert_contains "$JSON" '"allow_other":true' "commit_needs_input_allow_other"
+assert_contains "$JSON" '"hint":' "commit_needs_input_hint"
+assert_contains "$JSON" "or -i for the integration branch itself" \
     "commit_needs_input_hint_mentions_integration"
 assert_log_not_contains "C1" "commit_needs_input_no_commit"
 
@@ -113,10 +117,11 @@ gl drop zz -y > /dev/null 2>&1
 
 describe "agent mode: drop a file without -y asks for confirmation"
 write_file "a.txt" "modified content"
-gl_capture drop --agent a.txt
+gl_capture_json drop --agent a.txt
 assert_eq "10" "$CODE" "drop_confirm_exit"
-assert_contains "$OUT" '"status":"needs_confirmation"' "drop_confirm_status"
-assert_contains "$OUT" "loom drop <target> -y" "drop_confirm_hint"
+assert_contains "$(json_line)" '"status":"needs_confirmation"' "drop_confirm_status"
+assert_not_contains "$STDERR" '"status"' "drop_confirm_not_on_stderr"
+assert_contains "$JSON" "loom drop <target> -y" "drop_confirm_hint"
 assert_file_content "a.txt" "modified content" "drop_confirm_untouched"
 
 gl_capture drop --agent a.txt -y
@@ -124,16 +129,17 @@ assert_exit_ok "$CODE" "drop_yes_exit"
 assert_contains "$OUT" '"status":"ok"' "drop_yes_status"
 assert_file_content "a.txt" "content a" "drop_yes_restored"
 
-# ── completions: dispatched early, but still ends with a JSON status ──────────
+# ── completions: never in agent mode ──────────────────────────────────────────
 
-describe "agent mode: completions still ends with a JSON status"
-gl_capture completions powershell --agent
+describe "agent mode: completions prints its script alone"
+gl_capture_json completions powershell --agent
 assert_exit_ok "$CODE" "completions_exit"
-assert_contains "$OUT" '"status":"ok"' "completions_status"
+assert_contains "$JSON" "Register-ArgumentCompleter" "completions_script"
+assert_not_contains "$JSON" '"status"' "completions_no_json"
 
-gl_capture completions notashell --agent
+LOOM_AGENT=1 gl_capture_json completions notashell
 assert_eq "1" "$CODE" "completions_bad_shell_exit"
-assert_contains "$OUT" '"status":"error"' "completions_bad_shell_status"
+assert_not_contains "$JSON$STDERR" '"status"' "completions_bad_shell_no_json"
 
 # ── error: -p is rejected ─────────────────────────────────────────────────────
 
@@ -154,9 +160,10 @@ assert_contains "$OUT" "the TUI is interactive" "tui_rejected_msg"
 # ── error: normal failures still end with a JSON status ───────────────────────
 
 describe "agent mode: a failing command reports status error"
-gl_capture drop --agent no-such-target-xyz -y
+gl_capture_json drop --agent no-such-target-xyz -y
 assert_eq "1" "$CODE" "error_exit"
-assert_contains "$OUT" '"status":"error"' "error_status"
+assert_contains "$(json_line)" '"status":"error"' "error_status"
+assert_not_contains "$STDERR" '"status"' "error_not_on_stderr"
 
 # ── paused: a conflicting update ──────────────────────────────────────────────
 
@@ -184,16 +191,20 @@ echo "local content" > "$WORK/conflict.txt"
 git -C "$WORK" add conflict.txt
 git -C "$WORK" commit -q -m "Local change"
 
-gl_capture update --agent -y
+gl_capture_json update --agent -y
 assert_exit_ok "$CODE" "paused_exit"
-assert_contains "$OUT" '"status":"paused"' "paused_status"
-assert_contains "$OUT" "loom continue" "paused_hint"
+assert_contains "$(json_line)" '"status":"paused"' "paused_status"
+assert_not_contains "$STDERR" '"status":"paused"' "paused_not_on_stderr"
+assert_contains "$JSON" "loom continue" "paused_hint"
+assert_contains "$STDERR" "-> origin/" "update_fetch_summary_on_stderr"
+assert_not_contains "$JSON" "-> origin/" "update_fetch_summary_not_on_stdout"
 assert_state_file "paused_state_file"
 
 # A blocked command while paused still ends with a JSON error status
-gl_capture status --agent
+gl_capture_json status --agent
 assert_eq "1" "$CODE" "blocked_exit"
-assert_contains "$OUT" '"status":"error"' "blocked_status"
+assert_contains "$(json_line)" '"status":"error"' "blocked_status"
+assert_not_contains "$STDERR" '"status":"error"' "blocked_not_on_stderr"
 
 # `loom add` is blocked too, which is why the skill tells the agent to stage
 # conflict resolutions with raw `git add`
@@ -204,10 +215,130 @@ assert_contains "$OUT" '"status":"error"' "add_blocked_while_paused_status"
 echo "resolved content" > "$WORK/conflict.txt"
 git -C "$WORK" add conflict.txt
 
-gl_capture continue --agent
+gl_capture_json continue --agent
 assert_exit_ok "$CODE" "continue_exit"
-assert_contains "$OUT" '"status":"ok"' "continue_status"
+assert_contains "$(json_line)" '"status":"ok"' "continue_status"
 assert_no_state_file "continue_state_cleared"
+
+# ── status: the graph as JSON ─────────────────────────────────────────────────
+
+describe "agent mode: status puts the whole graph on stdout as one JSON line"
+setup_repo_with_remote
+create_feature_branch feature-api
+git -C "$WORK" checkout -q feature-api
+echo api > "$WORK/api.txt"
+git -C "$WORK" add api.txt
+git -C "$WORK" commit -q -m "feat(api): add the endpoint"
+git -C "$WORK" checkout -q integration
+weave_branch feature-api
+write_file dirty.txt "local edit"
+
+gl_capture_json status --agent
+assert_exit_ok "$CODE" "status_json_exit"
+assert_eq "1" "$(wc -l <<< "$JSON" | tr -d ' ')" "status_json_single_line"
+assert_contains "$JSON" '"status":"ok"' "status_json_status"
+assert_contains "$JSON" '"graph":{"schema":1' "status_json_schema"
+assert_contains "$JSON" '"integration_branch":"integration"' "status_json_branch"
+assert_contains "$JSON" '"id":"zz"' "status_json_unstaged_id"
+assert_contains "$JSON" '"name":"feature-api"' "status_json_branch_name"
+assert_contains "$JSON" '"subject":"feat(api): add the endpoint"' "status_json_subject"
+assert_contains "$JSON" "\"label\":\"origin/$BASE_BRANCH\"" "status_json_upstream"
+assert_contains "$JSON" '"state":"untracked"' "status_json_file_state"
+# The rendered tree is human output: it must not reach the machine stream.
+assert_not_contains "$JSON" "local changes" "status_json_no_tree_on_stdout"
+
+describe "agent mode: the rendered tree goes to stderr"
+gl_capture_json status --agent
+assert_contains "$STDERR" "[local changes]" "status_tree_on_stderr"
+assert_contains "$STDERR" "feature-api" "status_tree_branch_on_stderr"
+assert_not_contains "$STDERR" '"status":"ok"' "status_no_json_on_stderr"
+
+describe "agent mode: status -f adds commit files with ids counting from 0"
+gl_capture_json status --agent -f
+assert_exit_ok "$CODE" "status_files_exit"
+assert_contains "$JSON" '"path":"api.txt"' "status_files_path"
+# The file id is the owning commit's short ID with `:0` appended, not just
+# anything ending in `:0`.
+COMMIT_SID=$(grep -o '"id":"[a-z0-9]*","hash":"[0-9a-f]*","oid":"[0-9a-f]*","subject":"feat(api): add the endpoint"' <<< "$JSON" | sed 's/"id":"//; s/".*//')
+assert_contains "$JSON" "\"id\":\"$COMMIT_SID:0\"" "status_files_id_from_zero"
+
+describe "agent mode: a stack names the branch below in stacked_on"
+setup_repo_with_remote
+create_feature_branch feature-api
+git -C "$WORK" checkout -q feature-api
+echo api > "$WORK/api.txt"
+git -C "$WORK" add api.txt
+git -C "$WORK" commit -q -m "api"
+git -C "$WORK" checkout -q -b feature-ui
+echo ui > "$WORK/ui.txt"
+git -C "$WORK" add ui.txt
+git -C "$WORK" commit -q -m "ui"
+git -C "$WORK" checkout -q integration
+weave_branch feature-ui
+
+gl_capture_json status --agent
+assert_exit_ok "$CODE" "stack_json_exit"
+assert_contains "$JSON" '"stacked_on":"feature-api"' "stack_json_edge"
+assert_contains "$JSON" '"stacked_on":null' "stack_json_bottom"
+
+describe "agent mode: a command with no payload puts only the JSON on stdout"
+write_file solo.txt "one line of stdout"
+gl_capture_json commit --agent -b feature-api -m "feat(api): solo" solo.txt
+assert_exit_ok "$CODE" "solo_stdout_exit"
+assert_eq "1" "$(wc -l <<< "$JSON" | tr -d ' ')" "solo_stdout_single_line"
+assert_contains "$JSON" '"status":"ok"' "solo_stdout_status"
+# The success lines a person reads are on the other stream.
+assert_contains "$STDERR" "feature-api" "solo_progress_on_stderr"
+
+describe "agent mode: diff prints its patch before the JSON object"
+# The patch has to exist for the ordering to mean anything.
+write_file ui.txt "edited for the diff"
+# `loom diff` keeps the user's diff config (Spec 016); these make the patch
+# one whatever `diff.external` and `color.diff` say.
+gl_capture_json diff --agent -- --no-ext-diff --no-color
+assert_exit_ok "$CODE" "diff_json_exit"
+assert_contains "$JSON" "diff --git" "diff_json_has_patch"
+assert_contains "$(head -1 <<< "$JSON")" "diff --git" "diff_json_patch_first"
+assert_contains "$(json_line)" '"status":"ok"' "diff_json_last_line"
+# The patch is machine payload on stdout, so stderr carries no part of it.
+assert_not_contains "$STDERR" "diff --git" "diff_patch_not_on_stderr"
+
+describe "agent mode: absorb -n prints its plan before the JSON object"
+gl_capture_json absorb --agent -n
+assert_exit_ok "$CODE" "absorb_plan_exit"
+assert_contains "$JSON" "ui.txt -> " "absorb_plan_on_stdout"
+assert_contains "$JSON" "Dry run: would absorb" "absorb_plan_summary_on_stdout"
+assert_contains "$(json_line)" '"status":"ok"' "absorb_plan_last_line"
+assert_not_contains "$STDERR" "ui.txt -> " "absorb_plan_not_on_stderr"
+
+describe "agent mode: trace prints its log before the JSON object"
+gl_capture_json trace --agent
+assert_exit_ok "$CODE" "trace_exit"
+assert_contains "$JSON" "Log path:" "trace_log_on_stdout"
+assert_contains "$(json_line)" '"status":"ok"' "trace_last_line"
+assert_not_contains "$STDERR" "Log path:" "trace_log_not_on_stderr"
+
+describe "agent mode: a branch stacked on a hidden one says so"
+setup_repo_with_remote
+create_feature_branch local-base
+git -C "$WORK" checkout -q local-base
+echo base > "$WORK/base.txt"
+git -C "$WORK" add base.txt
+git -C "$WORK" commit -q -m "base"
+git -C "$WORK" checkout -q -b feature-top
+echo top > "$WORK/top.txt"
+git -C "$WORK" add top.txt
+git -C "$WORK" commit -q -m "top"
+git -C "$WORK" checkout -q integration
+weave_branch feature-top
+
+gl_capture_json status --agent
+assert_exit_ok "$CODE" "hidden_stack_exit"
+assert_not_contains "$JSON" '"name":"local-base"' "hidden_stack_base_hidden"
+assert_contains "$JSON" '"stacked_on":null,"stacked_on_hidden":true' "hidden_stack_flagged"
+
+gl_capture_json status --agent -a
+assert_contains "$JSON" '"stacked_on":"local-base","stacked_on_hidden":true' "hidden_stack_named_with_all"
 
 # ── hunk selection: -p answered as data ───────────────────────────────────────
 
@@ -446,8 +577,9 @@ setup_repo_with_remote
 echo x > "$WORK/mode.txt"
 git -C "$WORK" add mode.txt
 git -C "$WORK" commit -q -m "Add mode.txt"
-chmod +x "$WORK/mode.txt"
-git -C "$WORK" add -A
+# Stage the mode bit through the index: `chmod +x` alone stages nothing
+# where core.filemode is false (Windows), leaving nothing to commit.
+git -C "$WORK" update-index --chmod=+x mode.txt
 git -C "$WORK" commit -q -m "Make it executable"
 
 gl_capture split HEAD -m nope -p --agent
@@ -513,8 +645,7 @@ setup_repo_with_remote
 echo x > "$WORK/mode.txt"
 git -C "$WORK" add mode.txt
 git -C "$WORK" commit -q -m "Add mode.txt"
-chmod +x "$WORK/mode.txt"
-git -C "$WORK" add -A
+git -C "$WORK" update-index --chmod=+x mode.txt
 git -C "$WORK" commit -q -m "Make it executable"
 
 gl_capture split HEAD -m nope -p --hunks mode.txt:1 --hunks-from deadbeefcafe

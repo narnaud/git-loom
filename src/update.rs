@@ -86,7 +86,7 @@ pub fn run(skip_confirm: bool) -> Result<()> {
         Ok(summary) => {
             spinner.stop("Fetched latest changes");
             if !summary.is_empty() {
-                println!("{}", summary);
+                msg::human_line(&summary);
             }
         }
         Err(e) => {
@@ -222,7 +222,7 @@ fn fetch_push_remote(repo: &git2::Repository, workdir: &Path, upstream_name: &st
         Ok(summary) => {
             spinner.stop(&format!("Fetched `{}`", remote));
             if !summary.is_empty() {
-                println!("{}", summary);
+                msg::human_line(&summary);
             }
         }
         // An unreachable fork must not stop the update: the integration branch

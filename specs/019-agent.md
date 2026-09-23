@@ -78,12 +78,23 @@ terminal does not enable it.
 ### The JSON status line
 
 In agent mode, **every invocation ends with exactly one single-line JSON
-object, printed as the last line of stderr**:
+object, printed as the last line of stdout**. The two streams split by
+audience:
 
-- stdout carries only command payload (the status graph, `show`/`diff`
-  output).
-- stderr carries the human-readable progress lines (`✓`/`!`/`✗`) plus, last,
-  the JSON status.
+- stdout is the machine stream: an agent, an IDE or any other tool reads that
+  stream alone, and the object is always its **last line**. For most commands
+  it is the only line; the output an agent asked for comes first — `show`'s
+  and `diff`'s patch, `trace`'s log dump, `absorb`'s plan. A reader takes the
+  last line, never the whole stream.
+- stderr is the human stream: the progress lines (`✓`/`!`/`✗`), the rendered
+  status tree and `update`'s fetch summaries. No JSON is written there.
+
+`completions` never runs in agent mode: its script is for a shell, so it
+prints the script alone whatever `--agent` or `LOOM_AGENT` say.
+
+The status graph is also emitted as structured data, inside the `ok` object
+(see [The status graph](#the-status-graph)); the tree on stderr is the same
+information rendered for a person.
 
 The possible statuses:
 
@@ -162,6 +173,70 @@ human-readable form.
 
 The JSON `status` field is authoritative; the exit code is a convenience for
 agents that do not parse stdout/stderr.
+
+### The status graph
+
+`loom status` attaches its whole graph to the `ok` object under `graph`. No
+other command emits it. The model mirrors the rendered tree — same sections,
+same order (Spec 001), same short IDs — so an agent never parses glyphs:
+
+```json
+{"status":"ok","graph":{
+  "schema": 1,
+  "integration_branch": "integration",
+  "cwd_prefix": "",
+  "local_changes": {
+    "id": "zz",
+    "files": [{"id":"ma","path":"src/main.rs","index":"M","worktree":" ",
+               "state":"tracked"}]
+  },
+  "branches": [
+    {"names": [{"id":"fu","name":"feature-ui","remote":null}],
+     "stacked_on": "feature-api", "stacked_on_hidden": false,
+     "commits": [
+       {"id":"qvn","hash":"9c1d044","oid":"9c1d0448…",
+        "subject":"feat(ui): render the settings panel","change_id":"I9c1d…",
+        "files":[{"id":"qvn:0","path":"src/ui.rs","index":"M","worktree":" "}]}
+     ]},
+    {"names": [{"id":"fa","name":"feature-api","remote":"synced"}],
+     "stacked_on": null, "stacked_on_hidden": false,
+     "commits": [{"id":"mqt","hash":"1a2b3c4","oid":"1a2b3c4d…",
+                  "subject":"feat(api): add the settings endpoint",
+                  "change_id":"I1a2b…","files":[]}]}
+  ],
+  "loose_commits": [],
+  "upstream": {"label":"origin/main","base_hash":"7f3e9b0","base_oid":"7f3e9b0c…",
+               "base_subject":"chore(release): 2.4.0","base_date":"2026-09-14",
+               "commits_ahead":0},
+  "context_commits": []
+}}
+```
+
+- `schema` is an integer, bumped on any breaking change to this shape.
+- `branches` lists branch *groups* in render order: empty ones first, then the
+  top of each stack downward. A group holds several `names` when branches are
+  co-located on one tip, ordered alphabetically last first as the tree draws
+  them.
+- `stacked_on` names the group directly below in the stack, else `null`. It
+  is the same edge that draws `││` and that a stacked push follows, named as
+  the push names it: for a co-located group that is its *last* `names` entry
+  (Spec 011). Ownership is already resolved: a stacked branch lists only the
+  commits above the branch below it, so the agent never walks parents.
+- `stacked_on_hidden` is `true` when the branch below matches
+  `loom.hideBranchPattern`: `push` refuses the group (Spec 011), and hiding
+  removes the edge, so `stacked_on` is `null` unless `--all` shows it.
+- `remote` is `synced`, `different`, `gone`, or `null` for a branch never
+  pushed — the `✓`/`↑`/`✗` indicators, or none.
+- `state` on a working-tree file is `conflicted`, `tracked` or `untracked`:
+  the three groups the local-changes section renders, already classified.
+  `index` and `worktree` carry the raw `XY` characters alongside.
+- A commit's `id` is its short ID (persistent letters with a Change-Id, a hash
+  prefix without), `hash` the abbreviated hash, `oid` the full one.
+- `files` is populated only under `-f`; ids are `<commit id>:<n>` counting
+  from 0, exactly as `status -f` prints them.
+- Paths are relative to `cwd_prefix`, as every other loom surface prints them.
+- Hidden branches and `--all` behave as they do on the tree: IDs are allocated
+  before hiding, so they do not shift.
 
 ### Prompt sites
 
@@ -300,8 +375,10 @@ share the numbering and it shifts as soon as anything is staged.
 
 ### What does not change
 
-- The status graph, `show`, and `diff` payloads keep their human format on
-  stdout (already color-free when not a terminal).
+- `show` and `diff` payloads keep their raw git format on stdout (already
+  color-free when not a terminal). The status graph keeps its rendered form
+  too, on stderr with the rest of the human output, and gains the JSON
+  representation described above.
 - Normal interactive use (no flag, no variable) is completely unchanged.
 - Conflict pauses still exit 0 (see Spec 014); agent mode only adds the
   `paused` JSON status.
@@ -489,13 +566,23 @@ a side effect of committing. A warning in `messages` reaches the agent, which
 can run `agent init` itself or ask the user — the same outcome, with the write
 staying an explicit act.
 
-### JSON on stderr, not stdout
+### JSON on stdout, human output on stderr
 
-`show` and `diff` hand stdout to git directly, so loom cannot guarantee a
-clean stdout stream — and the status graph is itself a stdout payload worth
-keeping separate from the machine contract. In agent mode stdout is therefore
-reserved for payload, and the JSON status is the **last line of stderr**,
-printed after all child processes have finished.
+The streams split by audience, not by kind: stdout is what a tool reads,
+stderr is what a person reads. An agent then consumes one stream and needs no
+rule for skipping human text, and a human watching a transcript still sees the
+tree and the progress lines.
+
+What an agent asked for is machine-side output even when it is text: `show`
+and `diff` hand stdout to git directly, and `trace`'s log and `absorb`'s plan
+are the answer to the command. That is why the contract is the **last line**
+of stdout rather than the whole of it: those print first, and loom prints the
+object after all child processes have finished. The status tree is the
+exception, on stderr, because the object already carries the graph. For a
+command with nothing of its own to print, the last line is the only line.
+
+`--agent` is absent from the completion scripts: it is for tools driving loom,
+not for anyone typing at a prompt.
 
 ### Exit code 10, not 2
 
