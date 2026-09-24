@@ -604,3 +604,25 @@ fn filename_of_extracts_name() {
     assert_eq!(filename_of("a/b/c.rs"), "c.rs");
     assert_eq!(filename_of("file.rs"), "file.rs");
 }
+
+/// The first screen line, where the pane titles sit.
+fn title_line(app: HunkSelectorApp, width: u16) -> String {
+    let mut shell = Shell::new(app);
+    let backend = ratatui::backend::TestBackend::new(width, 10);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    terminal.draw(|f| shell.render(f)).unwrap();
+    let buffer = terminal.backend().buffer();
+    (0..width).map(|x| buffer[(x, 0)].symbol()).collect()
+}
+
+#[test]
+fn the_file_pane_is_titled_with_the_action_the_pick_is_for() {
+    let mut app = HunkSelectorApp::new(make_files(), make_theme());
+    app.action = Some("FOLD");
+    let line = title_line(app, 100);
+    assert!(line.contains(" FOLD "), "{line}");
+    assert!(!line.contains(" Files "), "{line}");
+
+    let cli = title_line(HunkSelectorApp::new(make_files(), make_theme()), 100);
+    assert!(cli.contains(" Files "), "{cli}");
+}

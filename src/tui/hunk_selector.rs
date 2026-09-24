@@ -12,7 +12,7 @@ use ratatui::{
 use crate::core::diff::DiffHunk;
 use crate::tui::shell::{KeyResult, PaneId, Shell, ShellApp, ShellConfig};
 use crate::tui::theme::TuiTheme;
-use crate::tui::widgets::common::pane_block;
+use crate::tui::widgets::common::{pane_block, pane_block_titled};
 use crate::tui::widgets::hunk_view::{HunkEvent, HunkView};
 use crate::tui::widgets::list_pane::ListPane;
 
@@ -127,6 +127,9 @@ pub(crate) struct HunkSelectorApp {
     /// Hunk cursor and diff-pane scroll state.
     hunks: HunkView,
     theme: TuiTheme,
+    /// The command the pick is for (`COMMIT`, `FOLD`), titling the file pane
+    /// in place of ` Files `; only the TUI, which runs several, sets it.
+    action: Option<&'static str>,
 }
 
 // ── Tree helpers ─────────────────────────────────────────────────────────
@@ -185,6 +188,7 @@ impl HunkSelectorApp {
             list: ListPane::new(0),
             hunks: HunkView::new(),
             theme,
+            action: None,
         }
     }
 
@@ -248,7 +252,19 @@ impl HunkSelectorApp {
             })
             .collect();
 
-        let block = pane_block(" Files ", &self.theme, focused);
+        let block = match self.action {
+            // Styled as the status tree tags what a pending command does.
+            Some(action) => pane_block_titled(
+                Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled(action, self.theme.pending_tag),
+                    Span::raw(" "),
+                ]),
+                &self.theme,
+                focused,
+            ),
+            None => pane_block(" Files ", &self.theme, focused),
+        };
         self.list
             .render(frame, area, items, block, self.theme.file_selected);
     }
@@ -536,17 +552,21 @@ fn refuse_in_agent_mode() -> Result<()> {
 }
 
 /// The selector inside a host TUI: it draws on the terminal the host already
-/// set up, so the screen never switches between the two.
+/// set up, so the screen never switches between the two. `action` names the
+/// command the pick is for.
 pub(crate) fn run_hunk_selector_nested(
     files: Vec<FileEntry>,
     theme: TuiTheme,
+    action: &'static str,
     terminal: &mut ratatui::DefaultTerminal,
 ) -> Result<Option<Vec<FileEntry>>> {
     refuse_in_agent_mode()?;
     if files.is_empty() {
         return Ok(None);
     }
-    let (app, verdict) = Shell::new(HunkSelectorApp::new(files, theme)).run_nested(terminal)?;
+    let mut app = HunkSelectorApp::new(files, theme);
+    app.action = Some(action);
+    let (app, verdict) = Shell::new(app).run_nested(terminal)?;
     Ok(confirmed(app, verdict))
 }
 

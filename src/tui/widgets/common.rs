@@ -12,13 +12,22 @@ use crate::tui::theme::TuiTheme;
 
 /// Bordered block for a pane, with the active border style when focused.
 pub(crate) fn pane_block(title: &str, theme: &TuiTheme, focused: bool) -> Block<'static> {
+    pane_block_titled(Line::from(title.to_string()), theme, focused)
+}
+
+/// [`pane_block`] with a styled title.
+pub(crate) fn pane_block_titled(
+    title: Line<'static>,
+    theme: &TuiTheme,
+    focused: bool,
+) -> Block<'static> {
     let border_style = if focused {
         theme.border_active
     } else {
         theme.border
     };
     Block::default()
-        .title(title.to_string())
+        .title(title)
         .borders(Borders::ALL)
         .border_style(border_style)
 }

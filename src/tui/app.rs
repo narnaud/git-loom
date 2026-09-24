@@ -1686,6 +1686,7 @@ impl<'a> App<'a> {
         let picked = run_hunk_selector_nested(
             entries,
             TuiTheme::from_graph_theme(&self.graph_theme),
+            "COMMIT",
             terminal,
         )?;
         let Some(picked) = picked else {
@@ -2592,6 +2593,7 @@ impl ShellApp for App<'_> {
                 let picked = run_hunk_selector_nested(
                     entries,
                     TuiTheme::from_graph_theme(&self.graph_theme),
+                    "FOLD",
                     terminal,
                 );
                 self.finish_fold_pick(picked, stamp, sources, targets, commit, origin);
