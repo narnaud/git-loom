@@ -113,10 +113,9 @@ working tree (`git loom add -p <files>`, `git loom commit -b <b> -m "<msg>" -p
 `git loom fold -p <commit> zz`). Each takes two calls.
 
 The first returns `needs_input` / exit 10 with `items` (one per hunk: `id`,
-`path`, `diff`, `selectable`, and `staged` when it already is) and a
-`fingerprint`. Nothing changed. Pick the ids you want and re-run the command
-the `hint` gives, adding `--hunks <id>` once per id, plus
-`--hunks-from <fingerprint>`.
+`path`, `diff`, and `staged` when it already is) and a `fingerprint`. Nothing
+changed. Pick the ids you want and re-run the command the `hint` gives, adding
+`--hunks <id>` once per id, plus `--hunks-from <fingerprint>`.
 
 - `--hunks` is the **whole** selection. On a working-tree source, an id marked
   `staged: true` that you leave out is unstaged by `add -p` — list it again to
@@ -128,11 +127,9 @@ the `hint` gives, adding `--hunks <id>` once per id, plus
   is repo-relative) gives exactly that content. Everything else is verbatim,
   including the same file once staged or `git add -N` — from there the entry is
   the indexed content, which a filter can make something else than the file.
-- `selectable: false` marks an entry this command cannot take: only a binary
-  file, under a commit-source `fold`. That `fold` still takes a deletion or a
-  submodule, moved whole. `split` and every working-tree source take any
-  whole-file entry (binary, deleted, empty, submodule), staged whole.
-  `options` already lists only the pickable ids.
+- A binary file, a deletion and a submodule are one entry each and move whole.
+  Their `diff` is only a label (`(binary file)`, `(file deleted)`,
+  `(submodule)`): read the file at `path` if its content matters.
 - The fingerprint is checked against the current diff and a mismatch is
   refused, because ids are positional. Re-list rather than reusing an old one.
 - Re-run the whole `hint`, including any `<files>` filter: dropping one changes

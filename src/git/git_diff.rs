@@ -16,7 +16,8 @@ const DISPLAY: &[&str] = &["--no-color", "--no-ext-diff"];
 /// A textconv filter rewrites a binary file's patch into text `git apply`
 /// cannot apply, `diff.context=0` produces hunks it refuses without
 /// `--unidiff-zero`, and `diff.submodule=diff` inlines a submodule's patch.
-/// `--full-index` spells out the blob ids a three-way apply needs to look up.
+/// `--full-index` spells out the blob ids a three-way apply needs to look up,
+/// and the ones a binary diff without `--binary` is applied from (Spec 007).
 const REPLAY: &[&str] = &[
     "--no-color",
     "--no-ext-diff",
@@ -35,7 +36,8 @@ fn diff_stdout(workdir: &Path, args: &[&str]) -> Result<String> {
 ///
 /// A diff saved only to be restored later needs it: without `--binary` a
 /// changed binary file prints as `Binary files a/x and b/x differ`, which
-/// `git apply` refuses — and since it applies a patch all-or-nothing, one such
+/// `git apply` refuses unless both blobs are in the object store — never so for
+/// uncommitted content — and since it applies a patch all-or-nothing, one such
 /// file would sink the whole restore.
 fn restore_stdout(workdir: &Path, args: &[&str]) -> Result<String> {
     let mut full = vec!["--binary"];

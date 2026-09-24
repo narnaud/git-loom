@@ -38,73 +38,38 @@ fn sample() -> Vec<FileEntry> {
 
 const OID: &str = "1111111111111111111111111111111111111111";
 
-fn picker(ids: &[&str], from: Option<&str>, whole_files: bool) -> Picker {
+fn picker(ids: &[&str], from: Option<&str>) -> Picker {
     Picker {
         hunks: HunkArgs::new(
             ids.iter().map(|s| s.to_string()).collect(),
             from.map(str::to_string),
         ),
         command: "loom split ab -m <message> -p".to_string(),
-        whole_files,
         target_hash: None,
         git_args: String::new(),
     }
 }
 
-/// `fold`'s policy: text hunks, submodules and deletions can move.
 fn hunks(ids: &[&str], from: &str) -> Picker {
-    picker(ids, Some(from), false)
+    picker(ids, Some(from))
 }
 
 #[test]
 fn ids_number_from_one_within_each_file() {
-    let listed = items(sample(), false);
+    let listed = items(sample());
     let ids: Vec<&str> = listed.iter().map(|i| i.id.as_str()).collect();
     assert_eq!(ids, ["src/a.rs:1", "src/a.rs:2", "logo.png:1"]);
     assert!(listed[0].diff.starts_with("@@ -1,3 +1,4 @@ fn a"));
 }
 
+/// `fold` and `split` both take a binary, deleted or submodule entry whole
+/// (Specs 007 and 013), so its id is as good as a hunk's.
 #[test]
-fn a_binary_entry_is_listed_but_not_selectable_for_fold() {
-    let listed = items(sample(), false);
-    assert!(listed[0].selectable);
-    assert!(!listed[2].selectable);
-}
-
-/// `fold` moves a deletion as the commit's own whole-file diff (spec 007), so
-/// refusing its id would answer the TUI's own listing with a no.
-#[test]
-fn a_deleted_entry_is_selectable_for_fold() {
-    let listed = items(vec![file("gone.txt", &[DELETED_ENTRY])], false);
-    assert!(listed[0].selectable);
-}
-
-/// `split` stages a binary or deleted file whole (spec 013), so the agent may
-/// pick what the interactive picker lets a user pick.
-#[test]
-fn binary_and_deleted_entries_are_selectable_for_split() {
-    let listed = items(sample(), true);
-    assert!(listed.iter().all(|i| i.selectable));
-
+fn apply_takes_a_whole_file_entry() {
     let mut entries = sample();
     let fp = fingerprint(OID, None, &entries);
-    apply(OID, &mut entries, &picker(&["logo.png:1"], Some(&fp), true)).unwrap();
+    apply(OID, &mut entries, &hunks(&["logo.png:1"], &fp)).unwrap();
     assert!(entries[1].hunks[0].selected);
-}
-
-/// A placeholder nobody thought to classify is unmovable by default: `fold`
-/// names the ones it can carry, and an empty file is not among them.
-#[test]
-fn an_unlisted_placeholder_is_not_selectable_for_fold() {
-    let listed = items(vec![file("empty.txt", &["(empty file)"])], false);
-    assert!(!listed[0].selectable);
-    assert!(items(vec![file("empty.txt", &["(empty file)"])], true)[0].selectable);
-}
-
-#[test]
-fn submodule_entries_stay_selectable_for_fold() {
-    let listed = items(vec![file("Data", &[SUBMODULE_ENTRY])], false);
-    assert!(listed[0].selectable);
 }
 
 #[test]
@@ -129,7 +94,7 @@ fn apply_refuses_a_stale_fingerprint() {
 #[test]
 fn apply_requires_a_fingerprint() {
     let mut entries = sample();
-    let err = apply(OID, &mut entries, &picker(&["src/a.rs:1"], None, false)).unwrap_err();
+    let err = apply(OID, &mut entries, &picker(&["src/a.rs:1"], None)).unwrap_err();
     assert!(err.to_string().contains("--hunks-from"));
 }
 
@@ -141,10 +106,10 @@ fn fingerprint_changes_when_a_hunk_changes() {
     assert_ne!(before, fingerprint(OID, None, &after));
 }
 
-/// An unselectable entry still counts in the digest, so dropping it shifts the
-/// numbering of nothing but must still invalidate the listing.
+/// A trailing entry counts in the digest too: dropping it shifts the numbering
+/// of nothing but must still invalidate the listing.
 #[test]
-fn fingerprint_covers_unselectable_entries() {
+fn fingerprint_covers_every_entry() {
     let before = fingerprint(OID, None, &sample());
     let after = vec![sample().remove(0)];
     assert_ne!(before, fingerprint(OID, None, &after));
@@ -172,17 +137,6 @@ fn apply_rejects_unknown_and_malformed_ids() {
         let err = apply(OID, &mut entries, &hunks(&[id], &fp)).unwrap_err();
         assert!(err.to_string().contains("Invalid hunk id"), "{id}: {err}");
     }
-}
-
-#[test]
-fn apply_rejects_a_binary_id() {
-    let mut entries = sample();
-    let fp = fingerprint(OID, None, &entries);
-    let err = apply(OID, &mut entries, &hunks(&["logo.png:1"], &fp)).unwrap_err();
-    assert!(
-        err.to_string().contains("cannot move `logo.png:1`"),
-        "{err}"
-    );
 }
 
 /// A listing from one commit must not validate against another with the same
@@ -221,14 +175,6 @@ fn fingerprint_covers_the_target_commit() {
     );
 }
 
-#[test]
-fn has_selectable_follows_the_command_policy() {
-    let binary_only = vec![file("logo.png", &[BINARY_ENTRY])];
-    assert!(!has_selectable(&binary_only, false));
-    assert!(has_selectable(&binary_only, true));
-    assert!(has_selectable(&sample(), false));
-}
-
 /// A staged working-tree hunk starts selected, and `--hunks` is the whole
 /// answer, so an id left out of it comes back out of the index.
 #[test]
@@ -236,7 +182,7 @@ fn apply_deselects_what_the_ids_leave_out() {
     let mut entries = sample();
     entries[0].hunks[0].selected = true;
     let fp = fingerprint(OID, None, &entries);
-    apply(OID, &mut entries, &picker(&["src/a.rs:2"], Some(&fp), true)).unwrap();
+    apply(OID, &mut entries, &picker(&["src/a.rs:2"], Some(&fp))).unwrap();
     assert!(!entries[0].hunks[0].selected);
     assert!(entries[0].hunks[1].selected);
 }
@@ -247,7 +193,7 @@ fn a_refused_selection_deselects_nothing() {
     let mut entries = sample();
     entries[0].hunks[0].selected = true;
     let fp = fingerprint(OID, None, &entries);
-    apply(OID, &mut entries, &picker(&["src/a.rs:9"], Some(&fp), true)).unwrap_err();
+    apply(OID, &mut entries, &picker(&["src/a.rs:9"], Some(&fp))).unwrap_err();
     assert!(entries[0].hunks[0].selected);
 }
 
@@ -255,7 +201,7 @@ fn a_refused_selection_deselects_nothing() {
 fn items_mark_an_already_staged_entry() {
     let mut entries = sample();
     entries[0].hunks[1].selected = true;
-    let listed = items(entries, true);
+    let listed = items(entries);
     assert!(!listed[0].staged);
     assert!(listed[1].staged);
 }
@@ -314,9 +260,8 @@ fn intent_to_add(path: &str, lines: usize) -> FileEntry {
 
 #[test]
 fn an_untracked_file_is_listed_by_size_not_by_content() {
-    let listed = items(vec![untracked("new.rs", 3)], true);
+    let listed = items(vec![untracked("new.rs", 3)]);
     assert_eq!(listed[0].diff, "(new file, 3 line(s))");
-    assert!(listed[0].selectable);
 
     // The fingerprint still digests the content the listing left out, so
     // editing the file invalidates the ids it was numbered for — including an
@@ -329,7 +274,7 @@ fn an_untracked_file_is_listed_by_size_not_by_content() {
     );
     // Same line count, so the summary is identical: the fingerprint is what
     // notices, not the listing.
-    assert_eq!(items(vec![edited], true)[0].diff, "(new file, 3 line(s))");
+    assert_eq!(items(vec![edited])[0].diff, "(new file, 3 line(s))");
 }
 
 /// Once the file is in the index, its text is git's diff of the *indexed*
@@ -337,13 +282,13 @@ fn an_untracked_file_is_listed_by_size_not_by_content() {
 /// disk — an LFS pointer for a huge file — so there is no summary to trust.
 #[test]
 fn an_intent_to_add_file_is_listed_verbatim() {
-    let listed = items(vec![intent_to_add("new.rs", 3)], true);
+    let listed = items(vec![intent_to_add("new.rs", 3)]);
     assert!(listed[0].diff.starts_with("@@ -0,0"));
 }
 
 #[test]
 fn a_staged_new_file_is_listed_verbatim() {
-    let listed = items(vec![staged_new("new.rs", 3)], true);
+    let listed = items(vec![staged_new("new.rs", 3)]);
     assert!(listed[0].diff.starts_with("@@ -0,0"));
 }
 
@@ -355,7 +300,7 @@ fn filling_a_tracked_empty_file_is_listed_verbatim() {
     entry.index_status = ' ';
     entry.worktree_status = 'M';
     let entry = with_origin(entry, HunkOrigin::Unstaged);
-    assert!(items(vec![entry], true)[0].diff.starts_with("@@ -0,0"));
+    assert!(items(vec![entry])[0].diff.starts_with("@@ -0,0"));
 }
 
 fn unstaged_hunk(text: &str) -> HunkEntry {
@@ -377,7 +322,7 @@ fn a_staged_new_file_gone_from_the_worktree_is_listed_verbatim() {
     entry.worktree_status = 'D';
     entry.hunks.push(unstaged_hunk(DELETED_ENTRY));
 
-    let listed = items(vec![entry], true);
+    let listed = items(vec![entry]);
     assert!(listed[0].diff.starts_with("@@ -0,0"));
     assert_eq!(listed[1].diff, DELETED_ENTRY);
 }
@@ -385,7 +330,7 @@ fn a_staged_new_file_gone_from_the_worktree_is_listed_verbatim() {
 #[test]
 fn a_single_line_new_file_is_still_counted() {
     assert_eq!(
-        items(vec![untracked("new.rs", 1)], true)[0].diff,
+        items(vec![untracked("new.rs", 1)])[0].diff,
         "(new file, 1 line(s))"
     );
 }
@@ -398,7 +343,7 @@ fn a_new_file_with_no_trailing_newline_counts_its_lines_only() {
         .hunk
         .text
         .push_str("\\ No newline at end of file\n");
-    assert_eq!(items(vec![entry], true)[0].diff, "(new file, 3 line(s))");
+    assert_eq!(items(vec![entry])[0].diff, "(new file, 3 line(s))");
 }
 
 /// Nothing about a staged file is summarized, and its worktree hunks are its
@@ -415,7 +360,7 @@ fn a_staged_new_file_edited_in_the_worktree_lists_both_hunks_verbatim() {
         entry.worktree_status = 'M';
         entry.hunks.push(unstaged_hunk(edit));
 
-        let listed = items(vec![entry], true);
+        let listed = items(vec![entry]);
         assert!(listed[0].diff.starts_with("@@ -0,0"));
         assert_eq!(listed[1].diff, edit);
     }
@@ -429,13 +374,13 @@ fn an_untracked_binary_or_empty_file_keeps_its_placeholder() {
         entry.index_status = '?';
         entry.worktree_status = '?';
         let entry = with_origin(entry, HunkOrigin::Unstaged);
-        assert_eq!(items(vec![entry], true)[0].diff, placeholder);
+        assert_eq!(items(vec![entry])[0].diff, placeholder);
     }
 }
 
 #[test]
 fn a_tracked_hunk_is_still_listed_verbatim() {
-    let listed = items(sample(), true);
+    let listed = items(sample());
     assert_eq!(listed[0].diff, "@@ -1,3 +1,4 @@ fn a\n+one\n");
 }
 
@@ -449,7 +394,7 @@ fn a_new_file_in_a_commit_is_listed_verbatim() {
     entry.index_status = 'A';
     entry.worktree_status = ' ';
     let entry = with_origin(entry, HunkOrigin::Commit);
-    assert!(items(vec![entry], false)[0].diff.starts_with("@@ -0,0"));
+    assert!(items(vec![entry])[0].diff.starts_with("@@ -0,0"));
 }
 
 /// A working-tree file with one staged and one unstaged hunk, as listed.

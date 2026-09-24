@@ -59,8 +59,6 @@ pub struct HunkItem {
     /// summarized: a hunk the agent picks from is never truncated, and it
     /// narrows the listing with `<files>` rather than loom cutting it short.
     pub diff: String,
-    /// False for an entry this command cannot take (spec 019).
-    pub selectable: bool,
     /// Already staged, so already part of the selection. `--hunks` replaces the
     /// selection wholesale; what then happens to a staged id left out depends
     /// on the command (Spec 019).
@@ -173,17 +171,13 @@ pub fn respond_needs_input(
 
 /// Store the hunk listing that answers a `-p` picker, and return the marker error.
 ///
-/// `options` carries only the selectable ids, so an agent that reads just the
-/// common `needs_input` fields cannot pick an entry `-p` would reject.
+/// `options` repeats the ids, for an agent that reads just the common
+/// `needs_input` fields.
 pub fn respond_needs_hunks(items: Vec<HunkItem>, fingerprint: String, hint: &str) -> anyhow::Error {
     *PENDING.lock().unwrap() = Some(AgentResponse::NeedsInput {
         kind: InputKind::Multiselect,
         prompt: "Select hunks".to_string(),
-        options: items
-            .iter()
-            .filter(|item| item.selectable)
-            .map(|item| item.id.clone())
-            .collect(),
+        options: items.iter().map(|item| item.id.clone()).collect(),
         allow_other: false,
         fingerprint: Some(fingerprint),
         items,
@@ -397,21 +391,19 @@ mod tests {
     }
 
     #[test]
-    fn needs_hunks_lists_only_selectable_ids_in_options() {
+    fn needs_hunks_lists_every_id_in_options() {
         let err = respond_needs_hunks(
             vec![
                 HunkItem {
                     id: "a.rs:1".to_string(),
                     path: "a.rs".to_string(),
                     diff: "@@ -1 +1 @@\n-a\n+b\n".to_string(),
-                    selectable: true,
                     staged: false,
                 },
                 HunkItem {
                     id: "logo.png:1".to_string(),
                     path: "logo.png".to_string(),
                     diff: "(binary file)".to_string(),
-                    selectable: false,
                     staged: false,
                 },
             ],
@@ -421,9 +413,8 @@ mod tests {
         assert!(err.downcast_ref::<NeedsInput>().is_some());
 
         let json = PENDING.lock().unwrap().take().unwrap().to_json();
-        assert!(json.contains(r#""options":["a.rs:1"]"#));
+        assert!(json.contains(r#""options":["a.rs:1","logo.png:1"]"#));
         assert!(json.contains(r#""fingerprint":"a91c3f2be417""#));
-        assert!(json.contains(r#""selectable":false"#));
         assert!(!json.contains("allow_other"));
     }
 }
