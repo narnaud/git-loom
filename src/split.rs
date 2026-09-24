@@ -96,8 +96,6 @@ pub fn run(
             &files,
         ),
         hunks,
-        // `split` stages a binary or deleted file whole (spec 013).
-        whole_files: true,
         // Both commits it writes are the one it lists.
         target_hash: None,
         git_args: String::new(),

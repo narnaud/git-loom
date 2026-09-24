@@ -629,9 +629,6 @@ fn report_moved_relative(
     msg::success(&message);
 }
 
-/// `fold -p` moves text hunks, and submodules and deletions whole. A binary
-/// file has nothing to move (Spec 007), so `--hunks` refuses its id — but the
-/// TUI still offers it, and `fold` then leaves it behind with a warning.
 fn fold_picker(
     hunks: &HunkArgs,
     command: &str,
@@ -641,7 +638,6 @@ fn fold_picker(
     Picker {
         hunks: hunks.clone(),
         command: command.to_string(),
-        whole_files: false,
         target_hash: target_hash.map(str::to_string),
         git_args: hunk_select::git_args_suffix(git_opts),
     }
@@ -705,7 +701,6 @@ fn run_patch_fold(
                     workdir,
                     &source_hash,
                     &target_hash,
-                    target_arg,
                     &picker,
                     git_opts,
                     theme,
@@ -816,8 +811,8 @@ pub fn run_picked(picked: &[FileEntry], stamp: &[Option<git2::Oid>], target: &st
 }
 
 /// The selected entries of this file that travel in the hunk patch. A
-/// whole-file label never does: a submodule or a deletion moves as the commit's
-/// own whole-file diff instead (`picked_whole_files`).
+/// whole-file label never does: a submodule, a deletion or a binary file moves
+/// as the commit's own whole-file diff instead (`picked_whole_files`).
 fn selected_hunks(file: &FileEntry) -> impl Iterator<Item = &diff::DiffHunk> {
     file.hunks
         .iter()
@@ -869,8 +864,9 @@ enum WholeFileKind {
     /// tree. `removed` says whether the commit drops it; see
     /// [`keep_submodule_removal`].
     Gitlink { removed: bool },
-    /// A file the commit deletes: working tree and index, like a hunk.
-    Deletion,
+    /// A file the commit deletes, or a binary one: working tree and index,
+    /// like a hunk.
+    File,
 }
 
 /// A file a `-p` selection picked whole, carried by the commit's own diff.
@@ -878,7 +874,8 @@ struct PickedWholeFile {
     path: String,
     /// The commit's whole-file diff for it, carrying what
     /// [`diff::build_hunk_patch`] cannot write into a hunk patch: the 160000
-    /// mode of a submodule, or the `deleted file mode` of a deletion.
+    /// mode of a submodule, the `deleted file mode` of a deletion, or the
+    /// `--full-index` blob ids `git apply` replays a binary change from.
     diff: String,
     kind: WholeFileKind,
 }
@@ -901,8 +898,8 @@ fn picked_whole_files(
         }
         let kind = if let Some(&removed) = gitlinks.get(&file.path) {
             WholeFileKind::Gitlink { removed }
-        } else if file.index_status == 'D' {
-            WholeFileKind::Deletion
+        } else if file.index_status == 'D' || file.binary {
+            WholeFileKind::File
         } else {
             continue;
         };
@@ -919,9 +916,10 @@ fn picked_whole_files(
 ///
 /// A picked submodule goes to the index instead of being staged by path:
 /// `git add` on one stages whatever its checkout currently holds, which is not
-/// what the commit this selection came from recorded. A picked deletion goes to
-/// both at once: reversed it writes the file back, forward it removes it, and
-/// `--index` stages either way without `git add`'s ignore rules.
+/// what the commit this selection came from recorded. A picked deletion or
+/// binary file goes to both at once: reversed it writes the old content back,
+/// forward the new, and `--index` stages either way without `git add`'s ignore
+/// rules.
 fn apply_and_amend(
     workdir: &Path,
     selections: &[FileEntry],
@@ -946,7 +944,7 @@ fn apply_and_amend(
                     git::apply_cached_patch(workdir, &whole.diff)?;
                 }
             }
-            WholeFileKind::Deletion => {
+            WholeFileKind::File => {
                 if reverse {
                     git::apply_patch_with_index_reverse(workdir, &whole.diff)?;
                 } else {
@@ -969,81 +967,30 @@ fn is_whole_file(whole_files: &[PickedWholeFile], path: &str) -> bool {
 
 /// Put the selection back in the working tree, unstaged.
 ///
-/// A picked deletion is not in `patch` — it travels as its own whole-file diff
-/// — so it is removed from disk here, over the index entry the amend restored,
-/// which is what an unstaged deletion is.
+/// A picked deletion or binary file is not in `patch` — it travels as its own
+/// whole-file diff — so it is applied to disk here, over the index entry the
+/// amend restored, which leaves it unstaged.
 fn restore_to_worktree(workdir: &Path, patch: &str, whole_files: &[PickedWholeFile]) -> Result<()> {
     if !patch.is_empty() {
         git::apply_patch_to_worktree(workdir, patch)?;
     }
     for whole in whole_files {
-        if matches!(whole.kind, WholeFileKind::Deletion) {
+        if matches!(whole.kind, WholeFileKind::File) {
             git::apply_patch_to_worktree(workdir, &whole.diff)?;
         }
     }
     Ok(())
 }
 
-/// The picked files `-p` will leave behind: every entry selected for them is a
-/// whole-file label, and no whole-file diff carries them either.
-fn unmovable_picks<'a>(
-    selections: &'a [FileEntry],
-    whole_files: &[PickedWholeFile],
-) -> Vec<&'a str> {
-    selections
-        .iter()
-        .filter(|f| {
-            f.hunks.iter().any(|h| h.selected)
-                && selected_hunks(f).next().is_none()
-                && !is_whole_file(whole_files, &f.path)
-        })
-        .map(|f| f.path.as_str())
-        .collect()
-}
-
-/// Says which files stayed put and how to move one whole instead.
-///
-/// Names where the id comes from rather than building one: a `CommitFile` id
-/// resolves only through the short-ID allocator, so neither the hash nor the
-/// revision the caller typed would work in its place.
-fn unmovable_warning(left: &[&str], destination: &str) -> String {
-    format!(
-        "Left behind, no hunk to move: {}\n\
-         To move one whole, take its `<commit>:<index>` id from `loom status -f` \
-         and run `loom fold <id> {destination}`",
-        left.join(", ")
-    )
-}
-
-/// The patch `fold -p` will apply, refusing a selection with no hunk in it and
-/// naming any picked file left behind rather than dropping it in silence.
-fn build_movable_patch(
-    selections: &[FileEntry],
-    whole_files: &[PickedWholeFile],
-    destination: &str,
-) -> Result<String> {
-    let patch = build_selected_patch(selections);
-    if patch.is_empty() && whole_files.is_empty() {
-        bail!("No text hunks selected — binary files are not supported with -p");
-    }
-    let left = unmovable_picks(selections, whole_files);
-    if !left.is_empty() {
-        msg::warn(&unmovable_warning(&left, destination));
-    }
-    Ok(patch)
-}
-
 /// Pick hunks from `source_hash` to move into `target_hash`.
 ///
 /// Selected hunks are removed from source and added to target via a two-phase
 /// edit+continue rebase. Requires source to be newer than target.
-#[allow(clippy::too_many_arguments)]
 fn run_patch_fold_commit_to_commit(
     repo: &Repository,
     workdir: &Path,
     source_hash: &str,
     target_hash: &str,
-    target_arg: &str,
     picker: &Picker,
     git_opts: &[&str],
     theme: &graph::Theme,
@@ -1066,7 +1013,6 @@ fn run_patch_fold_commit_to_commit(
         workdir,
         source_hash,
         target_hash,
-        target_arg,
         &selections,
         git_opts,
     )?;
@@ -1085,16 +1031,11 @@ fn run_patch_fold_commit_to_commit(
 /// The rest of [`run_patch_fold_commit_to_commit`], once the hunks are picked;
 /// split off so tests can supply `selections` without the picker. Returns the
 /// hashes the source and the target ended up with.
-///
-/// `target_arg` is what the user typed for the target, which the left-behind
-/// warning echoes: a short ID or a branch name still resolves once this rebase
-/// has rewritten the hash, unlike the hash itself.
 fn fold_selected_hunks_to_commit(
     repo: &Repository,
     workdir: &Path,
     source_hash: &str,
     target_hash: &str,
-    target_arg: &str,
     selections: &[FileEntry],
     git_opts: &[&str],
 ) -> Result<(String, String)> {
@@ -1108,8 +1049,9 @@ fn fold_selected_hunks_to_commit(
     }
 
     let whole_files = picked_whole_files(workdir, source_hash, selections)?;
+    refuse_whole_files_the_target_lacks(repo, source_oid, target_hash, &whole_files)?;
 
-    let selected_patch = build_movable_patch(selections, &whole_files, target_arg)?;
+    let selected_patch = build_selected_patch(selections);
 
     let saved_head = repo::head_oid(repo)?.to_string();
     let saved_refs = repo::snapshot_branch_refs(repo)?;
@@ -1248,6 +1190,45 @@ fn fold_selected_hunks_to_commit(
     Ok((new_source_hash, new_target_hash))
 }
 
+/// Refuse, before anything is rewritten, a whole file phase 2 could not apply.
+///
+/// A deletion's or a binary file's diff lands only onto the exact blob the
+/// source changed it from (Spec 007). A commit in between that changed the path
+/// would otherwise fail that apply only once phase 1 is committed.
+fn refuse_whole_files_the_target_lacks(
+    repo: &Repository,
+    source_oid: git2::Oid,
+    target_hash: &str,
+    whole_files: &[PickedWholeFile],
+) -> Result<()> {
+    let target_oid = git2::Oid::from_str(target_hash)?;
+    let source_parent = repo.find_commit(source_oid)?.parent_id(0)?;
+    for whole in whole_files {
+        if matches!(whole.kind, WholeFileKind::File)
+            && blob_at(repo, target_oid, &whole.path)? != blob_at(repo, source_parent, &whole.path)?
+        {
+            bail!(
+                "`{}` changed between `{}` and `{}`\n\
+                 A binary or deleted file only moves onto the content it was changed from",
+                whole.path,
+                git::short_hash(target_hash),
+                git::short_hash(&source_oid.to_string())
+            );
+        }
+    }
+    Ok(())
+}
+
+/// The object `path` names in `commit`'s tree, or `None` if it is absent.
+fn blob_at(repo: &Repository, commit: git2::Oid, path: &str) -> Result<Option<git2::Oid>> {
+    let tree = repo.find_commit(commit)?.tree()?;
+    match tree.get_path(Path::new(path)) {
+        Ok(entry) => Ok(Some(entry.id())),
+        Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
 /// Pick hunks from `commit_hash` to uncommit back into the working tree.
 ///
 /// Selected hunks are removed from the commit and left unstaged.
@@ -1271,7 +1252,7 @@ fn run_patch_fold_commit_to_unstaged(
 
     let whole_files = picked_whole_files(workdir, commit_hash, &selections)?;
 
-    let selected_patch = build_movable_patch(&selections, &whole_files, "zz")?;
+    let selected_patch = build_selected_patch(&selections);
 
     let head_oid = repo::head_oid(repo)?;
     let target_oid = git2::Oid::from_str(commit_hash)?;

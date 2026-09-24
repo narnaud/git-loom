@@ -55,13 +55,14 @@ pub fn run_hunk_picker<'a>(
         return Ok(None);
     }
 
+    let source = binary_source(workdir, &entries);
     if !picker.hunks.is_empty() {
-        hunk_select::apply("", &mut entries, picker)?;
+        hunk_select::apply(&source, &mut entries, picker)?;
         return stage_selection(workdir, &entries, left_out).map(Some);
     }
 
     if agent_mode::enabled() {
-        return Err(hunk_select::respond("", entries, picker));
+        return Err(hunk_select::respond(&source, entries, picker));
     }
 
     let tui_theme = TuiTheme::from_graph_theme(theme);
@@ -104,6 +105,17 @@ pub(crate) fn binary_stamp(workdir: &Path, entries: &[FileEntry]) -> Vec<Option<
             }
         })
         .collect()
+}
+
+/// What a working-tree listing is fingerprinted against in place of a commit:
+/// the `binary_stamp` of its entries, which it lists only as a label, so a
+/// replay after one changed on disk is refused rather than stage it (Spec 019).
+fn binary_source(workdir: &Path, entries: &[FileEntry]) -> String {
+    binary_stamp(workdir, entries)
+        .iter()
+        .map(|oid| oid.map_or_else(|| "-".to_string(), |oid| oid.to_string()))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// Whether `picked`, read before `stamp` was taken of it, still lists the
@@ -641,15 +653,6 @@ pub fn run_commit_hunk_picker(
     }
 
     if agent_mode::enabled() {
-        // A listing whose every id `apply` would refuse is a prompt with no
-        // answer. The picker still renders these, so this stays agent-only.
-        if !hunk_select::has_selectable(&entries, picker.whole_files) {
-            bail!(
-                "No hunks to select in `{}`\n\
-                 It changes only binary files, which -p cannot move",
-                git::short_hash(oid)
-            );
-        }
         return Err(hunk_select::respond(oid, entries, picker));
     }
 

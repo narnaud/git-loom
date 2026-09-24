@@ -1435,7 +1435,9 @@ fn picked_whole_files_carries_a_submodule() {
         }],
         index_status: 'M',
         worktree_status: ' ',
-        binary: true,
+        // Only the gitlink is flagged, as `collect_commit_hunks` does: a flagged
+        // non-gitlink would be picked up whole as a binary file instead.
+        binary: path == "Data",
     };
 
     let picked = [entry("other.txt", true), entry("Data", true)];
@@ -3644,7 +3646,6 @@ fn fold_patch_between_commits_names_the_source_that_survives_phase_two() {
         &workdir,
         &source.to_string(),
         &target.to_string(),
-        "Target",
         &selections,
         &[],
     )
@@ -3731,7 +3732,7 @@ fn deleted_and_changed() -> TestRepo {
     test_repo
 }
 
-/// A commit that changes a binary file, the one thing `-p` cannot move.
+/// A commit that changes a binary file beside a text one.
 fn changed_binary() -> TestRepo {
     let test_repo = TestRepo::new();
     test_repo.commit("Add kept", "kept.txt");
@@ -3809,7 +3810,7 @@ fn picked_whole_files_carries_a_deletion() {
 
     assert_eq!(picked.len(), 1);
     assert_eq!(picked[0].path, "gone.txt");
-    assert!(matches!(picked[0].kind, super::WholeFileKind::Deletion));
+    assert!(matches!(picked[0].kind, super::WholeFileKind::File));
     assert!(picked[0].diff.contains("deleted file mode"));
 
     let mut unpicked = all_selected(&test_repo, head);
@@ -3889,7 +3890,7 @@ fn a_picked_deletion_of_a_binary_file_still_moves() {
     let head = test_repo.head_oid();
     let selections = all_selected(&test_repo, head);
     let picked = picked_whole_files(&test_repo, head, &selections);
-    assert!(matches!(picked[0].kind, super::WholeFileKind::Deletion));
+    assert!(matches!(picked[0].kind, super::WholeFileKind::File));
     let patch = super::build_selected_patch(&selections);
 
     super::apply_and_amend(&workdir, &selections, &patch, &picked, true, &[]).unwrap();
@@ -3972,59 +3973,261 @@ fn a_picked_deletion_uncommits_as_an_unstaged_deletion() {
     assert!(status.contains(" M kept.txt"), "{status}");
 }
 
-/// With nothing left, the guard that states the rule is what the caller hits
-/// (Spec 007), rather than a rebase that dies on a malformed patch.
+/// A binary change travels as the commit's own diff: no payload, only the
+/// `--full-index` blob ids `git apply` looks the content up by.
 #[test]
-fn a_binary_file_alone_leaves_nothing_to_fold() {
-    let test_repo = TestRepo::new();
-    test_repo.commit("Add kept", "kept.txt");
-    test_repo.write_file("blob.bin", "\u{0}\u{1}old\u{0}");
-    test_repo.stage_files(&["blob.bin"]);
-    test_repo.commit_staged("Add binary");
-    test_repo.write_file("blob.bin", "\u{0}\u{1}new\u{0}");
-    test_repo.stage_files(&["blob.bin"]);
-    test_repo.commit_staged("Change binary");
-
-    let head = test_repo.head_oid();
-    let selections = all_selected(&test_repo, head);
-    assert_eq!(selections.len(), 1, "the binary file is offered anyway");
-
-    let picked = picked_whole_files(&test_repo, head, &selections);
-    let err = super::build_movable_patch(&selections, &picked, "cd").unwrap_err();
-    assert_eq!(
-        err.to_string(),
-        "No text hunks selected — binary files are not supported with -p"
-    );
-}
-
-/// The warning names what stays behind, and never a file that travels whole.
-#[test]
-fn unmovable_picks_names_only_what_stays_behind() {
+fn picked_whole_files_carries_a_binary_file() {
     let test_repo = changed_binary();
     let head = test_repo.head_oid();
 
     let selections = all_selected(&test_repo, head);
-    assert_eq!(super::unmovable_picks(&selections, &[]), ["blob.bin"]);
+    let picked = picked_whole_files(&test_repo, head, &selections);
 
-    // Left unpicked, it is nobody's business.
-    let mut unpicked = all_selected(&test_repo, head);
-    for file in &mut unpicked {
-        if file.path == "blob.bin" {
-            file.hunks.iter_mut().for_each(|h| h.selected = false);
-        }
-    }
-    assert!(super::unmovable_picks(&unpicked, &[]).is_empty());
+    assert_eq!(picked.len(), 1);
+    assert_eq!(picked[0].path, "blob.bin");
+    assert!(matches!(picked[0].kind, super::WholeFileKind::File));
+    assert!(
+        picked[0].diff.contains("Binary files"),
+        "{}",
+        picked[0].diff
+    );
 }
 
 #[test]
-fn unmovable_picks_leaves_out_a_picked_deletion() {
-    let test_repo = deleted_and_changed();
+fn a_picked_binary_leaves_the_source_commit() {
+    let test_repo = changed_binary();
+    let workdir = test_repo.workdir();
     let head = test_repo.head_oid();
-
     let selections = all_selected(&test_repo, head);
     let picked = picked_whole_files(&test_repo, head, &selections);
+    let patch = super::build_selected_patch(&selections);
 
-    assert!(super::unmovable_picks(&selections, &picked).is_empty());
+    super::apply_and_amend(&workdir, &selections, &patch, &picked, true, &[]).unwrap();
+
+    let amended = crate::git::diff_commit_name_status(&workdir, "HEAD").unwrap();
+    assert!(amended.is_empty(), "{amended:?}");
+    assert_eq!(test_repo.read_file("blob.bin"), "\u{0}\u{1}old\u{0}");
+    test_repo.assert_working_tree_clean();
+}
+
+#[test]
+fn a_picked_binary_enters_the_target_commit() {
+    let test_repo = changed_binary();
+    let workdir = test_repo.workdir();
+    let head = test_repo.head_oid();
+    let selections = all_selected(&test_repo, head);
+    let picked = picked_whole_files(&test_repo, head, &selections);
+    let patch = super::build_selected_patch(&selections);
+
+    // Stand where the rebase pauses on the target: one commit below the source.
+    test_repo.reset_hard(test_repo.get_oid(1));
+
+    super::apply_and_amend(&workdir, &selections, &patch, &picked, false, &[]).unwrap();
+
+    // The target is the commit that adds the file, now with its new content.
+    let amended = crate::git::diff_commit_name_status(&workdir, "HEAD").unwrap();
+    assert!(
+        amended.contains(&('A', "blob.bin".to_string())),
+        "{amended:?}"
+    );
+    assert_eq!(test_repo.read_file("blob.bin"), "\u{0}\u{1}new\u{0}");
+    test_repo.assert_working_tree_clean();
+}
+
+#[test]
+fn a_picked_binary_uncommits_as_an_unstaged_change() {
+    let test_repo = changed_binary();
+    let workdir = test_repo.workdir();
+    let head = test_repo.head_oid();
+    let selections = all_selected(&test_repo, head);
+    let picked = picked_whole_files(&test_repo, head, &selections);
+    let patch = super::build_selected_patch(&selections);
+
+    super::apply_and_amend(&workdir, &selections, &patch, &picked, true, &[]).unwrap();
+    super::restore_to_worktree(&workdir, &patch, &picked).unwrap();
+
+    assert_eq!(test_repo.read_file("blob.bin"), "\u{0}\u{1}new\u{0}");
+    let status = test_repo.status_porcelain();
+    assert!(status.contains(" M blob.bin"), "{status}");
+    assert!(status.contains(" M kept.txt"), "{status}");
+}
+
+/// A binary file the commit adds comes back as an untracked file, like a text
+/// one would.
+#[test]
+fn a_picked_new_binary_uncommits_as_an_untracked_file() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("Add kept", "kept.txt");
+    test_repo.write_file("blob.bin", "\u{0}\u{1}new\u{0}");
+    test_repo.stage_files(&["blob.bin"]);
+    test_repo.commit_staged("Add binary");
+
+    let workdir = test_repo.workdir();
+    let head = test_repo.head_oid();
+    let selections = all_selected(&test_repo, head);
+    let picked = picked_whole_files(&test_repo, head, &selections);
+    let patch = super::build_selected_patch(&selections);
+
+    super::apply_and_amend(&workdir, &selections, &patch, &picked, true, &[]).unwrap();
+    super::restore_to_worktree(&workdir, &patch, &picked).unwrap();
+
+    assert!(!test_repo.commit_has_file(test_repo.head_oid(), "blob.bin"));
+    assert_eq!(test_repo.read_file("blob.bin"), "\u{0}\u{1}new\u{0}");
+    assert_eq!(test_repo.status_porcelain(), "?? blob.bin\n");
+}
+
+/// Both phases of a move, a binary picked beside a text hunk of another file.
+#[test]
+fn fold_patch_between_commits_moves_a_binary_file() {
+    let t = TestRepo::new_with_remote();
+    t.commit_multi(&[("blob.bin", "\u{0}\u{1}old\u{0}")], "Base");
+    let target = t.commit_multi(&[("t.txt", "target\n")], "Target");
+    let source = t.commit_multi(
+        &[("blob.bin", "\u{0}\u{1}new\u{0}"), ("g.txt", "g\n")],
+        "Source",
+    );
+
+    let workdir = t.workdir();
+    let mut selections = all_selected(&t, source);
+    for file in &mut selections {
+        if file.path != "blob.bin" {
+            file.hunks.iter_mut().for_each(|h| h.selected = false);
+        }
+    }
+
+    let (new_source, new_target) = super::fold_selected_hunks_to_commit(
+        &t.repo,
+        &workdir,
+        &source.to_string(),
+        &target.to_string(),
+        &selections,
+        &[],
+    )
+    .unwrap();
+
+    assert_eq!(new_source, t.head_oid().to_string());
+    assert_eq!(new_target, t.get_oid(1).to_string());
+    assert_eq!(t.commit_file_paths(t.head_oid()), ["g.txt"]);
+    let mut moved = t.commit_file_paths(t.get_oid(1));
+    moved.sort();
+    assert_eq!(moved, ["blob.bin", "t.txt"]);
+    assert_eq!(t.read_file("blob.bin"), "\u{0}\u{1}new\u{0}");
+    t.assert_working_tree_clean();
+}
+
+/// A binary change applies only onto the exact content it was made from, so a
+/// commit in between that changed it too is refused before any rebase runs.
+#[test]
+fn fold_patch_between_commits_refuses_a_binary_changed_in_between() {
+    let t = TestRepo::new_with_remote();
+    // Nested, so a lookup that missed it would find nothing on both sides.
+    std::fs::create_dir_all(t.workdir().join("assets")).unwrap();
+    t.commit_multi(
+        &[("assets/blob.bin", "\u{0}v1"), ("other.txt", "other")],
+        "Base",
+    );
+    let target = t.commit_multi(&[("t.txt", "target\n")], "Target");
+    t.commit_multi(&[("assets/blob.bin", "\u{0}v2")], "Middle");
+    let source = t.commit_multi(&[("assets/blob.bin", "\u{0}v3")], "Source");
+
+    let head_before = t.head_oid();
+    t.write_file("other.txt", "uncommitted work");
+    let selections = all_selected(&t, source);
+
+    let err = super::fold_selected_hunks_to_commit(
+        &t.repo,
+        &t.workdir(),
+        &source.to_string(),
+        &target.to_string(),
+        &selections,
+        &[],
+    )
+    .expect_err("the binary's diff must not apply onto the target");
+
+    assert!(
+        err.to_string()
+            .starts_with("`assets/blob.bin` changed between"),
+        "{err}"
+    );
+    assert_eq!(t.head_oid(), head_before);
+    assert!(!t.workdir().join(".git/rebase-merge").exists());
+    assert_eq!(t.read_file("assets/blob.bin"), "\u{0}v3");
+    assert_eq!(t.read_file("other.txt"), "uncommitted work");
+    assert_eq!(t.status_porcelain(), " M other.txt\n");
+    assert!(!t.branch_exists("_loom-track"));
+}
+
+/// The same refusal for a deletion of a file the target never had.
+#[test]
+fn fold_patch_between_commits_refuses_a_deletion_the_target_lacks() {
+    let t = TestRepo::new_with_remote();
+    t.commit_multi(&[("base.txt", "base\n")], "Base");
+    let target = t.commit_multi(&[("t.txt", "target\n")], "Target");
+    t.commit_multi(&[("gone.txt", "gone\n")], "Add gone");
+    std::fs::remove_file(t.workdir().join("gone.txt")).unwrap();
+    t.write_file("s.txt", "source\n");
+    t.stage_files(&["gone.txt", "s.txt"]);
+    t.commit_staged("Delete gone");
+    let source = t.head_oid();
+
+    let head_before = t.head_oid();
+    let mut selections = all_selected(&t, source);
+    for file in &mut selections {
+        if file.path != "gone.txt" {
+            file.hunks.iter_mut().for_each(|h| h.selected = false);
+        }
+    }
+
+    let err = super::fold_selected_hunks_to_commit(
+        &t.repo,
+        &t.workdir(),
+        &source.to_string(),
+        &target.to_string(),
+        &selections,
+        &[],
+    )
+    .expect_err("the target has no gone.txt to delete");
+
+    assert!(
+        err.to_string().starts_with("`gone.txt` changed between"),
+        "{err}"
+    );
+    assert_eq!(t.head_oid(), head_before);
+    t.assert_working_tree_clean();
+}
+
+/// Absent on both sides counts as the same content: a binary the source adds
+/// moves onto a target that never had it.
+#[test]
+fn fold_patch_between_commits_moves_a_binary_the_source_adds() {
+    let t = TestRepo::new_with_remote();
+    t.commit_multi(&[("base.txt", "base\n")], "Base");
+    let target = t.commit_multi(&[("t.txt", "target\n")], "Target");
+    let source = t.commit_multi(
+        &[("blob.bin", "\u{0}\u{1}new\u{0}"), ("s.txt", "source\n")],
+        "Source",
+    );
+
+    let mut selections = all_selected(&t, source);
+    for file in &mut selections {
+        if file.path != "blob.bin" {
+            file.hunks.iter_mut().for_each(|h| h.selected = false);
+        }
+    }
+
+    super::fold_selected_hunks_to_commit(
+        &t.repo,
+        &t.workdir(),
+        &source.to_string(),
+        &target.to_string(),
+        &selections,
+        &[],
+    )
+    .unwrap();
+
+    assert_eq!(t.commit_file_paths(t.head_oid()), ["s.txt"]);
+    assert!(t.commit_has_file(t.get_oid(1), "blob.bin"));
+    t.assert_working_tree_clean();
 }
 
 /// A path is a pathspec, and `[1]` is a glob: the commit's diff for
@@ -4106,45 +4309,6 @@ fn a_picked_submodule_removal_stays_a_gitlink() {
 
     assert_eq!(test_repo.submodule_oid(test_repo.head_oid(), "Data"), first);
     assert!(workdir.join("Data").exists(), "the checkout stays on disk");
-}
-
-#[test]
-fn unmovable_picks_leaves_out_a_picked_submodule() {
-    let test_repo = TestRepo::new();
-    let (_first, second) = test_repo.add_submodule("Data");
-    test_repo.commit_staged("Add submodule");
-    test_repo.checkout_submodule("Data", second);
-    test_repo.stage_files(&["Data"]);
-    test_repo.commit_staged("Bump submodule");
-
-    let head = test_repo.head_oid();
-    let selections = all_selected(&test_repo, head);
-    let picked = picked_whole_files(&test_repo, head, &selections);
-
-    assert_eq!(picked.len(), 1, "the submodule is picked up whole");
-    assert!(super::unmovable_picks(&selections, &picked).is_empty());
-}
-
-/// The wording is quoted in `docs/src/commands/fold.md`, and the fold still
-/// goes ahead on the hunks it can move.
-#[test]
-fn a_left_behind_file_is_named_and_the_fold_proceeds() {
-    let test_repo = changed_binary();
-    let head = test_repo.head_oid();
-    let selections = all_selected(&test_repo, head);
-    let picked = picked_whole_files(&test_repo, head, &selections);
-
-    let patch = super::build_movable_patch(&selections, &picked, "zz").unwrap();
-    assert!(patch.starts_with("--- a/kept.txt"), "{patch}");
-
-    // A `<commit>:<index>` id only resolves through the short-ID allocator, so
-    // the hint names where to read one instead of printing one that will not.
-    assert_eq!(
-        super::unmovable_warning(&["blob.bin"], "zz"),
-        "Left behind, no hunk to move: blob.bin\n\
-         To move one whole, take its `<commit>:<index>` id from `loom status -f` \
-         and run `loom fold <id> zz`"
-    );
 }
 
 // ── Staging survives a rebase that completed ─────────────────────────────
@@ -4424,7 +4588,6 @@ fn a_patch_fold_forwards_to_the_amend_at_the_rebase_pause() {
             &t.workdir(),
             &source.to_string(),
             &target.to_string(),
-            "Target",
             &selections,
             &[],
         )
@@ -4439,7 +4602,6 @@ fn a_patch_fold_forwards_to_the_amend_at_the_rebase_pause() {
         &t.workdir(),
         &source.to_string(),
         &target.to_string(),
-        "Target",
         &selections,
         &["--no-verify"],
     )
@@ -4797,7 +4959,6 @@ fn fold_patch_into_a_redundant_target_does_not_offer_to_drop_it() {
         &workdir,
         &keeper.to_string(),
         &redundant.to_string(),
-        "redundant",
         &selections,
         &[],
     )

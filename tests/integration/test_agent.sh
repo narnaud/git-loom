@@ -669,7 +669,6 @@ git -C "$WORK" commit -q -m "Touch three files"
 gl_capture split HEAD -m "binary and deletion" -p --agent
 assert_eq "10" "$CODE" "split_whole_listed_exit"
 assert_contains "$OUT" '"options":["blob.bin:1","gone.txt:1","plain.txt:1"]' "split_whole_all_selectable"
-assert_not_contains "$OUT" '"selectable":false' "split_whole_none_rejected"
 FP="$(json_fingerprint)"
 
 gl_capture split HEAD -m "binary and deletion" -p --hunks blob.bin:1 --hunks gone.txt:1 --hunks-from "$FP" --agent
@@ -680,7 +679,7 @@ assert_contains "$(git -C "$WORK" show --stat HEAD~1)" "gone.txt" "split_whole_f
 assert_contains "$(git -C "$WORK" show --stat HEAD)" "plain.txt" "split_whole_second_text"
 assert_not_contains "$(git -C "$WORK" show --stat HEAD)" "blob.bin" "split_whole_second_clean"
 
-describe "agent mode: fold cannot take binary entries"
+describe "agent mode: fold -p uncommits a binary file whole"
 setup_repo_with_remote
 printf '\x00\x01\x02binary\x00' > "$WORK/blob.bin"
 seq 1 10 > "$WORK/plain.txt"
@@ -689,29 +688,39 @@ git -C "$WORK" commit -q -m "Add binary and text"
 
 gl_capture fold -p HEAD zz --agent
 assert_eq "10" "$CODE" "binary_listed_exit"
-assert_contains "$OUT" '"id":"blob.bin:1"' "binary_listed_item"
-assert_contains "$OUT" '"selectable":false' "binary_listed_unselectable"
-assert_contains "$OUT" '"options":["plain.txt:1"]' "binary_listed_options"
+assert_contains "$OUT" '"options":["blob.bin:1","plain.txt:1"]' "binary_listed_options"
 FP="$(json_fingerprint)"
 
 gl_capture fold -p HEAD zz --hunks blob.bin:1 --hunks-from "$FP" --agent
-assert_eq "1" "$CODE" "binary_picked_exit"
-assert_contains "$OUT" "cannot move \`blob.bin:1\`" "binary_picked_msg"
+assert_exit_ok "$CODE" "binary_uncommit_exit"
+assert_not_contains "$(git -C "$WORK" show --stat HEAD)" "blob.bin" "binary_uncommit_left_commit"
+assert_contains "$(git -C "$WORK" show --stat HEAD)" "plain.txt" "binary_uncommit_text_stays"
+assert_contains "$(git -C "$WORK" status --porcelain)" "?? blob.bin" "binary_uncommit_untracked"
 
-# A listing whose every id would be refused is a prompt with no answer.
-describe "agent mode: a commit fold cannot touch at all is not listed"
+describe "agent mode: fold -p moves a binary file between commits"
 setup_repo_with_remote
 printf '\x00\x01old\x00' > "$WORK/only.bin"
 git -C "$WORK" add only.bin
 git -C "$WORK" commit -q -m "Add binary"
+echo target > "$WORK/t.txt"
+git -C "$WORK" add t.txt
+git -C "$WORK" commit -q -m "Target"
 printf '\x00\x01new\x00' > "$WORK/only.bin"
-git -C "$WORK" add only.bin
+echo source > "$WORK/s.txt"
+git -C "$WORK" add only.bin s.txt
 git -C "$WORK" commit -q -m "Change binary"
 
-gl_capture fold -p HEAD zz --agent
-assert_eq "1" "$CODE" "unanswerable_exit"
-assert_contains "$OUT" "only binary files" "unanswerable_msg"
-assert_not_contains "$OUT" "needs_input" "unanswerable_not_a_prompt"
+gl_capture fold -p HEAD HEAD~1 --agent
+assert_eq "10" "$CODE" "binary_move_listed_exit"
+FP="$(json_fingerprint)"
+
+gl_capture fold -p HEAD HEAD~1 --hunks only.bin:1 --hunks-from "$FP" --agent
+assert_exit_ok "$CODE" "binary_move_exit"
+assert_not_contains "$(git -C "$WORK" show --stat HEAD)" "only.bin" "binary_move_left_source"
+assert_contains "$(git -C "$WORK" show --stat HEAD~1)" "only.bin" "binary_move_reached_target"
+assert_eq "$(printf '\x00\x01new\x00' | git hash-object --stdin)" \
+    "$(git -C "$WORK" rev-parse HEAD:only.bin)" "binary_move_content"
+assert_eq "" "$(git -C "$WORK" status --porcelain)" "binary_move_clean"
 
 # The case `-p` exists for: two logical changes in one file, no TUI available.
 describe "agent mode: -p works over working-tree changes"
@@ -728,6 +737,21 @@ gl_capture fold -p multi.txt HEAD --hunks multi.txt:1 --hunks-from "$FP" --agent
 assert_exit_ok "$CODE" "worktree_patch_folded_exit"
 assert_contains "$(show_patch HEAD)" "+FIVE" "worktree_patch_folded_hunk"
 assert_contains "$(diff_patch)" "+THIRTYFIVE" "worktree_patch_left_the_rest"
+
+# The listing names a binary without its content, so only the fingerprint can
+# tell that the file changed on disk since; `git add` would stage the new one.
+describe "agent mode: a binary edited since its listing is refused"
+setup_repo_with_remote
+printf '\x00\x01first' > "$WORK/logo.bin"
+gl_capture add -p logo.bin --agent
+assert_contains "$OUT" '"diff":"(binary file)"' "worktree_binary_listed_label"
+FP="$(json_fingerprint)"
+printf '\x00\x01second' > "$WORK/logo.bin"
+
+gl_capture add -p logo.bin --hunks logo.bin:1 --hunks-from "$FP" --agent
+assert_eq "1" "$CODE" "worktree_binary_stale_exit"
+assert_contains "$OUT" "hunks changed since" "worktree_binary_stale_msg"
+assert_eq "" "$(git -C "$WORK" diff --cached --name-only)" "worktree_binary_stale_nothing_staged"
 
 # A new file is taken whole, so the listing names its size rather than carrying
 # a copy of it — both before and after it is staged.

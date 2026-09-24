@@ -3304,7 +3304,7 @@ fn fold_with_hunks_on_a_file_picks_from_every_local_change() {
 }
 
 #[test]
-fn fold_with_hunks_of_a_binary_only_commit_fails_before_the_selector() {
+fn fold_with_hunks_of_a_binary_only_commit_opens_the_selector() {
     let repo = crate::core::test_helpers::TestRepo::new_with_remote();
     std::fs::write(repo.workdir().join("f.bin"), b"\0one").unwrap();
     repo.stage_files(&["f.bin"]);
@@ -3316,25 +3316,17 @@ fn fold_with_hunks_of_a_binary_only_commit_fails_before_the_selector() {
         let mut app = make_app(load_snapshot(1).unwrap(), &theme);
         move_cursor_to(&mut app, &source.to_string());
         press(&mut app, KeyCode::Char('F'));
-        let deadline = deadline();
-        while app.pick.is_some() && std::time::Instant::now() < deadline {
-            assert!(!matches!(app.poll_background(), Tick::TakeOver));
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        }
-        assert!(app.pick.is_none(), "the pick never ended");
-        assert!(matches!(app.mode, Mode::Normal));
-        let lines = &app.log.last().unwrap().lines;
-        assert!(
-            lines
-                .iter()
-                .any(|(l, text)| *l == Level::Error && text.contains("only binary files")),
-            "{lines:?}"
-        );
+        poll_until_take_over(&mut app);
+        let Some(Pick::Ready { entries, .. }) = &app.pick else {
+            panic!("no fold pick ready");
+        };
+        let paths: Vec<&str> = entries.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["f.bin"]);
     });
 }
 
 #[test]
-fn fold_with_hunks_does_not_mark_a_binary_it_leaves_behind() {
+fn fold_with_hunks_marks_a_picked_binary_too() {
     let repo = crate::core::test_helpers::TestRepo::new_with_remote();
     repo.write_file("f.txt", "text\n");
     std::fs::write(repo.workdir().join("f.bin"), b"\0one").unwrap();
@@ -3376,12 +3368,16 @@ fn fold_with_hunks_does_not_mark_a_binary_it_leaves_behind() {
             .unwrap()
             .files;
         let text = files.iter().position(|f| f.path == "f.txt").unwrap();
+        let binary = files.iter().position(|f| f.path == "f.bin").unwrap();
         let Mode::FoldTarget { source_rows, .. } = &app.mode else {
             panic!("not picking a fold target");
         };
         assert_eq!(
             source_rows.covered,
-            HashSet::from([commit_file_key(source, text)])
+            HashSet::from([
+                commit_file_key(source, text),
+                commit_file_key(source, binary)
+            ])
         );
     });
 }

@@ -275,11 +275,10 @@ backstops any future call path, which MUST answer as data before reaching it.
 
 ```json
 {"status":"needs_input","kind":"multiselect","prompt":"Select hunks",
- "options":["src/fold.rs:1"],"fingerprint":"a91c3f2be417",
+ "options":["src/fold.rs:1","logo.png:1"],"fingerprint":"a91c3f2be417",
  "items":[{"id":"src/fold.rs:1","path":"src/fold.rs",
-           "diff":"@@ -120,7 +120,9 @@ fn resolve\n...","selectable":true},
-          {"id":"logo.png:1","path":"logo.png",
-           "diff":"(binary file)","selectable":false}],
+           "diff":"@@ -120,7 +120,9 @@ fn resolve\n..."},
+          {"id":"logo.png:1","path":"logo.png","diff":"(binary file)"}],
  "hint":"re-run with: loom fold -p c2 c1 --hunks <id> [--hunks <id>...] --hunks-from a91c3f2be417"}
 ```
 
@@ -305,12 +304,13 @@ Applying a selection is all or nothing: a step that fails puts the index back.
 A picked hunk whose context a staged hunk being unstaged in the same file
 changes no longer applies, and is refused rather than placed by a looser match.
 
-- `items` lists every entry the picker itself would show, in that order,
-  including the ones this command cannot take, so the ids it did not get are
-  still accounted for. A file whose diff carries no text at all — a mode-only
-  change, a pure rename — reaches neither, and a commit with nothing but those
-  errors ``No hunks to select in `<hash>`⏎Its changes carry no text -p can
-  pick, or the given files matched none`` instead of listing nothing.
+- `items` lists every entry the picker itself would show, in that order, and
+  every one can be picked: a binary file, a deletion and a submodule each move
+  whole (Specs 007 and 013). A file whose diff carries no text at all — a
+  mode-only change, a pure rename — reaches neither the picker nor the
+  listing, and a commit with nothing but those errors ``No hunks to select in
+  `<hash>`⏎Its changes carry no text -p can pick, or the given files matched
+  none`` instead of listing nothing.
 - `id` is `<path>:<n>`, `n` counting from 1 within the file. It is passed back
   verbatim, one `--hunks` per id, so a path may hold any character including a
   comma. There is no separator to escape and none to get wrong.
@@ -329,22 +329,21 @@ changes no longer applies, and is refused rather than placed by a looser match.
   same file; and filling a tracked empty file, which is a change and not a new
   file. The fingerprint covers the content the listing left out, so any edit to
   the file invalidates the ids.
-- `selectable` marks what this command can take, which differs per command: a
-  binary file has no hunk a commit-source `fold` can move (Spec 007), while
-  `split` takes it whole (Spec 013) and a working-tree source stages it by
-  path, so only the commit-source `fold` forms mark it `false`. A submodule
-  entry and a deletion are selectable everywhere: they travel whole.
-- `options` repeats the selectable ids, so an agent reading only the common
-  `needs_input` fields cannot pick a rejected one.
+- A whole-file entry has no text to list, so its `diff` is a label and the
+  `path` is all it says: `(binary file)`, `(file deleted)`, `(submodule)` or
+  `(empty file)`. As with a summarized new file, the agent reads the file for
+  its content.
+- `options` repeats the ids, for an agent reading only the common
+  `needs_input` fields.
 - `fingerprint` digests every commit the operation touches — the source it
   lists and the target it lands in, including the target of
   `fold -p [<files>...] <commit>` — and the whole listing: paths, hunk texts
-  and whether each is staged, unselectable entries included. The target
-  matters because the replay re-resolves it from the revspec the agent typed,
-  and a relative one can name a different commit by then.
-- A listing MUST have at least one selectable entry. A commit with none is an
-  error (``No hunks to select in `<hash>`⏎It changes only binary files, which
-  -p cannot move``), never a prompt no answer satisfies.
+  and whether each is staged. The target matters because the replay
+  re-resolves it from the revspec the agent typed, and a relative one can name
+  a different commit by then. A working tree has no source commit, so there it
+  digests what each binary entry stages instead — a file's blob id, a
+  submodule's HEAD — which the label leaves out: `git add` on the replay would
+  otherwise take whatever the file became since.
 
 **CLI:**
 
@@ -383,7 +382,6 @@ current diff and refuse a mismatch — never resolve the ids against it:
 | Fingerprint mismatch | ``The hunks changed since the listing fingerprinted <given> (now <current>)⏎Re-run with -p alone to list them again`` |
 | Id absent from the diff | ``No hunk `<id>` in this diff`` |
 | Id not `<path>:<n>` with `n` plain digits from 1 | ``Invalid hunk id `<id>`⏎Ids look like `src/main.rs:1`` |
-| Id of an unselectable entry | ``` `fold -p` cannot move `<id>`: a binary file has no hunk ``` |
 | Staged id left out, its lines changed again in the working tree | ``Unstaging `<id>` would lose what only the index holds: the working tree changed `<path>` there again⏎Keep `<id>` staged`` |
 
 `commit -p` sets aside every staged path its picker did not return, and only

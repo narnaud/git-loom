@@ -1436,14 +1436,6 @@ impl<'a> App<'a> {
         match commit {
             Some(oid) => self.start_pick(command, origin, purpose, move |workdir| {
                 let entries = staging::collect_commit_hunks(workdir, &oid.to_string(), &[])?;
-                // The selector would offer them, and every pick would be refused.
-                if !entries.is_empty() && !hunk_select::has_selectable(&entries, false) {
-                    anyhow::bail!(
-                        "No hunks to select in `{}`\n\
-                         It changes only binary files, which -p cannot move",
-                        git::short_hash(&oid.to_string())
-                    );
-                }
                 Ok((entries, Vec::new()))
             }),
             None => self.start_pick(command, origin, purpose, move |workdir| {
@@ -1836,25 +1828,7 @@ impl<'a> App<'a> {
                 return;
             }
         };
-        // `--hunks` refuses a binary file's id, which the selector still
-        // offers: say which stay behind, as `fold -p` itself does.
-        let (ids, refused) = match commit {
-            Some(_) => hunk_select::picked_ids(&picked, false),
-            None => (Vec::new(), Vec::new()),
-        };
-        if commit.is_some() && ids.is_empty() {
-            let text = "No text hunks selected — binary files are not supported with -p";
-            self.log_line(Level::Error, text);
-            self.notice = Some(format!("fold: {}", text));
-            return;
-        }
-        if !refused.is_empty() {
-            self.log_line(
-                Level::Warn,
-                &format!("Left behind, no hunk to move: {}", refused.join(", ")),
-            );
-        }
-        let source_rows = self.hunk_sources(commit, &picked, &refused);
+        let source_rows = self.hunk_sources(commit, &picked);
         let hunks = match commit {
             Some(_) => FoldHunks::Commit(picked),
             None => FoldHunks::Worktree { picked, stamp },
@@ -1863,17 +1837,11 @@ impl<'a> App<'a> {
     }
 
     /// The gutter marks for picked hunks: the files they come from — the
-    /// working files, or the source commit with its files covered, except
-    /// the `left` behind.
-    fn hunk_sources(
-        &self,
-        commit: Option<git2::Oid>,
-        picked: &[FileEntry],
-        left: &[String],
-    ) -> Sources {
+    /// working files, or the source commit with its files covered.
+    fn hunk_sources(&self, commit: Option<git2::Oid>, picked: &[FileEntry]) -> Sources {
         let paths: HashSet<&str> = picked
             .iter()
-            .filter(|f| f.hunks.iter().any(|h| h.selected) && !left.contains(&f.path))
+            .filter(|f| f.hunks.iter().any(|h| h.selected))
             .map(|f| f.path.as_str())
             .collect();
         let Some(oid) = commit else {
@@ -2030,7 +1998,7 @@ impl<'a> App<'a> {
                 // `fold -p` re-reads them; `zz` names no commit.
                 let into = (target.effect != FoldEffect::Uncommit).then_some(target.arg.as_str());
                 let from = hunk_select::fingerprint(&sources[0], into, &picked);
-                let (ids, _) = hunk_select::picked_ids(&picked, false);
+                let ids = hunk_select::picked_ids(&picked);
                 Action::Fold {
                     sources,
                     target: target.arg,

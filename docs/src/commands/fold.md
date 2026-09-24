@@ -154,14 +154,9 @@ git loom fold -p pkz wsl
 # Selected hunks are removed from pkz and added to wsl
 ```
 
-The source (`pkz`) must be newer than the target (`wsl`). A submodule or a deleted file moves whole. Binary files are not supported: picking one alongside real hunks folds the hunks and leaves it where it is, warning before it rewrites anything:
+The source (`pkz`) must be newer than the target (`wsl`). A submodule, a deleted file or a binary file moves whole. A binary or deleted file only moves onto the exact content it was changed from: if the target holds a different version, the fold refuses before rewriting anything.
 
-```
-! Left behind, no hunk to move: logo.png
-  › To move one whole, take its `<commit>:<index>` id from `loom status -f` and run `loom fold <id> wsl`
-```
-
-Form 3 below leaves a binary file behind the same way; a picked deletion comes back as an unstaged deletion.
+In form 3 below, a picked deletion comes back as an unstaged deletion, and a picked binary file as an unstaged change (untracked, if the commit added it).
 
 **Form 3 — pick hunks from a commit → uncommit to working tree:**
 
