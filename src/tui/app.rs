@@ -5,7 +5,7 @@
 //! on a worker thread while the TUI stays up: the command's prompts become
 //! popups and its messages a log (`core::ui`), and only an editor takes the
 //! terminal over. Fold and commit pick their target in a second step inside
-//! the tree; `C` picks the commit's hunks first, in the hunk selector, which
+//! the tree; `C` and `F` pick their hunks first, in the hunk selector, which
 //! runs before any action, as a nested shell on the same terminal.
 
 use std::borrow::Cow;
@@ -26,7 +26,7 @@ use ratatui::{
 };
 
 use crate::core::graph::{self, Section};
-use crate::core::hunk_select::HunkArgs;
+use crate::core::hunk_select::{self, HunkArgs};
 use crate::core::repo::{self, BranchInfo, CommitInfo, FileChange, RemoteStatus, RepoInfo};
 use crate::core::shortid::IdAllocator;
 use crate::core::staging;
@@ -37,7 +37,7 @@ use crate::tui::hunk_selector::{FileEntry, run_hunk_selector_nested};
 use crate::tui::shell::{KeyResult, PaneId, Shell, ShellApp, ShellConfig, Tick};
 use crate::tui::status_tree::{
     self, LOCAL_CHANGES_KEY, PENDING_COMMIT_OID, Row, RowKind, RowMark, SelectionClass, branch_key,
-    working_file_key,
+    commit_file_key, working_file_key,
 };
 use crate::tui::theme::TuiTheme;
 use crate::tui::widgets::common::{colorize_diff, pane_block};
@@ -171,6 +171,39 @@ enum CommitSource {
     Index,
 }
 
+/// What folding the sources into a target does, tagged on the tree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FoldEffect {
+    /// Working changes or a fixup go into the target commit.
+    Amend,
+    /// The target is a source, or the commit a source file already sits in.
+    Noop,
+    /// The source commit or commit file goes back to the working tree.
+    Uncommit,
+    /// A commit file, or a commit's picked hunks, move into the target commit.
+    MoveFile,
+}
+
+impl FoldEffect {
+    fn tag(self) -> &'static str {
+        match self {
+            FoldEffect::Amend => "[AMEND]",
+            FoldEffect::Noop => "[NOOP]",
+            FoldEffect::Uncommit => "[UNCOMMIT]",
+            FoldEffect::MoveFile => "[MOVE]",
+        }
+    }
+}
+
+/// A row a pending fold can land on.
+#[derive(Debug, Clone)]
+struct FoldTarget {
+    key: String,
+    /// The row's command argument.
+    arg: String,
+    effect: FoldEffect,
+}
+
 /// A loom command to run on the worker thread.
 #[derive(Debug, PartialEq, Eq)]
 enum Action {
@@ -181,9 +214,21 @@ enum Action {
         source: CommitSource,
         dest: CommitDest,
     },
-    /// `loom fold <sources...> <target>`.
+    /// `loom fold [-p] <sources...> <target> [--hunks <id>... --hunks-from
+    /// <fingerprint>]`: the hunks, when some, are picked out of the one
+    /// source commit.
     Fold {
         sources: Vec<String>,
+        target: String,
+        hunks: Option<HunkArgs>,
+    },
+    /// `loom fold -p <files...> <target>` with the working-tree hunks already
+    /// picked; `sources` are the files or `zz` the picker was opened on,
+    /// `stamp` the pick's `staging::binary_stamp`.
+    FoldHunks {
+        sources: Vec<String>,
+        picked: Vec<FileEntry>,
+        stamp: Stamp,
         target: String,
     },
     /// `loom branch new <name> [-t target]`.
@@ -211,9 +256,17 @@ enum Outcome {
 /// branch's, or a placeholder row for a branch about to be created).
 enum Mode {
     Normal,
+    /// `↑`/`↓` move the cursor through `targets`, read off the tree `f` was
+    /// pressed on; the tree is rebuilt for `targets[index]`.
     FoldTarget {
         sources: Vec<String>,
         source_rows: Sources,
+        targets: Vec<FoldTarget>,
+        index: usize,
+        /// Key of the row `f` or `F` was pressed on, to go back to on cancel.
+        origin: String,
+        /// What `F` picked; `None` for `f`, which folds its sources whole.
+        hunks: Option<FoldHunks>,
     },
     /// `↑`/`↓` move the placeholder commit through `dests`; the tree is
     /// rebuilt with it at `dests[index]`.
@@ -270,14 +323,39 @@ enum PickTick {
     },
 }
 
-/// The two halves of a `C` pick. Reading the hunks is a git per changed file,
-/// so it waits on a worker like any other slow work; only the selector that
-/// follows needs the terminal, and only that half runs on the loop.
+/// What a pick's selection goes to.
+enum PickFor {
+    /// `C`: staged at once, then committed.
+    Commit,
+    /// `F`: folded into one of `targets`, read off the tree at the press so a
+    /// pick with nowhere to go never opens. `commit` is the source commit when
+    /// the hunks are its own rather than the working tree's.
+    Fold {
+        sources: Vec<String>,
+        targets: Vec<FoldTarget>,
+        commit: Option<git2::Oid>,
+    },
+}
+
+impl PickFor {
+    /// The command the pick is for, as notices and the status bar name it.
+    fn label(&self) -> &'static str {
+        match self {
+            PickFor::Commit => "commit",
+            PickFor::Fold { .. } => "fold",
+        }
+    }
+}
+
+/// The two halves of a `C` or `F` pick. Reading the hunks is a git per changed
+/// file, so it waits on a worker like any other slow work; only the selector
+/// that follows needs the terminal, and only that half runs on the loop.
 enum Pick {
     Collecting {
-        handle: JoinHandle<Result<Vec<FileEntry>>>,
-        /// Key of the row `C` was pressed on, to go back to on cancel.
+        handle: JoinHandle<Result<(Vec<FileEntry>, Stamp)>>,
+        /// Key of the row `C` or `F` was pressed on, to go back to on cancel.
         origin: String,
+        purpose: PickFor,
         /// Ticks so far, for the status-bar animation.
         ticks: usize,
         /// `Esc` was pressed: drop the result when it lands. The pick is held
@@ -288,8 +366,27 @@ enum Pick {
     /// Read and waiting for the shell to hand the terminal over.
     Ready {
         entries: Vec<FileEntry>,
+        stamp: Stamp,
         origin: String,
+        purpose: PickFor,
     },
+}
+
+/// `staging::binary_stamp` of a pick's entries, taken as they are read; empty
+/// for a pick that stages at once or reads a commit.
+type Stamp = Vec<Option<git2::Oid>>;
+
+/// The hunks `F` picked, folded instead of its source rows whole.
+enum FoldHunks {
+    /// Working-tree hunks, staged only once the target is confirmed, so a
+    /// cancelled fold leaves the index as it was; `stamp` lets the fold
+    /// refuse a pick the tree has moved away from by then.
+    Worktree {
+        picked: Vec<FileEntry>,
+        stamp: Stamp,
+    },
+    /// Hunks of the source commit, handed to `loom fold -p` by id (Spec 019).
+    Commit(Vec<FileEntry>),
 }
 
 /// The action currently running on its worker thread.
@@ -413,11 +510,23 @@ fn execute_action(
             };
             commit::run(branch, integration, None, false, files, vec![], theme)
         }
-        Action::Fold { sources, target } => {
+        Action::Fold {
+            sources,
+            target,
+            hunks,
+        } => {
             let mut args = sources;
             args.push(target);
-            fold::run(false, false, None, HunkArgs::default(), args, vec![], theme)
+            let patch = hunks.is_some();
+            let hunks = hunks.unwrap_or_default();
+            fold::run(false, patch, None, hunks, args, vec![], theme)
         }
+        Action::FoldHunks {
+            picked,
+            stamp,
+            target,
+            ..
+        } => fold::run_picked(&picked, &stamp, &target),
         Action::NewBranch { name, target } => branch::new::run(Some(name), target),
         Action::Drop { targets } => drop::run(targets, false),
         Action::Reword { target, name } => reword::run(target, name),
@@ -671,8 +780,30 @@ impl<'a> App<'a> {
                     words.extend(files.iter().map(|f| sid(f)));
                 }
             }
-            Action::Fold { sources, target } => {
+            Action::Fold {
+                sources,
+                target,
+                hunks,
+            } => {
                 words.push("fold".into());
+                if hunks.is_some() {
+                    words.push("-p".into());
+                }
+                words.extend(sources.iter().map(|s| sid(s)));
+                words.push(sid(target));
+                if let Some(hunks) = hunks {
+                    for id in &hunks.ids {
+                        words.extend(["--hunks".into(), hunk_select::quoted(id)]);
+                    }
+                    if let Some(from) = &hunks.from {
+                        words.extend(["--hunks-from".into(), from.clone()]);
+                    }
+                }
+            }
+            Action::FoldHunks {
+                sources, target, ..
+            } => {
+                words.extend(["fold".into(), "-p".into()]);
                 words.extend(sources.iter().map(|s| sid(s)));
                 words.push(sid(target));
             }
@@ -930,12 +1061,19 @@ impl<'a> App<'a> {
                 None
             }
             // Folding is how the cursor leaves a row: `←` on a child walks up
-            // to its parent. Fold mode wants it, to reach a target; a commit
-            // being placed must keep the cursor on its placeholder.
+            // to its parent. The cursor must stay on the placeholder or the
+            // fold target, and a closed commit would hide a commit-file source.
             KeyCode::Left | KeyCode::Right | KeyCode::Char('h' | 'l')
-                if matches!(self.mode, Mode::CommitTarget { .. }) =>
+                if matches!(
+                    self.mode,
+                    Mode::FoldTarget { .. } | Mode::CommitTarget { .. }
+                ) =>
             {
-                self.notice = Some("commit: Enter to confirm, Esc to cancel".to_string());
+                let what = match self.mode {
+                    Mode::CommitTarget { .. } => "commit",
+                    _ => "fold",
+                };
+                self.notice = Some(format!("{}: Enter to confirm, Esc to cancel", what));
                 None
             }
             KeyCode::Right | KeyCode::Char('l') => {
@@ -962,7 +1100,9 @@ impl<'a> App<'a> {
             // While picking a fold target or placing a commit only navigation,
             // Enter, and Esc apply — action keys must not fire and discard
             // the pending operation.
-            KeyCode::Char(' ' | 'c' | 'C' | 'f' | 'b' | 'd' | 'r' | 'R' | '+' | '=' | '-')
+            KeyCode::Char(
+                ' ' | 'c' | 'C' | 'f' | 'F' | 'b' | 'd' | 'r' | 'R' | '+' | '=' | '-',
+            )
             | KeyCode::F(5)
                 if matches!(
                     self.mode,
@@ -990,6 +1130,10 @@ impl<'a> App<'a> {
             }
             KeyCode::Char('f') => {
                 self.action_fold_start();
+                None
+            }
+            KeyCode::Char('F') => {
+                self.action_fold_patch_start();
                 None
             }
             KeyCode::Char('b') => {
@@ -1022,8 +1166,7 @@ impl<'a> App<'a> {
     /// quit.
     fn handle_escape(&mut self) {
         if matches!(self.mode, Mode::FoldTarget { .. }) {
-            self.mode = Mode::Normal;
-            self.notice = Some("fold cancelled".to_string());
+            self.cancel_fold_target();
         } else if matches!(self.mode, Mode::CommitTarget { .. }) {
             self.cancel_commit_target();
         } else if !self.selected.is_empty() {
@@ -1034,9 +1177,10 @@ impl<'a> App<'a> {
     }
 
     fn move_cursor(&mut self, dir: isize) {
-        if matches!(self.mode, Mode::CommitTarget { .. }) {
-            self.move_commit_dest(dir);
-            return;
+        match self.mode {
+            Mode::CommitTarget { .. } => return self.move_commit_dest(dir),
+            Mode::FoldTarget { .. } => return self.move_fold_target(dir),
+            _ => {}
         }
         if self
             .tree
@@ -1139,19 +1283,16 @@ impl<'a> App<'a> {
 
     // -- actions ----------------------------------------------------------------
 
-    /// Targets of the selected rows, in tree order, and the rows they mark;
-    /// falls back to the cursor row.
-    fn selection_sources(&self) -> (Vec<String>, Sources) {
-        let rows: Vec<&Row> = if self.selected.is_empty() {
+    /// The selected rows, in tree order, else the cursor row.
+    fn picked_rows(&self) -> Vec<&Row> {
+        if self.selected.is_empty() {
             self.current_row().into_iter().collect()
         } else {
             self.rows
                 .iter()
                 .filter(|r| self.selected.contains(&r.key))
                 .collect()
-        };
-        let targets = rows.iter().filter_map(|r| r.target.clone()).collect();
-        (targets, self.mark_sources(&rows))
+        }
     }
 
     /// The gutter marks for `rows` as the sources of a pending command: the
@@ -1244,9 +1385,87 @@ impl<'a> App<'a> {
             return;
         };
         let files = vec![self.snapshot.ids.get_unstaged().to_string()];
+        let command = format!("loom add -p {}", files.join(" "));
+        self.start_pick(command, origin, PickFor::Commit, move |workdir| {
+            let repo = git2::Repository::open(workdir)?;
+            let filter = staging::filter_paths(&repo, &files)?;
+            let entries = staging::collect_file_entries(&repo, workdir, filter.as_deref())?;
+            Ok((entries, Vec::new()))
+        });
+    }
+
+    /// `F`: `f` with the hunks picked first — out of one commit's own diff,
+    /// or, on working files or local changes, out of every local change, as
+    /// `C` shows them whatever the cursor or selection. The press starts the
+    /// read on a worker, as `C` does.
+    fn action_fold_patch_start(&mut self) {
+        let rows = self.picked_rows();
+        let Some(origin) = self.current_row().map(|r| r.key.clone()) else {
+            return;
+        };
+        let mut sources: Vec<String> = rows.iter().filter_map(|r| r.target.clone()).collect();
+        if sources.is_empty() || sources.len() != rows.len() {
+            self.notice = Some("fold: select source rows first".to_string());
+            return;
+        }
+        let commit = match rows[0].kind {
+            RowKind::Commit { oid, .. } => Some(oid),
+            RowKind::LocalChanges { .. } | RowKind::WorkingFile { .. } => None,
+            _ => {
+                self.notice = Some("fold: move to a file, local changes, or a commit".to_string());
+                return;
+            }
+        };
+        let targets = match self.fold_targets(&rows, true) {
+            Ok(targets) => targets,
+            Err(notice) => {
+                self.notice = Some(format!("fold: {}", notice));
+                return;
+            }
+        };
+        if commit.is_none() {
+            sources = vec![self.snapshot.ids.get_unstaged().to_string()];
+        }
+        let shown: Vec<String> = sources.iter().map(|s| self.sid_of(s)).collect();
+        let command = format!("loom fold -p {}", shown.join(" "));
+        let purpose = PickFor::Fold {
+            sources: sources.clone(),
+            targets,
+            commit,
+        };
+        match commit {
+            Some(oid) => self.start_pick(command, origin, purpose, move |workdir| {
+                let entries = staging::collect_commit_hunks(workdir, &oid.to_string(), &[])?;
+                // The selector would offer them, and every pick would be refused.
+                if !entries.is_empty() && !hunk_select::has_selectable(&entries, false) {
+                    anyhow::bail!(
+                        "No hunks to select in `{}`\n\
+                         It changes only binary files, which -p cannot move",
+                        git::short_hash(&oid.to_string())
+                    );
+                }
+                Ok((entries, Vec::new()))
+            }),
+            None => self.start_pick(command, origin, purpose, move |workdir| {
+                let repo = git2::Repository::open(workdir)?;
+                let entries = staging::collect_file_entries(&repo, workdir, None)?;
+                let stamp = staging::binary_stamp(workdir, &entries);
+                Ok((entries, stamp))
+            }),
+        }
+    }
+
+    /// Open `command`'s log entry and start `read` on a worker, over the
+    /// snapshot's working tree.
+    fn start_pick(
+        &mut self,
+        command: String,
+        origin: String,
+        purpose: PickFor,
+        read: impl FnOnce(&std::path::Path) -> Result<(Vec<FileEntry>, Stamp)> + Send + 'static,
+    ) {
         // Pushed before the worker starts, not when the staging happens: the
         // read is part of this command and its messages have to land here.
-        let command = format!("loom add -p {}", files.join(" "));
         self.log.push(LogEntry {
             command: command.clone(),
             lines: Vec::new(),
@@ -1261,11 +1480,7 @@ impl<'a> App<'a> {
             // the screen the loop is drawing at the same moment.
             ui::install(tx);
             crate::trace::init(&git_dir, &format!("loom tui: {command}"));
-            let result = (|| {
-                let repo = git2::Repository::open(&workdir)?;
-                let filter = staging::filter_paths(&repo, &files)?;
-                staging::collect_file_entries(&repo, &workdir, filter.as_deref())
-            })();
+            let result = read(&workdir);
             crate::trace::finalize();
             ui::uninstall();
             result
@@ -1273,6 +1488,7 @@ impl<'a> App<'a> {
         self.pick = Some(Pick::Collecting {
             handle,
             origin,
+            purpose,
             ticks: 0,
             cancelled: false,
         });
@@ -1283,14 +1499,7 @@ impl<'a> App<'a> {
     /// notice saying which of the reasons it was — or silently, when there is
     /// no row to stand on.
     fn commit_sources(&mut self) -> Option<(Vec<String>, Sources, String)> {
-        let rows: Vec<&Row> = if self.selected.is_empty() {
-            self.current_row().into_iter().collect()
-        } else {
-            self.rows
-                .iter()
-                .filter(|r| self.selected.contains(&r.key))
-                .collect()
-        };
+        let rows = self.picked_rows();
         if rows.is_empty()
             || !rows.iter().all(|r| {
                 matches!(
@@ -1375,12 +1584,14 @@ impl<'a> App<'a> {
             Some(Pick::Collecting {
                 handle,
                 origin,
+                purpose,
                 ticks,
                 cancelled,
             }) if !handle.is_finished() => {
                 self.pick = Some(Pick::Collecting {
                     handle,
                     origin,
+                    purpose,
                     ticks: ticks + 1,
                     cancelled,
                 });
@@ -1389,27 +1600,33 @@ impl<'a> App<'a> {
             Some(Pick::Collecting {
                 handle,
                 origin,
+                purpose,
                 cancelled,
                 ..
             }) => {
                 let read = handle.join().unwrap_or_else(|_| {
                     Err(anyhow::anyhow!(
-                        "reading the working tree crashed — run `loom trace` for what it did"
+                        "reading the hunks crashed — run `loom trace` for what it did"
                     ))
                 });
                 if cancelled {
                     // Waited for on purpose: the result is dropped, but not the
                     // worker, so nothing of it outlives the pick.
                     self.log_line(Level::Warn, "Cancelled");
-                    self.notice = Some("commit cancelled".to_string());
+                    self.notice = Some(format!("{} cancelled", purpose.label()));
                     if self.quit_after_pick {
                         self.outcome = Some(Outcome::Quit);
                     }
                     return PickTick::Redraw;
                 }
                 match read {
-                    Ok(entries) => {
-                        self.pick = Some(Pick::Ready { entries, origin });
+                    Ok((entries, stamp)) => {
+                        self.pick = Some(Pick::Ready {
+                            entries,
+                            stamp,
+                            origin,
+                            purpose,
+                        });
                         PickTick::Ready { first: true }
                     }
                     Err(e) => {
@@ -1546,41 +1763,297 @@ impl<'a> App<'a> {
         self.notice = Some("commit cancelled".to_string());
     }
 
-    /// `f`: remember the sources, then let the user pick the target in the tree.
+    /// `f`: the selection (else the cursor row) is what folds; `↑`/`↓` then
+    /// walk the rows it can fold into, each tagged with what the fold does
+    /// there, and nothing runs until one is confirmed.
     fn action_fold_start(&mut self) {
-        let (sources, source_rows) = self.selection_sources();
-        if sources.is_empty() {
+        let rows = self.picked_rows();
+        let Some(origin) = self.current_row().map(|r| r.key.clone()) else {
+            return;
+        };
+        let sources: Vec<String> = rows.iter().filter_map(|r| r.target.clone()).collect();
+        if sources.is_empty() || sources.len() != rows.len() {
             self.notice = Some("fold: select source rows first".to_string());
             return;
         }
+        let source_rows = self.mark_sources(&rows);
+        let targets = match self.fold_targets(&rows, false) {
+            Ok(targets) => targets,
+            Err(notice) => {
+                self.notice = Some(format!("fold: {}", notice));
+                return;
+            }
+        };
+        self.enter_fold_target(sources, source_rows, targets, origin, None);
+    }
+
+    fn enter_fold_target(
+        &mut self,
+        sources: Vec<String>,
+        source_rows: Sources,
+        targets: Vec<FoldTarget>,
+        origin: String,
+        hunks: Option<FoldHunks>,
+    ) {
+        let index = nearest_target(&self.rows, &targets, self.tree.cursor());
         self.mode = Mode::FoldTarget {
             sources,
             source_rows,
+            targets,
+            index,
+            origin,
+            hunks,
         };
+        self.show_fold_target();
+    }
+
+    /// What an `F` pick leaves behind once the selector is done with it: the
+    /// target walk, or a line in the entry the press opened saying why there
+    /// is none.
+    fn finish_fold_pick(
+        &mut self,
+        picked: Result<Option<Vec<FileEntry>>>,
+        stamp: Stamp,
+        sources: Vec<String>,
+        targets: Vec<FoldTarget>,
+        commit: Option<git2::Oid>,
+        origin: String,
+    ) {
+        let picked = match picked {
+            Ok(Some(picked)) if picked.iter().any(|f| f.hunks.iter().any(|h| h.selected)) => picked,
+            Ok(_) => {
+                self.log_line(Level::Warn, "Cancelled");
+                self.notice = Some("fold cancelled".to_string());
+                return;
+            }
+            Err(e) => {
+                let text = e.to_string();
+                self.log_line(Level::Error, &text);
+                self.show_error(&text, AfterNotice::Nothing);
+                return;
+            }
+        };
+        // `--hunks` refuses a binary file's id, which the selector still
+        // offers: say which stay behind, as `fold -p` itself does.
+        let (ids, refused) = match commit {
+            Some(_) => hunk_select::picked_ids(&picked, false),
+            None => (Vec::new(), Vec::new()),
+        };
+        if commit.is_some() && ids.is_empty() {
+            let text = "No text hunks selected — binary files are not supported with -p";
+            self.log_line(Level::Error, text);
+            self.notice = Some(format!("fold: {}", text));
+            return;
+        }
+        if !refused.is_empty() {
+            self.log_line(
+                Level::Warn,
+                &format!("Left behind, no hunk to move: {}", refused.join(", ")),
+            );
+        }
+        let source_rows = self.hunk_sources(commit, &picked, &refused);
+        let hunks = match commit {
+            Some(_) => FoldHunks::Commit(picked),
+            None => FoldHunks::Worktree { picked, stamp },
+        };
+        self.enter_fold_target(sources, source_rows, targets, origin, Some(hunks));
+    }
+
+    /// The gutter marks for picked hunks: the files they come from — the
+    /// working files, or the source commit with its files covered, except
+    /// the `left` behind.
+    fn hunk_sources(
+        &self,
+        commit: Option<git2::Oid>,
+        picked: &[FileEntry],
+        left: &[String],
+    ) -> Sources {
+        let paths: HashSet<&str> = picked
+            .iter()
+            .filter(|f| f.hunks.iter().any(|h| h.selected) && !left.contains(&f.path))
+            .map(|f| f.path.as_str())
+            .collect();
+        let Some(oid) = commit else {
+            return Sources {
+                named: paths.iter().map(|p| working_file_key(p)).collect(),
+                covered: HashSet::new(),
+            };
+        };
+        let files = self
+            .snapshot
+            .info
+            .commits
+            .iter()
+            .find(|c| c.oid == oid)
+            .map_or(&[][..], |c| &c.files);
+        Sources {
+            named: HashSet::from([oid.to_string()]),
+            covered: files
+                .iter()
+                .enumerate()
+                .filter(|(_, f)| paths.contains(f.path.as_str()))
+                .map(|(i, _)| commit_file_key(oid, i))
+                .collect(),
+        }
+    }
+
+    /// The rows `rows` can fold into, in tree order, as `loom fold` accepts
+    /// them (Spec 007); the error is the notice for sources with none. Moving
+    /// commits to a branch is not a fold here: the tree keeps fold to one
+    /// thing going into another.
+    ///
+    /// With `hunks`, a commit's picked hunks move out of it rather than the
+    /// whole commit folding: `[MOVE]` where `f` would say `[AMEND]`.
+    fn fold_targets(&self, rows: &[&Row], hunks: bool) -> Result<Vec<FoldTarget>, &'static str> {
+        let target = |row: &Row, effect| {
+            row.target.clone().map(|arg| FoldTarget {
+                key: row.key.clone(),
+                arg,
+                effect,
+            })
+        };
+        let targets: Vec<FoldTarget> = match rows[0].kind {
+            RowKind::LocalChanges { count: 0 } => return Err("no local changes"),
+            RowKind::LocalChanges { .. } | RowKind::WorkingFile { .. } => self
+                .rows
+                .iter()
+                .filter(|r| matches!(r.kind, RowKind::Commit { .. }))
+                .filter_map(|r| target(r, FoldEffect::Amend))
+                .collect(),
+            RowKind::Commit { oid: source, .. } => {
+                if rows.len() > 1 {
+                    return Err("one commit at a time");
+                }
+                // Opened once for the fixup check; a repo that cannot answer
+                // leaves the check to the command.
+                let repo = git2::Repository::open(&self.snapshot.workdir).ok();
+                let older = |oid: git2::Oid| {
+                    repo.as_ref()
+                        .is_none_or(|repo| repo.graph_descendant_of(source, oid).unwrap_or(true))
+                };
+                self.rows
+                    .iter()
+                    .filter_map(|r| match r.kind {
+                        RowKind::LocalChanges { .. } => target(r, FoldEffect::Uncommit),
+                        RowKind::Commit { oid, .. } if oid == source => target(r, FoldEffect::Noop),
+                        // A fixup goes into a commit the source descends from.
+                        RowKind::Commit { oid, .. } if older(oid) => target(
+                            r,
+                            if hunks {
+                                FoldEffect::MoveFile
+                            } else {
+                                FoldEffect::Amend
+                            },
+                        ),
+                        _ => None,
+                    })
+                    .collect()
+            }
+            RowKind::CommitFile { oid: owner, .. } => {
+                if rows.len() > 1 {
+                    return Err("one commit file at a time");
+                }
+                self.rows
+                    .iter()
+                    .filter_map(|r| match r.kind {
+                        RowKind::LocalChanges { .. } => target(r, FoldEffect::Uncommit),
+                        RowKind::Commit { oid, .. } if oid == owner => target(r, FoldEffect::Noop),
+                        RowKind::Commit { .. } => target(r, FoldEffect::MoveFile),
+                        _ => None,
+                    })
+                    .collect()
+            }
+            RowKind::BranchName { .. } => return Err("a branch cannot be folded"),
+            _ => return Err("move to a file, commit, or commit file"),
+        };
+        if targets.iter().all(|t| t.effect == FoldEffect::Noop) {
+            return Err("nothing to fold into");
+        }
+        Ok(targets)
+    }
+
+    /// Redraw the tree for the current fold target and put the cursor on it.
+    fn show_fold_target(&mut self) {
+        let Mode::FoldTarget { targets, index, .. } = &self.mode else {
+            return;
+        };
+        let key = targets[*index].key.clone();
+        self.rebuild_rows(&key);
+        self.diff.reset();
+    }
+
+    /// `↑`/`↓` while picking a fold target: the next target down or up the
+    /// tree, stopping at the ends.
+    fn move_fold_target(&mut self, dir: isize) {
+        let Mode::FoldTarget { targets, index, .. } = &mut self.mode else {
+            return;
+        };
+        let next = index.saturating_add_signed(dir).min(targets.len() - 1);
+        if next == *index {
+            return;
+        }
+        *index = next;
+        self.show_fold_target();
     }
 
     fn confirm_fold_target(&mut self) -> Option<Action> {
-        let row = self.current_row()?;
-        let Some(target) = row.target.clone() else {
-            self.notice = Some("fold: this row cannot be a target".to_string());
+        let Mode::FoldTarget { targets, index, .. } = &self.mode else {
             return None;
         };
-        let Mode::FoldTarget {
-            sources,
-            source_rows,
-        } = std::mem::replace(&mut self.mode, Mode::Normal)
+        let target = targets[*index].clone();
+        if target.effect == FoldEffect::Noop {
+            self.notice = Some("fold: nothing to do here, pick another target".to_string());
+            return None;
+        }
+        let Mode::FoldTarget { sources, hunks, .. } =
+            std::mem::replace(&mut self.mode, Mode::Normal)
         else {
             return None;
         };
-        if sources.contains(&target) {
-            self.mode = Mode::FoldTarget {
+        Some(match hunks {
+            None => Action::Fold {
                 sources,
-                source_rows,
-            };
-            self.notice = Some("fold: target is one of the sources".to_string());
+                target: target.arg,
+                hunks: None,
+            },
+            Some(FoldHunks::Worktree { picked, stamp }) => Action::FoldHunks {
+                sources,
+                picked,
+                stamp,
+                target: target.arg,
+            },
+            Some(FoldHunks::Commit(picked)) => {
+                // Numbered against the commit and where its hunks land, as
+                // `fold -p` re-reads them; `zz` names no commit.
+                let into = (target.effect != FoldEffect::Uncommit).then_some(target.arg.as_str());
+                let from = hunk_select::fingerprint(&sources[0], into, &picked);
+                let (ids, _) = hunk_select::picked_ids(&picked, false);
+                Action::Fold {
+                    sources,
+                    target: target.arg,
+                    hunks: Some(HunkArgs::new(ids, Some(from))),
+                }
+            }
+        })
+    }
+
+    fn cancel_fold_target(&mut self) {
+        let Mode::FoldTarget { origin, .. } = std::mem::replace(&mut self.mode, Mode::Normal)
+        else {
+            return;
+        };
+        self.rebuild_rows(&origin);
+        self.diff.reset();
+        self.notice = Some("fold cancelled".to_string());
+    }
+
+    /// The tag the pending fold puts on `row`, its target.
+    fn row_tag(&self, row: &Row) -> Option<&'static str> {
+        let Mode::FoldTarget { targets, index, .. } = &self.mode else {
             return None;
-        }
-        Some(Action::Fold { sources, target })
+        };
+        let target = &targets[*index];
+        (row.key == target.key).then(|| target.effect.tag())
     }
 
     /// `b`: start naming a new branch, drawn in the tree as if it already
@@ -1677,14 +2150,7 @@ impl<'a> App<'a> {
     /// commit, branch, working file, or the `[local changes]` header for
     /// `drop zz`). Only files can go together, as in the CLI.
     fn action_drop(&mut self) -> Option<Action> {
-        let rows: Vec<&Row> = if self.selected.is_empty() {
-            self.current_row().into_iter().collect()
-        } else {
-            self.rows
-                .iter()
-                .filter(|r| self.selected.contains(&r.key))
-                .collect()
-        };
+        let rows = self.picked_rows();
         let droppable = |row: &Row| {
             matches!(
                 row.kind,
@@ -1796,6 +2262,7 @@ impl<'a> App<'a> {
                     self.theme,
                     &self.snapshot.cwd_prefix,
                     self.row_mark(row),
+                    self.row_tag(row),
                     i == cursor,
                     editing
                         .as_ref()
@@ -1807,9 +2274,12 @@ impl<'a> App<'a> {
 
         let title = match &self.mode {
             Mode::Normal => " Status ".to_string(),
-            Mode::FoldTarget { sources, .. } => self.title_sources(sources, area.width, |what| {
-                format!(" Fold {} into... ", what)
-            }),
+            Mode::FoldTarget { sources, hunks, .. } => {
+                let of = if hunks.is_some() { "hunks of " } else { "" };
+                self.title_sources(sources, area.width, |what| {
+                    format!(" Fold {}{} into... ", of, what)
+                })
+            }
             Mode::CommitTarget {
                 source,
                 dests,
@@ -1969,15 +2439,29 @@ impl ShellApp for App<'_> {
         match pane {
             PaneId::Left => match kind {
                 // A click while a commit is being placed would take the cursor
-                // off the placeholder. The wheel is safe: it goes through
-                // `move_cursor`, which moves the destination in that mode.
+                // off the placeholder, and one picking a fold target may only
+                // land on a target. The wheel is safe: it goes through
+                // `move_cursor`, which moves the destination in those modes.
                 MouseEventKind::Down(MouseButton::Left)
                     if !matches!(self.mode, Mode::CommitTarget { .. }) =>
                 {
                     let Some(clicked) = self.tree.hit_test(area, pos.y) else {
                         return;
                     };
-                    if clicked < self.rows.len() && self.rows[clicked].focusable {
+                    let Some(key) = self
+                        .rows
+                        .get(clicked)
+                        .filter(|r| r.focusable)
+                        .map(|r| r.key.clone())
+                    else {
+                        return;
+                    };
+                    if let Mode::FoldTarget { targets, index, .. } = &mut self.mode {
+                        if let Some(i) = targets.iter().position(|t| t.key == key) {
+                            *index = i;
+                            self.show_fold_target();
+                        }
+                    } else {
                         self.tree.set_cursor(clicked);
                         self.diff.reset();
                     }
@@ -2070,22 +2554,49 @@ impl ShellApp for App<'_> {
         if changed { Tick::Redraw } else { Tick::Idle }
     }
 
-    /// The hunk selector for `C`, drawn on the tree's own terminal. What it
-    /// keeps is staged at once, as `loom add -p` would; the commit that
-    /// follows takes the index, so the tree reloads first to show it.
+    /// The hunk selector for `C` or `F`, drawn on the tree's own terminal.
+    /// What `C` keeps is staged at once, as `loom add -p` would; the commit
+    /// that follows takes the index, so the tree reloads first to show it.
+    /// What `F` keeps waits for its target, staging nothing.
     fn take_over(&mut self, terminal: &mut ratatui::DefaultTerminal) {
         // Only a read that is done is this to consume. Nothing else asks for
         // the terminal, so the other arm is a belt: it puts back rather than
         // drops, since dropping a running read would strand its worker.
-        let (entries, origin) = match self.pick.take() {
-            Some(Pick::Ready { entries, origin }) => (entries, origin),
+        let (entries, stamp, origin, purpose) = match self.pick.take() {
+            Some(Pick::Ready {
+                entries,
+                stamp,
+                origin,
+                purpose,
+            }) => (entries, stamp, origin, purpose),
             other => {
                 self.pick = other;
                 return;
             }
         };
-        let staged = self.select_and_stage(entries, terminal);
-        self.finish_pick(staged, origin);
+        match purpose {
+            PickFor::Commit => {
+                let staged = self.select_and_stage(entries, terminal);
+                self.finish_pick(staged, origin);
+            }
+            PickFor::Fold {
+                sources,
+                targets,
+                commit,
+            } => {
+                if entries.is_empty() {
+                    self.log_line(Level::Warn, "No changes to pick");
+                    self.notice = Some("fold: no hunks to pick".to_string());
+                    return;
+                }
+                let picked = run_hunk_selector_nested(
+                    entries,
+                    TuiTheme::from_graph_theme(&self.graph_theme),
+                    terminal,
+                );
+                self.finish_fold_pick(picked, stamp, sources, targets, commit, origin);
+            }
+        }
     }
 
     /// The worker holds the terminal (an editor); its `Resume` ends the wait.
@@ -2125,20 +2636,25 @@ impl ShellApp for App<'_> {
             return Some(format!(" {} {}{}", frame, running.command, detail));
         }
         if let Some(Pick::Collecting {
-            ticks, cancelled, ..
+            ticks,
+            cancelled,
+            purpose,
+            ..
         }) = &self.pick
         {
             let frame = SPINNER_FRAMES[(ticks / 2) % SPINNER_FRAMES.len()];
-            let what = if *cancelled {
-                "cancelling: waiting for the read to end"
-            } else {
-                "reading the working tree — Esc to cancel"
+            let what = match purpose {
+                _ if *cancelled => "cancelling: waiting for the read to end",
+                PickFor::Fold {
+                    commit: Some(_), ..
+                } => "reading the commit — Esc to cancel",
+                _ => "reading the working tree — Esc to cancel",
             };
-            return Some(format!(" {} commit: {}", frame, what));
+            return Some(format!(" {} {}: {}", frame, purpose.label(), what));
         }
         match &self.mode {
             Mode::FoldTarget { .. } => {
-                Some(" fold: move to the target, Enter to confirm, Esc to cancel".to_string())
+                Some(" fold: ↑/↓ choose the target, Enter to fold, Esc to cancel".to_string())
             }
             Mode::CommitTarget { .. } => Some(
                 " commit: ↑/↓ choose the destination, Enter to commit, Esc to cancel".to_string(),
@@ -2159,7 +2675,7 @@ impl ShellApp for App<'_> {
             "Close/open: ←/→".into(),
             "Select: space".into(),
             "Commit: c/C".into(),
-            "Fold: f".into(),
+            "Fold: f/F".into(),
             "Branch: b".into(),
             "Drop: d".into(),
             "Reword: r".into(),
@@ -2182,6 +2698,25 @@ fn nearest_focusable(rows: &[Row], index: usize) -> Option<usize> {
         .or_else(|| rows.iter().position(|r| r.focusable))
 }
 
+/// Index of the target a fold starts on: the nearest `[NOOP]` one, so commit
+/// sources start on themselves and a commit file on its commit, else the one
+/// nearest `cursor`, the lower on a tie.
+fn nearest_target(rows: &[Row], targets: &[FoldTarget], cursor: usize) -> usize {
+    (0..targets.len())
+        .min_by_key(|&i| {
+            let at = rows
+                .iter()
+                .position(|r| r.key == targets[i].key)
+                .unwrap_or(usize::MAX);
+            (
+                targets[i].effect != FoldEffect::Noop,
+                at.abs_diff(cursor),
+                at < cursor,
+            )
+        })
+        .unwrap_or(0)
+}
+
 // ── Row rendering ────────────────────────────────────────────────────────
 
 /// Render one tree row as a styled line; `editing` replaces the branch name
@@ -2191,6 +2726,7 @@ fn row_line(
     theme: &TuiTheme,
     cwd_prefix: &str,
     mark: RowMark,
+    tag: Option<&'static str>,
     is_cursor: bool,
     editing: Option<&TextField>,
 ) -> Line<'static> {
@@ -2214,6 +2750,10 @@ fn row_line(
         RowKind::LocalChanges { count } => {
             spans.push(Span::styled("╭─ ", theme.graph));
             spans.push(Span::styled(row.sid.clone(), theme.shortid));
+            if let Some(tag) = tag {
+                spans.push(Span::raw(" "));
+                spans.push(Span::styled(tag, theme.pending_tag));
+            }
             spans.push(Span::styled(" [", dim));
             spans.push(Span::styled("local changes", theme.label));
             spans.push(Span::styled("]", dim));
@@ -2303,6 +2843,10 @@ fn row_line(
             }
             spans.push(Span::styled(row.sid.clone(), theme.shortid));
             spans.push(Span::raw(graph::id_pad(&row.sid)));
+            if let Some(tag) = tag {
+                spans.push(Span::styled(tag, theme.pending_tag));
+                spans.push(Span::raw(" "));
+            }
             spans.push(Span::styled(message.clone(), theme.message));
             if row.expandable && !row.expanded {
                 spans.push(Span::styled(format!(" ({} files)", file_count), dim));

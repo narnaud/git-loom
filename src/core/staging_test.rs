@@ -1,4 +1,6 @@
-use super::{filter_paths, save_and_unstage_staged, selected_paths};
+use super::{
+    binary_stamp, collect_file_entries, filter_paths, save_and_unstage_staged, selected_paths,
+};
 use crate::core::diff::DiffHunk;
 use crate::core::repo;
 use crate::core::test_helpers::TestRepo;
@@ -248,4 +250,18 @@ fn a_handover_the_cleanup_never_reached_parks_the_patch() {
                 .starts_with("unrestored-staged")),
         "a cleanup that never ran leaves the guard to hand the patch over"
     );
+}
+
+#[test]
+fn a_submodule_is_stamped_with_its_checked_out_commit() {
+    let test_repo = TestRepo::new_with_remote();
+    let (_, second) = test_repo.add_submodule("sub");
+    test_repo.commit_staged("Add sub");
+    test_repo.checkout_submodule("sub", second);
+
+    let workdir = test_repo.workdir();
+    let entries =
+        collect_file_entries(&test_repo.repo, &workdir, Some(&["sub".to_string()])).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(binary_stamp(&workdir, &entries), vec![Some(second)]);
 }

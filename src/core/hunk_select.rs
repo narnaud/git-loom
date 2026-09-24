@@ -16,7 +16,7 @@ use crate::tui::hunk_selector::FileEntry;
 
 /// The `--hunks` / `--hunks-from` pair. The CLI requires each flag with the
 /// other, so an empty `ids` means neither was given.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct HunkArgs {
     pub ids: Vec<String>,
     pub from: Option<String>,
@@ -86,6 +86,27 @@ pub fn has_selectable(entries: &[FileEntry], whole_files: bool) -> bool {
         .iter()
         .flat_map(|file| &file.hunks)
         .any(|entry| is_selectable(&entry.hunk, whole_files))
+}
+
+/// The ids of the entries picked in `entries`, as `--hunks` takes them, and
+/// the paths of the picked entries this command cannot take, which a caller
+/// must leave out: [`apply`] refuses their ids.
+pub fn picked_ids(entries: &[FileEntry], whole_files: bool) -> (Vec<String>, Vec<String>) {
+    let mut ids = Vec::new();
+    let mut refused = Vec::new();
+    for file in entries {
+        for (index, entry) in file.hunks.iter().enumerate() {
+            if !entry.selected {
+                continue;
+            }
+            if is_selectable(&entry.hunk, whole_files) {
+                ids.push(hunk_id(&file.path, index));
+            } else if !refused.contains(&file.path) {
+                refused.push(file.path.clone());
+            }
+        }
+    }
+    (ids, refused)
 }
 
 /// Digest of the numbering a set of ids was taken from, not of the command:

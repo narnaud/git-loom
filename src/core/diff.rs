@@ -8,7 +8,7 @@ pub(crate) const SUBMODULE_ENTRY: &str = "(submodule)";
 const HUNK_HEADER: &str = "@@ -";
 
 /// A single hunk extracted from a unified diff.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DiffHunk {
     /// The raw diff text for this hunk (starting with the @@ header, ending before the next hunk
     /// or EOF).

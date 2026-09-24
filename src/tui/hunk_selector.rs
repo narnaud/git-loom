@@ -30,6 +30,7 @@ pub(crate) enum HunkOrigin {
 }
 
 /// A single hunk with a toggle state and origin.
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct HunkEntry {
     pub hunk: DiffHunk,
     pub selected: bool,
@@ -37,6 +38,7 @@ pub(crate) struct HunkEntry {
 }
 
 /// A file and its parsed hunks, with git status information.
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct FileEntry {
     pub path: String,
     pub hunks: Vec<HunkEntry>,

@@ -1223,6 +1223,7 @@ fn commit_mode_blocks_action_keys() {
         KeyCode::Char(' '),
         KeyCode::Char('c'),
         KeyCode::Char('f'),
+        KeyCode::Char('F'),
         KeyCode::Char('b'),
         KeyCode::Char('d'),
         KeyCode::Char('r'),
@@ -1262,7 +1263,12 @@ fn fold_flow_uses_selection_as_sources_and_cursor_as_target() {
     assert!(matches!(app.mode, Mode::FoldTarget { .. }));
 
     move_cursor_to(&mut app, &oid('a').to_string());
-    let Some(Action::Fold { sources, target }) = app.confirm_fold_target() else {
+    let Some(Action::Fold {
+        sources,
+        target,
+        hunks: None,
+    }) = app.confirm_fold_target()
+    else {
         panic!("expected a fold action");
     };
     assert_eq!(sources, vec![app.snapshot.ids.get_file("a.rs").to_string()]);
@@ -1270,17 +1276,234 @@ fn fold_flow_uses_selection_as_sources_and_cursor_as_target() {
     assert!(matches!(app.mode, Mode::Normal));
 }
 
-#[test]
-fn fold_rejects_target_among_sources() {
-    let theme = make_theme();
-    let mut app = make_app(make_snapshot(), &theme);
-    move_cursor_to(&mut app, &oid('a').to_string());
-    app.toggle_selection();
+/// `feature-b` owning `b` and `feature-a` owning `a`, side by side on `9`.
+fn two_branch_info() -> RepoInfo {
+    RepoInfo {
+        commits: vec![
+            commit('b', '9', "Add lexer"),
+            commit('a', '9', "Add parser"),
+        ],
+        branches: vec![
+            BranchInfo {
+                name: "feature-a".to_string(),
+                tip_oid: oid('a'),
+                remote: None,
+            },
+            BranchInfo {
+                name: "feature-b".to_string(),
+                tip_oid: oid('b'),
+                remote: None,
+            },
+        ],
+        ..make_info()
+    }
+}
 
+/// The target keys a pending fold walks, with their effects, in tree order.
+fn fold_targets_of(app: &App) -> Vec<(String, FoldEffect)> {
+    let Mode::FoldTarget { targets, .. } = &app.mode else {
+        panic!("not picking a fold target");
+    };
+    targets.iter().map(|t| (t.key.clone(), t.effect)).collect()
+}
+
+fn fold_start_on(app: &mut App, keys: &[&str]) {
+    for key in keys {
+        move_cursor_to(app, key);
+        app.toggle_selection();
+    }
     app.action_fold_start();
-    move_cursor_to(&mut app, &oid('a').to_string());
+}
+
+#[test]
+fn folding_files_walks_the_commits_tagged_amend() {
+    let theme = make_theme();
+    let mut app = make_app(snapshot_of(two_branch_info()), &theme);
+    fold_start_on(&mut app, &["wf:a.rs"]);
+
+    assert_eq!(
+        fold_targets_of(&app),
+        vec![
+            (oid('b').to_string(), FoldEffect::Amend),
+            (oid('a').to_string(), FoldEffect::Amend),
+        ]
+    );
+    assert_eq!(cursor_key(&app), oid('b').to_string());
+    press(&mut app, KeyCode::Down);
+    assert_eq!(cursor_key(&app), oid('a').to_string());
+
+    let mut shell = Shell::new(app);
+    let lines = rendered_lines(&mut shell);
+    assert!(tree_line(&lines, "Add parser").contains("[AMEND] Add parser"));
+    assert!(!tree_line(&lines, "Add lexer").contains("[AMEND]"));
+    assert!(tree_line(&lines, "a.rs").contains("▸ "), "{lines:#?}");
+}
+
+#[test]
+fn folding_a_commit_offers_uncommit_noop_and_amend() {
+    let theme = make_theme();
+    let mut app = make_app(snapshot_of(two_branch_info()), &theme);
+    fold_start_on(&mut app, &[&oid('a').to_string()]);
+
+    // No branch: moving commits is not a fold in the tree.
+    assert_eq!(
+        fold_targets_of(&app),
+        vec![
+            (LOCAL_CHANGES_KEY.to_string(), FoldEffect::Uncommit),
+            // Not a git repo's commits, so the fixup check is left to the
+            // command.
+            (oid('b').to_string(), FoldEffect::Amend),
+            (oid('a').to_string(), FoldEffect::Noop),
+        ]
+    );
+    assert_eq!(cursor_key(&app), oid('a').to_string(), "starts on itself");
     assert!(app.confirm_fold_target().is_none());
     assert!(matches!(app.mode, Mode::FoldTarget { .. }));
+    assert!(app.notice.as_deref().unwrap().contains("nothing to do"));
+
+    press(&mut app, KeyCode::Up);
+    let mut shell = Shell::new(app);
+    let lines = rendered_lines(&mut shell);
+    assert!(tree_line(&lines, "Add lexer").contains("[AMEND] Add lexer"));
+    assert!(!tree_line(&lines, "Add parser").contains("[NOOP]"));
+    let Some(Action::Fold {
+        sources,
+        target,
+        hunks: None,
+    }) = shell.app.confirm_fold_target()
+    else {
+        panic!("expected a fold action");
+    };
+    assert_eq!(sources, vec![oid('a').to_string()]);
+    assert_eq!(target, oid('b').to_string());
+}
+
+#[test]
+fn folding_a_commit_into_the_working_tree_tags_it_uncommit() {
+    let theme = make_theme();
+    let mut app = make_app(snapshot_of(two_branch_info()), &theme);
+    fold_start_on(&mut app, &[&oid('a').to_string()]);
+    while cursor_key(&app) != LOCAL_CHANGES_KEY {
+        press(&mut app, KeyCode::Up);
+    }
+
+    let mut shell = Shell::new(app);
+    let lines = rendered_lines(&mut shell);
+    assert!(
+        tree_line(&lines, "local changes").contains("[UNCOMMIT]"),
+        "{lines:#?}"
+    );
+}
+
+#[test]
+fn cancelling_a_fold_puts_the_cursor_back() {
+    let theme = make_theme();
+    let mut app = make_app(snapshot_of(two_branch_info()), &theme);
+    fold_start_on(&mut app, &[&oid('a').to_string()]);
+    let Mode::FoldTarget { origin, .. } = &app.mode else {
+        panic!("not picking a fold target");
+    };
+    let origin = origin.clone();
+    press(&mut app, KeyCode::Up);
+
+    press(&mut app, KeyCode::Esc);
+    assert!(matches!(app.mode, Mode::Normal));
+    assert_eq!(cursor_key(&app), origin);
+}
+
+#[test]
+fn folding_a_commit_file_offers_uncommit_noop_and_moves() {
+    let theme = make_theme();
+    let mut app = make_app(snapshot_of(two_branch_info()), &theme);
+    let a = oid('a').to_string();
+    app.expanded.insert(a.clone());
+    app.rebuild_rows(&a);
+    fold_start_on(&mut app, &[&format!("{a}:0")]);
+
+    assert_eq!(
+        fold_targets_of(&app),
+        vec![
+            (LOCAL_CHANGES_KEY.to_string(), FoldEffect::Uncommit),
+            (oid('b').to_string(), FoldEffect::MoveFile),
+            (a.clone(), FoldEffect::Noop),
+        ]
+    );
+    assert_eq!(cursor_key(&app), a, "starts on the file's own commit");
+    press(&mut app, KeyCode::Up);
+
+    let mut shell = Shell::new(app);
+    let lines = rendered_lines(&mut shell);
+    assert!(tree_line(&lines, "Add lexer").contains("[MOVE] Add lexer"));
+    assert!(!tree_line(&lines, "Add parser").contains("[NOOP]"));
+}
+
+#[test]
+fn fold_refuses_sources_the_command_would() {
+    let theme = make_theme();
+    let a = oid('a').to_string();
+    let b = oid('b').to_string();
+    for (keys, expected) in [
+        (
+            vec!["br:feature-a".to_string()],
+            "fold: a branch cannot be folded",
+        ),
+        (
+            vec![format!("{a}:0"), format!("{b}:0")],
+            "fold: one commit file at a time",
+        ),
+        (vec![b.clone(), a.clone()], "fold: one commit at a time"),
+    ] {
+        let mut app = make_app(snapshot_of(two_branch_info()), &theme);
+        app.expanded.insert(a.clone());
+        app.expanded.insert(b.clone());
+        app.rebuild_rows(&a);
+        let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
+        fold_start_on(&mut app, &keys);
+        assert!(matches!(app.mode, Mode::Normal), "{keys:?}");
+        assert_eq!(app.notice.as_deref(), Some(expected));
+    }
+}
+
+/// `loom fold <c> <target>` refuses a target the source does not descend
+/// from, so a newer commit is no target at all.
+#[test]
+fn a_fixup_is_offered_only_into_commits_the_source_descends_from() {
+    let repo = crate::core::test_helpers::TestRepo::new();
+    let base = repo.head_oid();
+    let c1 = repo.commit("one", "one.txt");
+    let c2 = repo.commit("two", "two.txt");
+    let c3 = repo.commit("three", "three.txt");
+    let real = |oid: git2::Oid, parent: git2::Oid, message: &str| CommitInfo {
+        oid,
+        parent_oid: Some(parent),
+        message: message.to_string(),
+        ..commit('0', '0', "")
+    };
+    let mut info = make_info();
+    info.upstream.merge_base_oid = base;
+    info.commits = vec![
+        real(c3, c2, "three"),
+        real(c2, c1, "two"),
+        real(c1, base, "one"),
+    ];
+    info.branches.clear();
+    let snapshot = Snapshot {
+        workdir: repo.workdir(),
+        git_dir: repo.repo.path().to_path_buf(),
+        ..snapshot_of(info)
+    };
+    let theme = make_theme();
+    let mut app = make_app(snapshot, &theme);
+    fold_start_on(&mut app, &[&c2.to_string()]);
+
+    assert_eq!(
+        fold_targets_of(&app),
+        vec![
+            (LOCAL_CHANGES_KEY.to_string(), FoldEffect::Uncommit),
+            (c2.to_string(), FoldEffect::Noop),
+            (c1.to_string(), FoldEffect::Amend),
+        ]
+    );
 }
 
 #[test]
@@ -1745,8 +1968,33 @@ fn command_line_uses_the_short_ids_the_tree_shows() {
         app.command_line(&Action::Fold {
             sources: vec![file.clone(), ids.get_unstaged().to_string()],
             target: oid('a').to_string(),
+            hunks: None,
         }),
         format!("loom fold {} {} {}", file, ids.get_unstaged(), commit)
+    );
+    assert_eq!(
+        app.command_line(&Action::Fold {
+            sources: vec![oid('a').to_string()],
+            target: ids.get_unstaged().to_string(),
+            hunks: Some(HunkArgs::new(
+                vec!["src/a b.rs:1".to_string()],
+                Some("0123abcd".to_string())
+            )),
+        }),
+        format!(
+            "loom fold -p {} {} --hunks 'src/a b.rs:1' --hunks-from 0123abcd",
+            commit,
+            ids.get_unstaged()
+        )
+    );
+    assert_eq!(
+        app.command_line(&Action::FoldHunks {
+            sources: vec![file.clone()],
+            picked: Vec::new(),
+            stamp: Vec::new(),
+            target: oid('a').to_string(),
+        }),
+        format!("loom fold -p {} {}", file, commit)
     );
     assert_eq!(
         app.command_line(&Action::Commit {
@@ -2362,7 +2610,7 @@ fn status_bar_matches_spec() {
         .collect();
     assert!(
         last_row.starts_with(
-            " Navigate: ↑/↓ | Close/open: ←/→ | Select: space | Commit: c/C | Fold: f \
+            " Navigate: ↑/↓ | Close/open: ←/→ | Select: space | Commit: c/C | Fold: f/F \
              | Branch: b | Drop: d | Reword: r | Log: L | Refresh: R | Quit: q"
         ),
         "got: {:?}",
@@ -2815,11 +3063,19 @@ fn tui_row_marks_a_one_sided_conflict_as_conflicted() {
             index,
             worktree,
         };
-        row_line(&row(kind, "wf"), &theme, "", RowMark::None, false, None)
-            .spans
-            .iter()
-            .map(|s| s.content.as_ref())
-            .collect::<String>()
+        row_line(
+            &row(kind, "wf"),
+            &theme,
+            "",
+            RowMark::None,
+            None,
+            false,
+            None,
+        )
+        .spans
+        .iter()
+        .map(|s| s.content.as_ref())
+        .collect::<String>()
     };
 
     assert!(
@@ -2831,4 +3087,473 @@ fn tui_row_marks_a_one_sided_conflict_as_conflicted() {
     assert!(line_text('!', '!').contains("!!"));
     assert!(line_text('?', '?').contains("⁕"));
     assert!(line_text('M', ' ').contains("M"));
+}
+
+/// Twenty lines, so a change to the first and one to the last are two hunks.
+fn twenty_lines(first: &str, last: &str) -> String {
+    let mut lines = vec![first.to_string()];
+    lines.extend((2..20).map(|i| format!("line {i}")));
+    lines.push(last.to_string());
+    lines.join("\n") + "\n"
+}
+
+/// Run an `F` read to the selector, then answer as the selector would,
+/// keeping the first hunk only.
+fn pick_first_hunk(app: &mut App) {
+    pick_first_hunk_after(app, || {});
+}
+
+/// `pick_first_hunk`, running `meanwhile` while the selector would be open.
+fn pick_first_hunk_after(app: &mut App, meanwhile: impl FnOnce()) {
+    poll_until_take_over(app);
+    meanwhile();
+    let Some(Pick::Ready {
+        mut entries,
+        stamp,
+        origin,
+        purpose:
+            PickFor::Fold {
+                sources,
+                targets,
+                commit,
+            },
+    }) = app.pick.take()
+    else {
+        panic!("no fold pick ready");
+    };
+    for (i, hunk) in entries[0].hunks.iter_mut().enumerate() {
+        hunk.selected = i == 0;
+    }
+    app.finish_fold_pick(Ok(Some(entries)), stamp, sources, targets, commit, origin);
+}
+
+#[test]
+fn fold_with_hunks_amends_the_picked_working_tree_hunks() {
+    let repo = crate::core::test_helpers::TestRepo::new_with_remote();
+    repo.write_file("f.txt", &twenty_lines("first", "last"));
+    repo.stage_files(&["f.txt"]);
+    repo.commit_staged("Add f");
+    let target = repo.head_oid();
+    repo.write_file("f.txt", &twenty_lines("FIRST", "LAST"));
+    let theme = make_theme();
+
+    repo.in_dir(|| {
+        let mut app = make_app(load_snapshot(1).unwrap(), &theme);
+        move_cursor_to(&mut app, "wf:f.txt");
+        press(&mut app, KeyCode::Char('F'));
+        pick_first_hunk(&mut app);
+
+        assert_eq!(
+            fold_targets_of(&app),
+            vec![(target.to_string(), FoldEffect::Amend)]
+        );
+        assert_eq!(app.row_mark(&app.rows[1]), RowMark::Source);
+        assert_eq!(repo.status_porcelain(), " M f.txt\n", "nothing staged yet");
+        let Some(action @ Action::FoldHunks { .. }) = app.confirm_fold_target() else {
+            panic!("expected a hunk fold");
+        };
+        let command = app.command_line(&action);
+        execute_action(
+            action,
+            &command,
+            &app.snapshot.git_dir,
+            &graph::Theme::dark(),
+        )
+        .unwrap();
+    });
+
+    assert_eq!(repo.get_message(0), "Add f");
+    let folded = repo.diff_commit("HEAD");
+    assert!(
+        folded.contains("+FIRST") && !folded.contains("+LAST"),
+        "{folded}"
+    );
+    let left = repo.diff_head_name_only();
+    assert_eq!(left.trim(), "f.txt");
+    assert_eq!(repo.read_file("f.txt"), twenty_lines("FIRST", "LAST"));
+}
+
+#[test]
+fn fold_with_hunks_uncommits_the_picked_commit_hunks() {
+    let repo = crate::core::test_helpers::TestRepo::new_with_remote();
+    repo.write_file("f.txt", &twenty_lines("first", "last"));
+    repo.stage_files(&["f.txt"]);
+    repo.commit_staged("Add f");
+    let older = repo.head_oid();
+    repo.write_file("f.txt", &twenty_lines("FIRST", "LAST"));
+    repo.stage_files(&["f.txt"]);
+    repo.commit_staged("Shout");
+    let source = repo.head_oid();
+    let theme = make_theme();
+
+    repo.in_dir(|| {
+        let mut app = make_app(load_snapshot(1).unwrap(), &theme);
+        move_cursor_to(&mut app, &source.to_string());
+        press(&mut app, KeyCode::Char('F'));
+        pick_first_hunk(&mut app);
+
+        assert_eq!(
+            fold_targets_of(&app),
+            vec![
+                (LOCAL_CHANGES_KEY.to_string(), FoldEffect::Uncommit),
+                (source.to_string(), FoldEffect::Noop),
+                (older.to_string(), FoldEffect::MoveFile),
+            ]
+        );
+        while cursor_key(&app) != LOCAL_CHANGES_KEY {
+            press(&mut app, KeyCode::Up);
+        }
+        let Some(action @ Action::Fold { hunks: Some(_), .. }) = app.confirm_fold_target() else {
+            panic!("expected a hunk fold");
+        };
+        let command = app.command_line(&action);
+        assert!(
+            command.contains("--hunks 'f.txt:1' --hunks-from"),
+            "{command}"
+        );
+        execute_action(
+            action,
+            &command,
+            &app.snapshot.git_dir,
+            &graph::Theme::dark(),
+        )
+        .unwrap();
+    });
+
+    assert_eq!(repo.get_message(0), "Shout");
+    let kept = repo.diff_commit("HEAD");
+    assert!(kept.contains("+LAST") && !kept.contains("+FIRST"), "{kept}");
+    assert_eq!(repo.read_file("f.txt"), twenty_lines("FIRST", "LAST"));
+    assert_eq!(repo.status_porcelain(), " M f.txt\n");
+}
+
+#[test]
+fn fold_with_hunks_moves_the_picked_commit_hunks_into_an_older_commit() {
+    let repo = crate::core::test_helpers::TestRepo::new_with_remote();
+    repo.write_file("f.txt", &twenty_lines("first", "last"));
+    repo.stage_files(&["f.txt"]);
+    repo.commit_staged("Add f");
+    let older = repo.head_oid();
+    repo.write_file("f.txt", &twenty_lines("FIRST", "LAST"));
+    repo.stage_files(&["f.txt"]);
+    repo.commit_staged("Shout");
+    let source = repo.head_oid();
+    let theme = make_theme();
+
+    repo.in_dir(|| {
+        let mut app = make_app(load_snapshot(1).unwrap(), &theme);
+        move_cursor_to(&mut app, &source.to_string());
+        press(&mut app, KeyCode::Char('F'));
+        pick_first_hunk(&mut app);
+        while cursor_key(&app) != older.to_string() {
+            press(&mut app, KeyCode::Down);
+        }
+        let Some(action @ Action::Fold { hunks: Some(_), .. }) = app.confirm_fold_target() else {
+            panic!("expected a hunk fold");
+        };
+        let command = app.command_line(&action);
+        execute_action(
+            action,
+            &command,
+            &app.snapshot.git_dir,
+            &graph::Theme::dark(),
+        )
+        .unwrap();
+    });
+
+    assert_eq!(repo.commit_messages().len(), 2);
+    assert_eq!(repo.get_message(0), "Shout");
+    let kept = repo.diff_commit("HEAD");
+    assert!(kept.contains("+LAST") && !kept.contains("+FIRST"), "{kept}");
+    let moved = repo.diff_commit("HEAD~1");
+    assert!(
+        moved.contains("+FIRST") && moved.contains("+last"),
+        "{moved}"
+    );
+    assert_eq!(repo.status_porcelain(), "");
+}
+
+#[test]
+fn fold_with_hunks_on_a_file_picks_from_every_local_change() {
+    let repo = crate::core::test_helpers::TestRepo::new_with_remote();
+    repo.write_file("a.txt", "a\n");
+    repo.write_file("b.txt", "b\n");
+    repo.stage_files(&["a.txt", "b.txt"]);
+    repo.commit_staged("Add a and b");
+    repo.write_file("a.txt", "A\n");
+    repo.write_file("b.txt", "B\n");
+    let theme = make_theme();
+
+    repo.in_dir(|| {
+        let mut app = make_app(load_snapshot(1).unwrap(), &theme);
+        move_cursor_to(&mut app, "wf:a.txt");
+        press(&mut app, KeyCode::Char('F'));
+        poll_until_take_over(&mut app);
+        let Some(Pick::Ready {
+            entries,
+            purpose: PickFor::Fold { sources, .. },
+            ..
+        }) = &app.pick
+        else {
+            panic!("no fold pick ready");
+        };
+        let paths: Vec<&str> = entries.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["a.txt", "b.txt"]);
+        assert_eq!(sources, &[app.snapshot.ids.get_unstaged().to_string()]);
+    });
+}
+
+#[test]
+fn fold_with_hunks_of_a_binary_only_commit_fails_before_the_selector() {
+    let repo = crate::core::test_helpers::TestRepo::new_with_remote();
+    std::fs::write(repo.workdir().join("f.bin"), b"\0one").unwrap();
+    repo.stage_files(&["f.bin"]);
+    repo.commit_staged("Add f");
+    let source = repo.head_oid();
+    let theme = make_theme();
+
+    repo.in_dir(|| {
+        let mut app = make_app(load_snapshot(1).unwrap(), &theme);
+        move_cursor_to(&mut app, &source.to_string());
+        press(&mut app, KeyCode::Char('F'));
+        let deadline = deadline();
+        while app.pick.is_some() && std::time::Instant::now() < deadline {
+            assert!(!matches!(app.poll_background(), Tick::TakeOver));
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert!(app.pick.is_none(), "the pick never ended");
+        assert!(matches!(app.mode, Mode::Normal));
+        let lines = &app.log.last().unwrap().lines;
+        assert!(
+            lines
+                .iter()
+                .any(|(l, text)| *l == Level::Error && text.contains("only binary files")),
+            "{lines:?}"
+        );
+    });
+}
+
+#[test]
+fn fold_with_hunks_does_not_mark_a_binary_it_leaves_behind() {
+    let repo = crate::core::test_helpers::TestRepo::new_with_remote();
+    repo.write_file("f.txt", "text\n");
+    std::fs::write(repo.workdir().join("f.bin"), b"\0one").unwrap();
+    repo.stage_files(&["f.txt", "f.bin"]);
+    repo.commit_staged("Add both");
+    let source = repo.head_oid();
+    let theme = make_theme();
+
+    repo.in_dir(|| {
+        let mut app = make_app(load_snapshot(1).unwrap(), &theme);
+        move_cursor_to(&mut app, &source.to_string());
+        press(&mut app, KeyCode::Char('F'));
+        poll_until_take_over(&mut app);
+        let Some(Pick::Ready {
+            mut entries,
+            stamp,
+            origin,
+            purpose:
+                PickFor::Fold {
+                    sources,
+                    targets,
+                    commit,
+                },
+        }) = app.pick.take()
+        else {
+            panic!("no fold pick ready");
+        };
+        for hunk in entries.iter_mut().flat_map(|f| &mut f.hunks) {
+            hunk.selected = true;
+        }
+        app.finish_fold_pick(Ok(Some(entries)), stamp, sources, targets, commit, origin);
+
+        let files = &app
+            .snapshot
+            .info
+            .commits
+            .iter()
+            .find(|c| c.oid == source)
+            .unwrap()
+            .files;
+        let text = files.iter().position(|f| f.path == "f.txt").unwrap();
+        let Mode::FoldTarget { source_rows, .. } = &app.mode else {
+            panic!("not picking a fold target");
+        };
+        assert_eq!(
+            source_rows.covered,
+            HashSet::from([commit_file_key(source, text)])
+        );
+    });
+}
+
+#[test]
+fn fold_with_hunks_refuses_before_the_pick_when_nothing_takes_it() {
+    let theme = make_theme();
+    let info = RepoInfo {
+        commits: Vec::new(),
+        branches: Vec::new(),
+        ..make_info()
+    };
+    let mut app = make_app(snapshot_of(info), &theme);
+    move_cursor_to(&mut app, "wf:b.rs");
+    press(&mut app, KeyCode::Char('F'));
+    assert!(app.pick.is_none());
+    assert_eq!(app.notice.as_deref(), Some("fold: nothing to fold into"));
+}
+
+/// `F` stages working-tree hunks only at confirm, so what changed while the
+/// target was picked must refuse the fold, not slip into the commit — a
+/// binary file included, which the listing shows only as a label.
+#[test]
+fn fold_with_hunks_refuses_a_pick_the_working_tree_moved_away_from() {
+    let text = |last: &str| twenty_lines("FIRST", last).into_bytes();
+    for (name, committed, picked, edited, in_selector) in [
+        (
+            "f.txt",
+            Some(twenty_lines("first", "last").into_bytes()),
+            text("LAST"),
+            Some(text("LATER")),
+            false,
+        ),
+        (
+            "f.bin",
+            Some(b"\0one".to_vec()),
+            b"\0two".to_vec(),
+            Some(b"\0three".to_vec()),
+            false,
+        ),
+        (
+            "f.bin",
+            Some(b"\0one".to_vec()),
+            b"\0two".to_vec(),
+            Some(b"\0three".to_vec()),
+            true,
+        ),
+        (
+            "f.bin",
+            Some(b"\0one".to_vec()),
+            b"\0two".to_vec(),
+            None,
+            false,
+        ),
+        (
+            "new.txt",
+            None,
+            b"one\n".to_vec(),
+            Some(b"two\n".to_vec()),
+            false,
+        ),
+        (
+            "new.bin",
+            None,
+            b"\0one".to_vec(),
+            Some(b"\0two".to_vec()),
+            false,
+        ),
+    ] {
+        let repo = crate::core::test_helpers::TestRepo::new_with_remote();
+        let path = repo.workdir().join(name);
+        repo.write_file("base.txt", "base\n");
+        repo.stage_files(&["base.txt"]);
+        if let Some(committed) = &committed {
+            std::fs::write(&path, committed).unwrap();
+            repo.stage_files(&[name]);
+        }
+        repo.commit_staged("Add f");
+        let head = repo.head_oid();
+        std::fs::write(&path, &picked).unwrap();
+        let theme = make_theme();
+
+        let result = repo.in_dir(|| {
+            let mut app = make_app(load_snapshot(1).unwrap(), &theme);
+            move_cursor_to(&mut app, &format!("wf:{name}"));
+            press(&mut app, KeyCode::Char('F'));
+            let edit = || {
+                if let Some(edited) = &edited {
+                    std::fs::write(&path, edited).unwrap();
+                }
+            };
+            if in_selector {
+                pick_first_hunk_after(&mut app, edit);
+            } else {
+                pick_first_hunk(&mut app);
+                edit();
+            }
+            let action = app.confirm_fold_target().unwrap();
+            let command = app.command_line(&action);
+            execute_action(
+                action,
+                &command,
+                &app.snapshot.git_dir,
+                &graph::Theme::dark(),
+            )
+        });
+
+        if edited.is_some() {
+            let err = result.unwrap_err().to_string();
+            assert!(
+                err.contains("moved since the hunks were picked"),
+                "{name}: {err}"
+            );
+            assert_eq!(repo.head_oid(), head, "{name}");
+            let status = if committed.is_some() { " M" } else { "??" };
+            assert_eq!(
+                repo.status_porcelain(),
+                format!("{status} {name}\n"),
+                "{name}"
+            );
+        } else {
+            result.unwrap();
+            assert_eq!(repo.status_porcelain(), "", "{name}");
+        }
+    }
+}
+
+#[test]
+fn a_fold_pick_that_kept_nothing_ends_with_a_notice() {
+    let repo = repo_with_one_unstaged_hunk();
+    let theme = make_theme();
+    let mut app = app_on(&repo, &theme);
+    let entries = picked_entries(&repo, false);
+
+    app.finish_fold_pick(
+        Ok(Some(entries)),
+        Vec::new(),
+        vec!["tr".to_string()],
+        Vec::new(),
+        None,
+        "wf:tracked.txt".to_string(),
+    );
+    assert!(matches!(app.mode, Mode::Normal));
+    assert_eq!(app.notice.as_deref(), Some("fold cancelled"));
+}
+
+#[test]
+fn fold_with_hunks_refuses_what_it_cannot_pick_from() {
+    let theme = make_theme();
+    let mut info = two_branch_info();
+    info.working_changes.clear();
+    let a = oid('a').to_string();
+    let b = oid('b').to_string();
+    for (keys, expected) in [
+        (
+            vec!["br:feature-a"],
+            "fold: move to a file, local changes, or a commit",
+        ),
+        (vec![b.as_str(), a.as_str()], "fold: one commit at a time"),
+        (vec![LOCAL_CHANGES_KEY], "fold: no local changes"),
+    ] {
+        let mut app = make_app(snapshot_of(info.clone()), &theme);
+        for key in &keys {
+            move_cursor_to(&mut app, key);
+            app.toggle_selection();
+        }
+        if keys == [LOCAL_CHANGES_KEY] {
+            app.clear_selection();
+            move_cursor_to(&mut app, LOCAL_CHANGES_KEY);
+        }
+        press(&mut app, KeyCode::Char('F'));
+        assert!(app.pick.is_none(), "{keys:?}");
+        assert_eq!(app.notice.as_deref(), Some(expected), "{keys:?}");
+    }
 }

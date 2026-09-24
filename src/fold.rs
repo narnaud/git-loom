@@ -763,6 +763,30 @@ fn run_patch_fold(
     fold_files_into_commit(repo, &staged, &commit_hash, true, git_opts)
 }
 
+/// `fold -p [<files>...] <commit>` with the working-tree hunks already picked,
+/// as the TUI picks them on its own terminal before running the fold. `stamp`
+/// is `staging::binary_stamp` of `picked`, taken as it was read: a pick the
+/// working tree or index has moved away from is refused, not staged.
+pub fn run_picked(picked: &[FileEntry], stamp: &[Option<git2::Oid>], target: &str) -> Result<()> {
+    let repo = repo::open_repo()?;
+    let workdir = repo::require_workdir(&repo, COMMAND)?;
+    let Target::Commit(commit_hash) = repo::resolve_arg(&repo, target, &[TargetKind::Commit])?
+    else {
+        bail!("'{}' did not resolve to a commit", target);
+    };
+    if !staging::still_listed(&repo, workdir, picked, stamp)? {
+        bail!(
+            "The local changes moved since the hunks were picked\n\
+             Pick them again"
+        );
+    }
+    let staged = staging::stage_selection(workdir, picked)?;
+    if staged.is_empty() {
+        bail!("No hunks selected");
+    }
+    fold_files_into_commit(&repo, &staged, &commit_hash, true, &[])
+}
+
 /// The selected entries of this file that travel in the hunk patch. A
 /// whole-file label never does: a submodule or a deletion moves as the commit's
 /// own whole-file diff instead (`picked_whole_files`).

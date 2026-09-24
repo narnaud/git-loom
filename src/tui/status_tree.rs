@@ -28,6 +28,11 @@ pub(crate) fn working_file_key(path: &str) -> String {
     format!("wf:{}", path)
 }
 
+/// [`Row::key`] of the row naming file `index` of commit `oid`.
+pub(crate) fn commit_file_key(oid: git2::Oid, index: usize) -> String {
+    format!("{}:{}", oid, index)
+}
+
 /// What the gutter marker on a row says. `Source` and `Covered` occur only
 /// while a target is being picked, and outrank `Selected`: what the pending
 /// command takes matters more than what is selected (Spec 020).
@@ -345,7 +350,7 @@ fn push_commit_rows(
                     },
                     sid: file_sid.clone(),
                     target: Some(file_sid.clone()),
-                    key: format!("{}:{}", commit.oid, i),
+                    key: commit_file_key(commit.oid, i),
                     focusable: true,
                     expandable: false,
                     expanded: false,

@@ -33,11 +33,58 @@ pub fn run_hunk_picker(
 
     match result {
         None => Ok(None),
-        Some(selected_files) => {
-            apply_selections(workdir, &selected_files)?;
-            Ok(Some(selected_paths(&selected_files)))
-        }
+        Some(selected_files) => stage_selection(workdir, &selected_files).map(Some),
     }
+}
+
+/// Stage what a picker kept, returning the paths it staged.
+pub(crate) fn stage_selection(workdir: &Path, files: &[FileEntry]) -> Result<Vec<String>> {
+    apply_selections(workdir, files)?;
+    Ok(selected_paths(files))
+}
+
+/// The content `git add` stages for the binary entries of `entries`, which
+/// their listing shows only as a label: a file's blob id, a submodule's HEAD.
+pub(crate) fn binary_stamp(workdir: &Path, entries: &[FileEntry]) -> Vec<Option<git2::Oid>> {
+    entries
+        .iter()
+        .filter(|f| f.binary)
+        .map(|f| {
+            let path = workdir.join(&f.path);
+            if path.is_dir() {
+                Repository::open(&path).ok()?.head().ok()?.target()
+            } else {
+                git2::Oid::hash_file(git2::ObjectType::Blob, &path).ok()
+            }
+        })
+        .collect()
+}
+
+/// Whether `picked`, read before `stamp` was taken of it, still lists the
+/// changes of its paths, whatever it selected: a pick staged later must not
+/// take what was edited since.
+pub(crate) fn still_listed(
+    repo: &Repository,
+    workdir: &Path,
+    picked: &[FileEntry],
+    stamp: &[Option<git2::Oid>],
+) -> Result<bool> {
+    let paths: Vec<String> = picked.iter().map(|f| f.path.clone()).collect();
+    let now = collect_file_entries(repo, workdir, Some(&paths))?;
+    let same = |a: &FileEntry, b: &FileEntry| {
+        a.path == b.path
+            && a.index_status == b.index_status
+            && a.worktree_status == b.worktree_status
+            && a.binary == b.binary
+            && a.hunks.len() == b.hunks.len()
+            && a.hunks
+                .iter()
+                .zip(&b.hunks)
+                .all(|(x, y)| x.hunk == y.hunk && x.origin == y.origin)
+    };
+    Ok(picked.len() == now.len()
+        && picked.iter().zip(&now).all(|(a, b)| same(a, b))
+        && binary_stamp(workdir, &now) == stamp)
 }
 
 /// The paths the picker staged: those with at least one selected hunk.
