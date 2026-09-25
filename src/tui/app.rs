@@ -1,11 +1,11 @@
 //! Interactive status TUI (`loom tui`): the status tree on the left, the diff
 //! of the item under the cursor on the right.
 //!
-//! Actions (commit, fold, branch, drop, reword) run the regular loom command
-//! on a worker thread while the TUI stays up: the command's prompts become
-//! popups and its messages a log (`core::ui`), and only an editor takes the
-//! terminal over. Fold and commit pick their target in a second step inside
-//! the tree; `C` and `F` pick their hunks first, in the hunk selector, which
+//! Actions (commit, fold, move, branch, drop, reword) run the regular loom
+//! command on a worker thread while the TUI stays up: the command's prompts
+//! become popups and its messages a log (`core::ui`), and only an editor takes
+//! the terminal over. Fold, move and commit pick their target in a second step
+//! inside the tree; `C` and `F` pick their hunks first, in the hunk selector, which
 //! runs before any action, as a nested shell on the same terminal.
 
 use std::borrow::Cow;
@@ -72,11 +72,27 @@ enum CommitDest {
     Branch(String),
 }
 
-/// A row that exists only on screen: a branch being named, or a commit
-/// being placed.
+/// A row that exists only on screen, or one drawn where it is not: a branch
+/// being named, a commit being placed, or a commit being moved.
 enum Preview {
     Branch(BranchInfo),
     Commit { dest: CommitDest, file_count: usize },
+    Move { oid: git2::Oid, slot: MoveSlot },
+}
+
+/// Where `m` puts its commit, as `loom fold` spells it (Spec 007).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum MoveSlot {
+    /// Where it already is: the walk starts here, and nothing runs.
+    Stay,
+    /// `--above <commit>`.
+    Above(git2::Oid),
+    /// `--below <commit>`.
+    Below(git2::Oid),
+    /// `fold <commit> <branch>`: the branch's tip, advancing only that name.
+    /// Never shown as a branch pick: it is the one way to reach an empty
+    /// branch, or to split a co-located group.
+    Branch(String),
 }
 
 impl Snapshot {
@@ -90,6 +106,7 @@ impl Snapshot {
             Some(Preview::Commit { dest, file_count }) => {
                 place_pending_commit(&mut info, &dest, file_count)
             }
+            Some(Preview::Move { oid, slot }) => place_moved_commit(&mut info, oid, &slot),
             None => {}
         }
         graph::build_sections(info)
@@ -137,28 +154,94 @@ fn place_pending_commit(info: &mut RepoInfo, dest: &CommitDest, file_count: usiz
             );
             info.commits.insert(0, pending);
         }
-        CommitDest::Branch(name) => {
-            // Every destination was read off a drawn branch row of this same
-            // snapshot, so the branch is there.
-            let Some(branch) = info.branches.iter_mut().find(|b| b.name == *name) else {
-                return;
-            };
-            let tip = branch.tip_oid;
-            branch.tip_oid = oid;
-            pending.parent_oid = Some(tip);
-            // A tip outside the range is the base: the branches forking from
-            // it stay parallel, only a stack on an in-range tip follows.
-            let at = info.commits.iter().position(|c| c.oid == tip);
-            if at.is_some() {
-                for commit in &mut info.commits {
-                    if commit.parent_oid == Some(tip) {
-                        commit.parent_oid = Some(oid);
-                    }
+        // Every destination was read off a drawn branch row of this same
+        // snapshot, so the branch is there.
+        CommitDest::Branch(name) => push_onto_branch(info, pending, name),
+    }
+}
+
+/// Put `commit` on top of branch `name`, advancing that name alone, with
+/// whatever was stacked on the old tip re-parented onto it. A no-op when the
+/// branch is not there.
+fn push_onto_branch(info: &mut RepoInfo, mut commit: CommitInfo, name: &str) {
+    let Some(branch) = info.branches.iter_mut().find(|b| b.name == name) else {
+        return;
+    };
+    let oid = commit.oid;
+    let tip = branch.tip_oid;
+    branch.tip_oid = oid;
+    commit.parent_oid = Some(tip);
+    // A tip outside the range is the base: the branches forking from it stay
+    // parallel, only a stack on an in-range tip follows.
+    let at = info.commits.iter().position(|c| c.oid == tip);
+    if at.is_some() {
+        reparent_children(info, tip, oid);
+    }
+    info.commits
+        .insert(at.unwrap_or(info.commits.len()), commit);
+}
+
+fn reparent_children(info: &mut RepoInfo, from: git2::Oid, to: git2::Oid) {
+    for commit in &mut info.commits {
+        if commit.parent_oid == Some(from) {
+            commit.parent_oid = Some(to);
+        }
+    }
+}
+
+/// Move commit `oid` of `info` to `slot`, as `loom fold` would (Spec 007):
+/// taken out, its children and the branches ending at it fall back onto its
+/// parent; `--above` hands it the target's branches, `--below` leaves them.
+fn place_moved_commit(info: &mut RepoInfo, oid: git2::Oid, slot: &MoveSlot) {
+    let anchor_known = |x: &git2::Oid| *x != oid && info.commits.iter().any(|c| c.oid == *x);
+    let known = match slot {
+        MoveSlot::Stay => false,
+        MoveSlot::Above(x) | MoveSlot::Below(x) => anchor_known(x),
+        MoveSlot::Branch(name) => info.branches.iter().any(|b| b.name == *name),
+    };
+    let Some(from) = info
+        .commits
+        .iter()
+        .position(|c| c.oid == oid)
+        .filter(|_| known)
+    else {
+        return;
+    };
+    let mut moved = info.commits.remove(from);
+    if let Some(parent) = moved.parent_oid {
+        reparent_children(info, oid, parent);
+        for branch in &mut info.branches {
+            if branch.tip_oid == oid {
+                branch.tip_oid = parent;
+            }
+        }
+    }
+    let position = |info: &RepoInfo, x: git2::Oid| {
+        info.commits
+            .iter()
+            .position(|c| c.oid == x)
+            .expect("checked above")
+    };
+    match slot {
+        MoveSlot::Stay => {}
+        MoveSlot::Above(x) => {
+            let at = position(info, *x);
+            reparent_children(info, *x, oid);
+            for branch in &mut info.branches {
+                if branch.tip_oid == *x {
+                    branch.tip_oid = oid;
                 }
             }
-            info.commits
-                .insert(at.unwrap_or(info.commits.len()), pending);
+            moved.parent_oid = Some(*x);
+            info.commits.insert(at, moved);
         }
+        MoveSlot::Below(x) => {
+            let at = position(info, *x);
+            moved.parent_oid = info.commits[at].parent_oid;
+            info.commits[at].parent_oid = Some(oid);
+            info.commits.insert(at + 1, moved);
+        }
+        MoveSlot::Branch(name) => push_onto_branch(info, moved, name),
     }
 }
 
@@ -231,6 +314,9 @@ enum Action {
         stamp: Stamp,
         target: String,
     },
+    /// `loom fold <commit> --above|--below <commit>`, or `loom fold <commit>
+    /// <branch>`; never `MoveSlot::Stay`.
+    Move { commit: git2::Oid, slot: MoveSlot },
     /// `loom branch new <name> [-t target]`.
     NewBranch {
         name: String,
@@ -277,6 +363,13 @@ enum Mode {
         index: usize,
         /// Key of the row `c` was pressed on, to go back to on cancel.
         origin: String,
+    },
+    /// `↑`/`↓` move `commit` through `slots`, each a distinct tree; the tree
+    /// is rebuilt with it at `slots[index]`.
+    MoveTarget {
+        commit: git2::Oid,
+        slots: Vec<MoveSlot>,
+        index: usize,
     },
     RenameBranch {
         branch: String,
@@ -527,6 +620,24 @@ fn execute_action(
             target,
             ..
         } => fold::run_picked(&picked, &stamp, &target),
+        Action::Move { commit, slot } => {
+            let (anchor, mut args) = match slot {
+                MoveSlot::Above(x) => (Some(fold::Anchor::Above(x.to_string())), vec![]),
+                MoveSlot::Below(x) => (Some(fold::Anchor::Below(x.to_string())), vec![]),
+                MoveSlot::Branch(name) => (None, vec![name]),
+                MoveSlot::Stay => anyhow::bail!("Nothing to move"),
+            };
+            args.insert(0, commit.to_string());
+            fold::run(
+                false,
+                false,
+                anchor,
+                HunkArgs::default(),
+                args,
+                vec![],
+                theme,
+            )
+        }
         Action::NewBranch { name, target } => branch::new::run(Some(name), target),
         Action::Drop { targets } => drop::run(targets, false),
         Action::Reword { target, name } => reword::run(target, name),
@@ -643,6 +754,14 @@ impl<'a> App<'a> {
                     CommitSource::Files(files) => self.commit_file_count(files),
                     CommitSource::Index => self.snapshot.staged_count(),
                 },
+            }),
+            Mode::MoveTarget {
+                commit,
+                slots,
+                index,
+            } => Some(Preview::Move {
+                oid: *commit,
+                slot: slots[*index].clone(),
             }),
             _ => None,
         };
@@ -806,6 +925,15 @@ impl<'a> App<'a> {
                 words.extend(["fold".into(), "-p".into()]);
                 words.extend(sources.iter().map(|s| sid(s)));
                 words.push(sid(target));
+            }
+            Action::Move { commit, slot } => {
+                words.extend(["fold".into(), sid(&commit.to_string())]);
+                match slot {
+                    MoveSlot::Above(x) => words.extend(["--above".into(), sid(&x.to_string())]),
+                    MoveSlot::Below(x) => words.extend(["--below".into(), sid(&x.to_string())]),
+                    MoveSlot::Branch(name) => words.push(sid(name)),
+                    MoveSlot::Stay => {}
+                }
             }
             Action::NewBranch { name, target } => {
                 words.extend(["branch".into(), "new".into(), name.clone()]);
@@ -1064,15 +1192,9 @@ impl<'a> App<'a> {
             // to its parent. The cursor must stay on the placeholder or the
             // fold target, and a closed commit would hide a commit-file source.
             KeyCode::Left | KeyCode::Right | KeyCode::Char('h' | 'l')
-                if matches!(
-                    self.mode,
-                    Mode::FoldTarget { .. } | Mode::CommitTarget { .. }
-                ) =>
+                if self.placing().is_some() =>
             {
-                let what = match self.mode {
-                    Mode::CommitTarget { .. } => "commit",
-                    _ => "fold",
-                };
+                let what = self.placing().unwrap_or_default();
                 self.notice = Some(format!("{}: Enter to confirm, Esc to cancel", what));
                 None
             }
@@ -1087,6 +1209,7 @@ impl<'a> App<'a> {
             KeyCode::Enter => match &self.mode {
                 Mode::FoldTarget { .. } => self.confirm_fold_target(),
                 Mode::CommitTarget { .. } => self.confirm_commit_target(),
+                Mode::MoveTarget { .. } => self.confirm_move_target(),
                 // Rename mode never gets here: it is handled above.
                 _ => {
                     self.toggle_current();
@@ -1101,18 +1224,12 @@ impl<'a> App<'a> {
             // Enter, and Esc apply — action keys must not fire and discard
             // the pending operation.
             KeyCode::Char(
-                ' ' | 'c' | 'C' | 'f' | 'F' | 'b' | 'd' | 'r' | 'R' | '+' | '=' | '-',
+                ' ' | 'c' | 'C' | 'f' | 'F' | 'm' | 'b' | 'd' | 'r' | 'R' | '+' | '=' | '-',
             )
             | KeyCode::F(5)
-                if matches!(
-                    self.mode,
-                    Mode::FoldTarget { .. } | Mode::CommitTarget { .. }
-                ) =>
+                if self.placing().is_some() =>
             {
-                let what = match self.mode {
-                    Mode::CommitTarget { .. } => "commit",
-                    _ => "fold",
-                };
+                let what = self.placing().unwrap_or_default();
                 self.notice = Some(format!("{}: Enter to confirm, Esc to cancel", what));
                 None
             }
@@ -1134,6 +1251,10 @@ impl<'a> App<'a> {
             }
             KeyCode::Char('F') => {
                 self.action_fold_patch_start();
+                None
+            }
+            KeyCode::Char('m') => {
+                self.action_move_start();
                 None
             }
             KeyCode::Char('b') => {
@@ -1162,13 +1283,26 @@ impl<'a> App<'a> {
         }
     }
 
-    /// Esc: cancel fold-target or commit mode, else clear the selection, else
-    /// quit.
+    /// The command whose target the tree is walking, if any: only navigation,
+    /// Enter and Esc apply then.
+    fn placing(&self) -> Option<&'static str> {
+        match self.mode {
+            Mode::CommitTarget { .. } => Some("commit"),
+            Mode::FoldTarget { .. } => Some("fold"),
+            Mode::MoveTarget { .. } => Some("move"),
+            _ => None,
+        }
+    }
+
+    /// Esc: cancel fold-target, commit or move mode, else clear the selection,
+    /// else quit.
     fn handle_escape(&mut self) {
         if matches!(self.mode, Mode::FoldTarget { .. }) {
             self.cancel_fold_target();
         } else if matches!(self.mode, Mode::CommitTarget { .. }) {
             self.cancel_commit_target();
+        } else if matches!(self.mode, Mode::MoveTarget { .. }) {
+            self.cancel_move_target();
         } else if !self.selected.is_empty() {
             self.clear_selection();
         } else {
@@ -1180,6 +1314,7 @@ impl<'a> App<'a> {
         match self.mode {
             Mode::CommitTarget { .. } => return self.move_commit_dest(dir),
             Mode::FoldTarget { .. } => return self.move_fold_target(dir),
+            Mode::MoveTarget { .. } => return self.move_move_target(dir),
             _ => {}
         }
         if self
@@ -2020,11 +2155,180 @@ impl<'a> App<'a> {
 
     /// The tag the pending fold puts on `row`, its target.
     fn row_tag(&self, row: &Row) -> Option<&'static str> {
-        let Mode::FoldTarget { targets, index, .. } = &self.mode else {
+        match &self.mode {
+            Mode::FoldTarget { targets, index, .. } => {
+                let target = &targets[*index];
+                (row.key == target.key).then(|| target.effect.tag())
+            }
+            Mode::MoveTarget { commit, .. } => (row.key == commit.to_string()).then_some("[MOVE]"),
+            _ => None,
+        }
+    }
+
+    /// `m`: the selected commit (else the cursor's) is moved; `↑`/`↓` then
+    /// walk it through every place it can go, the tree redrawn with it there,
+    /// and nothing runs until one is confirmed.
+    fn action_move_start(&mut self) {
+        let rows = self.picked_rows();
+        let commit = match rows.as_slice() {
+            [row] => match row.kind {
+                RowKind::Commit { oid, .. } if row.target.is_some() => oid,
+                _ => {
+                    self.notice = Some("move: move to a commit".to_string());
+                    return;
+                }
+            },
+            [] => return,
+            _ => {
+                self.notice = Some("move: one commit at a time".to_string());
+                return;
+            }
+        };
+        let slots = self.move_slots(commit);
+        if slots.len() < 2 {
+            self.notice = Some("move: nowhere else to put it".to_string());
+            return;
+        }
+        let index = slots
+            .iter()
+            .position(|s| *s == MoveSlot::Stay)
+            .expect("always offered");
+        self.clear_selection();
+        self.mode = Mode::MoveTarget {
+            commit,
+            slots,
+            index,
+        };
+        self.show_move_target();
+    }
+
+    /// Every distinct place `commit` can be moved to, in tree order, `Stay`
+    /// among them. The candidates are `--above`/`--below` every other commit
+    /// and every branch's tip, ranked by the row they sit next to; candidates
+    /// drawing the same tree are one place, spelled the first way.
+    fn move_slots(&self, commit: git2::Oid) -> Vec<MoveSlot> {
+        let info = &self.snapshot.info;
+        let parent_of = |oid: git2::Oid| {
+            info.commits
+                .iter()
+                .find(|c| c.oid == oid)
+                .and_then(|c| c.parent_oid)
+        };
+        let parent = parent_of(commit);
+        // Three ranks per row: above it, the row itself, below it. A branch
+        // tip ranks with the row after its name, behind an `--above` there.
+        let mut candidates: Vec<(usize, MoveSlot)> = Vec::new();
+        for (i, row) in self.rows.iter().enumerate() {
+            match &row.kind {
+                RowKind::Commit { oid, .. } if *oid == commit => {
+                    candidates.push((3 * i + 1, MoveSlot::Stay));
+                }
+                RowKind::Commit { oid, .. } if row.target.is_some() => {
+                    // `fold --above/--below` refuses the commit's own place,
+                    // even where the move would carry a branch name along.
+                    if parent != Some(*oid) {
+                        candidates.push((3 * i, MoveSlot::Above(*oid)));
+                    }
+                    if parent_of(*oid) != Some(commit) {
+                        candidates.push((3 * i + 2, MoveSlot::Below(*oid)));
+                    }
+                }
+                RowKind::BranchName { name, .. }
+                    if !info
+                        .branches
+                        .iter()
+                        .any(|b| b.name == *name && b.tip_oid == commit) =>
+                {
+                    candidates.push((3 * i + 3, MoveSlot::Branch(name.clone())));
+                }
+                _ => {}
+            }
+        }
+        candidates.sort_by_key(|(rank, slot)| (*rank, matches!(slot, MoveSlot::Branch(_))));
+
+        let mut seen = HashSet::from([self.move_signature(commit, &MoveSlot::Stay)]);
+        candidates
+            .into_iter()
+            .map(|(_, slot)| slot)
+            .filter(|slot| {
+                *slot == MoveSlot::Stay || seen.insert(self.move_signature(commit, slot))
+            })
+            .collect()
+    }
+
+    /// The tree `commit` at `slot` draws, as row keys and connectors: two
+    /// slots with the same one are the same move as far as the tree shows.
+    fn move_signature(&self, commit: git2::Oid, slot: &MoveSlot) -> Vec<String> {
+        let sections = self.snapshot.sections(Some(Preview::Move {
+            oid: commit,
+            slot: slot.clone(),
+        }));
+        status_tree::build_rows(&sections, &self.snapshot.ids, &self.expanded)
+            .into_iter()
+            .map(|r| match r.kind {
+                RowKind::Spacer(text) => text.to_string(),
+                _ => r.key,
+            })
+            .collect()
+    }
+
+    /// Redraw the tree with the commit at the current slot and put the cursor
+    /// on it.
+    fn show_move_target(&mut self) {
+        let Mode::MoveTarget { commit, .. } = &self.mode else {
+            return;
+        };
+        let key = commit.to_string();
+        self.rebuild_rows(&key);
+        self.diff.reset();
+    }
+
+    /// `↑`/`↓` while moving a commit: the next place up or down the tree,
+    /// stopping at the ends.
+    fn move_move_target(&mut self, dir: isize) {
+        let Mode::MoveTarget { slots, index, .. } = &mut self.mode else {
+            return;
+        };
+        let next = index.saturating_add_signed(dir).min(slots.len() - 1);
+        if next == *index {
+            return;
+        }
+        *index = next;
+        self.show_move_target();
+    }
+
+    fn confirm_move_target(&mut self) -> Option<Action> {
+        let Mode::MoveTarget { slots, index, .. } = &self.mode else {
             return None;
         };
-        let target = &targets[*index];
-        (row.key == target.key).then(|| target.effect.tag())
+        if slots[*index] == MoveSlot::Stay {
+            self.notice = Some("move: it is already here, pick another place".to_string());
+            return None;
+        }
+        let Mode::MoveTarget {
+            commit,
+            mut slots,
+            index,
+        } = std::mem::replace(&mut self.mode, Mode::Normal)
+        else {
+            return None;
+        };
+        // The rewrite renames the commit, so there is no key to follow: the
+        // cursor stays on the row the preview drew it at.
+        Some(Action::Move {
+            commit,
+            slot: slots.swap_remove(index),
+        })
+    }
+
+    fn cancel_move_target(&mut self) {
+        let Mode::MoveTarget { commit, .. } = std::mem::replace(&mut self.mode, Mode::Normal)
+        else {
+            return;
+        };
+        self.rebuild_rows(&commit.to_string());
+        self.diff.reset();
+        self.notice = Some("move cancelled".to_string());
     }
 
     /// `b`: start naming a new branch, drawn in the tree as if it already
@@ -2267,6 +2571,9 @@ impl<'a> App<'a> {
                     CommitSource::Index => title("the index"),
                 }
             }
+            Mode::MoveTarget { commit, .. } => {
+                format!(" Move {} ", self.sid_of(&commit.to_string()))
+            }
             Mode::RenameBranch { .. } => " Rename branch ".to_string(),
             Mode::NewBranch { .. } => " New branch ".to_string(),
         };
@@ -2414,7 +2721,10 @@ impl ShellApp for App<'_> {
                 // land on a target. The wheel is safe: it goes through
                 // `move_cursor`, which moves the destination in those modes.
                 MouseEventKind::Down(MouseButton::Left)
-                    if !matches!(self.mode, Mode::CommitTarget { .. }) =>
+                    if !matches!(
+                        self.mode,
+                        Mode::CommitTarget { .. } | Mode::MoveTarget { .. }
+                    ) =>
                 {
                     let Some(clicked) = self.tree.hit_test(area, pos.y) else {
                         return;
@@ -2631,6 +2941,9 @@ impl ShellApp for App<'_> {
             Mode::CommitTarget { .. } => Some(
                 " commit: ↑/↓ choose the destination, Enter to commit, Esc to cancel".to_string(),
             ),
+            Mode::MoveTarget { .. } => {
+                Some(" move: ↑/↓ choose the place, Enter to move, Esc to cancel".to_string())
+            }
             Mode::RenameBranch { .. } => Some(
                 " rename: type the new branch name, Enter to confirm, Esc to cancel".to_string(),
             ),
@@ -2648,6 +2961,7 @@ impl ShellApp for App<'_> {
             "Select: space".into(),
             "Commit: c/C".into(),
             "Fold: f/F".into(),
+            "Move: m".into(),
             "Branch: b".into(),
             "Drop: d".into(),
             "Reword: r".into(),

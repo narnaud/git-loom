@@ -1506,6 +1506,211 @@ fn a_fixup_is_offered_only_into_commits_the_source_descends_from() {
     );
 }
 
+/// The places a pending move walks, in tree order.
+fn move_slots_of(app: &App) -> Vec<MoveSlot> {
+    let Mode::MoveTarget { slots, .. } = &app.mode else {
+        panic!("not moving a commit");
+    };
+    slots.clone()
+}
+
+fn move_slot_of(app: &App) -> MoveSlot {
+    let Mode::MoveTarget { slots, index, .. } = &app.mode else {
+        panic!("not moving a commit");
+    };
+    slots[*index].clone()
+}
+
+fn move_start_on(app: &mut App, key: &str) {
+    move_cursor_to(app, key);
+    press(app, KeyCode::Char('m'));
+}
+
+fn row_at(app: &App, key: &str) -> usize {
+    app.rows.iter().position(|r| r.key == key).unwrap()
+}
+
+#[test]
+fn moving_a_commit_walks_the_places_it_can_go() {
+    let theme = make_theme();
+    let mut app = make_app(snapshot_of(two_branch_info()), &theme);
+    let a = oid('a').to_string();
+    move_start_on(&mut app, &a);
+
+    // `feature-b`'s tip is `--above b`, spelled that way; `feature-a`, which
+    // `a` empties, is where `a` already is.
+    assert_eq!(
+        move_slots_of(&app),
+        vec![
+            MoveSlot::Above(oid('b')),
+            MoveSlot::Below(oid('b')),
+            MoveSlot::Stay,
+        ]
+    );
+    assert_eq!(cursor_key(&app), a, "starts where it is");
+    assert!(app.confirm_move_target().is_none());
+    assert!(app.notice.as_deref().unwrap().contains("already here"));
+
+    press(&mut app, KeyCode::Up);
+    assert_eq!(cursor_key(&app), a, "the cursor follows the commit");
+    assert_eq!(row_at(&app, &a), row_at(&app, &oid('b').to_string()) + 1);
+    // Emptied, `feature-a` is drawn with the empty branches, on top.
+    assert!(row_at(&app, "br:feature-a") < row_at(&app, "br:feature-b"));
+
+    let mut shell = Shell::new(app);
+    let lines = rendered_lines(&mut shell);
+    assert!(tree_line(&lines, "Add parser").contains("[MOVE] Add parser"));
+    assert!(!tree_line(&lines, "Add lexer").contains("[MOVE]"));
+
+    let action = shell.app.confirm_move_target().expect("a move");
+    assert_eq!(
+        shell.app.command_line(&action),
+        format!(
+            "loom fold {} --below {}",
+            shell.app.snapshot.ids.get_commit(oid('a')),
+            shell.app.snapshot.ids.get_commit(oid('b'))
+        )
+    );
+    assert_eq!(
+        action,
+        Action::Move {
+            commit: oid('a'),
+            slot: MoveSlot::Below(oid('b')),
+        }
+    );
+    assert!(matches!(shell.app.mode, Mode::Normal));
+}
+
+#[test]
+fn moving_a_commit_reaches_an_empty_branch_through_its_name() {
+    let theme = make_theme();
+    let mut info = two_branch_info();
+    info.branches.push(BranchInfo {
+        name: "feature-c".to_string(),
+        tip_oid: oid('9'),
+        remote: None,
+    });
+    let mut app = make_app(snapshot_of(info), &theme);
+    move_start_on(&mut app, &oid('a').to_string());
+
+    let empty = MoveSlot::Branch("feature-c".to_string());
+    assert!(move_slots_of(&app).contains(&empty));
+    while move_slot_of(&app) != empty {
+        press(&mut app, KeyCode::Up);
+    }
+    assert_eq!(
+        row_at(&app, &oid('a').to_string()),
+        row_at(&app, "br:feature-c") + 1
+    );
+    assert_eq!(
+        app.confirm_move_target(),
+        Some(Action::Move {
+            commit: oid('a'),
+            slot: empty,
+        })
+    );
+}
+
+/// `a` ← `b` on `feature-a`: `--above a` for `b` is where `b` already is, and
+/// `fold --above` refuses it.
+#[test]
+fn moving_a_commit_skips_the_place_the_command_refuses() {
+    let theme = make_theme();
+    let mut info = make_info();
+    info.commits = vec![
+        commit('b', 'a', "Add lexer"),
+        commit('a', '9', "Add parser"),
+    ];
+    info.branches[0].tip_oid = oid('b');
+    let mut app = make_app(snapshot_of(info), &theme);
+    move_start_on(&mut app, &oid('b').to_string());
+
+    assert_eq!(
+        move_slots_of(&app),
+        vec![MoveSlot::Stay, MoveSlot::Below(oid('a'))]
+    );
+}
+
+#[test]
+fn moving_a_commit_above_a_branch_tip_carries_its_names_along() {
+    let mut info = two_branch_info();
+    info.branches.push(BranchInfo {
+        name: "feature-b2".to_string(),
+        tip_oid: oid('b'),
+        remote: None,
+    });
+    place_moved_commit(&mut info, oid('a'), &MoveSlot::Above(oid('b')));
+
+    let tip = |name: &str| {
+        info.branches
+            .iter()
+            .find(|b| b.name == name)
+            .unwrap()
+            .tip_oid
+    };
+    assert_eq!(tip("feature-b"), oid('a'));
+    assert_eq!(tip("feature-b2"), oid('a'));
+    assert_eq!(tip("feature-a"), oid('9'));
+    let order: Vec<git2::Oid> = info.commits.iter().map(|c| c.oid).collect();
+    assert_eq!(order, vec![oid('a'), oid('b')]);
+    assert_eq!(info.commits[0].parent_oid, Some(oid('b')));
+}
+
+#[test]
+fn move_refuses_what_is_not_one_commit() {
+    let theme = make_theme();
+    let a = oid('a').to_string();
+    let b = oid('b').to_string();
+    for (keys, expected) in [
+        (vec!["br:feature-a".to_string()], "move: move to a commit"),
+        (vec!["wf:a.rs".to_string()], "move: move to a commit"),
+        (vec![b.clone(), a.clone()], "move: one commit at a time"),
+    ] {
+        let mut app = make_app(snapshot_of(two_branch_info()), &theme);
+        for key in &keys {
+            move_cursor_to(&mut app, key);
+            app.toggle_selection();
+        }
+        press(&mut app, KeyCode::Char('m'));
+        assert!(matches!(app.mode, Mode::Normal), "{keys:?}");
+        assert_eq!(app.notice.as_deref(), Some(expected));
+    }
+
+    let mut app = make_app(make_snapshot(), &theme);
+    move_start_on(&mut app, &a);
+    assert!(matches!(app.mode, Mode::Normal));
+    assert_eq!(app.notice.as_deref(), Some("move: nowhere else to put it"));
+}
+
+#[test]
+fn move_mode_blocks_action_keys_and_escape_cancels_it() {
+    let theme = make_theme();
+    let mut app = make_app(snapshot_of(two_branch_info()), &theme);
+    let a = oid('a').to_string();
+    move_start_on(&mut app, &a);
+    for code in [
+        KeyCode::Char(' '),
+        KeyCode::Char('m'),
+        KeyCode::Char('f'),
+        KeyCode::Char('d'),
+        KeyCode::Left,
+    ] {
+        press(&mut app, code);
+        assert!(
+            matches!(app.mode, Mode::MoveTarget { .. }),
+            "{code:?} left move mode"
+        );
+        assert!(app.notice.is_some(), "{code:?} showed no notice");
+    }
+
+    press(&mut app, KeyCode::Up);
+    press(&mut app, KeyCode::Esc);
+    assert!(matches!(app.mode, Mode::Normal));
+    assert!(app.outcome.is_none());
+    assert_eq!(cursor_key(&app), a);
+    assert_eq!(row_at(&app, &a), row_at(&app, "br:feature-a") + 1);
+}
+
 #[test]
 fn fold_mode_blocks_action_keys() {
     let theme = make_theme();
@@ -2601,7 +2806,7 @@ fn status_bar_matches_spec() {
     let theme = make_theme();
     let mut shell = Shell::new(make_app(make_snapshot(), &theme));
 
-    let backend = ratatui::backend::TestBackend::new(150, 12);
+    let backend = ratatui::backend::TestBackend::new(160, 12);
     let mut terminal = ratatui::Terminal::new(backend).unwrap();
     terminal.draw(|f| shell.render(f)).unwrap();
     let buffer = terminal.backend().buffer();
@@ -2611,7 +2816,7 @@ fn status_bar_matches_spec() {
     assert!(
         last_row.starts_with(
             " Navigate: ↑/↓ | Close/open: ←/→ | Select: space | Commit: c/C | Fold: f/F \
-             | Branch: b | Drop: d | Reword: r | Log: L | Refresh: R | Quit: q"
+             | Move: m | Branch: b | Drop: d | Reword: r | Log: L | Refresh: R | Quit: q"
         ),
         "got: {:?}",
         last_row
@@ -3125,6 +3330,75 @@ fn pick_first_hunk_after(app: &mut App, meanwhile: impl FnOnce()) {
         hunk.selected = i == 0;
     }
     app.finish_fold_pick(Ok(Some(entries)), stamp, sources, targets, commit, origin);
+}
+
+/// Walk a pending move to `slot`, confirm it, and run what it confirms.
+fn run_move_to(app: &mut App, slot: MoveSlot) {
+    while move_slot_of(app) != slot {
+        let before = move_slot_of(app);
+        press(app, KeyCode::Down);
+        assert_ne!(move_slot_of(app), before, "{slot:?} is not offered");
+    }
+    let action = app.confirm_move_target().expect("a move");
+    let command = app.command_line(&action);
+    execute_action(
+        action,
+        &command,
+        &app.snapshot.git_dir,
+        &graph::Theme::dark(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn moving_a_commit_runs_fold_below() {
+    let repo = crate::core::test_helpers::TestRepo::new_with_remote();
+    let c1 = repo.commit("one", "one.txt");
+    repo.commit("two", "two.txt");
+    let c3 = repo.commit("three", "three.txt");
+    let theme = make_theme();
+
+    repo.in_dir(|| {
+        let mut app = make_app(load_snapshot(1).unwrap(), &theme);
+        move_start_on(&mut app, &c3.to_string());
+        run_move_to(&mut app, MoveSlot::Below(c1));
+    });
+
+    let subjects: Vec<String> = (0..3).map(|i| repo.get_subject(i)).collect();
+    assert_eq!(subjects, ["two", "one", "three"]);
+}
+
+#[test]
+fn moving_a_commit_into_an_empty_branch_runs_fold_onto_it() {
+    let repo = crate::core::test_helpers::TestRepo::new_with_remote();
+    let base = repo.head_oid();
+    repo.commit("one", "one.txt");
+    let c2 = repo.commit("two", "two.txt");
+    repo.create_branch_at_commit("feature-x", base);
+    let theme = make_theme();
+
+    repo.in_dir(|| {
+        let mut app = make_app(load_snapshot(1).unwrap(), &theme);
+        move_start_on(&mut app, &c2.to_string());
+        while move_slot_of(&app) != MoveSlot::Branch("feature-x".to_string()) {
+            let before = move_slot_of(&app);
+            press(&mut app, KeyCode::Up);
+            assert_ne!(move_slot_of(&app), before, "the branch is not offered");
+        }
+        let action = app.confirm_move_target().expect("a move");
+        let command = app.command_line(&action);
+        execute_action(
+            action,
+            &command,
+            &app.snapshot.git_dir,
+            &graph::Theme::dark(),
+        )
+        .unwrap();
+    });
+
+    let tip = repo.get_branch_target("feature-x");
+    assert_eq!(repo.find_commit(tip).summary().unwrap(), Some("two"));
+    assert_eq!(repo.find_commit(tip).parent_id(0).unwrap(), base);
 }
 
 #[test]
