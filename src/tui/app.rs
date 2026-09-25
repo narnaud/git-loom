@@ -99,17 +99,33 @@ impl Snapshot {
     /// The graph sections with `preview` faked in — a branch at its tip, or a
     /// commit at its destination — so the tree shows where it will land:
     /// split ownership, co-located names, stacking and all.
+    ///
+    /// A commit being placed or moved keeps every branch where the real tree
+    /// draws it, so one it fills or empties does not jump between the empty
+    /// and the owning groups under `↑`/`↓`; the tree regroups once it runs.
     fn sections(&self, preview: Option<Preview>) -> Vec<Section> {
         let mut info = self.info.clone();
-        match preview {
-            Some(Preview::Branch(pending)) => info.branches.push(pending),
-            Some(Preview::Commit { dest, file_count }) => {
-                place_pending_commit(&mut info, &dest, file_count)
+        let pinned = match preview {
+            Some(Preview::Branch(pending)) => {
+                info.branches.push(pending);
+                false
             }
-            Some(Preview::Move { oid, slot }) => place_moved_commit(&mut info, oid, &slot),
-            None => {}
+            Some(Preview::Commit { dest, file_count }) => {
+                place_pending_commit(&mut info, &dest, file_count);
+                true
+            }
+            Some(Preview::Move { oid, slot }) => {
+                place_moved_commit(&mut info, oid, &slot);
+                true
+            }
+            None => false,
+        };
+        let sections = graph::build_sections(info);
+        if pinned {
+            keep_branch_places(&graph::build_sections(self.info.clone()), sections)
+        } else {
+            sections
         }
-        graph::build_sections(info)
     }
 
     /// Whether `files` (short IDs) is the `zz` that stands for every change.
@@ -125,6 +141,66 @@ impl Snapshot {
             .filter(|c| is_staged(c))
             .count()
     }
+}
+
+/// Reorder the branch sections of `preview` into the order `base` draws them
+/// in. Each is ranked by the first of its names `base` places, one it lacks
+/// by the section before it; the sort is stable, so a group or stack a
+/// preview splits keeps its own order. An empty group is split by place.
+fn keep_branch_places(base: &[Section], mut preview: Vec<Section>) -> Vec<Section> {
+    let place: HashMap<&str, usize> = base
+        .iter()
+        .enumerate()
+        .flat_map(|(i, s)| match s {
+            Section::Branch { names, .. } => names.iter().map(|(n, _)| (n.as_str(), i)).collect(),
+            _ => Vec::new(),
+        })
+        .collect();
+    let is_branch = |s: &Section| matches!(s, Section::Branch { .. });
+    let Some(start) = preview.iter().position(is_branch) else {
+        return preview;
+    };
+    let end = start + preview[start..].iter().take_while(|s| is_branch(s)).count();
+    let taken: Vec<Section> = preview.drain(start..end).collect();
+    let rank_of = |name: &str| place.get(name).copied();
+    let mut rank = 0;
+    let mut run: Vec<(usize, Section)> = Vec::new();
+    for section in taken {
+        let Section::Branch { names, commits } = section else {
+            unreachable!("a run of branch sections");
+        };
+        if !commits.is_empty() {
+            rank = names
+                .iter()
+                .filter_map(|(n, _)| rank_of(n))
+                .min()
+                .unwrap_or(rank);
+            run.push((rank, Section::Branch { names, commits }));
+            continue;
+        }
+        // A branch the preview empties is co-located with those at the base,
+        // but keeps its own place: nothing is drawn under the group anyway.
+        for (name, remote) in names {
+            rank = rank_of(&name).unwrap_or(rank);
+            match run.last_mut() {
+                Some((r, Section::Branch { names, commits }))
+                    if *r == rank && commits.is_empty() =>
+                {
+                    names.push((name, remote))
+                }
+                _ => run.push((
+                    rank,
+                    Section::Branch {
+                        names: vec![(name, remote)],
+                        commits: Vec::new(),
+                    },
+                )),
+            }
+        }
+    }
+    run.sort_by_key(|(rank, _)| *rank);
+    preview.splice(start..start, run.into_iter().map(|(_, s)| s));
+    preview
 }
 
 /// Insert the pending commit into `info` where `loom commit` would put it:

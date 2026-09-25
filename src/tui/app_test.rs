@@ -1064,10 +1064,11 @@ fn commit_to_an_empty_branch_forks_from_the_base() {
     press(&mut app, KeyCode::Down);
     let at = app.tree.cursor();
     assert_eq!(app.rows[at - 1].key, "br:feature-b");
-    // Its own section, below feature-a's, so the two stay parallel.
+    // Its own section, kept above feature-a's while placing, parallel to it.
+    assert!(matches!(app.rows[at + 1].kind, RowKind::Spacer("├╯")));
     assert!(
-        app.rows[..at].iter().any(|r| r.key == oid('a').to_string()),
-        "feature-a still owns its commit above"
+        app.rows[at..].iter().any(|r| r.key == oid('a').to_string()),
+        "feature-a still owns its commit below"
     );
 }
 
@@ -1554,8 +1555,8 @@ fn moving_a_commit_walks_the_places_it_can_go() {
     press(&mut app, KeyCode::Up);
     assert_eq!(cursor_key(&app), a, "the cursor follows the commit");
     assert_eq!(row_at(&app, &a), row_at(&app, &oid('b').to_string()) + 1);
-    // Emptied, `feature-a` is drawn with the empty branches, on top.
-    assert!(row_at(&app, "br:feature-a") < row_at(&app, "br:feature-b"));
+    // Emptied, `feature-a` keeps its place until the move runs.
+    assert!(row_at(&app, "br:feature-b") < row_at(&app, "br:feature-a"));
 
     let mut shell = Shell::new(app);
     let lines = rendered_lines(&mut shell);
@@ -1608,6 +1609,62 @@ fn moving_a_commit_reaches_an_empty_branch_through_its_name() {
             commit: oid('a'),
             slot: empty,
         })
+    );
+}
+
+/// Loose `l` on `feature-b` ← `feature-a`'s `a`, with `feature-c` empty at
+/// the base.
+fn loose_empty_and_owning_info() -> RepoInfo {
+    let mut info = two_branch_info();
+    info.commits.insert(0, commit('c', 'b', "Loose fix"));
+    info.branches.push(BranchInfo {
+        name: "feature-c".to_string(),
+        tip_oid: oid('9'),
+        remote: None,
+    });
+    info
+}
+
+fn branch_order(app: &App) -> Vec<String> {
+    app.rows
+        .iter()
+        .filter(|r| matches!(r.kind, RowKind::BranchName { .. }))
+        .map(|r| r.key.clone())
+        .collect()
+}
+
+#[test]
+fn loose_commits_are_drawn_above_empty_branches_above_owning_ones() {
+    let theme = make_theme();
+    let app = make_app(snapshot_of(loose_empty_and_owning_info()), &theme);
+    assert!(row_at(&app, &oid('c').to_string()) < row_at(&app, "br:feature-c"));
+    assert_eq!(
+        branch_order(&app),
+        ["br:feature-c", "br:feature-b", "br:feature-a"]
+    );
+}
+
+/// Filling `feature-c` or emptying `feature-a` regrouped them mid-walk, so
+/// `↑`/`↓` seemed to jump.
+#[test]
+fn moving_a_commit_keeps_every_branch_in_place() {
+    let theme = make_theme();
+    let mut app = make_app(snapshot_of(loose_empty_and_owning_info()), &theme);
+    let before = branch_order(&app);
+    move_start_on(&mut app, &oid('a').to_string());
+    let slots = move_slots_of(&app);
+    assert!(slots.contains(&MoveSlot::Branch("feature-c".to_string())));
+    for _ in 0..slots.len() {
+        press(&mut app, KeyCode::Up);
+        assert_eq!(branch_order(&app), before, "at {:?}", move_slot_of(&app));
+    }
+    while move_slot_of(&app) != MoveSlot::Branch("feature-c".to_string()) {
+        press(&mut app, KeyCode::Down);
+        assert_eq!(branch_order(&app), before, "at {:?}", move_slot_of(&app));
+    }
+    assert_eq!(
+        row_at(&app, &oid('a').to_string()),
+        row_at(&app, "br:feature-c") + 1
     );
 }
 
@@ -3382,7 +3439,7 @@ fn moving_a_commit_into_an_empty_branch_runs_fold_onto_it() {
         move_start_on(&mut app, &c2.to_string());
         while move_slot_of(&app) != MoveSlot::Branch("feature-x".to_string()) {
             let before = move_slot_of(&app);
-            press(&mut app, KeyCode::Up);
+            press(&mut app, KeyCode::Down);
             assert_ne!(move_slot_of(&app), before, "the branch is not offered");
         }
         let action = app.confirm_move_target().expect("a move");
