@@ -445,8 +445,7 @@ pub(crate) fn build_sections(info: RepoInfo) -> Vec<Section> {
     }
 
     // Branches at the merge-base own no commits: they render as empty
-    // sections, above everything else, so a freshly created branch shows up
-    // next to the local changes instead of at the far end of the tree.
+    // sections, above the branches that own commits.
     let represented: HashSet<&String> = commit_to_branch.values().collect();
     let mut empty_sections: Vec<Section> = Vec::new();
     for branches in canonical_to_names.values() {
@@ -465,12 +464,11 @@ pub(crate) fn build_sections(info: RepoInfo) -> Vec<Section> {
         _ => Ordering::Equal,
     });
 
-    // Empty branches first, so one just created sits right under the local
-    // changes, then loose commits, then the feature branches.
-    sections.extend(empty_sections);
+    // Loose commits first, then empty branches, then the ones owning commits.
     if !loose_commits.is_empty() {
         sections.push(Section::Loose(loose_commits));
     }
+    sections.extend(empty_sections);
     sections.extend(branch_sections);
 
     sections.push(Section::Upstream(info.upstream));

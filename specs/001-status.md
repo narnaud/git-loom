@@ -23,8 +23,8 @@ ANSI color is enabled unless `--no-color` or `NO_COLOR` disables it. Paths are r
 Output runs top-to-bottom in this order:
 
 1. Local changes, only when changes exist.
-2. Feature-branch sections.
-3. Loose integration-line commits.
+2. Loose integration-line commits.
+3. Feature-branch sections: empty ones, then the ones owning commits.
 4. Upstream or common-base marker.
 5. Optional context commits.
 
@@ -63,7 +63,7 @@ A feature branch is any local branch whose tip is in `upstream..HEAD` (including
 - the current integration branch;
 - branches tracking the same upstream remote as the integration branch.
 
-Each section has a bracketed header (`│╭─ [name]`), owned commits (`│●`), and `├╯`. A branch at the base is an empty header/close section. Empty sections come first, above the loose commits and the branches that own commits, so a branch just created sits next to the local changes. If several branches share a tip, render multiple headers over one commit set: alphabetically last on top with `│╭─`, then `│├─`.
+Each section has a bracketed header (`│╭─ [name]`), owned commits (`│●`), and `├╯`. A branch at the base is an empty header/close section. Empty sections sit below the loose commits and above the branches that own commits. If several branches share a tip, render multiple headers over one commit set: alphabetically last on top with `│╭─`, then `│├─`.
 
 Ownership walks parents from each branch tip and stops at the base or another branch tip. Thus a stacked branch owns only commits above the branch below it. Adjacent sections are stacked (`│├─`, `││`) when the last commit of one parents the first commit of the next. The same adjacency determines stacked pushes (Spec 011).
 
