@@ -3489,6 +3489,7 @@ fn fold_commit_relative_refuses_when_the_moved_commit_replays_empty() {
     .to_string();
 
     assert!(err.contains("is redundant"), "{err}");
+    assert!(err.contains("loom drop"), "{err}");
     assert_eq!(t.head_oid(), head_before, "{err}");
     assert_eq!(t.get_branch_target("alpha"), alpha_before, "{err}");
     assert!(!t.branch_exists("_loom-track"), "{err}");
@@ -3518,6 +3519,7 @@ fn fold_commit_into_commit_refuses_when_the_target_replays_empty() {
         .to_string();
 
     assert!(err.contains("is redundant"), "{err}");
+    assert!(!err.contains("loom drop"), "{err}");
     assert_eq!(t.head_oid(), head_before, "{err}");
     assert_eq!(t.get_branch_target("alpha"), alpha_before, "{err}");
     assert!(!t.branch_exists("_loom-track"), "{err}");
@@ -3552,6 +3554,7 @@ fn fold_files_into_commit_refuses_when_the_target_replays_empty() {
     .to_string();
 
     assert!(err.contains("is redundant"), "{err}");
+    assert!(!err.contains("loom drop"), "{err}");
     assert_eq!(t.head_oid(), head_before, "{err}");
     assert!(!t.branch_exists("_loom-track"), "{err}");
     assert_eq!(t.read_file("three.txt"), "folded\n", "{err}");
@@ -4758,4 +4761,66 @@ fn fold_patch_refuses_an_upstream_target_before_staging() {
     let err = result.expect_err("upstream target").to_string();
     assert!(err.contains("not in the weave"), "{err}");
     assert_eq!(t.status_porcelain(), "M  a.txt\n M b.txt\n");
+}
+
+#[test]
+fn fold_file_into_a_redundant_newer_target_does_not_offer_to_drop_it() {
+    let (t, keeper) = crate::core::test_helpers::repo_with_a_redundant_commit_above();
+    let redundant = t.get_branch_target("alpha").to_string();
+
+    let err = super::fold_commit_file_to_commit(
+        &t.repo,
+        &keeper.to_string(),
+        "three.txt",
+        &redundant,
+        &[],
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(err.contains("is redundant"), "{err}");
+    assert!(!err.contains("loom drop"), "{err}");
+}
+
+#[test]
+fn fold_patch_into_a_redundant_target_does_not_offer_to_drop_it() {
+    let (t, redundant, keeper) = crate::core::test_helpers::repo_with_a_redundant_commit_below();
+    let workdir = t.workdir();
+    let mut selections =
+        crate::core::staging::collect_commit_hunks(&workdir, &keeper.to_string(), &[]).unwrap();
+    for hunk in selections.iter_mut().flat_map(|file| &mut file.hunks) {
+        hunk.selected = true;
+    }
+
+    let err = super::fold_selected_hunks_to_commit(
+        &t.repo,
+        &workdir,
+        &keeper.to_string(),
+        &redundant.to_string(),
+        "redundant",
+        &selections,
+        &[],
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(err.contains("is redundant"), "{err}");
+    assert!(!err.contains("loom drop"), "{err}");
+}
+
+#[test]
+fn fold_relative_to_a_redundant_commit_does_not_offer_to_drop_it() {
+    let (t, redundant, keeper) = crate::core::test_helpers::repo_with_a_redundant_commit_below();
+
+    let err = super::move_commits_relative_and_report(
+        &t.repo,
+        &[keeper.to_string()],
+        &redundant.to_string(),
+        Position::Below,
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(err.contains("is redundant"), "{err}");
+    assert!(!err.contains("loom drop"), "{err}");
 }

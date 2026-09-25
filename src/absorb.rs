@@ -268,7 +268,7 @@ fn apply_plan(repo: &Repository, workdir: &Path, git_dir: &Path, plan: AbsorbPla
     // `fixup` below it to land on whatever git picked before — an upstream
     // commit, in the worst case — while the count below still claims success.
     // One entry per target, not per fixup: several can land on the same commit.
-    let protect: Vec<String> = fixup_pairs
+    let targets: Vec<String> = fixup_pairs
         .iter()
         .map(|(_, target)| target.to_string())
         .collect::<std::collections::BTreeSet<_>>()
@@ -292,13 +292,14 @@ fn apply_plan(repo: &Repository, workdir: &Path, git_dir: &Path, plan: AbsorbPla
             ..Default::default()
         },
         context: serde_json::to_value(&ctx)?,
-        protect,
+        protect: Vec::new(),
+        targets,
     };
     transaction::save(git_dir, &state)?;
 
     let todo = graph.to_todo();
     let base = graph.base_oid.to_string();
-    let outcome = weave::run_rebase_protecting(workdir, Some(&base), &todo, &state.protect)
+    let outcome = weave::run_rebase_protecting(workdir, Some(&base), &todo, state.protected())
         .map_err(|e| transaction::roll_back_failed_rebase(workdir, git_dir, &state, e))?;
     match outcome {
         RebaseOutcome::Completed => {

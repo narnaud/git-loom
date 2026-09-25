@@ -444,6 +444,7 @@ fn absorb_abort_preserves_working_state() {
         },
         context: serde_json::json!({ "dry_run": false }),
         protect: Vec::new(),
+        targets: Vec::new(),
     };
     crate::core::transaction::save(&git_dir, &state).unwrap();
 

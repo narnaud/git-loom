@@ -519,9 +519,10 @@ fn fold_commit_relative(
             ..Default::default()
         },
         context: ctx,
-        // `_loom-track` follows the moved commit; the target goes in too,
+        // `_loom-track` follows the moved commit; the target goes in `targets`,
         // because a move relative to a commit that vanished is meaningless.
-        protect: vec![commit_hash.to_string(), target_hash.to_string()],
+        protect: vec![commit_hash.to_string()],
+        targets: vec![target_hash.to_string()],
     };
     transaction::save(&git_dir, &state)?;
 
@@ -530,7 +531,7 @@ fn fold_commit_relative(
     // refused before it starts (a branch checked out elsewhere) would leave
     // `_loom-track` behind as a branch `status` then lists.
     let base = graph.base_oid.to_string();
-    let outcome = weave::run_rebase_protecting(workdir, Some(&base), &todo, &state.protect)
+    let outcome = weave::run_rebase_protecting(workdir, Some(&base), &todo, state.protected())
         .map_err(|e| transaction::roll_back_failed_rebase(workdir, &git_dir, &state, e))?;
     match outcome {
         RebaseOutcome::Completed => {
@@ -572,15 +573,12 @@ fn move_commits_relative_and_report(
     let saved_staged = git::diff_cached(workdir)?;
     let todo = graph.to_todo();
     // The count has to be true: a moved commit dropped as empty is one the user
-    // is told moved and cannot find. The target goes in because a move relative
-    // to a commit that vanished is meaningless.
-    let protect: Vec<String> = commit_hashes
-        .iter()
-        .cloned()
-        .chain([target_hash.to_string()])
-        .collect();
+    // is told moved and cannot find. The target is protected too, because a
+    // move relative to a commit that vanished is meaningless.
+    let targets = [target_hash.to_string()];
+    let protected = git::Protected::named(commit_hashes).targeting(&targets);
     let base = graph.base_oid.to_string();
-    let outcome = weave::run_rebase_protecting(workdir, Some(&base), &todo, &protect)
+    let outcome = weave::run_rebase_protecting(workdir, Some(&base), &todo, protected)
         // The refusal aborts a rebase that has already autostashed, and that
         // replay comes back unstaged.
         .inspect_err(|e| git::restore_or_park_after_abort(workdir, &saved_staged, e))?;
@@ -1206,7 +1204,7 @@ fn fold_selected_hunks_to_commit(
         Some(&graph2.base_oid.to_string()),
         &todo2,
         phase2_target_oid,
-        &[],
+        &[&phase2_target_oid.to_string()],
     ) {
         rollback();
         return Err(e);
@@ -1842,13 +1840,14 @@ fn squash_fixup_into_commit(
             ..Default::default()
         },
         context: fold_ctx,
-        protect: vec![commit_hash],
+        protect: Vec::new(),
+        targets: vec![commit_hash],
     };
     transaction::save(git_dir, &loom_state)?;
 
     let todo = graph.to_todo();
     let base = graph.base_oid.to_string();
-    match weave::run_rebase_protecting(workdir, Some(&base), &todo, &loom_state.protect)? {
+    match weave::run_rebase_protecting(workdir, Some(&base), &todo, loom_state.protected())? {
         RebaseOutcome::Completed => Ok(FixupOutcome::Rebased),
         RebaseOutcome::Paused => {
             transaction::warn_paused_at_edit(Some(COMMAND));
@@ -1896,13 +1895,14 @@ fn fold_commit_into_commit(repo: &Repository, source_hash: &str, target_hash: &s
             ..Default::default()
         },
         context: fold_ctx,
-        protect: vec![target_hash.to_string()],
+        protect: Vec::new(),
+        targets: vec![target_hash.to_string()],
     };
     transaction::save(&git_dir, &loom_state)?;
 
     let todo = graph.to_todo();
     let base = graph.base_oid.to_string();
-    let outcome = weave::run_rebase_protecting(workdir, Some(&base), &todo, &loom_state.protect)
+    let outcome = weave::run_rebase_protecting(workdir, Some(&base), &todo, loom_state.protected())
         .map_err(|e| transaction::roll_back_failed_rebase(workdir, &git_dir, &loom_state, e))?;
     match outcome {
         RebaseOutcome::Completed => {
@@ -1957,12 +1957,13 @@ fn fold_commit_to_branch(repo: &Repository, commit_hash: &str, branch_name: &str
         // `branch_name` is read back for the success message, so it has to
         // still name the moved commit rather than the tip it landed on.
         protect: vec![commit_hash.to_string()],
+        targets: Vec::new(),
     };
     transaction::save(&git_dir, &state)?;
 
     let todo = graph.to_todo();
     let base = graph.base_oid.to_string();
-    let outcome = weave::run_rebase_protecting(workdir, Some(&base), &todo, &state.protect)
+    let outcome = weave::run_rebase_protecting(workdir, Some(&base), &todo, state.protected())
         .map_err(|e| transaction::roll_back_failed_rebase(workdir, &git_dir, &state, e))?;
     match outcome {
         RebaseOutcome::Completed => {
@@ -2022,7 +2023,12 @@ pub fn move_commits_to_branch(
     // Callers name the result by reading `branch_name` back, and report how
     // many commits moved: a replay dropped as empty would make both wrong.
     let base = graph.base_oid.to_string();
-    let outcome = weave::run_rebase_protecting(workdir, Some(&base), &todo, commit_hashes)?;
+    let outcome = weave::run_rebase_protecting(
+        workdir,
+        Some(&base),
+        &todo,
+        git::Protected::named(commit_hashes),
+    )?;
     Ok((outcome, parked))
 }
 
@@ -2459,7 +2465,7 @@ fn fold_commit_file_to_commit(
             Some(&graph2.base_oid.to_string()),
             &todo2,
             phase2_target_oid,
-            &[],
+            &[&phase2_target_hash],
         ) {
             rollback();
             return Err(e);
@@ -2530,9 +2536,10 @@ fn fold_commit_file_to_commit(
         // The source amend is already committed, so a continue that never
         // reached the target leaves the file removed and nowhere else: it has
         // to be rolled back, not just aborted.
+        let targets = [target_oid.to_string()];
         if let Err(e) = git::continue_rebase_expecting_edit(
             workdir,
-            git::AfterStop::rewrite(&target_oid.to_string()),
+            git::AfterStop::rewrite(&targets[0]).targeting(&targets),
         ) {
             return Err(git::rebase_abort_then_cleanup(workdir, e, || {
                 rollback_fold(workdir, &saved_head, Some(&saved_refs), &saved_worktree);
@@ -2621,6 +2628,7 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
             },
             context: fold_ctx,
             protect: Vec::new(),
+            targets: Vec::new(),
         };
         transaction::save(&git_dir, &loom_state)?;
 

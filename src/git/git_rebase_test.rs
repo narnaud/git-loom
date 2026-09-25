@@ -426,9 +426,13 @@ fn an_empty_stop_is_not_skipped_over_local_changes() {
 
     test_repo.write_file("other.txt", "edited while paused\n");
 
-    let outcome =
-        crate::git::skip_empty_stops(&workdir, &git_dir, &[], crate::git::RebaseOutcome::Stopped)
-            .unwrap();
+    let outcome = crate::git::skip_empty_stops(
+        &workdir,
+        &git_dir,
+        Default::default(),
+        crate::git::RebaseOutcome::Stopped,
+    )
+    .unwrap();
 
     assert_eq!(outcome, crate::git::RebaseOutcome::Stopped);
     assert_eq!(test_repo.read_file("other.txt"), "edited while paused\n");
@@ -572,7 +576,7 @@ fn a_protected_commit_is_refused_even_with_local_changes() {
         &workdir,
         Some(&graph.base_oid.to_string()),
         &graph.to_todo(),
-        &[],
+        Default::default(),
     )
     .unwrap();
 
@@ -588,9 +592,14 @@ fn a_protected_commit_is_refused_even_with_local_changes() {
     );
 
     let protect = [stopped];
-    let err = crate::git::skip_empty_stops(&workdir, &git_dir, &protect, outcome)
-        .unwrap_err()
-        .to_string();
+    let err = crate::git::skip_empty_stops(
+        &workdir,
+        &git_dir,
+        crate::git::Protected::named(&protect),
+        outcome,
+    )
+    .unwrap_err()
+    .to_string();
 
     assert!(err.contains("is redundant"), "{err}");
     assert_eq!(

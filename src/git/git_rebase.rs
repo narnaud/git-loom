@@ -220,6 +220,30 @@ fn replays_empty(workdir: &Path, sha: &str) -> bool {
     merged.lines().next().map(str::trim) == Some(head_tree.trim())
 }
 
+/// Commits a replay must not drop as empty (Spec 004), split by whose they are:
+/// only a commit the user named is theirs to `loom drop`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Protected<'a> {
+    /// Every other protected commit: the ones loom rewrites or moves.
+    pub named: &'a [String],
+    /// Commits the operation lands on, such as a fold or absorb target:
+    /// dropping one leaves it nothing to land on.
+    pub targets: &'a [String],
+}
+
+impl<'a> Protected<'a> {
+    pub fn named(named: &'a [String]) -> Self {
+        Self {
+            named,
+            targets: &[],
+        }
+    }
+
+    pub fn targeting(self, targets: &'a [String]) -> Self {
+        Self { targets, ..self }
+    }
+}
+
 /// Carry a rebase past every commit whose changes the new history already has,
 /// refusing when one of them is in `protected` (Spec 004).
 ///
@@ -230,7 +254,7 @@ fn replays_empty(workdir: &Path, sha: &str) -> bool {
 pub fn skip_empty_stops(
     workdir: &Path,
     git_dir: &Path,
-    protected: &[String],
+    protected: Protected<'_>,
     mut outcome: RebaseOutcome,
 ) -> Result<RebaseOutcome> {
     let mut skipped_already: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -250,7 +274,10 @@ pub fn skip_empty_stops(
         // already has this commit's changes does not depend on the tree. The
         // *action* does: an abort is a hard reset, so over work the user did
         // while the rebase was paused it refuses and leaves everything alone.
-        if protected.iter().any(|target| shas_match(target, &sha)) {
+        let in_list = |list: &[String]| list.iter().any(|hash| shas_match(hash, &sha));
+        // Checked first: a fold target the todo marks `edit` is in both lists.
+        let is_target = in_list(protected.targets);
+        if is_target || in_list(protected.named) {
             let cause = anyhow::Error::new(ReplayedEmpty(sha.clone()));
             if dirty {
                 // Not "run `loom abort`": that is the same hard reset, so it
@@ -265,8 +292,12 @@ pub fn skip_empty_stops(
                 workdir,
                 cause.context(format!(
                     "Commit `{short}` {REPLAYS_EMPTY}\n\
-                     Nothing was rewritten. Run `loom update` if it landed upstream, or \
-                     `loom drop {short} -y` to remove it now"
+                     Nothing was rewritten. Run `loom update` if it landed upstream{}",
+                    if is_target {
+                        String::new()
+                    } else {
+                        format!(", or `loom drop {short} -y` to remove it now")
+                    }
                 )),
                 || {},
             ));
@@ -495,9 +526,14 @@ pub fn auto_merge_id(workdir: &Path) -> Option<String> {
 /// `after` says whether this continue has a rewrite of its own to protect.
 pub fn continue_rebase_expecting_edit(workdir: &Path, after: AfterStop<'_>) -> Result<()> {
     let git_dir = super::absolute_git_dir(workdir)?;
-    let mut protected = after.protect.to_vec();
-    protected.extend(after.expect.map(str::to_string));
-    let outcome = skip_empty_stops(workdir, &git_dir, &protected, continue_rebase(workdir)?)?;
+    let mut named = after.protect.to_vec();
+    named.extend(after.expect.map(str::to_string));
+    let outcome = skip_empty_stops(
+        workdir,
+        &git_dir,
+        Protected::named(&named).targeting(after.targets),
+        continue_rebase(workdir)?,
+    )?;
 
     let Some(expect_stop) = after.expect else {
         return match outcome {
@@ -518,6 +554,7 @@ pub fn continue_rebase_expecting_edit(workdir: &Path, after: AfterStop<'_>) -> R
 pub struct AfterStop<'a> {
     expect: Option<&'a str>,
     protect: &'a [String],
+    targets: &'a [String],
 }
 
 impl<'a> AfterStop<'a> {
@@ -531,7 +568,7 @@ impl<'a> AfterStop<'a> {
     pub fn rewrite(expect_stop: &'a str) -> Self {
         Self {
             expect: Some(expect_stop),
-            protect: &[],
+            ..Self::default()
         }
     }
 
@@ -539,6 +576,12 @@ impl<'a> AfterStop<'a> {
     /// phase still has to find, for instance.
     pub fn protecting(self, protect: &'a [String]) -> Self {
         Self { protect, ..self }
+    }
+
+    /// The fold target this continue stops at, or another commit the
+    /// operation lands on (see [`Protected`]).
+    pub fn targeting(self, targets: &'a [String]) -> Self {
+        Self { targets, ..self }
     }
 }
 

@@ -353,9 +353,13 @@ $ loom fold mqt feature-b
 This covers the commit you move and the commit you fold into. A redundant commit
 that is neither is dropped, and loom says so.
 
-The hint always names the redundant commit, which is not always one you would want
-gone: when it is the *target* of the fold, dropping it removes what you were
-folding into. Nothing is rewritten either way.
+When the redundant commit is the *target* of the fold, loom does not offer to drop
+it, since that removes what you were folding into:
+
+```console
+# ✗ Commit `a337eda` is redundant — the history below it already has its change
+#   › Nothing was rewritten. Run `loom update` if it landed upstream
+```
 
 ## Conflicts
 

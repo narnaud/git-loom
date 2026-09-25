@@ -1580,28 +1580,29 @@ pub fn run_rebase_or_abort(
 ///
 /// Stopping at the replay of `expect_stop` is the point of the call, and the
 /// commits this todo marks `edit` are protected from being dropped as empty;
-/// `also_protect` adds ones a later phase depends on. The caller drives the
-/// rebase from there and finishes it with
-/// [`git::continue_rebase_expecting_edit`]. Any other outcome — a stop on
-/// another commit, a rebase that never stopped — is refused before the caller
-/// rewrites anything (see [`git::verify_paused_at`]).
+/// `also_target` adds the commits the operation lands on, edited or not, so the
+/// refusal does not offer to drop them. The caller drives the rebase from there
+/// and finishes it with [`git::continue_rebase_expecting_edit`]. Any other
+/// outcome — a stop on another commit, a rebase that never stopped — is
+/// refused before the caller rewrites anything (see [`git::verify_paused_at`]).
 pub fn run_rebase_expecting_edit(
     workdir: &Path,
     upstream: Option<&str>,
     todo_content: &str,
     expect_stop: Oid,
-    also_protect: &[&str],
+    also_target: &[&str],
 ) -> Result<()> {
-    let mut protected = edited_commits(todo_content);
-    ensure_todo_edits(&protected, expect_stop)?;
+    let edited = edited_commits(todo_content);
+    ensure_todo_edits(&edited, expect_stop)?;
     let expected = expect_stop.to_string();
 
-    protected.extend(also_protect.iter().map(|hash| hash.to_string()));
+    let targets: Vec<String> = also_target.iter().map(|hash| hash.to_string()).collect();
 
     // Protect every commit this todo rewrites — a second `edit` in the same
     // rebase is as much the caller's as the one it stops at first. These are
     // the todo's own hashes, abbreviated, which `shas_match` handles.
-    let outcome = halt_on_empty(workdir, upstream, todo_content, &protected)?;
+    let protected = git::Protected::named(&edited).targeting(&targets);
+    let outcome = halt_on_empty(workdir, upstream, todo_content, protected)?;
 
     match outcome {
         RebaseOutcome::Paused => git::verify_paused_at(workdir, &expected),
@@ -1621,13 +1622,15 @@ pub fn run_rebase_protecting(
     workdir: &Path,
     upstream: Option<&str>,
     todo_content: &str,
-    protected: &[String],
+    protected: git::Protected<'_>,
 ) -> Result<RebaseOutcome> {
     // Checked in release too: this runs once per rebase, and a short ID here
     // silently protects every commit sharing its prefix. 40 for SHA-1, 64 for
     // SHA-256.
     if let Some(bad) = protected
+        .named
         .iter()
+        .chain(protected.targets)
         .find(|hash| !matches!(hash.len(), 40 | 64) || !hash.bytes().all(|b| b.is_ascii_hexdigit()))
     {
         return git::before_rebase_starts(Err(anyhow::anyhow!(
@@ -1643,7 +1646,7 @@ fn halt_on_empty(
     workdir: &Path,
     upstream: Option<&str>,
     todo_content: &str,
-    protected: &[String],
+    protected: git::Protected<'_>,
 ) -> Result<RebaseOutcome> {
     let git_dir = git::absolute_git_dir(workdir)?;
     git::skip_empty_stops(

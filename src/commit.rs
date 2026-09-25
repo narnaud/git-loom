@@ -234,6 +234,7 @@ pub fn run(
         // `post_commit` names the new commit by reading `branch_name` back, so
         // a replay that came out empty would report the tip it was appended to.
         protect: vec![head_oid.to_string()],
+        targets: Vec::new(),
     };
     transaction::save(&git_dir, &state)?;
     // The state file owns the patch from here: the `Completed` arm puts it
@@ -244,7 +245,7 @@ pub fn run(
 
     // The rollback undoes the commit, so an empty replay is reported by
     // `roll_back_failed_rebase`, which knows whether that undo ran.
-    let outcome = weave::run_rebase_protecting(&workdir, Some(&base), &todo, &state.protect)
+    let outcome = weave::run_rebase_protecting(&workdir, Some(&base), &todo, state.protected())
         .map_err(|e| transaction::roll_back_failed_rebase(&workdir, &git_dir, &state, e))?;
     match outcome {
         RebaseOutcome::Completed => {

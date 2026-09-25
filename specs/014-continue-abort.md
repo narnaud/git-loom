@@ -56,6 +56,8 @@ The state file contains:
 - `protect`: Commits the resumed rebase MUST NOT drop as empty (Spec 004). A
   `run_rebase_protecting` caller that can pause MUST record them here, or
   `loom continue` replays without the protection the command started with.
+- `targets`: Protected commits the operation lands on (a fold or absorb
+  target); the refusal does not offer `loom drop` for them.
 - `context`: Command-specific resume data (serialized as JSON)
 
 The `.git/loom/` directory is created lazily when state is first saved.
@@ -205,9 +207,9 @@ loom continue
    - Runs `git rebase --continue`.
    - If `--continue` encounters another conflict: stays paused, keeps the state
      file, reports that the operation is still paused, exits successfully.
-   - If it halts on a commit in `protect` that replayed empty, that is not a
-     pause and not the user's to resolve: the rebase is aborted, the rollback
-     is applied, the state file goes, and the refusal is reported as an error.
+   - If it halts on a commit in `protect` or `targets` that replayed empty,
+     that is not a pause and not the user's to resolve: the rebase is aborted,
+     the rollback is applied, the state file goes, and the refusal is reported as an error.
      Where the rollback takes that commit out of reach, the message MUST NOT
      offer `loom drop` for it.
    - If `--continue` succeeds: moves to dispatch.

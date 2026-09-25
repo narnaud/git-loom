@@ -17,8 +17,19 @@ pub struct LoomState {
     /// [`crate::core::weave::run_rebase_protecting`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub protect: Vec<String>,
+    /// Protected commits the operation lands on (a fold or absorb target), so
+    /// the refusal does not offer to drop them (see [`git::Protected`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub targets: Vec<String>,
     /// Command-specific resume context (opaque JSON).
     pub context: serde_json::Value,
+}
+
+impl LoomState {
+    /// `protect` and `targets`, as the rebase takes them.
+    pub fn protected(&self) -> git::Protected<'_> {
+        git::Protected::named(&self.protect).targeting(&self.targets)
+    }
 }
 
 /// Rollback information captured before the rebase step starts.
@@ -373,7 +384,8 @@ pub fn continue_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
         // A stop on a commit the new history already contains is not a conflict
         // to resolve (`skip_empty_stops` establishes that before skipping
         // anything). A resumable owner has already made its own rewrite by the
-        // time it can pause; `protect` covers the commits it only follows.
+        // time it can pause; `protect` and `targets` cover the other commits it
+        // depends on.
         // Only the empty-replay refusal is undone here (Spec 014), and only
         // once it has ended the rebase: the refusal leaves a live one when the
         // tree is dirty, and its message says to save that work before undoing
@@ -382,7 +394,7 @@ pub fn continue_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
         let outcome = git::skip_empty_stops(
             workdir,
             git_dir,
-            &state.protect,
+            state.protected(),
             git::continue_rebase(workdir)?,
         )
         .map_err(|e| match git::replayed_empty_hash(&e) {
@@ -656,6 +668,7 @@ mod tests {
             },
             context: serde_json::json!({ "branch_name": "feature" }),
             protect: vec!["def456".to_string()],
+            targets: vec!["fed789".to_string()],
         };
 
         let json = serde_json::to_string_pretty(&state).unwrap();
@@ -664,6 +677,7 @@ mod tests {
         assert_eq!(restored.rollback.reset_mixed_to, "abc123");
         assert_eq!(restored.rollback.delete_branches, vec!["new-branch"]);
         assert_eq!(restored.protect, vec!["def456"]);
+        assert_eq!(restored.targets, vec!["fed789"]);
     }
 
     /// A state file written before `protect` existed must still load.
@@ -672,6 +686,7 @@ mod tests {
         let json = r#"{"command":"fold","rollback":{},"context":null}"#;
         let restored: LoomState = serde_json::from_str(json).unwrap();
         assert!(restored.protect.is_empty());
+        assert!(restored.targets.is_empty());
     }
 
     /// `--empty` outlives `git rebase --continue`, so the state file is what
@@ -693,7 +708,7 @@ mod tests {
             &workdir,
             Some(&graph.base_oid.to_string()),
             &graph.to_todo(),
-            &protect,
+            crate::git::Protected::named(&protect),
         )
         .unwrap();
         assert_eq!(outcome, git::RebaseOutcome::Paused);
@@ -709,6 +724,7 @@ mod tests {
                 },
                 context: serde_json::Value::Null,
                 protect,
+                targets: Vec::new(),
             },
         )
         .unwrap();
@@ -729,6 +745,42 @@ mod tests {
             !t.branch_exists("_loom-track"),
             "the rollback runs too, not just the state removal"
         );
+    }
+
+    #[test]
+    fn continue_does_not_offer_to_drop_a_target() {
+        let (t, keeper) = crate::core::test_helpers::repo_with_a_redundant_commit_above();
+        let workdir = t.workdir();
+        let git_dir = t.repo.path().to_path_buf();
+        let redundant = t.get_branch_target("alpha").to_string();
+
+        let mut graph = crate::core::weave::Weave::from_repo(&t.repo).unwrap();
+        assert!(graph.edit_commit(keeper));
+        let targets = vec![redundant];
+        crate::core::weave::run_rebase_protecting(
+            &workdir,
+            Some(&graph.base_oid.to_string()),
+            &graph.to_todo(),
+            crate::git::Protected::default().targeting(&targets),
+        )
+        .unwrap();
+        save(
+            &git_dir,
+            &LoomState {
+                command: "fold".to_string(),
+                rollback: Rollback::default(),
+                context: serde_json::Value::Null,
+                protect: Vec::new(),
+                targets,
+            },
+        )
+        .unwrap();
+
+        let err = continue_cmd(&workdir, &git_dir).unwrap_err().to_string();
+
+        assert!(err.contains("is redundant"), "{err}");
+        assert!(!err.contains("loom drop"), "{err}");
+        assert!(!git::rebase_is_in_progress(&git_dir), "{err}");
     }
 
     /// The refusal leaves a live rebase when the tree is dirty, because the
@@ -755,7 +807,7 @@ mod tests {
             &workdir,
             Some(&base),
             &graph.to_todo(),
-            &protect,
+            crate::git::Protected::named(&protect),
         )
         .unwrap();
 
@@ -770,6 +822,7 @@ mod tests {
                 },
                 context: serde_json::Value::Null,
                 protect,
+                targets: Vec::new(),
             },
         )
         .unwrap();
@@ -800,7 +853,7 @@ mod tests {
             &workdir,
             Some(&graph.base_oid.to_string()),
             &graph.to_todo(),
-            &protect,
+            crate::git::Protected::named(&protect),
         )
         .unwrap();
 
@@ -816,6 +869,7 @@ mod tests {
                 },
                 context: serde_json::Value::Null,
                 protect,
+                targets: Vec::new(),
             },
         )
         .unwrap();
@@ -843,6 +897,7 @@ mod tests {
             },
             context: serde_json::Value::Null,
             protect: Vec::new(),
+            targets: Vec::new(),
         };
         save(&git_dir, &state).unwrap();
 
@@ -878,6 +933,7 @@ mod tests {
             },
             context: serde_json::Value::Null,
             protect: Vec::new(),
+            targets: Vec::new(),
         };
         save(&git_dir, &state).unwrap();
 
@@ -903,6 +959,7 @@ mod tests {
             },
             context: serde_json::Value::Null,
             protect: Vec::new(),
+            targets: Vec::new(),
         };
         save(&git_dir, &state).unwrap();
 
@@ -1101,6 +1158,7 @@ mod tests {
             rollback: Rollback::default(),
             context: serde_json::Value::Null,
             protect: Vec::new(),
+            targets: Vec::new(),
         };
         save(dir.path(), &state).unwrap();
         assert_eq!(
@@ -1125,6 +1183,7 @@ mod tests {
             rollback: Rollback::default(),
             context: serde_json::Value::Null,
             protect: Vec::new(),
+            targets: Vec::new(),
         };
 
         save(dir.path(), &make("update")).unwrap();
@@ -1161,6 +1220,7 @@ mod tests {
                 rollback: Rollback::default(),
                 context: serde_json::Value::Null,
                 protect: Vec::new(),
+                targets: Vec::new(),
             },
         )
         .unwrap();
@@ -1218,6 +1278,7 @@ mod tests {
                 },
                 context: serde_json::Value::Null,
                 protect: Vec::new(),
+                targets: Vec::new(),
             },
         )
         .unwrap();
@@ -1271,6 +1332,7 @@ mod tests {
                 rollback: Rollback::default(),
                 context: serde_json::Value::Null,
                 protect: Vec::new(),
+                targets: Vec::new(),
             },
         )
         .unwrap();

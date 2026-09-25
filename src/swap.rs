@@ -56,12 +56,13 @@ fn swap_two_commits(repo: &Repository, hash_a: String, hash_b: String) -> Result
         // A swap that silently dropped one of them is not a swap, and the
         // success message names both.
         protect: vec![hash_a.clone(), hash_b.clone()],
+        targets: Vec::new(),
     };
     transaction::save(&git_dir, &state)?;
 
     let todo = graph.to_todo();
     let base = graph.base_oid.to_string();
-    let outcome = weave::run_rebase_protecting(workdir, Some(&base), &todo, &state.protect)
+    let outcome = weave::run_rebase_protecting(workdir, Some(&base), &todo, state.protected())
         .map_err(|e| transaction::roll_back_failed_rebase(workdir, &git_dir, &state, e))?;
     match outcome {
         RebaseOutcome::Completed => {

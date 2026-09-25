@@ -53,6 +53,7 @@ pub fn run(branch: Option<String>, all: bool) -> Result<()> {
                     branch_name: local_name,
                 })?,
                 protect: Vec::new(),
+                targets: Vec::new(),
             };
             transaction::save(&git_dir, &state)?;
             transaction::warn_paused(workdir, "merge");

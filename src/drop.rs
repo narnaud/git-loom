@@ -312,6 +312,7 @@ fn drop_commit(repo: &Repository, commit_hash: &str, skip_confirm: bool) -> Resu
         },
         context: serde_json::to_value(&ctx)?,
         protect: Vec::new(),
+        targets: Vec::new(),
     };
     transaction::save(&git_dir, &state)?;
 

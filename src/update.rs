@@ -149,6 +149,7 @@ pub fn run(skip_confirm: bool) -> Result<()> {
         },
         context: serde_json::to_value(&ctx)?,
         protect: Vec::new(),
+        targets: Vec::new(),
     };
     transaction::save(&git_dir, &state)?;
 

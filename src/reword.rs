@@ -148,22 +148,28 @@ pub fn reword_commit(repo: &Repository, commit_hash: &str, message: Option<Strin
             },
             context: serde_json::to_value(&ctx)?,
             protect: Vec::new(),
+            targets: Vec::new(),
         },
     )?;
 
     // The rebase runs with `--empty=stop`, so a commit above the target whose
     // changes are already in the base halts it: drop it and carry on, the way
     // `--empty=drop` did, rather than report it as a conflict.
-    let outcome = git::skip_empty_stops(workdir, &git_dir, &[], git::continue_rebase(workdir)?)
-        .inspect_err(|_| {
-            // The refusal aborted the rebase itself, so there is none to abort
-            // here — but that abort can fail, and then the state file and the
-            // index are both still `loom abort`'s to deal with.
-            if git::rebase_is_over(workdir) {
-                let _ = transaction::delete(&git_dir);
-                git::restore_staged_after_rebase(workdir, &saved_staged);
-            }
-        })?;
+    let outcome = git::skip_empty_stops(
+        workdir,
+        &git_dir,
+        git::Protected::default(),
+        git::continue_rebase(workdir)?,
+    )
+    .inspect_err(|_| {
+        // The refusal aborted the rebase itself, so there is none to abort
+        // here — but that abort can fail, and then the state file and the
+        // index are both still `loom abort`'s to deal with.
+        if git::rebase_is_over(workdir) {
+            let _ = transaction::delete(&git_dir);
+            git::restore_staged_after_rebase(workdir, &saved_staged);
+        }
+    })?;
     match outcome {
         git::RebaseOutcome::Completed => {
             git::restore_staged_after_rebase(workdir, &saved_staged);

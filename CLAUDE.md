@@ -97,7 +97,8 @@ leaves the index as the user had it — with one exception (Spec 014).
 `weave::run_rebase_or_abort` does it for its own callers (Specs 004 and 014).
 
 A `weave::run_rebase_protecting` caller that can pause must also record its
-protected commits in `LoomState.protect`, as full object names; `loom continue`
+protected commits in `LoomState.protect`, and the ones it lands on (a fold or
+absorb target) in `LoomState.targets`, as full object names; `loom continue`
 replays without them otherwise (Spec 004).
 
 Before rebase, `weave::run_rebase` must reject every moved branch checked out
