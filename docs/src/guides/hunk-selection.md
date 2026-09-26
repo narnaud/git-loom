@@ -12,7 +12,7 @@ Sometimes you want to stage or commit only part of your changes — a few specif
 │   A  new.rs      ││ +new line                      │
 │ ?? README.md     ││                                │
 ╰──────────────────╯╰────────────────────────────────╯
- Navigate: ↑/↓ | Switch Pane: tab | Toggle: space | Confirm: c or Enter | Quit: q or Esc
+ Toggle: space | Confirm: Enter | Help: ? | Cancel: Esc
 ```
 
 The left pane lists files with `git status`–style codes (`M`, `MM`, `A`, `??`, `D`). The right pane shows diff hunks — check the ones you want, leave the rest unchecked, then confirm.
@@ -22,8 +22,9 @@ The left pane lists files with `git status`–style codes (`M`, `MM`, `A`, `??`,
 | `↑` / `k`, `↓` / `j` | Navigate up/down |
 | `Tab` / `Shift+Tab` | Switch between left and right pane |
 | `Space` | Toggle hunk (right pane) or all hunks in file/directory (left pane) |
-| `c` / `Enter` | Confirm selections |
+| `Enter` | Confirm selections |
 | `q` / `Esc` / `Ctrl+C` | Cancel without changes |
+| `?` | Show the help popup |
 
 ## Staging hunks (`add -p`)
 

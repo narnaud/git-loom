@@ -596,7 +596,56 @@ enum Popup {
     Log {
         scroll: DiffPane,
     },
+    Help {
+        scroll: DiffPane,
+    },
 }
+
+/// The `?` popup: everything the status bar leaves out.
+const HELP: &[popup::HelpSection] = &[
+    (
+        "Navigation",
+        &[
+            (
+                "↑/k  ↓/j",
+                "move the cursor; scroll the diff when it has focus",
+            ),
+            (
+                "←/h  →/l",
+                "close / open a row; ← on a file walks up to its commit",
+            ),
+            ("Enter", "toggle a row open or closed"),
+            ("PgUp/PgDn", "scroll the diff by a page"),
+            ("Tab", "switch pane"),
+            ("Ctrl-←/→", "narrow / widen the left pane"),
+            ("+/-", "one more / one fewer context commit before the base"),
+            ("Space", "select / unselect a row"),
+            ("Esc", "cancel a pick or a mode, else clear the selection"),
+        ],
+    ),
+    (
+        "Actions (on the selection, else the cursor row)",
+        &[
+            ("c / C", "commit files / commit picked hunks"),
+            ("f / F", "fold into a commit / fold picked hunks"),
+            ("m", "move a commit above or below another"),
+            ("s / S", "split a commit by file / by hunk"),
+            ("b", "new branch at the cursor"),
+            ("d", "drop"),
+            ("a", "absorb into the commits that touched the same lines"),
+            ("r", "reword a commit, or rename a branch"),
+        ],
+    ),
+    (
+        "Other",
+        &[
+            ("L", "action log"),
+            ("R / F5", "reload the tree"),
+            ("?", "this help"),
+            ("q / Ctrl-C", "quit"),
+        ],
+    ),
+];
 
 enum AfterNotice {
     Nothing,
@@ -1243,17 +1292,24 @@ impl<'a> App<'a> {
             Popup::Log { mut scroll } => match code {
                 KeyCode::Esc | KeyCode::Char('q' | 'L') => {}
                 _ => {
-                    match code {
-                        KeyCode::Up | KeyCode::Char('k') => scroll.scroll_by(-1),
-                        KeyCode::Down | KeyCode::Char('j') => scroll.scroll_by(1),
-                        KeyCode::PageUp => scroll.scroll_page(-1),
-                        KeyCode::PageDown => scroll.scroll_page(1),
-                        _ => {}
-                    }
+                    scroll_popup(&mut scroll, code);
                     self.popup = Some(Popup::Log { scroll });
                 }
             },
+            Popup::Help { mut scroll } => match code {
+                KeyCode::Esc | KeyCode::Char('q' | '?') => {}
+                _ => {
+                    scroll_popup(&mut scroll, code);
+                    self.popup = Some(Popup::Help { scroll });
+                }
+            },
         }
+    }
+
+    fn open_help(&mut self) {
+        self.popup = Some(Popup::Help {
+            scroll: DiffPane::new(),
+        });
     }
 
     fn open_log(&mut self) {
@@ -1343,6 +1399,10 @@ impl<'a> App<'a> {
                 self.open_log();
                 None
             }
+            KeyCode::Char('?') => {
+                self.open_help();
+                None
+            }
             // While picking a fold target or placing a commit only navigation,
             // Enter, and Esc apply — action keys must not fire and discard
             // the pending operation.
@@ -1424,8 +1484,8 @@ impl<'a> App<'a> {
         }
     }
 
-    /// Esc: cancel fold-target, commit or move mode, else clear the selection,
-    /// else quit.
+    /// Esc: cancel fold-target, commit or move mode, else clear the selection.
+    /// Never quits: it reads as cancel, and `q` is the way out.
     fn handle_escape(&mut self) {
         if matches!(self.mode, Mode::FoldTarget { .. }) {
             self.cancel_fold_target();
@@ -1435,8 +1495,6 @@ impl<'a> App<'a> {
             self.cancel_move_target();
         } else if !self.selected.is_empty() {
             self.clear_selection();
-        } else {
-            self.outcome = Some(Outcome::Quit);
         }
     }
 
@@ -2964,9 +3022,10 @@ impl ShellApp for App<'_> {
                 self.start_action(action);
             }
         } else if self.running.is_some() {
-            // The log is read-only; everything else waits for the action.
+            // The log and help are read-only; everything else waits.
             match code {
                 KeyCode::Char('L') => self.open_log(),
+                KeyCode::Char('?') => self.open_help(),
                 _ => self.notice = Some("an action is running…".to_string()),
             }
         } else if self.pick.is_some() {
@@ -2977,6 +3036,7 @@ impl ShellApp for App<'_> {
             // keeps that reasoning off the list of things to know.
             match code {
                 KeyCode::Char('L') => self.open_log(),
+                KeyCode::Char('?') => self.open_help(),
                 // Marked, not dropped: the worker reads with `git`, so
                 // letting it outlive the pick would put it beside whatever
                 // action the freed keyboard starts next, over the same index.
@@ -3068,6 +3128,9 @@ impl ShellApp for App<'_> {
             Some(Popup::Notice { notice, .. }) => notice.render(frame, area, self.theme),
             Some(Popup::Log { scroll }) => {
                 popup::render_log(frame, area, &self.log, scroll, self.theme)
+            }
+            Some(Popup::Help { scroll }) => {
+                popup::render_help(frame, area, HELP, scroll, self.theme)
             }
             None => {}
         }
@@ -3266,21 +3329,24 @@ impl ShellApp for App<'_> {
 
     fn status_hints(&self, _focused: PaneId) -> Vec<Cow<'static, str>> {
         vec![
-            "Navigate: ↑/↓".into(),
-            "Close/open: ←/→".into(),
-            "Select: space".into(),
             "Commit: c/C".into(),
             "Fold: f/F".into(),
-            "Move: m".into(),
-            "Split: s/S".into(),
             "Branch: b".into(),
             "Drop: d".into(),
-            "Absorb: a".into(),
-            "Reword: r".into(),
-            "Log: L".into(),
-            "Refresh: R".into(),
+            "Help: ?".into(),
             "Quit: q".into(),
         ]
+    }
+}
+
+/// Keys the log and help popups scroll with.
+fn scroll_popup(scroll: &mut DiffPane, code: KeyCode) {
+    match code {
+        KeyCode::Up | KeyCode::Char('k') => scroll.scroll_by(-1),
+        KeyCode::Down | KeyCode::Char('j') => scroll.scroll_by(1),
+        KeyCode::PageUp => scroll.scroll_page(-1),
+        KeyCode::PageDown => scroll.scroll_page(1),
+        _ => {}
     }
 }
 

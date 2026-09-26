@@ -1,5 +1,5 @@
 //! Modal popups for `loom tui`: the prompts a running command asks through
-//! `core::ui`, error/pause notices, and the action log.
+//! `core::ui`, error/pause notices, the action log, and the key help.
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
@@ -532,6 +532,48 @@ pub(crate) fn render_log(
     frame.render_widget(Clear, rect);
     let block = Block::default()
         .title(" Log — L or Esc to close ")
+        .borders(Borders::ALL)
+        .border_style(theme.border_active);
+    scroll.render(frame, rect, lines, block);
+}
+
+/// One group of the help popup: a header and its `(keys, effect)` rows.
+pub(crate) type HelpSection = (&'static str, &'static [(&'static str, &'static str)]);
+
+/// Draw the key help over `area`; `scroll` persists across frames.
+pub(crate) fn render_help(
+    frame: &mut Frame,
+    area: Rect,
+    sections: &[HelpSection],
+    scroll: &mut DiffPane,
+    theme: &TuiTheme,
+) {
+    let width = sections
+        .iter()
+        .flat_map(|(_, rows)| rows.iter())
+        .map(|(keys, _)| keys.chars().count())
+        .max()
+        .unwrap_or(0);
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    for (i, (header, rows)) in sections.iter().enumerate() {
+        if i > 0 {
+            lines.push(Line::from(""));
+        }
+        lines.push(Line::from(Span::styled(
+            header.to_string(),
+            theme.message.add_modifier(Modifier::BOLD),
+        )));
+        for (keys, effect) in rows.iter() {
+            lines.push(Line::from(vec![
+                Span::styled(format!("  {:<width$}  ", keys), theme.highlight),
+                Span::styled(effect.to_string(), theme.message),
+            ]));
+        }
+    }
+    let rect = centered(area, area.width * 4 / 5, area.height * 4 / 5);
+    frame.render_widget(Clear, rect);
+    let block = Block::default()
+        .title(" Help — ? or Esc to close ")
         .borders(Borders::ALL)
         .border_style(theme.border_active);
     scroll.render(frame, rect, lines, block);
