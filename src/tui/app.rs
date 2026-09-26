@@ -1,11 +1,11 @@
 //! Interactive status TUI (`loom tui`): the status tree on the left, the diff
 //! of the item under the cursor on the right.
 //!
-//! Actions (commit, fold, move, branch, drop, reword) run the regular loom
+//! Actions (commit, fold, move, split, branch, drop, reword) run the regular loom
 //! command on a worker thread while the TUI stays up: the command's prompts
 //! become popups and its messages a log (`core::ui`), and only an editor takes
 //! the terminal over. Fold, move and commit pick their target in a second step
-//! inside the tree; `C` and `F` pick their hunks first, in the hunk selector, which
+//! inside the tree; `C`, `F` and `S` pick their hunks first, in the hunk selector, which
 //! runs before any action, as a nested shell on the same terminal.
 
 use std::borrow::Cow;
@@ -44,7 +44,7 @@ use crate::tui::widgets::common::{colorize_diff, pane_block};
 use crate::tui::widgets::diff_pane::DiffPane;
 use crate::tui::widgets::list_pane::ListPane;
 use crate::tui::widgets::popup::{self, LogEntry, Notice, Prompt, PromptOutcome, TextField};
-use crate::{branch, commit, drop, fold, reword};
+use crate::{branch, commit, drop, fold, reword, split};
 
 // ── Data model ───────────────────────────────────────────────────────────
 
@@ -393,6 +393,14 @@ enum Action {
     /// `loom fold <commit> --above|--below <commit>`, or `loom fold <commit>
     /// <branch>`; never `MoveSlot::Stay`.
     Move { commit: git2::Oid, slot: MoveSlot },
+    /// `loom split <commit> [files...]`, or `loom split -p <commit> --hunks
+    /// <id>... --hunks-from <fingerprint>` with the hunks `S` picked. `files`
+    /// are cwd-relative, as the CLI takes them.
+    Split {
+        commit: String,
+        files: Vec<String>,
+        hunks: Option<HunkArgs>,
+    },
     /// `loom branch new <name> [-t target]`.
     NewBranch {
         name: String,
@@ -504,6 +512,8 @@ enum PickFor {
         targets: Vec<FoldTarget>,
         commit: Option<git2::Oid>,
     },
+    /// `S`: the hunks of `commit` that make the first of its two halves.
+    Split { commit: git2::Oid },
 }
 
 impl PickFor {
@@ -512,6 +522,7 @@ impl PickFor {
         match self {
             PickFor::Commit => "commit",
             PickFor::Fold { .. } => "fold",
+            PickFor::Split { .. } => "split",
         }
     }
 }
@@ -713,6 +724,15 @@ fn execute_action(
                 vec![],
                 theme,
             )
+        }
+        Action::Split {
+            commit,
+            files,
+            hunks,
+        } => {
+            let patch = hunks.is_some();
+            let hunks = hunks.unwrap_or_default();
+            split::run(commit, None, patch, hunks, files, theme)
         }
         Action::NewBranch { name, target } => branch::new::run(Some(name), target),
         Action::Drop { targets } => drop::run(targets, false),
@@ -1011,6 +1031,26 @@ impl<'a> App<'a> {
                     MoveSlot::Stay => {}
                 }
             }
+            Action::Split {
+                commit,
+                files,
+                hunks,
+            } => {
+                words.push("split".into());
+                if hunks.is_some() {
+                    words.push("-p".into());
+                }
+                words.push(sid(commit));
+                words.extend(files.iter().map(|f| hunk_select::quoted(f)));
+                if let Some(hunks) = hunks {
+                    for id in &hunks.ids {
+                        words.extend(["--hunks".into(), hunk_select::quoted(id)]);
+                    }
+                    if let Some(from) = &hunks.from {
+                        words.extend(["--hunks-from".into(), from.clone()]);
+                    }
+                }
+            }
             Action::NewBranch { name, target } => {
                 words.extend(["branch".into(), "new".into(), name.clone()]);
                 if let Some(target) = target {
@@ -1300,7 +1340,8 @@ impl<'a> App<'a> {
             // Enter, and Esc apply — action keys must not fire and discard
             // the pending operation.
             KeyCode::Char(
-                ' ' | 'c' | 'C' | 'f' | 'F' | 'm' | 'b' | 'd' | 'r' | 'R' | '+' | '=' | '-',
+                ' ' | 'c' | 'C' | 'f' | 'F' | 'm' | 's' | 'S' | 'b' | 'd' | 'r' | 'R' | '+' | '='
+                | '-',
             )
             | KeyCode::F(5)
                 if self.placing().is_some() =>
@@ -1331,6 +1372,11 @@ impl<'a> App<'a> {
             }
             KeyCode::Char('m') => {
                 self.action_move_start();
+                None
+            }
+            KeyCode::Char('s') => self.action_split(),
+            KeyCode::Char('S') => {
+                self.action_split_patch_start();
                 None
             }
             KeyCode::Char('b') => {
@@ -2497,6 +2543,146 @@ impl<'a> App<'a> {
         Some(Action::NewBranch { name, target })
     }
 
+    /// The one commit `s` or `S` splits: the commit the rows are, or the one
+    /// the commit files among them belong to.
+    fn split_source(&self, rows: &[&Row]) -> Result<git2::Oid, &'static str> {
+        let mut commits = HashSet::new();
+        for row in rows {
+            match row.kind {
+                RowKind::Commit { oid, .. } | RowKind::CommitFile { oid, .. }
+                    if row.target.is_some() =>
+                {
+                    commits.insert(oid);
+                }
+                _ => return Err("move to a commit or commit file"),
+            }
+        }
+        match commits.into_iter().collect::<Vec<_>>()[..] {
+            [commit] => Ok(commit),
+            [] => Err("move to a commit or commit file"),
+            _ => Err("one commit at a time"),
+        }
+    }
+
+    /// `s`: the selected commit files (else the cursor's) become the first
+    /// commit, the rest of their commit the second; a commit row is `S`.
+    fn action_split(&mut self) -> Option<Action> {
+        let rows = self.picked_rows();
+        let commit = match self.split_source(&rows) {
+            Ok(commit) => commit,
+            Err(notice) => {
+                self.notice = Some(format!("split: {}", notice));
+                return None;
+            }
+        };
+        let files: Vec<String> = rows
+            .iter()
+            .filter_map(|r| match &r.kind {
+                RowKind::CommitFile { path, .. } => {
+                    Some(repo::cwd_relative_path(path, &self.snapshot.cwd_prefix))
+                }
+                _ => None,
+            })
+            .collect();
+        // A commit row names no files to take out: pick its hunks, as `S` does.
+        if files.is_empty() {
+            self.action_split_patch_start();
+            return None;
+        }
+        let total = self
+            .snapshot
+            .info
+            .commits
+            .iter()
+            .find(|c| c.oid == commit)
+            .map_or(0, |c| c.files.len());
+        if total < 2 {
+            self.notice = Some("split: one file only, split its hunks with S".to_string());
+            return None;
+        }
+        if files.len() >= total {
+            self.notice = Some("split: leave at least one file for the second commit".to_string());
+            return None;
+        }
+        Some(Action::Split {
+            commit: commit.to_string(),
+            files,
+            hunks: None,
+        })
+    }
+
+    /// `S`: `s` with the hunks picked first, over the commit's whole diff
+    /// whatever the cursor or selection, as `C` shows every local change. The
+    /// press starts the read on a worker, as `C` does.
+    fn action_split_patch_start(&mut self) {
+        let rows = self.picked_rows();
+        let Some(origin) = self.current_row().map(|r| r.key.clone()) else {
+            return;
+        };
+        let commit = match self.split_source(&rows) {
+            Ok(commit) => commit,
+            Err(notice) => {
+                self.notice = Some(format!("split: {}", notice));
+                return;
+            }
+        };
+        let command = format!("loom split -p {}", self.sid_of(&commit.to_string()));
+        self.start_pick(command, origin, PickFor::Split { commit }, move |workdir| {
+            let entries = staging::collect_commit_hunks(workdir, &commit.to_string(), &[])?;
+            Ok((entries, Vec::new()))
+        });
+    }
+
+    /// Whether an `S` read leaves nothing to split, after saying so: with fewer
+    /// than two entries no pick can keep something on each side.
+    fn refuse_split_pick(&mut self, entries: &[FileEntry]) -> bool {
+        let (line, notice) = match entries.iter().map(|f| f.hunks.len()).sum::<usize>() {
+            0 => ("No changes to pick", "split: no hunks to pick"),
+            1 => ("Only one hunk", "split: one hunk only, nothing to split"),
+            _ => return false,
+        };
+        self.log_line(Level::Warn, line);
+        self.notice = Some(notice.to_string());
+        true
+    }
+
+    /// The split an `S` pick confirms, handed to `loom split -p` by id (Spec
+    /// 019), or `None` after a line in the entry the press opened saying why
+    /// there is none. Both halves must keep something, as `split -p` checks.
+    fn finish_split_pick(
+        &mut self,
+        picked: Result<Option<Vec<FileEntry>>>,
+        commit: git2::Oid,
+    ) -> Option<Action> {
+        let picked = match picked {
+            Ok(Some(picked)) if picked.iter().any(|f| f.hunks.iter().any(|h| h.selected)) => picked,
+            Ok(_) => {
+                self.log_line(Level::Warn, "Cancelled");
+                self.notice = Some("split cancelled".to_string());
+                return None;
+            }
+            Err(e) => {
+                let text = e.to_string();
+                self.log_line(Level::Error, &text);
+                self.show_error(&text, AfterNotice::Nothing);
+                return None;
+            }
+        };
+        if picked.iter().all(|f| f.hunks.iter().all(|h| h.selected)) {
+            self.log_line(Level::Warn, "Nothing left for the second commit");
+            self.notice = Some("split: leave at least one hunk for the second commit".to_string());
+            return None;
+        }
+        let commit = commit.to_string();
+        let from = hunk_select::fingerprint(&commit, None, &picked);
+        let ids = hunk_select::picked_ids(&picked);
+        Some(Action::Split {
+            commit,
+            files: Vec::new(),
+            hunks: Some(HunkArgs::new(ids, Some(from))),
+        })
+    }
+
     /// `d`: drop the selected working files together, else the cursor row (a
     /// commit, branch, working file, or the `[local changes]` header for
     /// `drop zz`). Only files can go together, as in the CLI.
@@ -2936,6 +3122,20 @@ impl ShellApp for App<'_> {
                 let staged = self.select_and_stage(entries, terminal);
                 self.finish_pick(staged, origin);
             }
+            PickFor::Split { commit } => {
+                if self.refuse_split_pick(&entries) {
+                    return;
+                }
+                let picked = run_hunk_selector_nested(
+                    entries,
+                    TuiTheme::from_graph_theme(&self.graph_theme),
+                    "SPLIT",
+                    terminal,
+                );
+                if let Some(action) = self.finish_split_pick(picked, commit) {
+                    self.start_action(action);
+                }
+            }
             PickFor::Fold {
                 sources,
                 targets,
@@ -3005,7 +3205,8 @@ impl ShellApp for App<'_> {
                 _ if *cancelled => "cancelling: waiting for the read to end",
                 PickFor::Fold {
                     commit: Some(_), ..
-                } => "reading the commit — Esc to cancel",
+                }
+                | PickFor::Split { .. } => "reading the commit — Esc to cancel",
                 _ => "reading the working tree — Esc to cancel",
             };
             return Some(format!(" {} {}: {}", frame, purpose.label(), what));
@@ -3038,6 +3239,7 @@ impl ShellApp for App<'_> {
             "Commit: c/C".into(),
             "Fold: f/F".into(),
             "Move: m".into(),
+            "Split: s/S".into(),
             "Branch: b".into(),
             "Drop: d".into(),
             "Reword: r".into(),
