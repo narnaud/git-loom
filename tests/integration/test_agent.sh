@@ -849,8 +849,8 @@ setup_two_hunk_commit
 printf '#!/bin/sh\necho hi\n' > "$WORK/m.sh"
 git -C "$WORK" add m.sh
 git -C "$WORK" commit -q -m "add a script"
-chmod +x "$WORK/m.sh"
-git -C "$WORK" add m.sh
+# Through the index: `chmod +x` stages nothing where core.filemode is false.
+git -C "$WORK" update-index --chmod=+x m.sh
 perl -pi -e 's/^5$/FIVE/' "$WORK/multi.txt"
 
 gl_capture fold -p zz HEAD --agent
@@ -1256,8 +1256,8 @@ seq 1 40 > "$WORK/f.txt"
 printf '#!/bin/sh\necho hi\n' > "$WORK/m.sh"
 git -C "$WORK" add f.txt m.sh
 git -C "$WORK" commit -q -m base
-chmod +x "$WORK/m.sh"
-git -C "$WORK" add m.sh
+# Through the index: `chmod +x` stages nothing where core.filemode is false.
+git -C "$WORK" update-index --chmod=+x m.sh
 perl -pi -e 's/^3$/THREE/' "$WORK/f.txt"
 
 gl_capture commit -i -m msg -p --agent
