@@ -2895,7 +2895,7 @@ fn status_bar_matches_spec() {
     assert!(
         last_row.starts_with(
             " Navigate: ↑/↓ | Close/open: ←/→ | Select: space | Commit: c/C | Fold: f/F \
-             | Move: m | Split: s/S | Branch: b | Drop: d | Reword: r | Log: L | Refresh: R | Quit: q"
+             | Move: m | Split: s/S | Branch: b | Drop: d | Absorb: a | Reword: r | Log: L | Refresh: R | Quit: q"
         ),
         "got: {:?}",
         last_row
@@ -4162,4 +4162,52 @@ fn a_split_pick_with_fewer_than_two_hunks_never_opens() {
     );
     assert!(app.refuse_split_pick(&[]));
     assert_eq!(app.notice.as_deref(), Some("split: no hunks to pick"));
+}
+
+#[test]
+fn absorb_takes_the_picked_files_else_every_change() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    let a_rs = app.snapshot.ids.get_file("a.rs").to_string();
+
+    move_cursor_to(&mut app, "wf:a.rs");
+    assert_eq!(
+        app.action_absorb(),
+        Some(Action::Absorb {
+            files: vec![a_rs.clone()]
+        })
+    );
+    assert_eq!(
+        app.command_line(&Action::Absorb {
+            files: vec![a_rs.clone()]
+        }),
+        format!("loom absorb {a_rs}")
+    );
+
+    for key in [LOCAL_CHANGES_KEY.to_string(), oid('a').to_string()] {
+        move_cursor_to(&mut app, &key);
+        assert_eq!(
+            app.action_absorb(),
+            Some(Action::Absorb { files: vec![] }),
+            "{key}"
+        );
+    }
+
+    app.selected.insert(oid('a').to_string());
+    assert!(app.action_absorb().is_none());
+    assert_eq!(
+        app.notice.as_deref(),
+        Some("absorb: select files or local changes")
+    );
+}
+
+#[test]
+fn absorb_refuses_an_empty_working_tree() {
+    let theme = make_theme();
+    let mut snapshot = make_snapshot();
+    snapshot.info.working_changes.clear();
+    let mut app = make_app(snapshot, &theme);
+
+    assert!(app.action_absorb().is_none());
+    assert_eq!(app.notice.as_deref(), Some("absorb: no local changes"));
 }

@@ -128,6 +128,14 @@ Entire files are skipped for these reasons:
 | Binary file | Binary files cannot be blamed at line level |
 | All hunks skipped | Every hunk in the file was individually skipped |
 
+### TUI Mode
+
+Under `loom tui` (Spec 020) the plan cannot be printed, so it is the detail
+of a `msg::confirm` asked after analysis and before any mutation:
+`Absorb N hunk(s) from M file(s) into K commit(s)?` followed by the plan
+lines. Declining is `Cancelled`. With nothing to absorb there is no prompt:
+the skip lines follow `No files could be absorbed` in the error.
+
 ### Dry-Run Mode
 
 With `--dry-run`, the command prints the analysis plan without creating any
