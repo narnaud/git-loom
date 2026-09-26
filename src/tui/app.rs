@@ -1,7 +1,7 @@
 //! Interactive status TUI (`loom tui`): the status tree on the left, the diff
 //! of the item under the cursor on the right.
 //!
-//! Actions (commit, fold, move, split, branch, drop, reword) run the regular loom
+//! Actions (commit, fold, move, split, branch, drop, absorb, reword) run the regular loom
 //! command on a worker thread while the TUI stays up: the command's prompts
 //! become popups and its messages a log (`core::ui`), and only an editor takes
 //! the terminal over. Fold, move and commit pick their target in a second step
@@ -44,7 +44,7 @@ use crate::tui::widgets::common::{colorize_diff, pane_block};
 use crate::tui::widgets::diff_pane::DiffPane;
 use crate::tui::widgets::list_pane::ListPane;
 use crate::tui::widgets::popup::{self, LogEntry, Notice, Prompt, PromptOutcome, TextField};
-use crate::{branch, commit, drop, fold, reword, split};
+use crate::{absorb, branch, commit, drop, fold, reword, split};
 
 // ── Data model ───────────────────────────────────────────────────────────
 
@@ -408,6 +408,8 @@ enum Action {
     },
     /// `loom drop <targets...>`: one commit, branch, or `zz`, or several files.
     Drop { targets: Vec<String> },
+    /// `loom absorb [files...]`; no files is every local change.
+    Absorb { files: Vec<String> },
     /// `loom reword <target>`; `name` is the new branch name typed in the
     /// tree, `None` for a commit (the editor asks for the message).
     Reword {
@@ -736,6 +738,7 @@ fn execute_action(
         }
         Action::NewBranch { name, target } => branch::new::run(Some(name), target),
         Action::Drop { targets } => drop::run(targets, false),
+        Action::Absorb { files } => absorb::run(false, files),
         Action::Reword { target, name } => reword::run(target, name),
     };
     crate::trace::finalize();
@@ -1061,6 +1064,10 @@ impl<'a> App<'a> {
                 words.push("drop".into());
                 words.extend(targets.iter().map(|t| sid(t)));
             }
+            Action::Absorb { files } => {
+                words.push("absorb".into());
+                words.extend(files.iter().map(|f| sid(f)));
+            }
             Action::Reword { target, name } => {
                 words.extend(["reword".into(), sid(target)]);
                 if let Some(name) = name {
@@ -1340,8 +1347,8 @@ impl<'a> App<'a> {
             // Enter, and Esc apply — action keys must not fire and discard
             // the pending operation.
             KeyCode::Char(
-                ' ' | 'c' | 'C' | 'f' | 'F' | 'm' | 's' | 'S' | 'b' | 'd' | 'r' | 'R' | '+' | '='
-                | '-',
+                ' ' | 'c' | 'C' | 'f' | 'F' | 'm' | 's' | 'S' | 'b' | 'd' | 'a' | 'r' | 'R' | '+'
+                | '=' | '-',
             )
             | KeyCode::F(5)
                 if self.placing().is_some() =>
@@ -1384,6 +1391,7 @@ impl<'a> App<'a> {
                 None
             }
             KeyCode::Char('d') => self.action_drop(),
+            KeyCode::Char('a') => self.action_absorb(),
             KeyCode::Char('r') => self.action_reword(),
             KeyCode::Char('R') | KeyCode::F(5) => {
                 self.reload();
@@ -2714,6 +2722,31 @@ impl<'a> App<'a> {
         Some(Action::Drop { targets })
     }
 
+    /// `a`: absorb the selected working files, else the cursor's, else every
+    /// local change. The command itself shows its plan to confirm.
+    fn action_absorb(&mut self) -> Option<Action> {
+        if self.snapshot.info.working_changes.is_empty() {
+            self.notice = Some("absorb: no local changes".to_string());
+            return None;
+        }
+        let rows = self.picked_rows();
+        let is_file = |r: &&Row| matches!(r.kind, RowKind::WorkingFile { .. });
+        if !self.selected.is_empty()
+            && !rows
+                .iter()
+                .all(|r| is_file(r) || matches!(r.kind, RowKind::LocalChanges { .. }))
+        {
+            self.notice = Some("absorb: select files or local changes".to_string());
+            return None;
+        }
+        let files = if rows.iter().all(is_file) {
+            rows.iter().filter_map(|r| r.target.clone()).collect()
+        } else {
+            Vec::new()
+        };
+        Some(Action::Absorb { files })
+    }
+
     /// `r`: reword the commit under the cursor, or start editing the branch
     /// name in place.
     fn action_reword(&mut self) -> Option<Action> {
@@ -3242,6 +3275,7 @@ impl ShellApp for App<'_> {
             "Split: s/S".into(),
             "Branch: b".into(),
             "Drop: d".into(),
+            "Absorb: a".into(),
             "Reword: r".into(),
             "Log: L".into(),
             "Refresh: R".into(),
