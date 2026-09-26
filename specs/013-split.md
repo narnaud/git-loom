@@ -64,6 +64,9 @@ generation is enabled.
      ```
      reset_mixed(HEAD~1) → stage selected → commit(msg1) → stage remaining → commit(original_msg)
      ```
+     Both halves are staged from the commit (`git restore --staged
+     --source=<commit>`), never from the working tree: nothing autostashed
+     the user's edits on this path, so staging by path would commit them.
    - **Non-HEAD path** (edit-and-continue rebase):
      ```
      start_edit_rebase(target) → reset_mixed(HEAD~1)
@@ -102,6 +105,8 @@ generation is enabled.
      reset_mixed(HEAD~1) → apply selected hunks (git apply --cached) → commit(msg1)
      → stage remaining changes → commit(original_msg)
      ```
+     Whole files (binary, deleted, remaining) are staged from the commit, as
+     in the file-level split.
    - **Non-HEAD path** (edit-and-continue rebase):
      ```
      start_edit_rebase(target) → reset_mixed(HEAD~1)
@@ -116,9 +121,9 @@ generation is enabled.
 
 - Binary files and deleted files are handled at file granularity within the
   hunk picker (the entire file is included or excluded together).
-- A submodule is one whole entry too, moved by the commit's own whole-file diff
-  applied with `--cached` (Spec 007). Staging it by path would record whatever
-  its checkout holds instead of what the commit being split recorded.
+- A submodule is one whole entry too, staged from the commit like every whole
+  file: staging it by path would record whatever its checkout holds instead
+  of what the commit being split recorded.
 - The `-p` mode does not save `LoomState` and does not support `loom continue`;
   any conflict causes an immediate auto-abort.
 
