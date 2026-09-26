@@ -39,9 +39,11 @@ Short IDs are displayed like in `git loom status`, so the tree doubles as a chea
 | `Ctrl-←` / `Ctrl-→` | Narrow / widen the left pane (2% per press, clamped to 10–90%) |
 | `PgUp`/`PgDn` | Scroll the diff by a page |
 | Mouse click / wheel | Focus, move, scroll |
+| `?` | Show the help popup listing every key |
+| `L` | Show the action log |
 | `R` / `F5` | Reload the tree from the repo |
 | `+` (or `=`) / `-` | Show one more / one fewer context commit before the base (starts at [`loom.statusContext`](../configuration.md#loomstatuscontext), never goes below 1) |
-| `Esc` | Cancel fold, commit, move, rename, or new-branch mode → clear selection → quit (first that applies) |
+| `Esc` | Cancel fold, commit, move, rename, or new-branch mode → clear selection (first that applies); it never quits |
 | `q` / `Ctrl-C` | Quit |
 
 Commits are collapsed by default; opening one reveals a row per changed file. Local changes start expanded. Expansion state survives reloads.
