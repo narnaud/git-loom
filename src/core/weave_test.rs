@@ -1388,6 +1388,78 @@ fn weave_branch_moves_picks_into_section() {
     );
 }
 
+fn line_labels(graph: &Weave) -> Vec<String> {
+    graph
+        .integration_line
+        .iter()
+        .map(|e| match e {
+            IntegrationEntry::Pick(c) => c.message.clone(),
+            IntegrationEntry::Merge { label, .. } => format!("merge {label}"),
+        })
+        .collect()
+}
+
+/// Guards the old placement where C1 was, which put a branch created from
+/// loose commits below one merged after them.
+///
+/// ```text
+/// before:  C1(feature-x) ─ merge(ra) ─ C3
+/// after:   merge(ra) ─ merge(feature-x) ─ C3
+/// ```
+#[test]
+fn weave_branch_merges_above_the_last_merge() {
+    let mut graph = Weave {
+        base_oid: oid("aaa"),
+        branch_sections: vec![],
+        integration_line: vec![
+            IntegrationEntry::Pick(make_commit_with_refs("111", "C1", vec!["feature-x"])),
+            IntegrationEntry::Merge {
+                original_oid: Some(oid("999")),
+                label: "ra".to_string(),
+            },
+            IntegrationEntry::Pick(make_commit("333", "C3")),
+        ],
+        base_refs: vec![],
+    };
+
+    graph.weave_branch("feature-x");
+
+    assert_eq!(line_labels(&graph), ["merge ra", "merge feature-x", "C3"]);
+    assert_eq!(graph.branch_sections[0].reset_target, "onto");
+}
+
+/// C2 was built on C1, so hoisting the merge above `ra` would replay C2 on a
+/// base without C1.
+///
+/// ```text
+/// before:  C1(feature-x) ─ C2 ─ merge(ra) ─ C3
+/// after:   merge(feature-x) ─ C2 ─ merge(ra) ─ C3
+/// ```
+#[test]
+fn weave_branch_merge_stays_below_loose_picks_built_on_it() {
+    let mut graph = Weave {
+        base_oid: oid("aaa"),
+        branch_sections: vec![],
+        integration_line: vec![
+            IntegrationEntry::Pick(make_commit_with_refs("111", "C1", vec!["feature-x"])),
+            IntegrationEntry::Pick(make_commit("222", "C2")),
+            IntegrationEntry::Merge {
+                original_oid: Some(oid("999")),
+                label: "ra".to_string(),
+            },
+            IntegrationEntry::Pick(make_commit("333", "C3")),
+        ],
+        base_refs: vec![],
+    };
+
+    graph.weave_branch("feature-x");
+
+    assert_eq!(
+        line_labels(&graph),
+        ["merge feature-x", "C2", "merge ra", "C3"]
+    );
+}
+
 // ── swap_commits unit tests ──────────────────────────────────────────────
 
 #[test]

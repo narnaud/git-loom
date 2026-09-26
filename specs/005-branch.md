@@ -49,7 +49,7 @@ Status ownership walks from a branch tip to the next branch boundary or base. Cr
 
 ### Automatic weaving
 
-If the target lies on the first-parent line from HEAD through, but not including, the base, convert those integration commits to a side section and add a merge commit (Spec 004). HEAD is included: branching there moves all first-parent integration commits into the section.
+If the target lies on the first-parent line from HEAD through, but not including, the base, convert those integration commits to a side section rooted at the base and add its merge commit as high as possible without crossing a loose commit above the target, since those were built on it: above every existing merge when none intervenes, so the newest branch is on top (Spec 004). HEAD is included: branching there moves all first-parent integration commits into the section.
 
 Do not restructure when:
 

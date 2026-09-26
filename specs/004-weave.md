@@ -50,7 +50,7 @@ Mutations MUST remain repository-free until serialization/execution.
 | Fixup commit | Move source directly after target and mark it `Fixup`. |
 | Edit commit | Mark it `Edit`. |
 | Add branch section / merge | Add corresponding topology, including an empty/new branch. |
-| Weave branch | Move non-woven integration commits to a new section and add its merge. |
+| Weave branch | Move non-woven integration commits to a new section and add its merge before the first remaining pick (all were built on the target), after every merge entry otherwise. |
 | Reassign branch | Transfer a co-located woven section to a surviving branch. |
 
 ### Move commit
