@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.25.0](https://github.com/narnaud/git-loom/compare/v0.24.0...v0.25.0) (2026-09-26)
+
+
+### Features ✨
+
+* **agent:** answer the -p hunk picker with data ([100b5b1](https://github.com/narnaud/git-loom/commit/100b5b177357e32277042c71936834f3fedd4189)) by @dfaure-kdab
+* **agent:** emit the status graph as JSON on stdout ([24782cf](https://github.com/narnaud/git-loom/commit/24782cf18d9e6ec0759634381e20be5496e518ec)) by @narnaud
+* **agent:** list an untracked file by size, not by content ([47910fa](https://github.com/narnaud/git-loom/commit/47910fad0e23314118497cf4c02f8944c15e5979)) by @dfaure-kdab
+* **agent:** list working-tree hunks too, so -p is never refused ([9d8c3b9](https://github.com/narnaud/git-loom/commit/9d8c3b913fa7be032c75914dadd2dc5f04440a95)) by @dfaure-kdab
+* **branch:** weave a new branch above the last merge ([05e55ca](https://github.com/narnaud/git-loom/commit/05e55cacd63ebb5397a5b99eb6e7f58686b7df57)) by @narnaud
+* **fold:** forward `git commit` options after `--` ([f940369](https://github.com/narnaud/git-loom/commit/f94036970f0daba89db86e1e61e087242fd33407)) by @dfaure-kdab
+* **fold:** move a picked binary file whole with -p ([4b3c161](https://github.com/narnaud/git-loom/commit/4b3c1614752bba447ea7b690cedd62a1d7dc3e78)), closes [#272](https://github.com/narnaud/git-loom/issues/272)
+* **rebase:** carry a rebase past a conflict `rerere` already resolved ([78f61fc](https://github.com/narnaud/git-loom/commit/78f61fcf9bbda903c39d0293598d8010496899b0)) by @narnaud
+* **status:** put the abbreviated hash next to the short ID ([9c08ec8](https://github.com/narnaud/git-loom/commit/9c08ec8a4ee9dda9b5b50f474e882e52997cb70f)) by @narnaud
+* **tui:** keep every branch in place while placing or moving a commit ([31ddbe8](https://github.com/narnaud/git-loom/commit/31ddbe8c0c73f1d9419bcd2dd7208ecf30a78978)) by @narnaud
+* **tui:** mark the source rows of a pending commit or fold ([6a95666](https://github.com/narnaud/git-loom/commit/6a95666a27d315399919df673a482d20fbd3f9b8)) by @narnaud
+* **tui:** move a commit with m, previewed where it lands ([3d59a76](https://github.com/narnaud/git-loom/commit/3d59a76dbf19c9261ee5da30a1ebb6cc0875eabe)) by @narnaud
+* **tui:** pick hunks with C before placing the commit ([8f1a63c](https://github.com/narnaud/git-loom/commit/8f1a63cd127d9cb51ed607956bb510efa739f3c9)) by @narnaud
+* **tui:** split a commit with s/S ([bc9b75b](https://github.com/narnaud/git-loom/commit/bc9b75bfb3180cc9b47d95b9de65d5efe23fadff)) by @narnaud
+* **tui:** title the hunk picker with the action it is for ([4274f75](https://github.com/narnaud/git-loom/commit/4274f7560174696dd84b3b0f45b9d917c1b4a8ae)) by @narnaud
+* **tui:** walk the fold targets, tagged with what the fold does ([c668ad9](https://github.com/narnaud/git-loom/commit/c668ad994ba45f2678ee07fcec153ead83a891ce)) by @narnaud
+
+
+### Bug Fixes 🐞
+
+* **commit,absorb:** restore the staged patch before deleting the state file ([ce7c312](https://github.com/narnaud/git-loom/commit/ce7c3128ee9f5fd9b0c0b6c1bd3e1b002d2e9d6d)) by @narnaud
+* put staged changes back when a rebase completes ([ec6ad96](https://github.com/narnaud/git-loom/commit/ec6ad9666c054e4d069ecae0f7aec41d779cb27b)) by @dfaure-kdab
+* **rebase:** don't offer `loom drop` for a fold or absorb target ([da61bb4](https://github.com/narnaud/git-loom/commit/da61bb4d85b2c29f5fb1ae3ae667b612c072f991)) by @dfaure-kdab
+* **split:** stage a HEAD split from the commit, not the working tree ([279a92c](https://github.com/narnaud/git-loom/commit/279a92c9702714dd049f63a196e1b0603c77a275)) by @narnaud
+* **staging:** never drop the staging set aside for a rewrite ([eb1aeac](https://github.com/narnaud/git-loom/commit/eb1aeac8517c41753939948c3d19525223afb26b)) by @narnaud
+* **staging:** scope the unmerged-index hint to the paths it is about ([d63fe36](https://github.com/narnaud/git-loom/commit/d63fe36e7ce9e0a9abb8e5a833d517aa42d836fc)) by @narnaud
+* **transaction:** roll back what a refused rebase already changed ([1a2e3c1](https://github.com/narnaud/git-loom/commit/1a2e3c1e5dffeb80bfaa83a114d7090faa553865)) by @narnaud
+
+
+### Performance Improvements ⚡
+
+* **tui:** read a pick's hunks on a worker, not on the loop ([b5c51e8](https://github.com/narnaud/git-loom/commit/b5c51e8a4d4bac767dd371003f4ba928fb87d698)) by @narnaud
+
+
+### Changes
+
+* **tui:** Change `Fold/unfold` to `Open/close` ([bd487de](https://github.com/narnaud/git-loom/commit/bd487defd23465aaa57f675814df37c6c44b820a)) by @narnaud
+
+
+### Other
+
+* **coverage:** add a coverage script, runnable from Windows too ([f3c860d](https://github.com/narnaud/git-loom/commit/f3c860de7a022c2917a128b48597e79e9b992234)) by @narnaud
+* **deps:** bump clap from 4.6.6 to 4.6.7 ([7b3b811](https://github.com/narnaud/git-loom/commit/7b3b8116d2dc84f3e9461261306e725baca6b35c)) by @dependabot[bot]
+* **release:** credit commit authors in the changelog ([23fa92a](https://github.com/narnaud/git-loom/commit/23fa92ae0c8c3518d2f41de168bdfb9344d3da30)) by @narnaud
+
 ## [0.24.0](https://github.com/narnaud/git-loom/compare/v0.23.0...v0.24.0) (2026-09-20)
 
 
