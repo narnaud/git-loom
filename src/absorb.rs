@@ -9,6 +9,7 @@ use crate::core::diff::{DiffHunk, build_hunk_patch, parse_hunks};
 use crate::core::msg;
 use crate::core::repo::{self, CommitInfo, RepoInfo};
 use crate::core::transaction::{self, LoomState, Rollback};
+use crate::core::ui;
 use crate::core::weave::{self, RebaseOutcome, Weave};
 use crate::git;
 
@@ -53,6 +54,8 @@ struct AbsorbPlan {
     hunk_assigned: Vec<(String, Oid, Vec<DiffHunk>)>,
     /// Files that could not be absorbed (saved and re-applied after rebase).
     skipped_files: Vec<String>,
+    /// One line per file or hunk, assigned or skipped: what dry-run prints.
+    lines: Vec<String>,
     num_hunks: usize,
     num_files: usize,
     num_commits: usize,
@@ -77,6 +80,43 @@ pub fn run(dry_run: bool, user_files: Vec<String>) -> Result<()> {
     let weave_graph = Weave::from_repo_with_info(&repo, &info)?;
     let plan = build_plan(&repo, workdir, &info, &changed_files, &weave_graph)?;
 
+    // The TUI has no stdout to print the plan on: it becomes the detail of a
+    // confirmation, asked before anything is touched (Spec 020).
+    if ui::active() {
+        if plan.num_hunks == 0 {
+            bail!(
+                "No files could be absorbed
+{}",
+                plan.lines.join(
+                    "
+"
+                )
+            );
+        }
+        let question = format!(
+            "Absorb {} hunk(s) from {} file(s) into {} commit(s)?
+{}",
+            plan.num_hunks,
+            plan.num_files,
+            plan.num_commits,
+            plan.lines.join(
+                "
+"
+            )
+        );
+        if !msg::confirm(&question, "")? {
+            return Err(msg::cancelled());
+        }
+        return apply_plan(&repo, workdir, &git_dir, plan);
+    }
+
+    for line in &plan.lines {
+        println!("  {}", line);
+    }
+    if plan.num_hunks == 0 {
+        bail!("No files could be absorbed");
+    }
+
     if dry_run {
         println!(
             "\nDry run: would absorb {} hunk(s) from {} file(s) into {} commit(s)",
@@ -88,8 +128,8 @@ pub fn run(dry_run: bool, user_files: Vec<String>) -> Result<()> {
     apply_plan(&repo, workdir, &git_dir, plan)
 }
 
-/// Analyze changed files and build an absorb plan, printing each assignment as
-/// it is determined. Errors if nothing can be absorbed.
+/// Analyze changed files and build an absorb plan; one with no hunk is the
+/// caller's error, reported after its lines.
 fn build_plan(
     repo: &Repository,
     workdir: &Path,
@@ -107,14 +147,17 @@ fn build_plan(
     let mut whole_file_assigned: Vec<(String, Oid)> = Vec::new();
     let mut hunk_assigned: Vec<(String, Oid, Vec<DiffHunk>)> = Vec::new();
     let mut skipped_files: Vec<String> = Vec::new();
-    let mut any_assigned = false;
+    let mut lines: Vec<String> = Vec::new();
 
     for file in changed_files {
         match analyze_file(repo, workdir, file, &in_scope)? {
             FileAnalysis::Assigned { commit_oid } => {
-                print_assignment(file, commit_oid, &in_scope, &commit_to_branch);
+                lines.push(format!(
+                    "{} -> {}",
+                    file,
+                    commit_label(commit_oid, &in_scope, &commit_to_branch)
+                ));
                 whole_file_assigned.push((file.clone(), commit_oid));
-                any_assigned = true;
             }
             FileAnalysis::Split { hunks } => {
                 let total = hunks.len();
@@ -124,24 +167,23 @@ fn build_plan(
                 for (i, (hunk, analysis)) in hunks.into_iter().enumerate() {
                     match analysis {
                         HunkAnalysis::Assigned { commit_oid } => {
-                            print_hunk_assignment(
+                            lines.push(format!(
+                                "{} [hunk {}/{}] -> {}",
                                 file,
                                 i + 1,
                                 total,
-                                commit_oid,
-                                &in_scope,
-                                &commit_to_branch,
-                            );
+                                commit_label(commit_oid, &in_scope, &commit_to_branch)
+                            ));
                             per_commit.entry(commit_oid).or_default().push(hunk);
                         }
                         HunkAnalysis::Skipped { reason } => {
-                            println!(
-                                "  {} [hunk {}/{}] -- skipped ({})",
+                            lines.push(format!(
+                                "{} [hunk {}/{}] -- skipped ({})",
                                 file,
                                 i + 1,
                                 total,
                                 reason
-                            );
+                            ));
                             has_skipped = true;
                         }
                     }
@@ -152,19 +194,14 @@ fn build_plan(
                 }
 
                 for (oid, hunks_for_commit) in per_commit {
-                    any_assigned = true;
                     hunk_assigned.push((file.clone(), oid, hunks_for_commit));
                 }
             }
             FileAnalysis::Skipped { reason } => {
-                println!("  {} -- skipped ({})", file, reason);
+                lines.push(format!("{} -- skipped ({})", file, reason));
                 skipped_files.push(file.clone());
             }
         }
-    }
-
-    if !any_assigned {
-        bail!("No files could be absorbed");
     }
 
     let num_hunks: usize = whole_file_assigned.len()
@@ -189,6 +226,7 @@ fn build_plan(
         whole_file_assigned,
         hunk_assigned,
         skipped_files,
+        lines,
         num_hunks,
         num_files,
         num_commits,
@@ -473,36 +511,6 @@ fn commit_label(
         .map(|b| format!(" ({})", b))
         .unwrap_or_default();
     format!("{} \"{}\"{}", short, message, branch_info)
-}
-
-fn print_assignment(
-    file: &str,
-    commit_oid: Oid,
-    in_scope: &HashMap<Oid, &CommitInfo>,
-    commit_to_branch: &HashMap<Oid, String>,
-) {
-    println!(
-        "  {} -> {}",
-        file,
-        commit_label(commit_oid, in_scope, commit_to_branch)
-    );
-}
-
-fn print_hunk_assignment(
-    file: &str,
-    hunk_num: usize,
-    total: usize,
-    commit_oid: Oid,
-    in_scope: &HashMap<Oid, &CommitInfo>,
-    commit_to_branch: &HashMap<Oid, String>,
-) {
-    println!(
-        "  {} [hunk {}/{}] -> {}",
-        file,
-        hunk_num,
-        total,
-        commit_label(commit_oid, in_scope, commit_to_branch)
-    );
 }
 
 /// Determine the list of changed files to analyze.

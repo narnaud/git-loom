@@ -519,3 +519,90 @@ fn absorb_rolls_back_when_the_rebase_refuses_to_start() {
         "the state file goes with the rollback"
     );
 }
+
+// ── TUI confirmation ─────────────────────────────────────────────────────
+
+/// Runs `absorb` with a TUI sink installed, answers its one prompt with
+/// `yes`, and returns the prompt text with the command's result.
+fn run_in_tui(test_repo: &TestRepo, yes: bool) -> (String, anyhow::Result<()>) {
+    use crate::core::ui;
+    test_repo.in_dir(|| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            ui::install(tx);
+            let result = super::run(false, vec![]);
+            ui::uninstall();
+            result
+        });
+        let prompt = loop {
+            match rx.recv().unwrap() {
+                ui::Request::Prompt { prompt, reply, .. } => {
+                    reply.send(Some(ui::Answer::Bool(yes))).unwrap();
+                    break prompt;
+                }
+                _ => continue,
+            }
+        };
+        (prompt, worker.join().unwrap())
+    })
+}
+
+#[test]
+fn tui_absorb_shows_the_plan_and_declining_touches_nothing() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("Add file1", "file1.txt");
+    let original_head = test_repo.head_oid();
+    test_repo.write_file("file1.txt", "modified content");
+
+    let (prompt, result) = run_in_tui(&test_repo, false);
+
+    let (question, detail) = prompt.split_once('\n').unwrap();
+    assert_eq!(
+        question,
+        "Absorb 1 hunk(s) from 1 file(s) into 1 commit(s)?"
+    );
+    assert!(
+        detail.starts_with("file1.txt -> ") && detail.contains("\"Add file1\""),
+        "plan: {detail}"
+    );
+    let err = result.unwrap_err();
+    assert!(err.downcast_ref::<crate::core::ui::Cancelled>().is_some());
+    assert_eq!(test_repo.head_oid(), original_head);
+    assert_eq!(test_repo.read_file("file1.txt"), "modified content");
+}
+
+#[test]
+fn tui_absorb_runs_once_confirmed() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("Add file1", "file1.txt");
+    test_repo.write_file("file1.txt", "modified content");
+
+    let (_, result) = run_in_tui(&test_repo, true);
+
+    assert!(result.is_ok(), "absorb failed: {:?}", result);
+    test_repo.assert_working_tree_clean();
+    assert_eq!(test_repo.get_message(0), "Add file1");
+}
+
+/// With no stdout to print on, the skip reasons travel in the error.
+#[test]
+fn tui_absorb_with_nothing_to_absorb_says_why_without_asking() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.write_file("file1.txt", "line1\n");
+    test_repo.stage_files(&["file1.txt"]);
+    test_repo.commit_staged("Add file1");
+    test_repo.write_file("file1.txt", "line1\nline2\n");
+
+    let result = test_repo.in_dir(|| {
+        let (tx, _rx) = std::sync::mpsc::channel();
+        crate::core::ui::install(tx);
+        let result = super::run(false, vec![]);
+        crate::core::ui::uninstall();
+        result
+    });
+
+    assert_eq!(
+        result.unwrap_err().to_string(),
+        "No files could be absorbed\nfile1.txt -- skipped (pure addition)"
+    );
+}
