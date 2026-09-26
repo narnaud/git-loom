@@ -39,7 +39,7 @@ conflict they abort immediately and leave the repository in its original state:
 When an in-scope command hits a conflict, it saves a state file:
 
 ```
-.git/loom/state.json
+.git/loom/state.json          # or .git/worktrees/<name>/loom/state.json in a linked worktree (Spec 022)
 ```
 
 The state file contains:

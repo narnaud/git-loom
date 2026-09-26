@@ -118,4 +118,4 @@ For accepted kinds, resolution proceeds as follows:
 
 A ref literally named like a persistent ID wins in step 1, exactly as a ref named like a two-character hex ID does today.
 
-Git-native resolution works without an upstream. Short-ID resolution requires an upstream-configured current branch, successful `gather_repo_info()`, and an ID currently shown by status.
+Git-native resolution works without an upstream. Short-ID resolution requires an upstream-configured current branch (or a base-ref context, Spec 022), successful `gather_repo_info()`, and an ID currently shown by status.

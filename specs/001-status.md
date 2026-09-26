@@ -4,7 +4,7 @@
 
 ## CLI and prerequisites
 
-The current checkout MUST be a local branch with an upstream tracking branch.
+The current checkout MUST be a local branch with an upstream tracking branch, or a base ref resolved as in Spec 022.
 
 | Command | Behavior |
 | --- | --- |

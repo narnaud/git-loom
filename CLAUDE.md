@@ -42,6 +42,7 @@ keep it terse and normative, and do not duplicate rules, docs, or examples.
 | `specs/019-agent.md` | Agent integration: `agent init` skill install and `--agent` machine-readable mode |
 | `specs/020-tui.md` | Interactive status TUI: tree + diff panes, with actions |
 | `specs/021-git-args.md` | Forwarding arguments to git after a `--` separator |
+| `specs/022-worktree.md` | Worktree: `wt new`/`done`/`rm`, status rail, loom inside a linked worktree |
 
 ## Commands
 
