@@ -322,6 +322,8 @@ fn stamped_messages(
 /// reset_mixed(HEAD~1) → stage selected → commit(msg1) → stage remaining → commit(msg2)
 /// ```
 ///
+/// Both halves are staged from the commit, never the working tree (Spec 013).
+///
 /// Returns `(hash1, hash2)` — the two new commit hashes.
 fn perform_head_split(
     repo: &Repository,
@@ -331,14 +333,15 @@ fn perform_head_split(
     msg1: Option<&str>,
     msg2: &str,
 ) -> Result<(String, String)> {
+    let original = git::rev_parse(workdir, "HEAD")?;
     git::reset_mixed(workdir, "HEAD~1")?;
 
     let selected_refs: Vec<&str> = selected.iter().map(|s| s.as_str()).collect();
-    git::stage_files(workdir, &selected_refs)?;
+    git::stage_from(workdir, &original, &selected_refs)?;
     commit_or_editor(repo, workdir, msg1)?;
 
     let remaining_refs: Vec<&str> = remaining.iter().map(|s| s.as_str()).collect();
-    git::stage_files(workdir, &remaining_refs)?;
+    git::stage_from(workdir, &original, &remaining_refs)?;
     git::commit(workdir, msg2)?;
 
     let hash2 = git::rev_parse(workdir, "HEAD")?;
@@ -374,6 +377,8 @@ fn perform_split_by_hunks(
 /// ```text
 /// reset_mixed(HEAD~1) → apply selected hunks → commit(msg1) → stage remaining → commit(msg2)
 /// ```
+///
+/// Whole files are staged from the commit, as in [`perform_head_split`].
 fn perform_head_split_by_hunks(
     repo: &Repository,
     workdir: &std::path::Path,
@@ -381,14 +386,7 @@ fn perform_head_split_by_hunks(
     msg1: Option<&str>,
     msg2: &str,
 ) -> Result<(String, String)> {
-    // Captured before the reset moves HEAD off the commit being split. A
-    // submodule has to move by this diff: `git add` would stage whatever its
-    // checkout holds, not what the commit recorded.
-    let mut gitlinks = std::collections::HashMap::new();
-    for path in git::commit_gitlinks(workdir, "HEAD")?.into_keys() {
-        let diff = git::diff_commit_file(workdir, "HEAD", &path)?;
-        gitlinks.insert(path, diff);
-    }
+    let original = git::rev_parse(workdir, "HEAD")?;
 
     git::reset_mixed(workdir, "HEAD~1")?;
 
@@ -403,10 +401,9 @@ fn perform_head_split_by_hunks(
         if selected.is_empty() {
             continue;
         }
-        if let Some(diff) = gitlinks.get(&file.path) {
-            git::apply_cached_patch(workdir, diff)?;
-        } else if file.binary || file.index_status == 'D' {
-            git::stage_path(workdir, &file.path)?;
+        // A submodule is listed as binary, so it too comes whole from the commit.
+        if file.binary || file.index_status == 'D' {
+            git::stage_from(workdir, &original, &[&file.path])?;
         } else {
             selected_patch.push_str(&diff::build_hunk_patch(&file.path, &selected));
         }
@@ -419,11 +416,7 @@ fn perform_head_split_by_hunks(
 
     for file in selections {
         if file.hunks.iter().any(|h| !h.selected) {
-            if let Some(diff) = gitlinks.get(&file.path) {
-                git::apply_cached_patch(workdir, diff)?;
-            } else {
-                git::stage_path(workdir, &file.path)?;
-            }
+            git::stage_from(workdir, &original, &[&file.path])?;
         }
     }
     git::commit(workdir, msg2)?;

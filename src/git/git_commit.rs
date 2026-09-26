@@ -158,6 +158,21 @@ pub fn stage_path(workdir: &Path, path: &str) -> Result<()> {
     stage_files(workdir, &[path])
 }
 
+/// Stage `files` as `source` records them, whatever the working tree holds
+/// (`git restore --staged --source`). A path absent from `source` is dropped
+/// from the index; one absent from both fails.
+pub fn stage_from(workdir: &Path, source: &str, files: &[&str]) -> Result<()> {
+    if files.is_empty() {
+        return Ok(());
+    }
+    // `:(literal)` for the reason [`super::ls_files`] gives.
+    let literal: Vec<String> = files.iter().map(|f| format!(":(literal){f}")).collect();
+    let source = format!("--source={source}");
+    let mut args = vec!["restore", "--staged", source.as_str(), "--"];
+    args.extend(literal.iter().map(|f| f.as_str()));
+    super::run_git(workdir, &args)
+}
+
 /// Create a commit with a message (`git commit -m <message>`).
 pub fn commit(workdir: &Path, message: &str) -> Result<()> {
     commit_captured(workdir, message, &[])

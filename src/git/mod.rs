@@ -19,7 +19,7 @@ pub use git_branch::{
 pub use git_commit::{
     commit, commit_amend, commit_amend_message_unverified, commit_amend_no_edit, commit_captured,
     commit_opts, commit_with_editor, reset_hard, reset_mixed, reset_soft, stage_all,
-    stage_all_opts, stage_files, stage_files_opts, stage_path,
+    stage_all_opts, stage_files, stage_files_opts, stage_from, stage_path,
 };
 pub use git_diff::{
     diff_cached, diff_cached_display, diff_cached_file, diff_cached_file_is_binary,

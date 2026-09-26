@@ -282,6 +282,125 @@ fn split_head_commit_with_a_deletion() {
     test_repo.assert_working_tree_clean();
 }
 
+fn blob_at(test_repo: &TestRepo, steps_back: usize, path: &str) -> Vec<u8> {
+    let commit = test_repo.find_commit(test_repo.get_oid(steps_back));
+    let entry = commit
+        .tree()
+        .unwrap()
+        .get_path(std::path::Path::new(path))
+        .unwrap();
+    let blob = test_repo.repo.find_blob(entry.id()).unwrap();
+    blob.content().to_vec()
+}
+
+/// Splitting HEAD resets onto its parent with nothing autostashed, so staging
+/// by path would commit the user's edits along with the commit's own content.
+/// `a[1].txt` would also match `a1.txt` as a glob.
+#[test]
+fn split_head_takes_the_files_from_the_commit_not_the_working_tree() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("Base", "base.txt");
+    test_repo.commit_multi(
+        &[
+            ("a[1].txt", "a\n"),
+            ("a1.txt", "one\n"),
+            ("gone.txt", "g\n"),
+        ],
+        "Three files",
+    );
+    test_repo.write_file("a[1].txt", "a\nDIRTY\n");
+    test_repo.write_file("a1.txt", "one\nDIRTY\n");
+    std::fs::remove_file(test_repo.workdir().join("gone.txt")).unwrap();
+
+    super::split_commit_with_selection(
+        &test_repo.repo,
+        "HEAD",
+        vec!["a[1].txt".to_string()],
+        "First".to_string(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        test_repo.commit_file_paths(test_repo.get_oid(1)),
+        vec!["a[1].txt"]
+    );
+    assert_eq!(blob_at(&test_repo, 0, "a[1].txt"), b"a\n");
+    assert_eq!(blob_at(&test_repo, 0, "a1.txt"), b"one\n");
+    assert_eq!(blob_at(&test_repo, 0, "gone.txt"), b"g\n");
+    assert_eq!(test_repo.read_file("a[1].txt"), "a\nDIRTY\n");
+    assert_eq!(
+        test_repo.status_porcelain(),
+        " M a1.txt\n M a[1].txt\n D gone.txt\n"
+    );
+}
+
+/// Staging by path committed the unstaged layer into the first half; the
+/// staged one must also come back to the index, not the working tree.
+#[test]
+fn split_head_keeps_a_staged_and_an_unstaged_edit_of_one_file() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("Base", "base.txt");
+    test_repo.commit_multi(&[("a.txt", "a\n"), ("b.txt", "b\n")], "Two files");
+    test_repo.write_file("a.txt", "a\nSTAGED\n");
+    test_repo.stage_files(&["a.txt"]);
+    test_repo.write_file("a.txt", "a\nSTAGED\nUNSTAGED\n");
+
+    super::split_commit_with_selection(
+        &test_repo.repo,
+        "HEAD",
+        vec!["a.txt".to_string()],
+        "First".to_string(),
+    )
+    .unwrap();
+
+    assert_eq!(blob_at(&test_repo, 1, "a.txt"), b"a\n");
+    assert_eq!(blob_at(&test_repo, 0, "b.txt"), b"b\n");
+    assert_eq!(test_repo.status_porcelain(), "MM a.txt\n");
+    assert_eq!(test_repo.read_file("a.txt"), "a\nSTAGED\nUNSTAGED\n");
+    let index = test_repo.repo.index().unwrap();
+    let staged = index.get_path(std::path::Path::new("a.txt"), 0).unwrap();
+    let blob = test_repo.repo.find_blob(staged.id).unwrap();
+    assert_eq!(blob.content(), b"a\nSTAGED\n");
+}
+
+#[test]
+fn split_head_by_hunks_takes_whole_files_from_the_commit() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("Base", "base.txt");
+    test_repo.write_file("text.txt", "one\n");
+    std::fs::write(test_repo.workdir().join("f.bin"), b"\0one").unwrap();
+    std::fs::remove_file(test_repo.workdir().join("base.txt")).unwrap();
+    test_repo.stage_files(&["text.txt", "f.bin", "base.txt"]);
+    test_repo.commit_staged("Text, binary and a deletion");
+    let workdir = test_repo.workdir();
+    let mut selections = crate::core::staging::collect_commit_hunks(&workdir, "HEAD", &[]).unwrap();
+    for file in &mut selections {
+        for hunk in &mut file.hunks {
+            hunk.selected = file.path != "text.txt";
+        }
+    }
+    test_repo.write_file("text.txt", "one\nDIRTY\n");
+    std::fs::write(workdir.join("f.bin"), b"\0dirty").unwrap();
+    test_repo.write_file("base.txt", "recreated\n");
+
+    super::perform_head_split_by_hunks(
+        &test_repo.repo,
+        &workdir,
+        &selections,
+        Some("Binary"),
+        "Text",
+    )
+    .unwrap();
+
+    assert_eq!(blob_at(&test_repo, 1, "f.bin"), b"\0one");
+    assert!(!test_repo.commit_has_file(test_repo.get_oid(1), "base.txt"));
+    assert_eq!(blob_at(&test_repo, 0, "text.txt"), b"one\n");
+    assert_eq!(
+        test_repo.status_porcelain(),
+        " M f.bin\n M text.txt\n?? base.txt\n"
+    );
+}
+
 /// A submodule has to be split by the commit's own diff: `git add` would stage
 /// whatever its checkout currently holds. Here the checkout deliberately holds
 /// the *pre-image*, so staging by path would drop the bump from history.
