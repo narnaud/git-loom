@@ -65,7 +65,7 @@ origin/main → A1 → A2 → A3 → HEAD
 origin/main               merge → A3' (HEAD)
 ```
 
-All first-parent commits from the start up to (and including) the target move into the new branch section. Commits after the target are replayed on top of the resulting merge commit.
+All first-parent commits from the start up to (and including) the target move into the new branch section, which starts from the upstream base. Commits after the target are replayed where they were, always above the new merge since they were built on the target. When none sits between the target and a later merge, the new merge goes above every branch already woven, so the newest branch is on top.
 
 **No-op cases** — weaving does not trigger and only the branch ref is created:
 

@@ -1009,7 +1009,9 @@ impl Weave {
 
     /// Weave a non-woven branch into the integration line: the integration-line
     /// picks up to and including the branch tip become a new branch section, and a
-    /// merge entry is added for it.
+    /// merge entry is added for it as high as the loose picks allow: every pick
+    /// left on the line was built on the target, so the merge goes above the
+    /// merges that precede the first of them and never below one.
     pub fn weave_branch(&mut self, branch_name: &str) {
         // Find which integration line Pick has this branch in update_refs
         let branch_idx = self.integration_line.iter().position(|e| {
@@ -1020,12 +1022,10 @@ impl Weave {
             return;
         };
 
-        // Collect all Pick entries from 0..=branch_idx into the branch section.
-        // Also count existing Merge entries in that range — the new merge will be
-        // inserted right after them, before any loose Picks that follow branch_idx.
+        // Collect all Pick entries from 0..=branch_idx into the branch section;
+        // Merge entries in that range stay.
         let mut section_commits = Vec::new();
         let mut indices_to_remove = Vec::new();
-        let mut insert_pos = 0;
 
         for i in 0..=branch_idx {
             if let IntegrationEntry::Pick(commit) = &self.integration_line[i] {
@@ -1033,9 +1033,6 @@ impl Weave {
                 commit.update_refs.retain(|r| r != branch_name);
                 section_commits.push(commit);
                 indices_to_remove.push(i);
-            } else {
-                // A Merge entry in this range stays; the new merge goes after it.
-                insert_pos += 1;
             }
         }
 
@@ -1051,15 +1048,7 @@ impl Weave {
             branch_names: vec![branch_name.to_string()],
         });
 
-        // Insert merge before any loose commits that follow the branch tip,
-        // so those commits sit on top of the merge in the resulting history.
-        self.integration_line.insert(
-            insert_pos,
-            IntegrationEntry::Merge {
-                original_oid: None,
-                label: branch_name.to_string(),
-            },
-        );
+        self.add_merge(branch_name.to_string(), None, None);
     }
 
     /// Reassign a branch section from one branch name to another, renaming its

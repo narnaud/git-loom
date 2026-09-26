@@ -259,3 +259,34 @@ fn branch_new_weaving_keeps_staging() {
 
     assert_eq!(test_repo.status_porcelain(), before);
 }
+
+/// The `loom branch tn` case: loose L1 sat below `ra`'s merge, and `tn` went
+/// below `ra` in the history and in status though it was created last.
+#[test]
+fn branch_from_loose_commits_below_a_merge_merges_on_top() {
+    let test_repo = TestRepo::new_with_remote();
+    let base = test_repo
+        .find_remote_branch_target("origin/main")
+        .to_string();
+    test_repo.create_branch_at("ra", &base);
+    let l1 = test_repo.commit("L1", "l1.txt");
+    test_repo.switch_branch("ra");
+    let r1 = test_repo.commit("R1", "r1.txt");
+    test_repo.switch_branch("integration");
+    test_repo.merge_no_ff("ra");
+
+    test_repo
+        .in_dir(|| super::new::run(Some("tn".to_string()), Some(l1.to_string())))
+        .unwrap();
+
+    let merge_tn = test_repo.head_commit();
+    let tn = test_repo.get_branch_target("tn");
+    assert_eq!(merge_tn.parent_id(1).unwrap(), tn);
+    assert_eq!(
+        test_repo.find_commit(tn).parent_id(0).unwrap().to_string(),
+        base
+    );
+    let merge_ra = test_repo.find_commit(merge_tn.parent_id(0).unwrap());
+    assert_eq!(merge_ra.parent_id(1).unwrap(), r1);
+    assert_eq!(merge_ra.parent_id(0).unwrap().to_string(), base);
+}
