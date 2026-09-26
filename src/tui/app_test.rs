@@ -2295,6 +2295,28 @@ fn command_line_uses_the_short_ids_the_tree_shows() {
         }),
         format!("loom drop {}", commit)
     );
+    assert_eq!(
+        app.command_line(&Action::Split {
+            commit: oid('a').to_string(),
+            files: vec!["src/a b.rs".to_string()],
+            hunks: None,
+        }),
+        format!("loom split {} 'src/a b.rs'", commit)
+    );
+    assert_eq!(
+        app.command_line(&Action::Split {
+            commit: oid('a').to_string(),
+            files: Vec::new(),
+            hunks: Some(HunkArgs::new(
+                vec!["src/a b.rs:1".to_string()],
+                Some("0123abcd".to_string())
+            )),
+        }),
+        format!(
+            "loom split -p {} --hunks 'src/a b.rs:1' --hunks-from 0123abcd",
+            commit
+        )
+    );
     // A target no row shows (rewritten meanwhile) is passed through.
     assert_eq!(
         app.command_line(&Action::Reword {
@@ -2863,7 +2885,7 @@ fn status_bar_matches_spec() {
     let theme = make_theme();
     let mut shell = Shell::new(make_app(make_snapshot(), &theme));
 
-    let backend = ratatui::backend::TestBackend::new(160, 12);
+    let backend = ratatui::backend::TestBackend::new(180, 12);
     let mut terminal = ratatui::Terminal::new(backend).unwrap();
     terminal.draw(|f| shell.render(f)).unwrap();
     let buffer = terminal.backend().buffer();
@@ -2873,7 +2895,7 @@ fn status_bar_matches_spec() {
     assert!(
         last_row.starts_with(
             " Navigate: ↑/↓ | Close/open: ←/→ | Select: space | Commit: c/C | Fold: f/F \
-             | Move: m | Branch: b | Drop: d | Reword: r | Log: L | Refresh: R | Quit: q"
+             | Move: m | Split: s/S | Branch: b | Drop: d | Reword: r | Log: L | Refresh: R | Quit: q"
         ),
         "got: {:?}",
         last_row
@@ -3883,4 +3905,261 @@ fn fold_with_hunks_refuses_what_it_cannot_pick_from() {
         assert!(app.pick.is_none(), "{keys:?}");
         assert_eq!(app.notice.as_deref(), Some(expected), "{keys:?}");
     }
+}
+
+/// `a`: one commit touching `src/lexer.rs` and `src/parser.rs`.
+fn two_file_commit_info() -> RepoInfo {
+    let mut info = make_info();
+    info.commits[0].files = vec![
+        file("src/lexer.rs", 'M', ' '),
+        file("src/parser.rs", 'M', ' '),
+    ];
+    info
+}
+
+fn run_action(app: &App, action: Action) -> Result<()> {
+    let command = app.command_line(&action);
+    execute_action(
+        action,
+        &command,
+        &app.snapshot.git_dir,
+        &graph::Theme::dark(),
+    )
+}
+
+#[test]
+fn split_on_a_commit_file_takes_that_file_only() {
+    let theme = make_theme();
+    let snapshot = Snapshot {
+        cwd_prefix: "src".to_string(),
+        ..snapshot_of(two_file_commit_info())
+    };
+    let mut app = make_app(snapshot, &theme);
+    move_cursor_to(&mut app, &oid('a').to_string());
+    app.expand_current();
+    move_cursor_to(&mut app, &commit_file_key(oid('a'), 1));
+
+    assert_eq!(
+        app.action_split(),
+        Some(Action::Split {
+            commit: oid('a').to_string(),
+            files: vec!["parser.rs".to_string()],
+            hunks: None,
+        })
+    );
+}
+
+#[test]
+fn split_on_a_commit_row_picks_its_hunks() {
+    let repo = crate::core::test_helpers::TestRepo::new_with_remote();
+    let source = repo.commit("one", "one.txt");
+    let theme = make_theme();
+
+    repo.in_dir(|| {
+        let mut app = make_app(load_snapshot(1).unwrap(), &theme);
+        move_cursor_to(&mut app, &source.to_string());
+        press(&mut app, KeyCode::Char('s'));
+        poll_until_take_over(&mut app);
+        let Some(Pick::Ready {
+            entries,
+            purpose: PickFor::Split { commit },
+            ..
+        }) = &app.pick
+        else {
+            panic!("no split pick ready");
+        };
+        assert_eq!(*commit, source);
+        let paths: Vec<&str> = entries.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["one.txt"]);
+    });
+}
+
+#[test]
+fn split_refuses_what_it_cannot_split() {
+    let theme = make_theme();
+    let a = oid('a').to_string();
+    let b = oid('b').to_string();
+    let lexer = commit_file_key(oid('a'), 0);
+    let parser = commit_file_key(oid('a'), 1);
+    let mut two_commits = two_branch_info();
+    two_commits.commits[1].files = two_file_commit_info().commits[0].files.clone();
+    for (info, keys, expected) in [
+        (
+            make_info(),
+            vec![lexer.as_str()],
+            "split: one file only, split its hunks with S",
+        ),
+        (
+            two_file_commit_info(),
+            vec![lexer.as_str(), parser.as_str()],
+            "split: leave at least one file for the second commit",
+        ),
+        (
+            two_file_commit_info(),
+            vec!["br:feature-a"],
+            "split: move to a commit or commit file",
+        ),
+        (
+            two_file_commit_info(),
+            vec!["wf:a.rs"],
+            "split: move to a commit or commit file",
+        ),
+        (
+            two_commits,
+            vec![b.as_str(), a.as_str()],
+            "split: one commit at a time",
+        ),
+    ] {
+        let mut app = make_app(snapshot_of(info), &theme);
+        move_cursor_to(&mut app, &a);
+        app.expand_current();
+        for key in &keys {
+            move_cursor_to(&mut app, key);
+            app.toggle_selection();
+        }
+        // One row goes through the cursor, not the selection.
+        if keys.len() == 1 {
+            app.clear_selection();
+            move_cursor_to(&mut app, keys[0]);
+        }
+        assert_eq!(app.action_split(), None, "{keys:?}");
+        assert_eq!(app.notice.as_deref(), Some(expected), "{keys:?}");
+    }
+}
+
+#[test]
+fn split_takes_the_selected_commit_files_out_first() {
+    let repo = crate::core::test_helpers::TestRepo::new_with_remote();
+    for name in ["a.txt", "b.txt", "c.txt"] {
+        repo.write_file(name, "x\n");
+    }
+    repo.stage_files(&["a.txt", "b.txt", "c.txt"]);
+    repo.commit_staged("Add three");
+    let source = repo.head_oid();
+    repo.set_fake_editor("Add a and b");
+    let theme = make_theme();
+
+    repo.in_dir(|| {
+        let mut app = make_app(load_snapshot(1).unwrap(), &theme);
+        move_cursor_to(&mut app, &source.to_string());
+        app.expand_current();
+        for i in [0, 1] {
+            move_cursor_to(&mut app, &commit_file_key(source, i));
+            app.toggle_selection();
+        }
+        let action = app.action_split().expect("a split");
+        run_action(&app, action).unwrap();
+    });
+
+    assert_eq!(repo.get_subject(0), "Add three");
+    assert_eq!(repo.get_subject(1), "Add a and b");
+    let first = repo.diff_commit("HEAD~1");
+    assert!(
+        first.contains("a.txt") && first.contains("b.txt") && !first.contains("c.txt"),
+        "{first}"
+    );
+    assert_eq!(repo.status_porcelain(), "");
+}
+
+#[test]
+fn split_with_hunks_puts_the_picked_hunks_first() {
+    let repo = crate::core::test_helpers::TestRepo::new_with_remote();
+    repo.write_file("f.txt", &twenty_lines("first", "last"));
+    repo.stage_files(&["f.txt"]);
+    repo.commit_staged("Add f");
+    repo.write_file("f.txt", &twenty_lines("FIRST", "LAST"));
+    repo.stage_files(&["f.txt"]);
+    repo.commit_staged("Shout");
+    let source = repo.head_oid();
+    repo.set_fake_editor("Shout first");
+    let theme = make_theme();
+
+    repo.in_dir(|| {
+        let mut app = make_app(load_snapshot(1).unwrap(), &theme);
+        move_cursor_to(&mut app, &source.to_string());
+        press(&mut app, KeyCode::Char('S'));
+        poll_until_take_over(&mut app);
+        let Some(Pick::Ready {
+            mut entries,
+            purpose: PickFor::Split { commit },
+            ..
+        }) = app.pick.take()
+        else {
+            panic!("no split pick ready");
+        };
+        for (i, hunk) in entries[0].hunks.iter_mut().enumerate() {
+            hunk.selected = i == 0;
+        }
+        let action = app
+            .finish_split_pick(Ok(Some(entries)), commit)
+            .expect("a split");
+        let command = app.command_line(&action);
+        assert!(
+            command.contains("split -p") && command.contains("--hunks 'f.txt:1' --hunks-from"),
+            "{command}"
+        );
+        run_action(&app, action).unwrap();
+    });
+
+    assert_eq!(repo.get_subject(0), "Shout");
+    assert_eq!(repo.get_subject(1), "Shout first");
+    let first = repo.diff_commit("HEAD~1");
+    assert!(
+        first.contains("+FIRST") && !first.contains("+LAST"),
+        "{first}"
+    );
+    let second = repo.diff_commit("HEAD");
+    assert!(
+        second.contains("+LAST") && !second.contains("+FIRST"),
+        "{second}"
+    );
+    assert_eq!(repo.status_porcelain(), "");
+}
+
+#[test]
+fn a_split_pick_must_leave_something_on_each_side() {
+    let repo = crate::core::test_helpers::TestRepo::new_with_remote();
+    repo.write_file("f.txt", &twenty_lines("first", "last"));
+    repo.stage_files(&["f.txt"]);
+    repo.commit_staged("Add f");
+    repo.write_file("f.txt", &twenty_lines("FIRST", "LAST"));
+    repo.stage_files(&["f.txt"]);
+    repo.commit_staged("Shout");
+    let source = repo.head_oid();
+    let theme = make_theme();
+    let mut app = app_over_repo(&repo, &theme);
+    for (keep, expected) in [
+        (false, "split cancelled"),
+        (true, "split: leave at least one hunk for the second commit"),
+    ] {
+        let mut entries =
+            staging::collect_commit_hunks(&repo.workdir(), &source.to_string(), &[]).unwrap();
+        for hunk in entries.iter_mut().flat_map(|f| &mut f.hunks) {
+            hunk.selected = keep;
+        }
+        assert!(!app.refuse_split_pick(&entries));
+        assert_eq!(
+            app.finish_split_pick(Ok(Some(entries)), source),
+            None,
+            "{keep}"
+        );
+        assert_eq!(app.notice.as_deref(), Some(expected), "{keep}");
+    }
+}
+
+#[test]
+fn a_split_pick_with_fewer_than_two_hunks_never_opens() {
+    let repo = crate::core::test_helpers::TestRepo::new_with_remote();
+    let one = repo.commit("one", "one.txt");
+    let theme = make_theme();
+    let mut app = app_over_repo(&repo, &theme);
+
+    let entries = staging::collect_commit_hunks(&repo.workdir(), &one.to_string(), &[]).unwrap();
+    assert!(app.refuse_split_pick(&entries));
+    assert_eq!(
+        app.notice.as_deref(),
+        Some("split: one hunk only, nothing to split")
+    );
+    assert!(app.refuse_split_pick(&[]));
+    assert_eq!(app.notice.as_deref(), Some("split: no hunks to pick"));
 }
