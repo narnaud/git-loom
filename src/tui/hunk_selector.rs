@@ -13,8 +13,10 @@ use crate::core::diff::DiffHunk;
 use crate::tui::shell::{KeyResult, PaneId, Shell, ShellApp, ShellConfig};
 use crate::tui::theme::TuiTheme;
 use crate::tui::widgets::common::{pane_block, pane_block_titled};
+use crate::tui::widgets::diff_pane::DiffPane;
 use crate::tui::widgets::hunk_view::{HunkEvent, HunkView};
 use crate::tui::widgets::list_pane::ListPane;
+use crate::tui::widgets::popup::{self, HelpSection};
 
 // ── Data model ───────────────────────────────────────────────────────────
 
@@ -133,7 +135,37 @@ pub(crate) struct HunkSelectorApp {
     /// The command the pick is for (`COMMIT`, `FOLD`), titling the file pane
     /// in place of ` Files `; only the TUI, which runs several, sets it.
     action: Option<&'static str>,
+    /// The `?` popup's scroll while it is open; it owns the keyboard then.
+    help: Option<DiffPane>,
 }
+
+/// The `?` popup: everything the status bar leaves out.
+const HELP: &[HelpSection] = &[
+    (
+        "Navigation",
+        &[
+            (
+                "↑/k  ↓/j",
+                "previous / next file, or hunk when the diff has focus",
+            ),
+            ("Tab", "switch pane"),
+            ("Ctrl-←/→", "narrow / widen the left pane"),
+            ("Mouse", "click a file or a hunk, wheel to scroll"),
+        ],
+    ),
+    (
+        "Selection",
+        &[
+            (
+                "Space",
+                "toggle the hunk, or every hunk of the file or directory",
+            ),
+            ("Enter", "confirm the selection"),
+            ("Esc / q / Ctrl-C", "cancel, changing nothing"),
+            ("?", "this help"),
+        ],
+    ),
+];
 
 // ── Tree helpers ─────────────────────────────────────────────────────────
 
@@ -192,6 +224,7 @@ impl HunkSelectorApp {
             hunks: HunkView::new(),
             theme,
             action: None,
+            help: None,
         }
     }
 
@@ -446,12 +479,35 @@ impl ShellApp for HunkSelectorApp {
         &mut self,
         focused: PaneId,
         code: KeyCode,
-        _modifiers: KeyModifiers,
+        modifiers: KeyModifiers,
     ) -> KeyResult<Verdict> {
+        // The help is modal, so the shell forwards Ctrl-C here too.
+        if let Some(mut scroll) = self.help.take() {
+            match code {
+                KeyCode::Esc | KeyCode::Char('q' | '?') => {}
+                KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
+                    return KeyResult::Exit(Verdict::Cancel);
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    scroll.scroll_by(-1);
+                    self.help = Some(scroll);
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    scroll.scroll_by(1);
+                    self.help = Some(scroll);
+                }
+                _ => self.help = Some(scroll),
+            }
+            return KeyResult::Handled;
+        }
         match code {
             KeyCode::Esc => KeyResult::Exit(Verdict::Cancel),
             // Ctrl-C never reaches here — the shell intercepts it first.
-            KeyCode::Char('c') | KeyCode::Enter => KeyResult::Exit(Verdict::Confirm),
+            KeyCode::Enter => KeyResult::Exit(Verdict::Confirm),
+            KeyCode::Char('?') => {
+                self.help = Some(DiffPane::new());
+                KeyResult::Handled
+            }
             KeyCode::Up | KeyCode::Char('k') => {
                 self.navigate_up(focused);
                 KeyResult::Handled
@@ -515,12 +571,21 @@ impl ShellApp for HunkSelectorApp {
 
     fn status_hints(&self, _focused: PaneId) -> Vec<Cow<'static, str>> {
         vec![
-            "Navigate: \u{2191}/\u{2193}".into(),
-            "Switch Pane: tab".into(),
             "Toggle: space".into(),
-            "Confirm: c or Enter".into(),
-            "Quit: q or Esc".into(),
+            "Confirm: Enter".into(),
+            "Help: ?".into(),
+            "Cancel: Esc".into(),
         ]
+    }
+
+    fn modal_active(&self) -> bool {
+        self.help.is_some()
+    }
+
+    fn render_overlay(&mut self, frame: &mut Frame, area: Rect) {
+        if let Some(scroll) = &mut self.help {
+            popup::render_help(frame, area, HELP, scroll, &self.theme);
+        }
     }
 }
 

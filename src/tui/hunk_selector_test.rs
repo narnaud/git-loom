@@ -241,11 +241,45 @@ fn quit_key_cancels_via_shell() {
     assert!(matches!(exit, Some(Verdict::Cancel)));
 }
 
+/// `c` used to confirm; it is `commit` in the TUI the selector runs under,
+/// so a habit press must not confirm a half-made pick.
 #[test]
-fn confirm_key_exits_with_confirm() {
+fn c_does_not_confirm() {
     let mut app = HunkSelectorApp::new(make_files(), make_theme());
     let result = app.handle_key(PaneId::Left, KeyCode::Char('c'), KeyModifiers::NONE);
-    assert!(matches!(result, KeyResult::Exit(Verdict::Confirm)));
+    assert!(matches!(result, KeyResult::Handled));
+}
+
+#[test]
+fn help_popup_owns_the_keyboard_until_closed() {
+    let mut app = HunkSelectorApp::new(make_files(), make_theme());
+    app.handle_key(PaneId::Left, KeyCode::Char('?'), KeyModifiers::NONE);
+    assert!(app.modal_active());
+    let result = app.handle_key(PaneId::Left, KeyCode::Enter, KeyModifiers::NONE);
+    assert!(
+        matches!(result, KeyResult::Handled),
+        "Enter does not confirm under the help"
+    );
+    let result = app.handle_key(PaneId::Left, KeyCode::Char('q'), KeyModifiers::NONE);
+    assert!(
+        matches!(result, KeyResult::Handled),
+        "q closes the help, not the selector"
+    );
+    assert!(!app.modal_active());
+
+    let mut shell = Shell::new(HunkSelectorApp::new(make_files(), make_theme()));
+    shell.handle_event(Event::Key(KeyEvent::new(
+        KeyCode::Char('?'),
+        KeyModifiers::NONE,
+    )));
+    let exit = shell.handle_event(Event::Key(KeyEvent::new(
+        KeyCode::Char('c'),
+        KeyModifiers::CONTROL,
+    )));
+    assert!(
+        matches!(exit, Some(Verdict::Cancel)),
+        "Ctrl-C still leaves under the help"
+    );
 }
 
 #[test]

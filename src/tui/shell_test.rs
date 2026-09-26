@@ -310,10 +310,9 @@ fn hunk_selector_status_bar_matches_spec() {
     let mut shell = Shell::new(sample_app());
     let rows = buffer_text(&render(&mut shell, 110, 10));
     assert!(
-        rows.last().unwrap().starts_with(
-            " Navigate: \u{2191}/\u{2193} | Switch Pane: tab | Toggle: space \
-             | Confirm: c or Enter | Quit: q or Esc"
-        ),
+        rows.last()
+            .unwrap()
+            .starts_with(" Toggle: space | Confirm: Enter | Help: ? | Cancel: Esc"),
         "got: {:?}",
         rows.last().unwrap()
     );

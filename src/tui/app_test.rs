@@ -322,8 +322,9 @@ fn collapsing_a_parent_forgets_the_rows_it_hides() {
     assert_eq!(app.notice, None);
 }
 
+/// `Esc` reads as cancel, so it never quits: `q` does.
 #[test]
-fn escape_clears_selection_before_quitting() {
+fn escape_clears_selection_and_never_quits() {
     let theme = make_theme();
     let mut app = make_app(make_snapshot(), &theme);
     move_cursor_to(&mut app, "wf:a.rs");
@@ -334,7 +335,39 @@ fn escape_clears_selection_before_quitting() {
     assert!(app.outcome.is_none());
 
     app.handle_escape();
-    assert!(matches!(app.outcome, Some(Outcome::Quit)));
+    assert!(app.outcome.is_none());
+}
+
+#[test]
+fn help_popup_opens_with_question_mark() {
+    let theme = make_theme();
+    let mut shell = Shell::new(make_app(make_snapshot(), &theme));
+    shell.handle_event(Event::Key(KeyEvent::new(
+        KeyCode::Char('?'),
+        KeyModifiers::NONE,
+    )));
+    assert!(matches!(shell.app.popup, Some(Popup::Help { .. })));
+    let lines = rendered_lines(&mut shell);
+    assert!(
+        lines.iter().any(|l| l.contains("Help — ? or Esc to close")),
+        "got: {:?}",
+        lines
+    );
+    assert!(lines.iter().any(|l| l.contains("Navigation")));
+
+    // Under the popup action keys are inert and `q` closes it, not the TUI.
+    let exit = shell.handle_event(Event::Key(KeyEvent::new(
+        KeyCode::Char('d'),
+        KeyModifiers::NONE,
+    )));
+    assert!(exit.is_none());
+    assert!(matches!(shell.app.popup, Some(Popup::Help { .. })));
+    let exit = shell.handle_event(Event::Key(KeyEvent::new(
+        KeyCode::Char('q'),
+        KeyModifiers::NONE,
+    )));
+    assert!(exit.is_none());
+    assert!(shell.app.popup.is_none());
 }
 
 fn pending_commit_key() -> String {
@@ -2893,10 +2926,7 @@ fn status_bar_matches_spec() {
         .map(|x| buffer[(x, buffer.area.height - 1)].symbol())
         .collect();
     assert!(
-        last_row.starts_with(
-            " Navigate: ↑/↓ | Close/open: ←/→ | Select: space | Commit: c/C | Fold: f/F \
-             | Move: m | Split: s/S | Branch: b | Drop: d | Absorb: a | Reword: r | Log: L | Refresh: R | Quit: q"
-        ),
+        last_row.starts_with(" Commit: c/C | Fold: f/F | Branch: b | Drop: d | Help: ? | Quit: q"),
         "got: {:?}",
         last_row
     );
