@@ -3226,48 +3226,6 @@ fn fold_staged_deletion_into_non_head_commit() {
     test_repo.assert_working_tree_clean();
 }
 
-/// When even the reset fails there is nothing safe to replay onto, so both
-/// halves of the snapshot are parked on disk instead of applied blind.
-#[test]
-fn rollback_fold_parks_both_patches_when_the_reset_fails() {
-    let test_repo = TestRepo::new();
-    test_repo.commit("A commit", "file1.txt");
-    let workdir = test_repo.workdir();
-    let snapshot = super::WorktreeSnapshot {
-        worktree: "worktree half".to_string(),
-        staged: "staged half".to_string(),
-    };
-
-    super::rollback_fold(
-        &workdir,
-        "0123456789abcdef0123456789abcdef01234567",
-        None,
-        &snapshot,
-    );
-
-    let loom_dir = crate::git::git_path(&workdir, "loom").unwrap();
-    let saved: Vec<String> = std::fs::read_dir(&loom_dir)
-        .unwrap()
-        .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
-        .collect();
-    assert!(
-        saved.contains(&"unrestored-0.patch".to_string()),
-        "{saved:?}"
-    );
-    assert!(
-        saved.contains(&"unrestored-staged-0.patch".to_string()),
-        "{saved:?}"
-    );
-    assert_eq!(
-        std::fs::read_to_string(loom_dir.join("unrestored-0.patch")).unwrap(),
-        "worktree half"
-    );
-    assert_eq!(
-        std::fs::read_to_string(loom_dir.join("unrestored-staged-0.patch")).unwrap(),
-        "staged half"
-    );
-}
-
 /// The `-p` uncommit of a picked submodule: the entry leaves the commit through
 /// the index, and the checkout stays where the user put it, so the bump shows up
 /// as an unstaged change exactly like the whole-file form.

@@ -292,3 +292,101 @@ fn putting_the_index_back_goes_through_its_lock() {
         "no index to remove is no miss"
     );
 }
+
+/// When even the reset fails there is nothing safe to replay onto, so both
+/// halves of the snapshot are parked on disk instead of applied blind.
+#[test]
+fn rollback_to_snapshot_parks_both_patches_when_the_reset_fails() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("A commit", "file1.txt");
+    let workdir = test_repo.workdir();
+    let snapshot = super::WorktreeSnapshot {
+        worktree: "worktree half".to_string(),
+        staged: "staged half".to_string(),
+    };
+
+    super::rollback_to_snapshot(
+        &workdir,
+        "0123456789abcdef0123456789abcdef01234567",
+        None,
+        &snapshot,
+    );
+
+    let loom_dir = crate::git::git_path(&workdir, "loom").unwrap();
+    let saved: Vec<String> = std::fs::read_dir(&loom_dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+        .collect();
+    assert!(
+        saved.contains(&"unrestored-0.patch".to_string()),
+        "{saved:?}"
+    );
+    assert!(
+        saved.contains(&"unrestored-staged-0.patch".to_string()),
+        "{saved:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(loom_dir.join("unrestored-0.patch")).unwrap(),
+        "worktree half"
+    );
+    assert_eq!(
+        std::fs::read_to_string(loom_dir.join("unrestored-staged-0.patch")).unwrap(),
+        "staged half"
+    );
+}
+
+/// Each half is replayed on its own: a half that fails to apply is parked
+/// while the other still lands, so a bad worktree patch cannot take the
+/// staged one with it, nor the reverse.
+#[test]
+fn rollback_to_snapshot_parks_only_the_half_that_fails_to_apply() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("A commit", "file1.txt");
+    let workdir = test_repo.workdir();
+    let head = test_repo.head_oid().to_string();
+    test_repo.write_file(
+        "file1.txt",
+        "changed
+",
+    );
+    let good = crate::git::diff_head(&workdir).unwrap();
+    test_repo.reset_hard(test_repo.head_oid());
+    let loom_dir = crate::git::git_path(&workdir, "loom").unwrap();
+
+    super::rollback_to_snapshot(
+        &workdir,
+        &head,
+        None,
+        &super::WorktreeSnapshot {
+            worktree: good.clone(),
+            staged: "not a patch".to_string(),
+        },
+    );
+    assert_eq!(
+        test_repo.read_file("file1.txt"),
+        "changed
+"
+    );
+    assert_eq!(crate::git::diff_cached(&workdir).unwrap(), "");
+    assert_eq!(
+        std::fs::read_to_string(loom_dir.join("unrestored-staged-0.patch")).unwrap(),
+        "not a patch"
+    );
+    assert!(!loom_dir.join("unrestored-0.patch").exists());
+
+    super::rollback_to_snapshot(
+        &workdir,
+        &head,
+        None,
+        &super::WorktreeSnapshot {
+            worktree: "not a patch".to_string(),
+            staged: good.clone(),
+        },
+    );
+    assert_eq!(crate::git::diff_cached(&workdir).unwrap(), good);
+    assert_eq!(
+        std::fs::read_to_string(loom_dir.join("unrestored-0.patch")).unwrap(),
+        "not a patch"
+    );
+    assert!(!loom_dir.join("unrestored-staged-1.patch").exists());
+}

@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::core::diff::{DiffHunk, build_hunk_patch, parse_hunks};
 use crate::core::msg;
 use crate::core::repo::{self, CommitInfo, RepoInfo};
+use crate::core::staging::{self, WorktreeSnapshot};
 use crate::core::transaction::{self, LoomState, Rollback};
 use crate::core::ui;
 use crate::core::weave::{self, RebaseOutcome, Weave};
@@ -16,8 +17,21 @@ use crate::git;
 struct PreRebaseState<'a> {
     saved_head: &'a str,
     saved_refs: &'a HashMap<String, git2::Oid>,
-    saved_staged: &'a str,
-    saved_worktree: &'a str,
+    snapshot: &'a WorktreeSnapshot,
+}
+
+impl PreRebaseState<'_> {
+    /// Roll back a failure during fixup creation, before any rebase started —
+    /// unlike `Rollback::apply_abort()`, which trusts `git rebase --abort
+    /// --update-refs` to restore branch refs.
+    fn roll_back(&self, workdir: &Path) {
+        staging::rollback_to_snapshot(
+            workdir,
+            self.saved_head,
+            Some(self.saved_refs),
+            self.snapshot,
+        );
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -267,8 +281,12 @@ fn apply_plan(repo: &Repository, workdir: &Path, git_dir: &Path, plan: AbsorbPla
         patch
     };
 
-    // Snapshot full working-tree diff before any mutations (needed for pre-rebase rollback).
-    let saved_worktree = git::diff_head(workdir)?;
+    // Not `WorktreeSnapshot::take`: the absorbed files are meant to leave
+    // the index, so only the non-absorbed part of it is kept.
+    let snapshot = WorktreeSnapshot {
+        worktree: git::diff_head(workdir)?,
+        staged: saved_staged,
+    };
 
     // Refuse an unrewritable target before committing anything: the graph is
     // rebuilt after the fixup commits exist, and bailing there would strand
@@ -287,8 +305,7 @@ fn apply_plan(repo: &Repository, workdir: &Path, git_dir: &Path, plan: AbsorbPla
         &PreRebaseState {
             saved_head: &saved_head,
             saved_refs: &saved_refs,
-            saved_staged: &saved_staged,
-            saved_worktree: &saved_worktree,
+            snapshot: &snapshot,
         },
     )?;
 
@@ -324,8 +341,8 @@ fn apply_plan(repo: &Repository, workdir: &Path, git_dir: &Path, plan: AbsorbPla
             // `git rebase --abort` restores HEAD to after the fixup commits, so
             // reset_hard_to has to go further back to undo them.
             reset_hard_to: saved_head.to_string(),
-            saved_staged_patch: saved_staged.clone(),
-            saved_worktree_patch: saved_worktree.clone(),
+            saved_staged_patch: snapshot.staged.clone(),
+            saved_worktree_patch: snapshot.worktree.clone(),
             ..Default::default()
         },
         context: serde_json::to_value(&ctx)?,
@@ -340,7 +357,7 @@ fn apply_plan(repo: &Repository, workdir: &Path, git_dir: &Path, plan: AbsorbPla
         .map_err(|e| transaction::roll_back_failed_rebase(workdir, git_dir, &state, e))?;
     match outcome {
         RebaseOutcome::Completed => {
-            git::restore_staged_after_rebase(workdir, &saved_staged);
+            git::restore_staged_after_rebase(workdir, &snapshot.staged);
             transaction::delete(git_dir)?;
             post_absorb(
                 workdir,
@@ -376,7 +393,7 @@ fn create_fixup_commits(
     for (target_oid, files) in groups {
         let file_refs: Vec<&str> = files.iter().map(|s| s.as_str()).collect();
         if let Err(e) = git::stage_files(workdir, &file_refs) {
-            rollback_pre_rebase(workdir, pre_rebase);
+            pre_rebase.roll_back(workdir);
             return Err(e);
         }
         commit_fixup(repo, workdir, target_oid, pre_rebase, &mut fixup_pairs)?;
@@ -388,7 +405,7 @@ fn create_fixup_commits(
             combined_patch.push_str(&build_hunk_patch(path, hunks));
         }
         if let Err(e) = git::apply_cached_patch(workdir, &combined_patch) {
-            rollback_pre_rebase(workdir, pre_rebase);
+            pre_rebase.roll_back(workdir);
             return Err(e);
         }
         commit_fixup(repo, workdir, target_oid, pre_rebase, &mut fixup_pairs)?;
@@ -412,7 +429,7 @@ fn commit_fixup(
         .unwrap_or_else(|| target_oid.to_string());
     let msg = format!("fixup! {}", subject);
     if let Err(e) = git::commit(workdir, &msg) {
-        rollback_pre_rebase(workdir, pre_rebase);
+        pre_rebase.roll_back(workdir);
         return Err(e);
     }
     let fixup_hash = git::rev_parse(workdir, "HEAD")?;
@@ -433,23 +450,6 @@ fn save_skipped_patch(workdir: &Path, skipped_files: &[String]) -> Result<Option
     }
     let _ = git::restore_files_to_head(workdir, &refs);
     Ok(Some(patch))
-}
-
-/// Roll back pre-rebase mutations: reset hard, restore refs and saved patches.
-/// For a failure during fixup creation, before any rebase started — unlike
-/// `Rollback::apply_abort()`, which trusts `git rebase --abort --update-refs`
-/// to restore branch refs.
-fn rollback_pre_rebase(workdir: &Path, state: &PreRebaseState<'_>) {
-    let _ = git::reset_hard(workdir, state.saved_head);
-    let _ = repo::restore_branch_refs(workdir, state.saved_refs);
-    if !state.saved_staged.is_empty() {
-        let _ = git::apply_cached_patch(workdir, state.saved_staged);
-    }
-    if !state.saved_worktree.is_empty()
-        && let Err(e) = git::apply_patch(workdir, state.saved_worktree)
-    {
-        msg::warn(&format!("could not restore working tree changes: {e}"));
-    }
 }
 
 /// Resume an `absorb` operation after a conflict has been resolved.

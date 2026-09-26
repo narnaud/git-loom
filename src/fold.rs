@@ -1055,8 +1055,8 @@ fn fold_selected_hunks_to_commit(
 
     let saved_head = repo::head_oid(repo)?.to_string();
     let saved_refs = repo::snapshot_branch_refs(repo)?;
-    // Snapshot for `rollback_fold`.
-    let saved_worktree = WorktreeSnapshot::take(workdir)?;
+    // Snapshot for `rollback_to_snapshot`.
+    let saved_worktree = staging::WorktreeSnapshot::take(workdir)?;
 
     // Unstage pre-existing staged changes so the amends below leave them out.
     let staged = staging::save_and_unstage_staged(repo, workdir)?;
@@ -1116,7 +1116,7 @@ fn fold_selected_hunks_to_commit(
     let rollback = || {
         staged.handed_over();
         let _ = git::branch_delete(workdir, TRACK_BRANCH);
-        rollback_fold(workdir, &saved_head, Some(&saved_refs), &saved_worktree);
+        staging::rollback_to_snapshot(workdir, &saved_head, Some(&saved_refs), &saved_worktree);
     };
 
     // Phase 2: edit target (new OID tracked via TRACK_BRANCH), add selected
@@ -1163,8 +1163,9 @@ fn fold_selected_hunks_to_commit(
         return Err(git::rebase_abort_then_cleanup(workdir, e, rollback));
     }
 
-    // Still inside the paused rebase, so the abort comes first: `rollback_fold`
-    // resets hard, and doing that under a live rebase makes the mess worse.
+    // Still inside the paused rebase, so the abort comes first:
+    // `rollback_to_snapshot` resets hard, and doing that under a live rebase
+    // makes the mess worse.
     let new_target_hash = match git::rev_parse(workdir, "HEAD") {
         Ok(hash) => hash,
         Err(e) => return Err(git::rebase_abort_then_cleanup(workdir, e, rollback)),
@@ -1258,13 +1259,13 @@ fn run_patch_fold_commit_to_unstaged(
     let target_oid = git2::Oid::from_str(commit_hash)?;
     let is_head = head_oid == target_oid;
 
-    // Snapshot for `rollback_fold`.
-    let saved_worktree = WorktreeSnapshot::take(workdir)?;
+    // Snapshot for `rollback_to_snapshot`.
+    let saved_worktree = staging::WorktreeSnapshot::take(workdir)?;
 
     // Unstage pre-existing staged changes so the amend below leaves them out.
     // Held armed throughout, so every exit below puts it back; only the
-    // `rollback_fold` paths hand it over, to the snapshot above, which predates
-    // the unstaging.
+    // `rollback_to_snapshot` paths hand it over, to the snapshot above, which
+    // predates the unstaging.
     let staged_aside = staging::save_and_unstage_staged(repo, workdir)?;
 
     let new_hash;
@@ -1282,13 +1283,13 @@ fn run_patch_fold_commit_to_unstaged(
             git_opts,
         ) {
             staged_aside.handed_over();
-            rollback_fold(workdir, &pre_amend_hash, None, &saved_worktree);
+            staging::rollback_to_snapshot(workdir, &pre_amend_hash, None, &saved_worktree);
             return Err(e).context("Failed to remove hunks from the commit, operation rolled back");
         }
         new_hash = git::rev_parse(workdir, "HEAD")?;
         if let Err(e) = restore_to_worktree(workdir, &selected_patch, &whole_files) {
             staged_aside.handed_over();
-            rollback_fold(workdir, &pre_amend_hash, None, &saved_worktree);
+            staging::rollback_to_snapshot(workdir, &pre_amend_hash, None, &saved_worktree);
             return Err(e)
                 .context("Failed to restore hunks to working directory, operation rolled back");
         }
@@ -1325,13 +1326,18 @@ fn run_patch_fold_commit_to_unstaged(
         if let Err(e) = git::continue_rebase_expecting_edit(workdir, git::AfterStop::nothing()) {
             return Err(git::rebase_abort_then_cleanup(workdir, e, || {
                 staged_aside.handed_over();
-                rollback_fold(workdir, &saved_head, Some(&saved_refs), &saved_worktree);
+                staging::rollback_to_snapshot(
+                    workdir,
+                    &saved_head,
+                    Some(&saved_refs),
+                    &saved_worktree,
+                );
             }));
         }
 
         if let Err(e) = restore_to_worktree(workdir, &selected_patch, &whole_files) {
             staged_aside.handed_over();
-            rollback_fold(workdir, &saved_head, Some(&saved_refs), &saved_worktree);
+            staging::rollback_to_snapshot(workdir, &saved_head, Some(&saved_refs), &saved_worktree);
             return Err(e)
                 .context("Failed to apply changes to working directory, operation rolled back");
         }
@@ -2067,95 +2073,6 @@ fn plan_move(
     Ok((graph, parked))
 }
 
-/// What the user had uncommitted before an operation started, as the two
-/// patches it takes to put it back.
-///
-/// `worktree` is HEAD → working tree and `staged` is HEAD → index. Neither
-/// contains the other — a change staged then undone in the working tree is in
-/// `staged` alone — which is why both are always taken. A rollback replays
-/// `staged` into the index first and `worktree` over the files after, the same
-/// two patches [`Rollback`] carries, so a rollback and an abort restore alike.
-/// Both hold binary files inline, which is what it costs to restore them.
-struct WorktreeSnapshot {
-    worktree: String,
-    staged: String,
-}
-
-impl WorktreeSnapshot {
-    fn take(workdir: &Path) -> Result<Self> {
-        Ok(Self {
-            worktree: git::diff_head(workdir)?,
-            staged: git::diff_cached(workdir)?,
-        })
-    }
-}
-
-/// Undo a failed fold: history back to `saved_head`, then the user's own
-/// uncommitted changes back on top of it.
-///
-/// The `reset --hard` clears whatever a failed apply left behind, conflict
-/// markers included, so `saved_worktree` — taken before the operation started
-/// — has to be replayed afterwards, or the uncommitted work is gone for good.
-/// Should the reset or either replay fail, that half of the snapshot is saved
-/// where the user can still reach it, because the caller is about to report
-/// the operation as rolled back.
-fn rollback_fold(
-    workdir: &Path,
-    saved_head: &str,
-    saved_refs: Option<&std::collections::HashMap<String, git2::Oid>>,
-    saved_worktree: &WorktreeSnapshot,
-) {
-    if let Err(e) = git::reset_hard(workdir, saved_head) {
-        // The tree is not where the snapshot expects it, so replaying onto it
-        // would add to the mess. Hand the patches over instead.
-        msg::warn(&format!(
-            "could not reset back to {}: {e}\n\
-             History is NOT where it was — check `loom` before replaying anything",
-            git::short_hash(saved_head)
-        ));
-        git::save_or_warn(
-            workdir,
-            "unrestored",
-            &saved_worktree.worktree,
-            git::Replay::Worktree,
-        );
-        git::save_or_warn(
-            workdir,
-            "unrestored-staged",
-            &saved_worktree.staged,
-            git::Replay::Cached,
-        );
-        return;
-    }
-    if let Some(refs) = saved_refs
-        && let Err(e) = repo::restore_branch_refs(workdir, refs)
-    {
-        msg::warn(&format!("failed to restore branch refs: {e}"));
-    }
-    if !saved_worktree.staged.is_empty()
-        && let Err(e) = git::apply_cached_patch(workdir, &saved_worktree.staged)
-    {
-        msg::warn(&format!("could not re-stage your staged changes: {e}"));
-        git::save_or_warn(
-            workdir,
-            "unrestored-staged",
-            &saved_worktree.staged,
-            git::Replay::Cached,
-        );
-    }
-    if !saved_worktree.worktree.is_empty()
-        && let Err(e) = git::apply_patch(workdir, &saved_worktree.worktree)
-    {
-        msg::warn(&format!("could not restore your uncommitted changes: {e}"));
-        git::save_or_warn(
-            workdir,
-            "unrestored",
-            &saved_worktree.worktree,
-            git::Replay::Worktree,
-        );
-    }
-}
-
 /// Stage a submodule's removal once it is out of the commit (Spec 007): with
 /// the checkout still on disk nothing would show it, and deleting a checkout
 /// that may hold the user's own work is not loom's to do.
@@ -2224,8 +2141,8 @@ fn fold_commit_file_to_unstaged(
     let gitlinks = git::commit_gitlinks(workdir, commit_hash)?;
     let gitlink = gitlinks.contains_key(path);
 
-    // Snapshot for `rollback_fold`.
-    let saved_worktree = WorktreeSnapshot::take(workdir)?;
+    // Snapshot for `rollback_to_snapshot`.
+    let saved_worktree = staging::WorktreeSnapshot::take(workdir)?;
 
     let new_hash;
 
@@ -2234,12 +2151,12 @@ fn fold_commit_file_to_unstaged(
         // A failure part-way through leaves the file reverse-applied in the
         // working tree, so this rolls back like the re-apply below does.
         if let Err(e) = apply_and_amend_path(workdir, &file_diff, path, gitlink, true, git_opts) {
-            rollback_fold(workdir, &saved_head, None, &saved_worktree);
+            staging::rollback_to_snapshot(workdir, &saved_head, None, &saved_worktree);
             return Err(e).context("Failed to uncommit file, operation rolled back");
         }
         new_hash = git::rev_parse(workdir, "HEAD")?;
         if !gitlink && let Err(e) = git::apply_patch_to_worktree(workdir, &file_diff) {
-            rollback_fold(workdir, &saved_head, None, &saved_worktree);
+            staging::rollback_to_snapshot(workdir, &saved_head, None, &saved_worktree);
             return Err(e).context("Failed to uncommit file, operation rolled back");
         }
     } else {
@@ -2280,7 +2197,7 @@ fn fold_commit_file_to_unstaged(
         )?;
 
         if !gitlink && let Err(e) = git::apply_patch_to_worktree(workdir, &file_diff) {
-            rollback_fold(workdir, &saved_head, Some(&saved_refs), &saved_worktree);
+            staging::rollback_to_snapshot(workdir, &saved_head, Some(&saved_refs), &saved_worktree);
             return Err(e).context("Failed to uncommit file, operation rolled back");
         }
         // After the worktree apply, like every other uncommit path: its failure
@@ -2339,9 +2256,9 @@ fn fold_commit_file_to_commit(
 
     let source_is_newer = repo.graph_descendant_of(source_oid, target_oid)?;
 
-    // Snapshot for `rollback_fold`: both branches below reset over a working
-    // tree a rebase has put the user's uncommitted changes back into.
-    let saved_worktree = WorktreeSnapshot::take(workdir)?;
+    // Snapshot for `rollback_to_snapshot`: both branches below reset over a
+    // working tree a rebase has put the user's uncommitted changes back into.
+    let saved_worktree = staging::WorktreeSnapshot::take(workdir)?;
 
     let new_source_hash;
     let new_target_hash;
@@ -2357,7 +2274,7 @@ fn fold_commit_file_to_commit(
 
         let rollback = || {
             let _ = git::branch_delete(workdir, TRACK_BRANCH);
-            rollback_fold(workdir, &saved_head, Some(&saved_refs), &saved_worktree);
+            staging::rollback_to_snapshot(workdir, &saved_head, Some(&saved_refs), &saved_worktree);
         };
 
         // Phase 1: edit at source, remove file, continue.
@@ -2510,7 +2427,12 @@ fn fold_commit_file_to_commit(
         new_source_hash = git::rev_parse(workdir, "HEAD").map_err(|e| {
             // Still inside the paused rebase, so the abort comes first.
             git::rebase_abort_then_cleanup(workdir, e, || {
-                rollback_fold(workdir, &saved_head, Some(&saved_refs), &saved_worktree);
+                staging::rollback_to_snapshot(
+                    workdir,
+                    &saved_head,
+                    Some(&saved_refs),
+                    &saved_worktree,
+                );
             })
         })?;
 
@@ -2523,26 +2445,46 @@ fn fold_commit_file_to_commit(
             git::AfterStop::rewrite(&targets[0]).targeting(&targets),
         ) {
             return Err(git::rebase_abort_then_cleanup(workdir, e, || {
-                rollback_fold(workdir, &saved_head, Some(&saved_refs), &saved_worktree);
+                staging::rollback_to_snapshot(
+                    workdir,
+                    &saved_head,
+                    Some(&saved_refs),
+                    &saved_worktree,
+                );
             }));
         }
 
         if let Err(e) = apply_and_amend_path(workdir, &file_diff, path, gitlink, false, git_opts) {
             return Err(git::rebase_abort_then_cleanup(workdir, e, || {
-                rollback_fold(workdir, &saved_head, Some(&saved_refs), &saved_worktree);
+                staging::rollback_to_snapshot(
+                    workdir,
+                    &saved_head,
+                    Some(&saved_refs),
+                    &saved_worktree,
+                );
             }));
         }
 
         new_target_hash = git::rev_parse(workdir, "HEAD").map_err(|e| {
             // Still inside the paused rebase, so the abort comes first.
             git::rebase_abort_then_cleanup(workdir, e, || {
-                rollback_fold(workdir, &saved_head, Some(&saved_refs), &saved_worktree);
+                staging::rollback_to_snapshot(
+                    workdir,
+                    &saved_head,
+                    Some(&saved_refs),
+                    &saved_worktree,
+                );
             })
         })?;
 
         if let Err(e) = git::continue_rebase_expecting_edit(workdir, git::AfterStop::nothing()) {
             return Err(git::rebase_abort_then_cleanup(workdir, e, || {
-                rollback_fold(workdir, &saved_head, Some(&saved_refs), &saved_worktree);
+                staging::rollback_to_snapshot(
+                    workdir,
+                    &saved_head,
+                    Some(&saved_refs),
+                    &saved_worktree,
+                );
             }));
         }
     }
@@ -2591,8 +2533,8 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
         let diff = git::diff_commit(workdir, commit_hash)?;
         let saved_head = head_oid.to_string();
         let saved_refs = repo::snapshot_branch_refs(repo)?;
-        // Snapshot for `rollback_fold`.
-        let saved_worktree = WorktreeSnapshot::take(workdir)?;
+        // Snapshot for `rollback_to_snapshot`.
+        let saved_worktree = staging::WorktreeSnapshot::take(workdir)?;
 
         let git_dir = repo.path().to_path_buf();
         let fold_ctx = serde_json::to_value(FoldVariant::CommitToUnstaged {
@@ -2633,7 +2575,12 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
                 if !diff.is_empty()
                     && let Err(e) = git::apply_patch_to_worktree(workdir, &diff)
                 {
-                    rollback_fold(workdir, &saved_head, Some(&saved_refs), &saved_worktree);
+                    staging::rollback_to_snapshot(
+                        workdir,
+                        &saved_head,
+                        Some(&saved_refs),
+                        &saved_worktree,
+                    );
                     return Err(e).context(
                         "Failed to apply changes to working directory, operation rolled back",
                     );

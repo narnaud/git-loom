@@ -860,6 +860,96 @@ fn hunk_sort_key(hunk: &diff::DiffHunk) -> usize {
     parse_hunk_start(first_line).unwrap_or(0)
 }
 
+/// What the user had uncommitted before an operation started, as the two
+/// patches it takes to put it back.
+///
+/// `worktree` is HEAD → working tree and `staged` is HEAD → index. Neither
+/// contains the other — a change staged then undone in the working tree is in
+/// `staged` alone — which is why `take` records both. A rollback replays
+/// `staged` into the index first and `worktree` over the files after, the same
+/// two patches `transaction::Rollback` carries, so a rollback and an abort
+/// restore alike. Both hold binary files inline, which is what it costs to
+/// restore them.
+pub(crate) struct WorktreeSnapshot {
+    pub worktree: String,
+    pub staged: String,
+}
+
+impl WorktreeSnapshot {
+    pub fn take(workdir: &Path) -> Result<Self> {
+        Ok(Self {
+            worktree: git::diff_head(workdir)?,
+            staged: git::diff_cached(workdir)?,
+        })
+    }
+}
+
+/// Undo a failed operation: history back to `saved_head`, then the user's own
+/// uncommitted changes back on top of it.
+///
+/// The `reset --hard` clears whatever a failed apply left behind, conflict
+/// markers included, so `saved_worktree` — taken before the operation started
+/// — has to be replayed afterwards, or the uncommitted work is gone for good.
+/// Should the reset or either replay fail, that half of the snapshot is saved
+/// where the user can still reach it, because the caller is about to report
+/// the operation as rolled back.
+pub(crate) fn rollback_to_snapshot(
+    workdir: &Path,
+    saved_head: &str,
+    saved_refs: Option<&std::collections::HashMap<String, git2::Oid>>,
+    saved_worktree: &WorktreeSnapshot,
+) {
+    if let Err(e) = git::reset_hard(workdir, saved_head) {
+        // The tree is not where the snapshot expects it, so replaying onto it
+        // would add to the mess. Hand the patches over instead.
+        msg::warn(&format!(
+            "could not reset back to {}: {e}\n\
+             History is NOT where it was — check `loom` before replaying anything",
+            git::short_hash(saved_head)
+        ));
+        git::save_or_warn(
+            workdir,
+            "unrestored",
+            &saved_worktree.worktree,
+            git::Replay::Worktree,
+        );
+        git::save_or_warn(
+            workdir,
+            "unrestored-staged",
+            &saved_worktree.staged,
+            git::Replay::Cached,
+        );
+        return;
+    }
+    if let Some(refs) = saved_refs
+        && let Err(e) = repo::restore_branch_refs(workdir, refs)
+    {
+        msg::warn(&format!("failed to restore branch refs: {e}"));
+    }
+    if !saved_worktree.staged.is_empty()
+        && let Err(e) = git::apply_cached_patch(workdir, &saved_worktree.staged)
+    {
+        msg::warn(&format!("could not re-stage your staged changes: {e}"));
+        git::save_or_warn(
+            workdir,
+            "unrestored-staged",
+            &saved_worktree.staged,
+            git::Replay::Cached,
+        );
+    }
+    if !saved_worktree.worktree.is_empty()
+        && let Err(e) = git::apply_patch(workdir, &saved_worktree.worktree)
+    {
+        msg::warn(&format!("could not restore your uncommitted changes: {e}"));
+        git::save_or_warn(
+            workdir,
+            "unrestored",
+            &saved_worktree.worktree,
+            git::Replay::Worktree,
+        );
+    }
+}
+
 #[cfg(test)]
 #[path = "staging_test.rs"]
 mod tests;
