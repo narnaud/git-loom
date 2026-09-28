@@ -1,5 +1,7 @@
 use anyhow::{Context, Result, bail};
-use git2::{BranchType, Repository};
+use std::path::{Path, PathBuf};
+
+use git2::{BranchType, Oid, Repository};
 use serde::{Deserialize, Serialize};
 
 use crate::core::msg;
@@ -22,10 +24,11 @@ pub fn run(branch: Option<String>, all: bool) -> Result<()> {
     let workdir = repo::require_workdir(&repo, "merge")?;
     let git_dir = repo.path().to_path_buf();
     let info = repo::gather_repo_info(&repo, false, 1)?;
+    let others = other_integrations(&repo, workdir, &info.branch_name)?;
 
     let branch_name = match branch {
-        Some(name) => resolve_non_woven_branch(&repo, &info, &name)?,
-        None => pick_branch(&repo, &info, all)?,
+        Some(name) => resolve_non_woven_branch(&repo, &info, &others, &name)?,
+        None => pick_branch(&repo, &info, &others, all)?,
     };
 
     // Remote branches need a local tracking branch before they can be merged.
@@ -74,16 +77,103 @@ pub fn after_continue(context: &serde_json::Value) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Resolve a branch argument, ensuring it's NOT already woven.
+/// The integration branch of another worktree: its checked-out branch, when
+/// that branch has an upstream.
+struct OtherIntegration {
+    branch: String,
+    path: PathBuf,
+    tip: Oid,
+    upstream_tip: Oid,
+}
+
+/// Every other worktree's integration branch. `current` is skipped by name, as
+/// a branch is checked out in one worktree at most.
+fn other_integrations(
+    repo: &Repository,
+    workdir: &Path,
+    current: &str,
+) -> Result<Vec<OtherIntegration>> {
+    let mut result = Vec::new();
+    for checkout in git::git_worktree::worktree_checkouts(workdir)? {
+        if checkout.branch == current {
+            continue;
+        }
+        let Ok(local) = repo.find_branch(&checkout.branch, BranchType::Local) else {
+            continue;
+        };
+        let (Some(tip), Some(upstream_tip)) = (
+            local.get().target(),
+            local.upstream().ok().and_then(|u| u.get().target()),
+        ) else {
+            continue;
+        };
+        result.push(OtherIntegration {
+            branch: checkout.branch,
+            path: checkout.path,
+            tip,
+            upstream_tip,
+        });
+    }
+    Ok(result)
+}
+
+/// The other integration branch `branch` is woven into: its tip is in that
+/// branch's history but not yet in its upstream (Spec 005).
+fn woven_elsewhere<'a>(
+    repo: &Repository,
+    others: &'a [OtherIntegration],
+    branch: &str,
+) -> Result<Option<&'a OtherIntegration>> {
+    let Some(tip) = repo
+        .find_branch(branch, BranchType::Local)
+        .ok()
+        .and_then(|local| local.get().target())
+    else {
+        return Ok(None);
+    };
+    for other in others {
+        if other.branch != branch
+            && repo::contains(repo, other.tip, tip)?
+            && !repo::contains(repo, other.upstream_tip, tip)?
+        {
+            return Ok(Some(other));
+        }
+    }
+    Ok(None)
+}
+
+/// Resolve a branch argument, ensuring it's NOT already woven, here or in
+/// another worktree's integration branch.
 fn resolve_non_woven_branch(
     repo: &Repository,
     info: &repo::RepoInfo,
+    others: &[OtherIntegration],
     branch_arg: &str,
 ) -> Result<String> {
     // Check if it's already woven
     if info.branches.iter().any(|b| b.name == branch_arg) {
         bail!(
             "Branch '{}' is already woven into the integration branch",
+            branch_arg
+        );
+    }
+
+    // Weaving it would weave everything woven there as well.
+    if let Some(other) = others.iter().find(|o| o.branch == branch_arg) {
+        bail!(
+            "Branch `{}` is checked out in the worktree at `{}`",
+            branch_arg,
+            other.path.display()
+        );
+    }
+
+    if let Some(other) = woven_elsewhere(repo, others, branch_arg)? {
+        bail!(
+            "Branch `{}` is already woven into `{}` at `{}`\n\
+             Unweave it there first: `loom branch unmerge {}`",
+            branch_arg,
+            other.branch,
+            other.path.display(),
             branch_arg
         );
     }
@@ -102,7 +192,12 @@ fn resolve_non_woven_branch(
 }
 
 /// Interactive picker: list non-woven local branches, optionally with remotes.
-fn pick_branch(repo: &Repository, info: &repo::RepoInfo, include_remote: bool) -> Result<String> {
+fn pick_branch(
+    repo: &Repository,
+    info: &repo::RepoInfo,
+    others: &[OtherIntegration],
+    include_remote: bool,
+) -> Result<String> {
     let woven_names: Vec<&str> = info.branches.iter().map(|b| b.name.as_str()).collect();
     let current_branch = &info.branch_name;
 
@@ -114,6 +209,8 @@ fn pick_branch(repo: &Repository, info: &repo::RepoInfo, include_remote: bool) -
         if let Some(name) = branch.name()?
             && name != current_branch
             && !woven_names.contains(&name)
+            && !others.iter().any(|o| o.branch == name)
+            && woven_elsewhere(repo, others, name)?.is_none()
         {
             items.push(name.to_string());
         }

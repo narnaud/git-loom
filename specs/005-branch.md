@@ -26,7 +26,7 @@ Target resolution uses Spec 002 in this order: exact local branch name (its tip)
 git-loom branch merge [branch] [-a|--all]
 ```
 
-Weave an existing non-woven branch with `git merge --no-ff`. Without `[branch]`, show an interactive picker. `--all` adds remote branches lacking local counterparts; selecting one first creates its local tracking branch. Error if the branch does not exist or is already woven.
+Weave an existing non-woven branch with `git merge --no-ff`. Without `[branch]`, show an interactive picker. `--all` adds remote branches lacking local counterparts; selecting one first creates its local tracking branch. Error if the branch does not exist, is already woven here or into another worktree's integration branch (the branch checked out there, when it has an upstream, whose history holds the branch's tip while its upstream does not), or is that integration branch itself. A branch woven into two integration branches goes stale in one of them on any rewrite from the other; the picker leaves such branches out.
 
 ### Unmerge
 
