@@ -29,6 +29,7 @@ is its directory name.
 git-loom worktree new <name>
 git-loom worktree list
 git-loom worktree drop <worktree>
+git-loom worktree cd [<worktree>]
 ```
 
 `<worktree>` accepts a worktree's name, its checked-out branch, its short ID,
@@ -78,3 +79,16 @@ It is deleted only when every non-merge commit it holds is on another branch,
 a tag or a remote-tracking ref, so nothing but weave merges is lost;
 otherwise it is kept and named in a warning, with the count of commits only
 it holds. Its feature branches stay, unwoven.
+
+## cd
+
+Print the worktree's absolute path, alone, on stdout: a process cannot change
+its parent shell's directory. Without `<worktree>`, the main worktree from a
+linked one, else a picker of the other worktrees. `list` and `cd` run while an
+operation is paused, to reach the worktree it is paused in.
+
+The scripts `completions powershell` and `completions clink` emit define
+`loom`, which runs every other command as `git-loom` does and turns `loom wt
+cd` into a change of the shell's directory: Set-Location on the printed path,
+or a Clink input filter rewriting the line into a `cd`. In agent mode the JSON
+status follows the path; both move only to the path and pass the status through.

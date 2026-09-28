@@ -72,7 +72,8 @@ local worktree_matcher = clink.argmatcher()
         "list" .. plain_matcher,
         "ls"   .. plain_matcher,
         "drop" .. plain_matcher,
-        "rm"   .. plain_matcher
+        "rm"   .. plain_matcher,
+        "cd"   .. plain_matcher
     )
     :addflags("--help", "-h")
 
@@ -128,3 +129,43 @@ clink.argmatcher("git-loom")
         "abort"     .. plain_matcher
     )
     :addflags("--no-color", "--theme" .. theme_matcher, "--version", "--help", "-h")
+
+-- `loom wt cd <worktree>` changes cmd's directory. A child process can never
+-- cd its parent, so `git-loom wt cd` prints the path and the input line is
+-- rewritten here, before cmd runs it, into a `cd` on that output. `loom` is
+-- whatever the user made of it (a doskey macro, a copy of the exe); `git-loom`
+-- called directly keeps printing the path.
+--
+-- The first unquoted `&` or `|` ends the `wt cd` command: the rest is chained
+-- after the parenthesized loop instead of running in FOR /F's subprocess.
+local function split_chain(s)
+    local quoted = false
+    local i = 1
+    while i <= #s do
+        local c = s:sub(i, i)
+        if c == '"' then
+            quoted = not quoted
+        elseif not quoted and c == "^" then
+            i = i + 1
+        elseif not quoted and (c == "&" or c == "|") then
+            return s:sub(1, i - 1), s:sub(i)
+        end
+        i = i + 1
+    end
+    return s, ""
+end
+
+clink.onfilterinput(function(text)
+    local lead, sub, tail = text:match("^(%s*)loom%s+(%S+)%s+cd(.*)$")
+    if (sub ~= "wt" and sub ~= "worktree") or (tail ~= "" and not tail:match("^[%s&|]")) then
+        return
+    end
+    local args, chain = split_chain(tail)
+    if args:match("^%s+%-") then
+        return
+    end
+    -- In agent mode a JSON status follows the path: a line that is no
+    -- directory is echoed, not cd'd into.
+    return lead .. "(for /f \"delims=\" %i in ('git-loom wt cd" .. args
+        .. "') do @if exist \"%i\\\" (cd /d \"%i\") else echo(%i)" .. chain
+end)

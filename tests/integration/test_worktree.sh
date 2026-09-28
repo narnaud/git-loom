@@ -68,4 +68,14 @@ assert_exit_ok "$CODE" "drop_by_name"
 assert_contains "$OUT" "Deleted branch" "drop_deleted_msg"
 assert_branch_not_exists "integration-bar" "drop_deleted_branch"
 
+describe "cd prints a worktree path, and the main one from a linked worktree"
+gl wt new baz > /dev/null
+BAZ="$TMPROOT/work-baz"
+gl_capture wt cd baz
+assert_exit_ok "$CODE" "cd_by_name"
+assert_eq "$(cd "$OUT" && pwd -P)" "$(cd "$BAZ" && pwd -P)" "cd_by_name_path"
+gl_capture_in "$BAZ" wt cd
+assert_exit_ok "$CODE" "cd_to_main"
+assert_eq "$(cd "$OUT" && pwd -P)" "$(cd "$WORK" && pwd -P)" "cd_to_main_path"
+
 pass

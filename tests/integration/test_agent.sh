@@ -135,6 +135,7 @@ describe "agent mode: completions prints its script alone"
 gl_capture_json completions powershell --agent
 assert_exit_ok "$CODE" "completions_exit"
 assert_contains "$JSON" "Register-ArgumentCompleter" "completions_script"
+assert_contains "$JSON" "function loom" "completions_loom_function"
 assert_not_contains "$JSON" '"status"' "completions_no_json"
 
 LOOM_AGENT=1 gl_capture_json completions notashell
