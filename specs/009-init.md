@@ -30,18 +30,18 @@ git-loom init [name]
 
 **Arguments:**
 
-- `[name]`: Branch name (optional; defaults to `"integration"`)
+- `[name]`: Branch name (optional; see Default Name)
 
 **Behavior:**
 
 - With `name`: creates the integration branch with that name
-- Without `name`: creates a branch named `"integration"`
+- Without `name`: creates a branch with the default name
 - The branch is created at the upstream tip and tracks it
 - HEAD is switched to the new branch
 
 ## What Happens
 
-1. **Name resolution**: Use the provided name or default to `"integration"`
+1. **Name resolution**: Use the provided name or the default name
 2. **Validation**: Name is trimmed, checked for emptiness, validated against
    git's naming rules, and checked for duplicates
 3. **Upstream detection**: The upstream tracking ref is determined:
@@ -65,14 +65,17 @@ The upstream is resolved in priority order:
    the new integration branch will also track `origin/main`. This is the most
    common case.
 
-2. **Remote scan** — If the current branch has no upstream (e.g., a detached
+2. **Main worktree's upstream** — In a linked worktree, the upstream of the
+   branch checked out in the main worktree, when the current branch has none.
+
+3. **Remote scan** — If the current branch has no upstream (e.g., a detached
    HEAD or a branch without tracking), git-loom scans all remotes for branches
    named `main`, `master`, or `develop`.
 
-3. **Interactive prompt** — If multiple candidates are found (e.g., both
+4. **Interactive prompt** — If multiple candidates are found (e.g., both
    `origin/main` and `upstream/main`), the user is prompted to select one.
 
-4. **Error** — If no remote tracking branches are found at all, an error
+5. **Error** — If no remote tracking branches are found at all, an error
    message guides the user to set up a remote.
 
 ## Prerequisites
@@ -134,6 +137,13 @@ git-loom init
 ## Design Decisions
 
 ### Default Name: "integration"
+
+In the main worktree the default is `integration`. In a linked worktree it is
+`integration-<name>`, since each worktree holds its own integration branch and
+`integration` is already checked out in the main one: `<name>` is the
+worktree's directory name with the main worktree's directory name and a dash
+stripped from its front (`repo-foo` beside `repo` gives `integration-foo`), or
+the whole directory name when it does not start that way.
 
 The default name `"integration"` was chosen because:
 

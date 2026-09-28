@@ -281,6 +281,27 @@ impl TestRepo {
         self.repo.workdir().unwrap().to_path_buf()
     }
 
+    /// `git worktree add <sibling dir> <args>`, returning the new worktree's
+    /// path. The repo must be nested in the TempDir (`new_with_remote`), or
+    /// the sibling would outlive the test in `%TEMP%`.
+    pub fn add_worktree(&self, dir: &str, args: &[&str]) -> PathBuf {
+        let parent = self.workdir().parent().unwrap().to_path_buf();
+        // Canonicalized: on Windows the TempDir may be an 8.3 short path
+        // (`RUNNER~1`) that libgit2 resolves to its long form in `workdir()`.
+        assert!(
+            std::fs::canonicalize(&parent)
+                .unwrap()
+                .starts_with(std::fs::canonicalize(self._dir.path()).unwrap()),
+            "{dir} escapes the TempDir"
+        );
+        let path = parent.join(dir);
+        let path_arg = path.display().to_string();
+        let mut git_args = vec!["worktree", "add", "-q", path_arg.as_str()];
+        git_args.extend_from_slice(args);
+        crate::git::run_git(&self.workdir(), &git_args).unwrap();
+        path
+    }
+
     /// Run a closure with the current directory set to the repo's working
     /// directory, under a global mutex and a drop guard so concurrent test
     /// threads cannot corrupt each other's cwd even on a panic.

@@ -13,6 +13,17 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
 
+/// One entry of `git worktree list --porcelain`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Worktree {
+    pub path: PathBuf,
+    /// Branch name without the `refs/heads/` prefix; `None` when detached or bare.
+    pub branch: Option<String>,
+    pub bare: bool,
+    /// Registered, but its directory is gone.
+    pub prunable: bool,
+}
+
 /// A local branch checked out in a worktree.
 ///
 /// Detached, bare, and prunable (directory gone) worktrees are excluded.
@@ -23,10 +34,28 @@ pub struct WorktreeCheckout {
     pub branch: String,
 }
 
+/// Every registered worktree, the main one first, as git lists them.
+pub fn list_worktrees(workdir: &Path) -> Result<Vec<Worktree>> {
+    let stdout = super::run_git_stdout(workdir, &["worktree", "list", "--porcelain"])?;
+    Ok(parse_worktrees(&stdout))
+}
+
 /// List all worktrees that have a local branch checked out.
 pub fn worktree_checkouts(workdir: &Path) -> Result<Vec<WorktreeCheckout>> {
-    let stdout = super::run_git_stdout(workdir, &["worktree", "list", "--porcelain"])?;
-    Ok(parse_worktree_list(&stdout))
+    Ok(checkouts(list_worktrees(workdir)?))
+}
+
+fn checkouts(worktrees: Vec<Worktree>) -> Vec<WorktreeCheckout> {
+    worktrees
+        .into_iter()
+        .filter(|w| !w.bare && !w.prunable)
+        .filter_map(|w| {
+            Some(WorktreeCheckout {
+                path: w.path,
+                branch: w.branch?,
+            })
+        })
+        .collect()
 }
 
 /// Parse `git worktree list --porcelain` output.
@@ -34,30 +63,37 @@ pub fn worktree_checkouts(workdir: &Path) -> Result<Vec<WorktreeCheckout>> {
 /// Each worktree is a block of `attribute [value]` lines separated by a blank
 /// line: `worktree <path>`, `HEAD <sha>`, then `branch refs/heads/<name>` or
 /// `detached`, optionally `bare`, `locked [reason]`, `prunable [reason]`.
-fn parse_worktree_list(porcelain: &str) -> Vec<WorktreeCheckout> {
+fn parse_worktrees(porcelain: &str) -> Vec<Worktree> {
     let mut result = Vec::new();
-    let mut path: Option<PathBuf> = None;
-    let mut branch: Option<String> = None;
-    let mut skip = false;
+    let mut current: Option<Worktree> = None;
 
     // Trailing sentinel so the last block is flushed even without a blank line.
     for line in porcelain.lines().chain(std::iter::once("")) {
         if line.is_empty() {
-            if let (Some(p), Some(b)) = (path.take(), branch.take())
-                && !skip
-            {
-                result.push(WorktreeCheckout { path: p, branch: b });
-            }
-            skip = false;
+            result.extend(current.take());
         } else if let Some(p) = line.strip_prefix("worktree ") {
-            path = Some(PathBuf::from(p));
-        } else if let Some(b) = line.strip_prefix("branch refs/heads/") {
-            branch = Some(b.to_string());
-        } else if line == "bare" || line.starts_with("prunable") {
-            skip = true;
+            current = Some(Worktree {
+                path: PathBuf::from(p),
+                branch: None,
+                bare: false,
+                prunable: false,
+            });
+        } else if let Some(w) = current.as_mut() {
+            if let Some(b) = line.strip_prefix("branch refs/heads/") {
+                w.branch = Some(b.to_string());
+            } else if line == "bare" {
+                w.bare = true;
+            } else if line.starts_with("prunable") {
+                w.prunable = true;
+            }
         }
     }
     result
+}
+
+#[cfg(test)]
+fn parse_worktree_list(porcelain: &str) -> Vec<WorktreeCheckout> {
+    checkouts(parse_worktrees(porcelain))
 }
 
 /// Refuse the operation if any of `branches` is checked out in another

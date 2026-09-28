@@ -183,3 +183,79 @@ fn init_no_upstream_remote_uses_origin_on_github() {
     let upstream_name = upstream.name().unwrap().unwrap();
     assert_eq!(upstream_name, "origin/main");
 }
+
+fn worktree_head_and_upstream(path: &std::path::Path) -> (String, String) {
+    let repo = git2::Repository::open(path).unwrap();
+    let head = repo.head().unwrap();
+    let name = head.shorthand().unwrap().to_string();
+    let branch = repo.find_branch(&name, BranchType::Local).unwrap();
+    let upstream = branch
+        .upstream()
+        .unwrap()
+        .name()
+        .unwrap()
+        .unwrap()
+        .to_string();
+    (name, upstream)
+}
+
+#[test]
+fn init_in_worktree_names_branch_after_dir_suffix() {
+    let test_repo = TestRepo::new_with_remote();
+    let path = test_repo.add_worktree("work-foo", &["--detach"]);
+
+    let result = test_repo.in_dir_path(&path, || super::run(None));
+    assert!(result.is_ok(), "init failed: {:?}", result.err());
+
+    assert_eq!(
+        worktree_head_and_upstream(&path),
+        ("integration-foo".to_string(), "origin/main".to_string())
+    );
+    assert_eq!(test_repo.current_branch_name(), "integration");
+}
+
+#[test]
+fn init_in_worktree_outside_naming_scheme_uses_whole_dir_name() {
+    let test_repo = TestRepo::new_with_remote();
+    let path = test_repo.add_worktree("other", &["--detach"]);
+
+    let result = test_repo.in_dir_path(&path, || super::run(None));
+    assert!(result.is_ok(), "init failed: {:?}", result.err());
+
+    assert_eq!(worktree_head_and_upstream(&path).0, "integration-other");
+}
+
+#[test]
+fn init_in_worktree_keeps_explicit_name() {
+    let test_repo = TestRepo::new_with_remote();
+    let path = test_repo.add_worktree("work-foo", &["--detach"]);
+
+    let result = test_repo.in_dir_path(&path, || super::run(Some("mine".to_string())));
+    assert!(result.is_ok(), "init failed: {:?}", result.err());
+
+    assert_eq!(worktree_head_and_upstream(&path).0, "mine");
+}
+
+#[test]
+fn init_in_worktree_tracks_main_worktree_upstream() {
+    // origin/release is not a default-branch candidate, so only the main
+    // worktree's `integration` can lead init to it.
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    crate::git::run_git(
+        &workdir,
+        &["push", "-q", "origin", "HEAD:refs/heads/release"],
+    )
+    .unwrap();
+    crate::git::run_git(&workdir, &["fetch", "-q", "origin"]).unwrap();
+    crate::git::run_git(&workdir, &["branch", "-q", "-u", "origin/release"]).unwrap();
+    let path = test_repo.add_worktree("work-foo", &["-b", "scratch"]);
+
+    let result = test_repo.in_dir_path(&path, || super::run(None));
+    assert!(result.is_ok(), "init failed: {:?}", result.err());
+
+    assert_eq!(
+        worktree_head_and_upstream(&path),
+        ("integration-foo".to_string(), "origin/release".to_string())
+    );
+}

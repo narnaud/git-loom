@@ -107,4 +107,16 @@ gl_capture init
 assert_exit_ok "$CODE" "no_upstream_tracking"
 assert_branch_exists "integration" "no_upstream_tracking_branch"
 
+describe "in a linked worktree, names the branch after the directory"
+setup_repo_for_init
+gl init
+git -C "$WORK" worktree add -q --detach "$TMPROOT/work-foo"
+MAIN="$WORK"
+WORK="$TMPROOT/work-foo"
+gl_capture init
+assert_exit_ok "$CODE" "worktree_default_name"
+assert_eq "$(current_branch)" "integration-foo" "worktree_default_name_head"
+assert_eq "$(branch_upstream integration-foo)" "$(branch_upstream integration)" "worktree_same_upstream"
+WORK="$MAIN"
+
 pass

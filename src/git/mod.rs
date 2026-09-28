@@ -40,7 +40,7 @@ pub use git_rebase::{
     rebase_outcome, rebase_progress, replayed_empty_hash, stop_id, unmerged_paths,
     verify_paused_at,
 };
-pub use git_worktree::ensure_not_checked_out_elsewhere;
+pub use git_worktree::{Worktree, ensure_not_checked_out_elsewhere, list_worktrees};
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

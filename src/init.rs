@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use anyhow::{Result, bail};
 use git2::{BranchType, Repository};
 
@@ -7,14 +9,17 @@ use crate::git;
 
 /// Initialize a new integration branch tracking a remote upstream.
 ///
-/// Creates a branch (default name: "integration") at the upstream tip and switches to it.
-/// The remote is auto-detected from the current branch's upstream tracking ref.
-/// If no upstream is found, the user is prompted to choose one.
+/// Creates the branch at the upstream tip and switches to it; the default name
+/// depends on the worktree (see [`default_name`]).
 pub fn run(name: Option<String>) -> Result<()> {
     let repo = repo::open_repo()?;
     let workdir = repo::require_workdir(&repo, "initialize")?;
+    let main = main_worktree(&repo, workdir)?;
 
-    let name = name.unwrap_or_else(|| "integration".to_string());
+    let name = match name {
+        Some(name) => name,
+        None => default_name(workdir, main.as_ref()),
+    };
     let name = name.trim().to_string();
     if name.is_empty() {
         bail!("Branch name cannot be empty");
@@ -24,7 +29,7 @@ pub fn run(name: Option<String>) -> Result<()> {
 
     repo::ensure_branch_not_exists(&repo, &name)?;
 
-    let upstream = detect_upstream(&repo)?;
+    let upstream = detect_upstream(&repo, main.as_ref())?;
 
     git::branch_switch_create_tracking(workdir, &name, &upstream)?;
 
@@ -36,15 +41,47 @@ pub fn run(name: Option<String>) -> Result<()> {
     Ok(())
 }
 
+/// The main worktree, when `workdir` is a linked one.
+fn main_worktree(repo: &Repository, workdir: &Path) -> Result<Option<git::Worktree>> {
+    if !repo.is_worktree() {
+        return Ok(None);
+    }
+    Ok(git::list_worktrees(workdir)?.into_iter().next())
+}
+
+/// `integration` in the main worktree; `integration-<name>` in a linked one,
+/// where `<name>` is the directory name minus the main worktree's name and a
+/// dash (`<dir>-<name>`, as `worktree new` lays it out), else the whole
+/// directory name.
+fn default_name(workdir: &Path, main: Option<&git::Worktree>) -> String {
+    let Some(main) = main else {
+        return "integration".to_string();
+    };
+    let dir = dir_name(workdir);
+    let prefix = format!("{}-", dir_name(&main.path));
+    let name = dir
+        .strip_prefix(&prefix)
+        .filter(|rest| !rest.is_empty())
+        .unwrap_or(&dir);
+    format!("integration-{}", name)
+}
+
+fn dir_name(path: &Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
 /// Detect the upstream tracking ref to use for the new integration branch.
 ///
 /// Strategy:
 /// 1. On GitHub repos with an "upstream" remote (fork workflow), use it.
 /// 2. If the current branch has an upstream, use it (e.g., "origin/main").
-/// 3. Otherwise, check each remote's HEAD symref (e.g., refs/remotes/origin/HEAD).
-/// 4. Fall back to scanning for common branch names (main, master, develop).
-/// 5. If exactly one candidate, use it. If multiple, prompt the user.
-fn detect_upstream(repo: &Repository) -> Result<String> {
+/// 3. In a linked worktree, the upstream of the main worktree's branch.
+/// 4. Otherwise, check each remote's HEAD symref (e.g., refs/remotes/origin/HEAD).
+/// 5. Fall back to scanning for common branch names (main, master, develop).
+/// 6. If exactly one candidate, use it. If multiple, prompt the user.
+fn detect_upstream(repo: &Repository, main: Option<&git::Worktree>) -> Result<String> {
     // On GitHub repos with a fork workflow, prefer the "upstream" remote
     if let Some(upstream) = try_github_upstream(repo) {
         return Ok(upstream);
@@ -59,6 +96,12 @@ fn detect_upstream(repo: &Repository) -> Result<String> {
         && let Ok(Some(upstream_name)) = upstream.name()
     {
         return Ok(upstream_name.to_string());
+    }
+
+    if let Some(branch) = main.and_then(|m| m.branch.as_deref())
+        && let Some(upstream) = branch_upstream(repo, branch)
+    {
+        return Ok(upstream);
     }
 
     // No upstream on current branch — gather remote candidates
@@ -79,6 +122,12 @@ fn detect_upstream(repo: &Repository) -> Result<String> {
             )
         }
     }
+}
+
+fn branch_upstream(repo: &Repository, branch: &str) -> Option<String> {
+    let local = repo.find_branch(branch, BranchType::Local).ok()?;
+    let upstream = local.upstream().ok()?;
+    upstream.name().ok().flatten().map(str::to_string)
 }
 
 /// On GitHub repositories with an "upstream" remote, find its default branch.
