@@ -40,6 +40,7 @@ Commits:
 Branches:
   branch, br        Manage feature branches (create, merge, unmerge)
   switch, sw        Switch to any branch for testing (without weaving)
+  worktree, wt      Manage worktrees, each with its own integration branch (new, list, drop)
 
 Inspection:
   status            Show the branch-aware status (default command)

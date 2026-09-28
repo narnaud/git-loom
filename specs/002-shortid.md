@@ -12,8 +12,9 @@ All displayed actionable entities share one global ID namespace.
 | Commit | Change-Id letters (see Persistent commit identity), else full hexadecimal hash | first three letters, else first two hex characters |
 | Branch | branch name words | first character of each of the first two words |
 | File | filename stem (not extension/path) | first character of each of the first two words |
+| Worktree | worktree name (Spec 022) | as for branches |
 
-Branch and file IDs are at least two characters, commit IDs with a Change-Id at least three. For branch/file sources:
+Branch and file IDs are at least two characters, commit IDs with a Change-Id at least three. For branch/file/worktree sources:
 
 - Split multi-word names on `-`, `_`, and `/`; generate, in order, every pair containing one character from the first word and one from the second. Example: `feature-alpha` starts `fa, fl, fp, fh, ea, el, ...`.
 - For a single word, generate every character pair `(i,j)` where `i < j`. `main` gives `ma, mi, mn, ai, an, in, ...`.
@@ -33,7 +34,8 @@ Allocate greedily in stable original order within these priority groups:
 
 1. unstaged (`zz`);
 2. commits;
-3. branches and files.
+3. branches and files;
+4. worktrees, so allocating them never changes another entity's ID.
 
 Give each entity its first globally unused candidate. Only exact full-ID equality collides; `fa` and `fb` do not. If every candidate is exhausted, append numeric suffixes to the first candidate: `ab`, `ab1`, `ab2`, ... . `zz` is reserved and excluded from generated IDs.
 

@@ -142,8 +142,9 @@ In the main worktree the default is `integration`. In a linked worktree it is
 `integration-<name>`, since each worktree holds its own integration branch and
 `integration` is already checked out in the main one: `<name>` is the
 worktree's directory name with the main worktree's directory name and a dash
-stripped from its front (`repo-foo` beside `repo` gives `integration-foo`), or
-the whole directory name when it does not start that way.
+stripped from its front (`repo-foo` beside `repo` gives `integration-foo`, the
+layout `worktree new` creates, Spec 022), or the whole directory name when it
+does not start that way.
 
 The default name `"integration"` was chosen because:
 

@@ -66,6 +66,16 @@ local branch_matcher = clink.argmatcher()
     )
     :addflags("-t", "--target", "--help", "-h")
 
+local worktree_matcher = clink.argmatcher()
+    :addarg(
+        "new"  .. plain_matcher,
+        "list" .. plain_matcher,
+        "ls"   .. plain_matcher,
+        "drop" .. plain_matcher,
+        "rm"   .. plain_matcher
+    )
+    :addflags("--help", "-h")
+
 local agent_init_matcher = clink.argmatcher()
     :addarg("claude")
     :addflags("--project", "--help", "-h")
@@ -105,6 +115,8 @@ clink.argmatcher("git-loom")
         -- Branches
         "branch"    .. branch_matcher,
         "switch"    .. plain_matcher,
+        "worktree"  .. worktree_matcher,
+        "wt"        .. worktree_matcher,
         -- Inspection
         "status"    .. status_matcher,
         "tui"       .. plain_matcher,

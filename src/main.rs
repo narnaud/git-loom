@@ -20,6 +20,7 @@ mod switch;
 mod trace;
 mod tui;
 mod update;
+mod worktree;
 
 use crate::agent::AgentKind;
 use crate::core::hunk_select::HunkArgs;
@@ -84,6 +85,7 @@ const GROUPED_COMMANDS: &str = "\
 {h}Branches:{r}
   {l}branch{r}, {l}br{r}        Manage feature branches (create, merge, unmerge)
   {l}switch{r}, {l}sw{r}        Switch to any branch for testing (without weaving)
+  {l}worktree{r}, {l}wt{r}      Manage worktrees, each with its own integration branch (new, list, drop)
 
 {h}Inspection:{r}
   {l}status{r}            Show the branch-aware status ({p}default{r} command)
@@ -332,6 +334,13 @@ enum Command {
         branch: Option<String>,
     },
 
+    /// Manage worktrees, each with its own integration branch
+    #[command(visible_alias = "wt")]
+    Worktree {
+        #[command(subcommand)]
+        action: WorktreeAction,
+    },
+
     // -- Inspection --
     /// Interactive status TUI: browse the tree, view diffs, and run actions
     Tui,
@@ -459,6 +468,26 @@ enum BranchAction {
     },
 }
 
+#[derive(Subcommand)]
+enum WorktreeAction {
+    /// Create the worktree <dir>-<name> beside the main one, on integration-<name>
+    New {
+        /// Worktree name
+        name: String,
+    },
+
+    /// List the worktrees with their short IDs
+    #[command(visible_alias = "ls")]
+    List,
+
+    /// Remove a worktree, and its branch when no commit would be lost
+    #[command(visible_alias = "rm")]
+    Drop {
+        /// Worktree short ID, name, branch, or path
+        worktree: String,
+    },
+}
+
 #[derive(Args, Clone)]
 struct BranchNewArgs {
     /// Branch name (if not provided, will prompt interactively)
@@ -566,7 +595,7 @@ fn main() {
     }
 
     // Check for a paused loom operation and block most commands if one exists.
-    // Exempt: show, trace, continue, abort, completions, internal-write-todo.
+    // Exempt: show, trace, continue, abort, completions, internal-write-todo, worktree list.
     let is_exempt = matches!(
         cli.command,
         Some(Command::Show { .. })
@@ -576,6 +605,9 @@ fn main() {
             | Some(Command::Abort)
             | Some(Command::Completions { .. })
             | Some(Command::InternalWriteTodo { .. })
+            | Some(Command::Worktree {
+                action: WorktreeAction::List
+            })
     );
     if !is_exempt && let Ok(repo) = repo::open_repo() {
         let git_dir = repo.path().to_path_buf();
@@ -630,6 +662,11 @@ fn main() {
             &theme,
         ),
         Some(Command::Switch { branch }) => switch::run(branch),
+        Some(Command::Worktree { action }) => match action {
+            WorktreeAction::New { name } => worktree::new::run(name),
+            WorktreeAction::List => worktree::list::run(&theme),
+            WorktreeAction::Drop { worktree } => worktree::drop::run(worktree),
+        },
         Some(Command::Branch(cmd)) => match cmd.action {
             Some(BranchAction::New(args)) => branch::new::run(args.name, args.target),
             Some(BranchAction::Merge { branch, all }) => branch::merge::run(branch, all),

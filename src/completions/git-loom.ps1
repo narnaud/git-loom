@@ -33,6 +33,7 @@ $_gitLoomCompleter = {
         # Branches
         @{ Name = 'branch'; Description = 'Manage feature branches (create, merge, unmerge)' },
         @{ Name = 'switch'; Description = 'Switch to any branch for testing (without weaving)' },
+        @{ Name = 'worktree'; Description = 'Manage worktrees, each with its own integration branch' },
         # Inspection
         @{ Name = 'status'; Description = 'Show the branch-aware status' },
         @{ Name = 'tui'; Description = 'Interactive status TUI (tree + diff, with actions)' },
@@ -49,7 +50,7 @@ $_gitLoomCompleter = {
     $aliases = @{
         'up' = 'update'; 'pr' = 'push'; 'ci' = 'commit'
         'amend' = 'fold'; 'am' = 'fold'; 'fixup' = 'fold'; 'mv' = 'fold'; 'rub' = 'fold'
-        'rw' = 'reword'; 'rm' = 'drop'; 'br' = 'branch'; 'sw' = 'switch'
+        'rw' = 'reword'; 'rm' = 'drop'; 'br' = 'branch'; 'sw' = 'switch'; 'wt' = 'worktree'
         'sh' = 'show'; 'di' = 'diff'; 'c' = 'continue'; 'a' = 'abort'
     }
 
@@ -252,6 +253,28 @@ $_gitLoomCompleter = {
                     )
                 }
             }
+        }
+        'worktree' {
+            $worktreeSubcommand = $null
+            for ($i = $subIndex + 1; $i -lt $tokens.Count; $i++) {
+                if ($tokens[$i] -match '^-') { continue }
+                $worktreeSubcommand = $tokens[$i]
+                break
+            }
+
+            if ($null -eq $worktreeSubcommand -and -not ($wordToComplete -match '^-')) {
+                $worktreeSubs = @(
+                    @{ Name = 'new'; Description = 'Create a worktree with its own integration branch' },
+                    @{ Name = 'list'; Description = 'List the worktrees with their short IDs' },
+                    @{ Name = 'ls'; Description = 'Alias of list' },
+                    @{ Name = 'drop'; Description = 'Remove a worktree' },
+                    @{ Name = 'rm'; Description = 'Alias of drop' }
+                )
+                return $worktreeSubs | Where-Object { $_.Name -like "$wordToComplete*" } | ForEach-Object {
+                    [System.Management.Automation.CompletionResult]::new($_.Name, $_.Name, 'ParameterValue', $_.Description)
+                }
+            }
+            $subFlags = @()
         }
     }
 

@@ -6,6 +6,7 @@ use git2::{BranchType, Repository};
 use crate::core::msg;
 use crate::core::repo;
 use crate::git;
+use crate::worktree;
 
 /// Initialize a new integration branch tracking a remote upstream.
 ///
@@ -29,7 +30,7 @@ pub fn run(name: Option<String>) -> Result<()> {
 
     repo::ensure_branch_not_exists(&repo, &name)?;
 
-    let upstream = detect_upstream(&repo, main.as_ref())?;
+    let upstream = detect_upstream(&repo, main.as_ref().and_then(|m| m.branch.as_deref()))?;
 
     git::branch_switch_create_tracking(workdir, &name, &upstream)?;
 
@@ -57,19 +58,11 @@ fn default_name(workdir: &Path, main: Option<&git::Worktree>) -> String {
     let Some(main) = main else {
         return "integration".to_string();
     };
-    let dir = dir_name(workdir);
-    let prefix = format!("{}-", dir_name(&main.path));
-    let name = dir
-        .strip_prefix(&prefix)
-        .filter(|rest| !rest.is_empty())
-        .unwrap_or(&dir);
+    let name = worktree::name_of(
+        &worktree::dir_name(workdir),
+        &worktree::dir_name(&main.path),
+    );
     format!("integration-{}", name)
-}
-
-fn dir_name(path: &Path) -> String {
-    path.file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default()
 }
 
 /// Detect the upstream tracking ref to use for the new integration branch.
@@ -77,11 +70,11 @@ fn dir_name(path: &Path) -> String {
 /// Strategy:
 /// 1. On GitHub repos with an "upstream" remote (fork workflow), use it.
 /// 2. If the current branch has an upstream, use it (e.g., "origin/main").
-/// 3. In a linked worktree, the upstream of the main worktree's branch.
+/// 3. The upstream of `main_branch`, the main worktree's branch.
 /// 4. Otherwise, check each remote's HEAD symref (e.g., refs/remotes/origin/HEAD).
 /// 5. Fall back to scanning for common branch names (main, master, develop).
 /// 6. If exactly one candidate, use it. If multiple, prompt the user.
-fn detect_upstream(repo: &Repository, main: Option<&git::Worktree>) -> Result<String> {
+pub fn detect_upstream(repo: &Repository, main_branch: Option<&str>) -> Result<String> {
     // On GitHub repos with a fork workflow, prefer the "upstream" remote
     if let Some(upstream) = try_github_upstream(repo) {
         return Ok(upstream);
@@ -98,7 +91,7 @@ fn detect_upstream(repo: &Repository, main: Option<&git::Worktree>) -> Result<St
         return Ok(upstream_name.to_string());
     }
 
-    if let Some(branch) = main.and_then(|m| m.branch.as_deref())
+    if let Some(branch) = main_branch
         && let Some(upstream) = branch_upstream(repo, branch)
     {
         return Ok(upstream);
@@ -124,7 +117,7 @@ fn detect_upstream(repo: &Repository, main: Option<&git::Worktree>) -> Result<St
     }
 }
 
-fn branch_upstream(repo: &Repository, branch: &str) -> Option<String> {
+pub fn branch_upstream(repo: &Repository, branch: &str) -> Option<String> {
     let local = repo.find_branch(branch, BranchType::Local).ok()?;
     let upstream = local.upstream().ok()?;
     upstream.name().ok().flatten().map(str::to_string)

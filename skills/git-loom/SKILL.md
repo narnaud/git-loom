@@ -98,11 +98,12 @@ The `graph` fields:
 | Reorder | `git loom swap <a> <b>`. |
 | Delete/discard/reset | `git loom drop <target> -y`; explicitly name commits, branches, or files; never `zz`. |
 | Create branch | Usually commit with `-b <new-name>`; empty branch: `git loom branch new <name>`. |
-| Merge/unmerge | `git loom branch merge <branch>` / `git loom branch unmerge <branch>`. |
+| Merge/unmerge | `git loom branch merge <branch>` / `git loom branch unmerge <branch>`. A branch woven into another worktree's integration branch is refused: unmerge it there first. |
 | Pull-rebase | `git loom update -y`. |
 | Push / PR | `git loom push <branch>`; `--no-pr` skips PR/review creation. A stacked push includes lower branches. Same-repo PRs target the branch below; GitHub fork PRs target upstream. |
 | Diff/show | `git loom diff` / `git loom show`; short IDs work; Git options follow `--`. |
 | Test branch | `git loom switch <branch>`. |
+| Worktrees | Each worktree holds its own integration branch and runs every command as the main one does. `git loom wt new <name>` creates `../<dir>-<name>` on `integration-<name>`; `git loom wt list`; `git loom wt drop <id>` refuses dirty or paused worktrees and keeps a branch with unique commits. `git loom init` in a plain git worktree names the branch the same way. |
 
 ## Hunk selection
 

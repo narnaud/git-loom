@@ -38,6 +38,7 @@
 - [drop](commands/drop.md)
 - [branch](commands/branch.md)
 - [switch](commands/switch.md)
+- [worktree](commands/worktree.md)
 - [status](commands/status.md)
 - [tui](commands/tui.md)
 - [show](commands/show.md)

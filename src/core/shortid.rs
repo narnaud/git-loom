@@ -13,6 +13,8 @@ pub enum Entity {
         change_id: Option<String>,
     },
     File(String),
+    /// A worktree, by its name (Spec 022).
+    Worktree(String),
 }
 
 #[cfg(test)]
@@ -95,6 +97,13 @@ impl IdAllocator {
             .unwrap_or("")
     }
 
+    pub fn get_worktree(&self, name: &str) -> &str {
+        self.map
+            .get(&Entity::Worktree(name.to_string()))
+            .map(|s| s.as_str())
+            .unwrap_or("")
+    }
+
     /// Every commit `arg` names by Change-Id: the canonical `I…` literal, or
     /// a prefix of at least [`changeid::MIN_LEN`] letters. One hit resolves;
     /// several mean a too-short prefix or twins sharing a Change-Id.
@@ -136,7 +145,7 @@ fn generate_candidates(entity: &Entity) -> Vec<String> {
                 .map(|n| chars[..n].iter().collect())
                 .collect()
         }
-        Entity::Branch(name) => word_candidates(name),
+        Entity::Branch(name) | Entity::Worktree(name) => word_candidates(name),
         Entity::File(path) => {
             let filename = std::path::Path::new(path)
                 .file_name()
@@ -301,12 +310,14 @@ fn single_word_candidates(word: &str) -> Vec<String> {
 
 /// Priority for entity allocation, lower first. Commits come before
 /// branches/files: their candidate sets are the most constrained (prefixes of
-/// one string), while names have rich word-based alternatives.
+/// one string), while names have rich word-based alternatives. Worktrees come
+/// last, so listing them never changes an ID `loom status` shows (Spec 022).
 fn entity_priority(entity: &Entity) -> u8 {
     match entity {
         Entity::Unstaged => 0,
         Entity::Commit { .. } => 1,
         Entity::Branch(_) | Entity::File(_) => 2,
+        Entity::Worktree(_) => 3,
     }
 }
 
