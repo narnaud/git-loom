@@ -9,9 +9,7 @@ pub mod new;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
-use git2::Repository;
 
-use crate::core::repo;
 use crate::core::shortid::{Entity, IdAllocator};
 use crate::git;
 
@@ -74,15 +72,14 @@ fn canonical(path: &Path) -> PathBuf {
     path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
-/// Short IDs for `entries`, allocated after the current worktree's status
-/// entities so they never shift an ID `loom status` shows. Outside an
-/// integration branch there is no status, and only worktrees are allocated.
-pub fn ids(repo: &Repository, entries: &[Entry]) -> IdAllocator {
-    let mut entities = repo::gather_repo_info(repo, false, 1)
-        .map(|info| info.collect_entities())
-        .unwrap_or_default();
-    entities.extend(entries.iter().map(|e| Entity::Worktree(e.name.clone())));
-    IdAllocator::new(entities)
+/// Short IDs for `entries`, allocated among worktrees only (Spec 022).
+pub fn ids(entries: &[Entry]) -> IdAllocator {
+    IdAllocator::new(
+        entries
+            .iter()
+            .map(|e| Entity::Worktree(e.name.clone()))
+            .collect(),
+    )
 }
 
 /// The worktree `arg` names: a name, a checked-out branch, a short ID, or a
@@ -90,9 +87,9 @@ pub fn ids(repo: &Repository, entries: &[Entry]) -> IdAllocator {
 /// in Spec 002, a real name wins over an ID spelled the same. Names are not
 /// unique (and two same-named worktrees share an ID), so a rule matching
 /// several refuses rather than pick one.
-pub fn resolve(repo: &Repository, workdir: &Path, arg: &str) -> Result<Entry> {
+pub fn resolve(workdir: &Path, arg: &str) -> Result<Entry> {
     let mut entries = entries(workdir)?;
-    let ids = ids(repo, &entries);
+    let ids = ids(&entries);
     let path = canonical(Path::new(arg));
     let rules: [&dyn Fn(&Entry) -> bool; 4] = [
         &|e| e.name == arg,

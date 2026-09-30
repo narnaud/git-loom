@@ -34,8 +34,9 @@ Allocate greedily in stable original order within these priority groups:
 
 1. unstaged (`zz`);
 2. commits;
-3. branches and files;
-4. worktrees, so allocating them never changes another entity's ID.
+3. branches and files.
+
+Worktrees are allocated alone, among themselves (Spec 022).
 
 Give each entity its first globally unused candidate. Only exact full-ID equality collides; `fa` and `fb` do not. If every candidate is exhausted, append numeric suffixes to the first candidate: `ab`, `ab1`, `ab2`, ... . `zz` is reserved and excluded from generated IDs.
 

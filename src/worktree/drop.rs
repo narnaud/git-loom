@@ -9,7 +9,7 @@ use crate::git;
 pub fn run(target: String) -> Result<()> {
     let repo = repo::open_repo()?;
     let workdir = repo::require_workdir(&repo, "drop a worktree")?;
-    let entry = super::resolve(&repo, workdir, &target)?;
+    let entry = super::resolve(workdir, &target)?;
 
     if entry.main {
         bail!("`{}` is the main worktree", entry.name);

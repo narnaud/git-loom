@@ -38,10 +38,8 @@ matching rule finds in several worktrees is refused, naming their paths.
 
 ## Short IDs
 
-Worktrees get IDs from their names, like branches (Spec 002), allocated after
-every status entity of the current worktree so that they never change an ID
-`loom status` shows. Without an integration branch in the current worktree,
-only worktrees are allocated.
+Worktrees get IDs from their names, like branches (Spec 002), allocated among
+worktrees only: a worktree ID is never shown beside a status ID.
 
 ## new
 

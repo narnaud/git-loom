@@ -9,7 +9,7 @@ pub fn run(theme: &graph::Theme) -> Result<()> {
     let repo = repo::open_repo()?;
     let workdir = repo::require_workdir(&repo, "list worktrees")?;
     let entries = super::entries(workdir)?;
-    let ids = super::ids(&repo, &entries);
+    let ids = super::ids(&entries);
     let width = entries.iter().map(|e| e.name.len()).max().unwrap_or(0);
 
     // stdout even with `--agent`: the listing is the command's answer (Spec 019).

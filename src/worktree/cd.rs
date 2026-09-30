@@ -9,7 +9,7 @@ pub fn run(target: Option<String>) -> Result<()> {
     let repo = repo::open_repo()?;
     let workdir = repo::require_workdir(&repo, "locate a worktree")?;
     let entry = match target {
-        Some(arg) => super::resolve(&repo, workdir, &arg)?,
+        Some(arg) => super::resolve(workdir, &arg)?,
         None => {
             let mut entries = super::entries(workdir)?;
             let in_main = entries.first().is_some_and(|e| e.current);

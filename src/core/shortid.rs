@@ -310,14 +310,12 @@ fn single_word_candidates(word: &str) -> Vec<String> {
 
 /// Priority for entity allocation, lower first. Commits come before
 /// branches/files: their candidate sets are the most constrained (prefixes of
-/// one string), while names have rich word-based alternatives. Worktrees come
-/// last, so listing them never changes an ID `loom status` shows (Spec 022).
+/// one string), while names have rich word-based alternatives.
 fn entity_priority(entity: &Entity) -> u8 {
     match entity {
         Entity::Unstaged => 0,
         Entity::Commit { .. } => 1,
-        Entity::Branch(_) | Entity::File(_) => 2,
-        Entity::Worktree(_) => 3,
+        Entity::Branch(_) | Entity::File(_) | Entity::Worktree(_) => 2,
     }
 }
 
