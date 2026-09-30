@@ -42,7 +42,7 @@ gl_capture wt list
 assert_exit_ok "$CODE" "list_ok"
 assert_contains "$OUT" "[integration]" "list_main"
 assert_contains "$OUT" "[integration-foo]" "list_foo"
-FOO_ID="$(grep -F "[integration-foo]" <<< "$OUT" | awk '{print $1}')"
+FOO_ID="$(grep -F "[integration-foo]" <<< "$OUT" | awk '{print $2}')"
 gl_capture_json wt list --agent
 assert_exit_ok "$CODE" "list_agent_ok"
 assert_contains "$JSON" "[integration-foo]" "list_agent_on_stdout"

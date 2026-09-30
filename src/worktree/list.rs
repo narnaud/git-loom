@@ -19,8 +19,9 @@ pub fn run(theme: &graph::Theme) -> Result<()> {
             Some(b) => format!("[{b}]").color(theme.branch),
             None => "detached".color(theme.dim),
         };
+        let icon = if e.main { "\u{1F3E0}" } else { "\u{1F517}" };
         let mut line = format!(
-            "{}{} {:<width$} {} {}",
+            "{icon} {}{} {:<width$} {} {}",
             id.color(theme.shortid).underline(),
             " ".repeat(4usize.saturating_sub(id.len())),
             e.name,

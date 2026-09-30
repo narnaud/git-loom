@@ -55,12 +55,12 @@ git loom wt new hotfix
 git loom worktree list
 ```
 
-One line per worktree, the main checkout first: short ID, name, checked-out branch and path, with `*` on the worktree you are in and `dirty` where there are uncommitted or untracked changes.
+One line per worktree, the main checkout first: 🏠 for the main checkout or 🔗 for a linked worktree, short ID, name, checked-out branch and path, with `*` on the worktree you are in and `dirty` where there are uncommitted or untracked changes.
 
 ```bash
 git loom wt ls
-# re   repo   [integration] /src/repo *
-# ho   hotfix  [integration-hotfix] /src/repo-hotfix dirty
+# 🏠 re   repo   [integration] /src/repo *
+# 🔗 ho   hotfix [integration-hotfix] /src/repo-hotfix dirty
 ```
 
 ## worktree drop

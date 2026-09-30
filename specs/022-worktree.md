@@ -58,7 +58,8 @@ tracking <upstream>`.
 ## list
 
 One line per registered worktree, the main one first, prunable ones skipped:
-`<id> <name> [<branch>] <path>`, `<branch>` being `detached` for a detached
+`<icon> <id> <name> [<branch>] <path>`, `<icon>` being 🏠 on the main worktree
+and 🔗 on a linked one, `<branch>` being `detached` for a detached
 HEAD, then `*` on the current worktree and `dirty` when `git status` reports
 any change there. The lines go to stdout, `--agent` included (Spec 019).
 
