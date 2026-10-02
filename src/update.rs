@@ -91,6 +91,15 @@ pub fn run(skip_confirm: bool) -> Result<()> {
         }
         Err(e) => {
             spinner.error("Fetch failed");
+            // Under the TUI git may not prompt (Spec 020), so missing
+            // credentials are the failure to point at.
+            if crate::core::ui::active() {
+                return Err(e.context(
+                    "Fetch failed\n\
+                     If the remote needs credentials, run `loom update` in a terminal, \
+                     or set up a credential helper or ssh-agent",
+                ));
+            }
             return Err(e);
         }
     }
@@ -298,31 +307,35 @@ fn post_update(workdir: &Path, repo: &git2::Repository, ctx: &UpdateContext) -> 
         .collect();
     let to_remove: Vec<&String> = merged.iter().chain(gone.iter()).collect();
     if !to_remove.is_empty() {
-        warn_branch_list(&merged, "fully merged upstream");
-        warn_branch_list(&gone, "with a gone upstream");
+        let auto = ctx.skip_confirm || repo::prune_gone_branches(repo);
         // Post-mutation prompt: the pull-rebase already succeeded, so agent
         // mode must not answer `needs_input` (that would imply nothing
         // happened) — skip the optional pruning instead and say how to redo it.
-        let confirmed = if agent_mode::enabled() && !ctx.skip_confirm {
-            let confirmed = repo::prune_gone_branches(repo);
-            if !confirmed {
-                msg::warn(
-                    "Skipped removing branches (agent mode)\n\
-                     Re-run with `loom update -y` to remove them",
-                );
+        let ask = !auto && !agent_mode::enabled();
+        // The question names the branches itself; listing them again first
+        // would print them twice.
+        if !ask {
+            warn_branch_list(&merged, "fully merged upstream");
+            warn_branch_list(&gone, "with a gone upstream");
+        }
+        let confirmed = if ask {
+            // Dismissing the TUI menu is a no: the update itself has landed,
+            // and a `Cancelled` would tell the TUI nothing changed.
+            match msg::confirm(
+                &removal_prompt(&merged, &gone),
+                "re-run with: loom update -y",
+            ) {
+                Err(e) if e.is::<crate::core::ui::Cancelled>() => false,
+                answer => answer?,
             }
-            confirmed
+        } else if !auto {
+            msg::warn(
+                "Skipped removing branches (agent mode)\n\
+                 Re-run with `loom update -y` to remove them",
+            );
+            false
         } else {
-            ctx.skip_confirm
-                || repo::prune_gone_branches(repo)
-                || msg::confirm(
-                    if to_remove.len() == 1 {
-                        "Remove it?"
-                    } else {
-                        "Remove them?"
-                    },
-                    "re-run with: loom update -y",
-                )?
+            true
         };
         if confirmed {
             for name in to_remove {
@@ -350,6 +363,24 @@ fn post_update(workdir: &Path, repo: &git2::Repository, ctx: &UpdateContext) -> 
     }
 
     Ok(())
+}
+
+/// The cleanup question, naming every branch and why it goes: under the TUI
+/// it is a menu, away from the log any warning would land in (Spec 020). One
+/// branch per detail line, since the menu's help box does not wrap.
+fn removal_prompt(merged: &[String], gone: &[String]) -> String {
+    let mut prompt = match merged.len() + gone.len() {
+        1 => "Remove local branch?".to_string(),
+        count => format!("Remove {} local branches?", count),
+    };
+    let reasons = merged
+        .iter()
+        .map(|name| (name, "fully merged upstream"))
+        .chain(gone.iter().map(|name| (name, "upstream gone")));
+    for (name, why) in reasons {
+        prompt.push_str(&format!("\n`{}`: {}", name, why));
+    }
+    prompt
 }
 
 /// Warn with the branch names listed one per line. Silent for an empty list.

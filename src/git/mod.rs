@@ -117,21 +117,31 @@ pub fn reaches_from_head(workdir: &Path, rev: &str) -> bool {
     run_git(workdir, &["merge-base", "--is-ancestor", rev, "HEAD"]).is_ok()
 }
 
-/// Run a git command, capture output, trace-log it, and bail on failure.
+/// The git command [`run_git_captured`] runs, whose output it captures.
 ///
-/// Output is piped, so an editor could never work here: `GIT_EDITOR=true`
-/// keeps commands like `merge --continue` (which has no `--no-edit`) from
-/// opening one and hanging. `GIT_SEQUENCE_EDITOR` falls back to it, so a
-/// captured `rebase -i` must set its own sequence editor (`weave` runs its
-/// own `Command` and sets both).
-fn run_git_captured(workdir: &Path, args: &[&str]) -> Result<std::process::Output> {
-    let start = Instant::now();
-    let output = Command::new("git")
+/// An editor could never work here: `GIT_EDITOR=true` keeps commands like
+/// `merge --continue` (which has no `--no-edit`) from opening one and hanging.
+/// `GIT_SEQUENCE_EDITOR` falls back to it, so a captured `rebase -i` must set
+/// its own sequence editor (`weave` runs its own `Command` and sets both).
+fn captured_command(workdir: &Path, args: &[&str]) -> Command {
+    let mut command = Command::new("git");
+    command
         .current_dir(workdir)
         .args(FORCED_CONFIG)
         .args(args)
-        .env("GIT_EDITOR", "true")
-        .output()?;
+        .env("GIT_EDITOR", "true");
+    // Under `loom tui` git would prompt for credentials on the raw-mode
+    // terminal the TUI is drawing; failing is the lesser evil (Spec 020).
+    if crate::core::ui::active() {
+        command.env("GIT_TERMINAL_PROMPT", "0");
+    }
+    command
+}
+
+/// Run a git command, capture output, trace-log it, and bail on failure.
+fn run_git_captured(workdir: &Path, args: &[&str]) -> Result<std::process::Output> {
+    let start = Instant::now();
+    let output = captured_command(workdir, args).output()?;
 
     let duration_ms = start.elapsed().as_millis();
     let stderr = String::from_utf8_lossy(&output.stderr);

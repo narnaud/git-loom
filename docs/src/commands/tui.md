@@ -71,6 +71,7 @@ Every action suspends the TUI, runs the regular loom command — prompts and edi
 | `a` | [`absorb`](absorb.md) | Absorb the selected working files, else the one under the cursor, else every local change. A menu shows the plan first — each file or hunk and the commit it goes into, or why it is skipped — and `Enter` on the action runs it, `Cancel` or `Esc` leaves with nothing changed. |
 | `d` | [`drop`](drop.md) | Selected working files, all at once; else the cursor commit, branch, working file, or the `[local changes]` header (drops everything, like `drop zz`). A menu asks for confirmation: `Enter` on the action runs it, `Cancel` or `Esc` leaves. |
 | `r` | [`reword`](reword.md) | Cursor commit: opens the editor. Cursor branch: edit the name in place on its row — `Enter` renames, `Esc` cancels. |
+| `u` | [`update`](update.md) | Fetch and rebase the integration branch onto its upstream, whatever the cursor is on. Removing branches that are fully merged upstream or whose upstream is gone asks first, naming each one. Git cannot prompt for credentials inside the TUI: an HTTPS remote that needs them fails with an error — set up a credential helper, or run `loom update` in the terminal. ssh is the exception: a key passphrase or a first connection's host-key question is asked on the terminal by ssh itself, which hangs the TUI, so load the key into ssh-agent and connect once from a terminal first. |
 
 ### Diff Pane
 

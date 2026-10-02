@@ -79,6 +79,9 @@ git-loom update [--yes]
    - branches whose configured upstream tracking branch no longer exists
      (pruned in step 2)
 
+   The prompt names each branch and its kind itself, so it stands alone as a
+   TUI menu (Spec 020); without a prompt (`--yes`, the config below, agent
+   mode) the two kinds are listed as warnings instead.
    Use `--yes`, or set `loom.pruneGoneBranches` to `true` in git config, to
    skip the prompt. Branches are force-deleted (`git branch -D`); each one
    prints a success message with the tip it had, so it can be revived. If a
@@ -239,9 +242,8 @@ git-loom update
 # ✓ Fetched latest changes
 # ✓ Rebased onto upstream
 # ✓ Updated branch `integration` with `origin/main` (abc1234 Latest upstream commit)
-# ⚠ 1 local branch fully merged upstream:
-#   › feat1
-# Remove it? [y/N] y
+#   › `feat1`: fully merged upstream
+# Remove local branch? [y/N] y
 # ✓ Removed branch `feat1` (was def5678)
 ```
 
@@ -254,10 +256,9 @@ git-loom update
 # ✓ Fetched latest changes
 # ✓ Rebased onto upstream
 # ✓ Updated branch `integration` with `origin/main` (abc1234 Latest upstream commit)
-# ⚠ 2 local branches with a gone upstream:
-#   › old-feature
-#   › closed-pr
-# Remove them? [y/N]
+#   › `old-feature`: upstream gone
+#   › `closed-pr`: upstream gone
+# Remove 2 local branches? [y/N]
 ```
 
 ### Error: merge conflict
@@ -278,9 +279,8 @@ git-loom update
 # ✓ Fetched latest changes
 # ✓ Rebased onto upstream
 # ✓ Updated branch `integration` with `origin/main` (abc1234 Latest upstream commit)
-# ⚠ 1 local branch with a gone upstream:
-#   › work-in-progress
-# Remove it? [y/N] y
+#   › `work-in-progress`: upstream gone
+# Remove local branch? [y/N] y
 # ⚠ Skipped branch `work-in-progress` — could not delete it (run `loom trace` for the git error)
 ```
 

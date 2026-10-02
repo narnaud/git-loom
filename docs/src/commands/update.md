@@ -51,7 +51,7 @@ If `.gitmodules` exists, runs `git submodule update --init --recursive`.
 
 ### Branch Cleanup
 
-Lists local branches that are fully merged upstream (every commit was filtered out before the rebase) and local branches whose upstream tracking ref was pruned in the fetch step, then prompts once to remove them. Pass `-y` to skip the prompt. Branches are force-deleted one by one; each success message shows the tip the branch had, so it can be revived. A branch that cannot be deleted (checked out in another worktree, for instance) is skipped with a warning rather than aborting the cleanup.
+Lists local branches that are fully merged upstream (every commit was filtered out before the rebase) and local branches whose upstream tracking ref was pruned in the fetch step, then prompts once to remove them, naming each branch and why it goes. Pass `-y` to skip the prompt; the branches are then listed as warnings. Branches are force-deleted one by one; each success message shows the tip the branch had, so it can be revived. A branch that cannot be deleted (checked out in another worktree, for instance) is skipped with a warning rather than aborting the cleanup.
 
 ## Examples
 
@@ -92,9 +92,8 @@ git loom update
 # ✓ Fetched latest changes
 # ✓ Rebased onto upstream
 # ✓ Updated branch `integration` with `origin/main` (abc1234 Latest commit)
-# ! 1 local branch fully merged upstream:
-#   › feature-x
-# ? Remove it? [y/N]
+#   › `feature-x`: fully merged upstream
+# ? Remove local branch? [y/N]
 ```
 
 ### Gone upstream branches
@@ -104,10 +103,9 @@ git loom update
 # ✓ Fetched latest changes
 # ✓ Rebased onto upstream
 # ✓ Updated branch `integration` with `origin/main` (abc1234 Latest commit)
-# ! 2 local branches with a gone upstream:
-#   › feature-x
-#   › feature-y
-# ? Remove them? [y/N]
+#   › `feature-x`: upstream gone
+#   › `feature-y`: upstream gone
+# ? Remove 2 local branches? [y/N]
 ```
 
 ### Skip the removal prompt
@@ -117,6 +115,9 @@ git loom update -y
 # ✓ Fetched latest changes
 # ✓ Rebased onto upstream
 # ✓ Updated branch `integration` with `origin/main` (abc1234 Latest commit)
+# ! 2 local branches with a gone upstream:
+#   › old-feature
+#   › closed-pr
 # ✓ Removed branch `old-feature`
 # ✓ Removed branch `closed-pr`
 ```
@@ -130,9 +131,8 @@ git loom update
 # ✓ Fetched latest changes
 # ✓ Rebased onto upstream
 # ✓ Updated branch `integration` with `origin/main` (abc1234 Latest commit)
-# ! 1 local branch with a gone upstream:
-#   › work-in-progress
-# Remove it? [y/N] y
+#   › `work-in-progress`: upstream gone
+# ? Remove local branch? [y/N] y
 # ! Skipped branch `work-in-progress` — could not delete it (run `loom trace` for the git error)
 ```
 

@@ -142,9 +142,8 @@ The upstream marker moved forward — your branches are now rebased on top of th
 If any of your pushed feature branches have been merged and deleted on the remote, `update` will notice and offer to clean up the local branches:
 
 ```
-# ! 1 local branch with a gone upstream:
-#   · feature-auth
-# ? Remove them? [y/N]
+#   › `feature-auth`: upstream gone
+# ? Remove local branch? [y/N]
 ```
 
 > [!NOTE]

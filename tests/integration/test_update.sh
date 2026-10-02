@@ -155,6 +155,21 @@ assert_contains "$out" "g-gone-branch"  "gone_yes_branch_listed"
 assert_contains "$out" "Removed branch" "gone_yes_branch_removed"
 assert_branch_not_exists "g-gone-branch" "gone_yes_branch_deleted"
 
+describe "agent mode lists a gone branch and keeps it"
+setup_repo_with_remote
+create_feature_branch "g-gone-branch"
+switch_to g-gone-branch
+commit_file "Gone branch commit" "gone.txt"
+git -C "$WORK" push -q -u origin g-gone-branch >/dev/null
+switch_to integration
+weave_branch "g-gone-branch"
+git -C "$WORK" push -q origin --delete g-gone-branch >/dev/null
+out=$(gl update --agent 2>&1)
+assert_exit_ok $? "gone_agent_ok"
+assert_contains "$out" "gone upstream" "gone_agent_warning"
+assert_contains "$out" "Skipped removing branches (agent mode)" "gone_agent_skipped"
+assert_branch_exists "g-gone-branch" "gone_agent_branch_kept"
+
 
 describe "--yes removes only gone branches, not live ones"
 setup_repo_with_remote
