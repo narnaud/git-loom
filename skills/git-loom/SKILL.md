@@ -103,7 +103,7 @@ The `graph` fields:
 | Push / PR | `git loom push <branch>`; `--no-pr` skips PR/review creation. A stacked push includes lower branches. Same-repo PRs target the branch below; GitHub fork PRs target upstream. |
 | Diff/show | `git loom diff` / `git loom show`; short IDs work; Git options follow `--`. |
 | Test branch | `git loom switch <branch>`. |
-| Worktrees | Each worktree holds its own integration branch and runs every command as the main one does. `git loom wt new <name>` creates `../<dir>-<name>` on `integration-<name>`; `git loom wt list`; `git loom wt cd <id>` prints a path; `git loom wt drop <id>` refuses dirty or paused worktrees and keeps a branch with unique commits. `git loom init` in a plain git worktree names the branch the same way. |
+| Worktrees | Each worktree holds its own integration branch and runs every command as the main one does. `git loom wt new <name>` creates `../<dir>-<name>` on `integration-<name>`; `git loom wt` (or `git loom wt list`) lists them; `git loom wt cd <id>` prints a path; `git loom wt drop <id>` refuses dirty or paused worktrees and keeps a branch with unique commits. `git loom init` in a plain git worktree names the branch the same way. |
 
 ## Hunk selection
 

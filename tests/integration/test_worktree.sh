@@ -47,6 +47,9 @@ gl_capture_json wt list --agent
 assert_exit_ok "$CODE" "list_agent_ok"
 assert_contains "$JSON" "[integration-foo]" "list_agent_on_stdout"
 assert_contains "$(json_line)" '"status":"ok"' "list_agent_last_line"
+gl_capture wt
+assert_exit_ok "$CODE" "list_default_ok"
+assert_contains "$OUT" "[integration-foo]" "list_default"
 
 describe "drop keeps a branch holding commits no other ref has"
 gl_capture_in "$FOO" branch unmerge feature-wt

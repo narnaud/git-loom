@@ -85,7 +85,7 @@ const GROUPED_COMMANDS: &str = "\
 {h}Branches:{r}
   {l}branch{r}, {l}br{r}        Manage feature branches (create, merge, unmerge)
   {l}switch{r}, {l}sw{r}        Switch to any branch for testing (without weaving)
-  {l}worktree{r}, {l}wt{r}      Manage worktrees, each with its own integration branch (new, list, drop, cd)
+  {l}worktree{r}, {l}wt{r}      Manage worktrees, each with its own integration branch (list by default, new, drop, cd)
 
 {h}Inspection:{r}
   {l}status{r}            Show the branch-aware status ({p}default{r} command)
@@ -334,11 +334,11 @@ enum Command {
         branch: Option<String>,
     },
 
-    /// Manage worktrees, each with its own integration branch
+    /// Manage worktrees, each with its own integration branch (lists them by default)
     #[command(visible_alias = "wt")]
     Worktree {
         #[command(subcommand)]
-        action: WorktreeAction,
+        action: Option<WorktreeAction>,
     },
 
     // -- Inspection --
@@ -613,7 +613,7 @@ fn main() {
             | Some(Command::Completions { .. })
             | Some(Command::InternalWriteTodo { .. })
             | Some(Command::Worktree {
-                action: WorktreeAction::List | WorktreeAction::Cd { .. }
+                action: None | Some(WorktreeAction::List | WorktreeAction::Cd { .. })
             })
     );
     if !is_exempt && let Ok(repo) = repo::open_repo() {
@@ -670,10 +670,10 @@ fn main() {
         ),
         Some(Command::Switch { branch }) => switch::run(branch),
         Some(Command::Worktree { action }) => match action {
-            WorktreeAction::New { name } => worktree::new::run(name),
-            WorktreeAction::List => worktree::list::run(&theme),
-            WorktreeAction::Drop { worktree } => worktree::drop::run(worktree),
-            WorktreeAction::Cd { worktree } => worktree::cd::run(worktree),
+            Some(WorktreeAction::New { name }) => worktree::new::run(name),
+            None | Some(WorktreeAction::List) => worktree::list::run(&theme),
+            Some(WorktreeAction::Drop { worktree }) => worktree::drop::run(worktree),
+            Some(WorktreeAction::Cd { worktree }) => worktree::cd::run(worktree),
         },
         Some(Command::Branch(cmd)) => match cmd.action {
             Some(BranchAction::New(args)) => branch::new::run(args.name, args.target),

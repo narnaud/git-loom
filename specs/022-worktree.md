@@ -27,7 +27,7 @@ is its directory name.
 
 ```bash
 git-loom worktree new <name>
-git-loom worktree list
+git-loom worktree [list]
 git-loom worktree drop <worktree>
 git-loom worktree cd [<worktree>]
 ```
@@ -57,7 +57,7 @@ tracking <upstream>`.
 
 ## list
 
-One line per registered worktree, the main one first, prunable ones skipped:
+`worktree` without a subcommand runs `list`. One line per registered worktree, the main one first, prunable ones skipped:
 `<icon> <id> <name> [<branch>] <path>`, `<icon>` being 🏠 on the main worktree
 and 🔗 on a linked one, `<branch>` being `detached` for a detached
 HEAD, then `*` on the current worktree and `dirty` when `git status` reports

@@ -8,12 +8,12 @@ Each worktree holds its own integration branch, tracking the same remote branch 
 
 ```
 git loom worktree new <name>
-git loom worktree list
+git loom worktree [list]
 git loom worktree drop <worktree>
 git loom worktree cd [<worktree>]
 ```
 
-`worktree` has the alias `wt`, `list` the alias `ls`, and `drop` the alias `rm`.
+`worktree` has the alias `wt`, `list` the alias `ls`, and `drop` the alias `rm`. `worktree` alone runs `list`.
 
 ## Layout
 
