@@ -4317,6 +4317,234 @@ fn push_takes_a_selected_branch_over_the_cursor() {
     assert_eq!(app.notice.as_deref(), Some("push: select one branch"));
 }
 
+// ── Paused operation ─────────────────────────────────────────────────────
+
+/// Dropping `one` pauses: `two` edits the file `one` created, so replaying it
+/// without `one` conflicts. Returns the repo and its HEAD before the drop.
+fn repo_with_a_paused_drop() -> (crate::core::test_helpers::TestRepo, git2::Oid) {
+    let repo = crate::core::test_helpers::TestRepo::new_with_remote();
+    repo.write_file("f.txt", "one\n");
+    repo.stage_files(&["f.txt"]);
+    repo.commit_staged("one");
+    let one = repo.head_oid();
+    repo.write_file("f.txt", "two\n");
+    repo.stage_files(&["f.txt"]);
+    repo.commit_staged("two");
+    let head = repo.head_oid();
+    repo.in_dir(|| crate::drop::run(vec![one.to_string()], true))
+        .unwrap();
+    assert!(crate::git::rebase_is_in_progress(repo.repo.path()));
+    (repo, head)
+}
+
+/// What `run` opens on a paused repo: the paused view over a placeholder tree.
+fn paused_app<'a>(repo: &crate::core::test_helpers::TestRepo, theme: &'a TuiTheme) -> App<'a> {
+    let snapshot = Snapshot::placeholder(repo.workdir(), repo.repo.path().to_path_buf());
+    let mut app = make_app(snapshot, theme);
+    app.refresh();
+    assert!(app.paused.is_some(), "the repo is paused");
+    app
+}
+
+#[test]
+fn a_clean_repo_is_not_paused() {
+    let repo = crate::core::test_helpers::TestRepo::new();
+    assert!(Paused::load(&repo.workdir(), repo.repo.path()).is_none());
+}
+
+#[test]
+fn a_paused_operation_replaces_the_tree() {
+    let (repo, _) = repo_with_a_paused_drop();
+    let theme = make_theme();
+    let app = paused_app(&repo, &theme);
+
+    let paused = app.paused.as_ref().unwrap();
+    assert_eq!(paused.command.as_deref(), Some("drop"));
+    assert!(
+        paused.headline.starts_with("Conflicts"),
+        "{}",
+        paused.headline
+    );
+    assert_eq!(paused.current().map(|f| f.path.as_str()), Some("f.txt"));
+    assert!(is_conflicted(paused.current().unwrap()));
+
+    let mut shell = Shell::new(app);
+    let lines = rendered_lines(&mut shell);
+    assert!(lines[0].contains("Paused: loom drop"), "{}", lines[0]);
+    assert!(lines.iter().any(|l| l.contains("!! f.txt")), "{lines:#?}");
+    assert!(
+        lines.last().unwrap().contains("Continue: c | Abort: a"),
+        "{}",
+        lines.last().unwrap()
+    );
+}
+
+/// No command but continue and abort can run while paused, so the tree's
+/// action keys say so rather than doing nothing.
+#[test]
+fn tree_actions_are_refused_while_paused() {
+    let (repo, _) = repo_with_a_paused_drop();
+    let theme = make_theme();
+    let mut app = paused_app(&repo, &theme);
+
+    press(&mut app, KeyCode::Char('f'));
+    assert!(app.running.is_none());
+    assert_eq!(
+        app.notice.as_deref(),
+        Some("`loom drop` is paused: c to continue, a to abort")
+    );
+}
+
+#[test]
+fn staging_the_resolution_then_continuing_finishes_the_operation() {
+    let (repo, _) = repo_with_a_paused_drop();
+    let theme = make_theme();
+    repo.write_file("f.txt", "two\n");
+
+    repo.in_dir(|| {
+        let mut app = paused_app(&repo, &theme);
+        press(&mut app, KeyCode::Char(' '));
+        assert_eq!(app.notice.as_deref(), Some("staged f.txt"));
+        let paused = app.paused.as_ref().expect("still paused");
+        assert!(!paused.files.iter().any(is_conflicted));
+        assert!(paused.headline.starts_with("No conflicts left"));
+
+        press(&mut app, KeyCode::Char('c'));
+        assert_eq!(app.log.last().unwrap().command, "loom continue");
+        poll_until_idle(&mut app);
+        assert!(app.paused.is_none(), "back on the tree");
+        assert!(app.popup.is_none(), "the tree loaded");
+    });
+
+    assert!(!crate::git::rebase_is_in_progress(repo.repo.path()));
+    assert_eq!(repo.get_subject(0), "two");
+    assert_eq!(repo.read_file("f.txt"), "two\n");
+}
+
+/// A file staged back to its HEAD content leaves the paused list, so the
+/// cursor stays on its index instead of advancing past the next file.
+#[test]
+fn staging_a_file_out_of_the_paused_list_moves_on_to_the_next_one() {
+    let repo = crate::core::test_helpers::TestRepo::new_with_remote();
+    let files = ["a.txt", "b.txt", "c.txt", "d.txt"];
+    let commit = |subject: &str| {
+        for f in files {
+            repo.write_file(f, &format!("{subject}\n"));
+        }
+        repo.stage_files(&files);
+        repo.commit_staged(subject);
+        repo.head_oid()
+    };
+    commit("base");
+    let one = commit("one");
+    commit("two");
+    repo.in_dir(|| crate::drop::run(vec![one.to_string()], true))
+        .unwrap();
+    let theme = make_theme();
+    repo.write_file("c.txt", "base\n");
+
+    repo.in_dir(|| {
+        let mut app = paused_app(&repo, &theme);
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Char(' '));
+        assert_eq!(app.notice.as_deref(), Some("staged c.txt"));
+        let paused = app.paused.as_ref().expect("still paused");
+        assert!(!paused.files.iter().any(|f| f.path == "c.txt"));
+        assert_eq!(paused.current().map(|f| f.path.as_str()), Some("d.txt"));
+    });
+}
+
+#[test]
+fn abort_asks_first_and_restores_the_original_history() {
+    let (repo, head) = repo_with_a_paused_drop();
+    let theme = make_theme();
+
+    repo.in_dir(|| {
+        let mut app = paused_app(&repo, &theme);
+        press(&mut app, KeyCode::Char('a'));
+        let deadline = deadline();
+        while !matches!(app.popup, Some(Popup::Prompt { .. })) {
+            assert!(std::time::Instant::now() < deadline, "never asked");
+            app.poll_background();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert!(crate::git::rebase_is_in_progress(repo.repo.path()));
+        // The first item is the question itself: yes.
+        press(&mut app, KeyCode::Enter);
+        poll_until_idle(&mut app);
+        assert!(app.paused.is_none(), "back on the tree");
+    });
+
+    assert!(!crate::git::rebase_is_in_progress(repo.repo.path()));
+    assert_eq!(repo.head_oid(), head);
+}
+
+/// The question names the operation the view showed; one finished or
+/// replaced from elsewhere while it was asked must not be aborted in its place.
+#[test]
+fn abort_refuses_once_the_paused_operation_changed() {
+    let (repo, _) = repo_with_a_paused_drop();
+    let theme = make_theme();
+
+    repo.in_dir(|| {
+        let mut app = paused_app(&repo, &theme);
+        press(&mut app, KeyCode::Char('a'));
+        let deadline = deadline();
+        while !matches!(app.popup, Some(Popup::Prompt { .. })) {
+            assert!(std::time::Instant::now() < deadline, "never asked");
+            app.poll_background();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        crate::git::run_git(&repo.workdir(), &["rebase", "--abort"]).unwrap();
+        press(&mut app, KeyCode::Enter);
+        poll_until_idle(&mut app);
+        let lines = &app.log.last().unwrap().lines;
+        assert!(
+            lines
+                .iter()
+                .any(|(_, l)| l.contains("The paused operation changed")),
+            "{lines:?}"
+        );
+    });
+
+    assert!(
+        crate::core::transaction::load(repo.repo.path())
+            .unwrap()
+            .is_some(),
+        "loom abort never ran"
+    );
+}
+
+/// The view is only re-read on `R` or after an action: an operation finished
+/// or replaced from elsewhere since must not be continued in its place.
+#[test]
+fn continue_refuses_once_the_paused_operation_changed() {
+    let (repo, _) = repo_with_a_paused_drop();
+    let theme = make_theme();
+
+    repo.in_dir(|| {
+        let mut app = paused_app(&repo, &theme);
+        crate::git::run_git(&repo.workdir(), &["rebase", "--abort"]).unwrap();
+        press(&mut app, KeyCode::Char('c'));
+        poll_until_idle(&mut app);
+        let lines = &app.log.last().unwrap().lines;
+        assert!(
+            lines
+                .iter()
+                .any(|(_, l)| l.contains("The paused operation changed")),
+            "{lines:?}"
+        );
+    });
+
+    assert!(
+        crate::core::transaction::load(repo.repo.path())
+            .unwrap()
+            .is_some(),
+        "loom continue never ran"
+    );
+}
+
 #[test]
 fn t_opens_the_latest_trace() {
     let dir = tempfile::tempdir().unwrap();

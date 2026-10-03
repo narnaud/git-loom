@@ -614,10 +614,12 @@ fn main() {
     }
 
     // Check for a paused loom operation and block most commands if one exists.
-    // Exempt: show, trace, continue, abort, completions, internal-write-todo, worktree list/path.
+    // Exempt: show, trace, continue, abort, tui (it opens on the paused
+    // operation), completions, internal-write-todo, worktree list/path.
     let is_exempt = matches!(
         cli.command,
         Some(Command::Show { .. })
+            | Some(Command::Tui)
             | Some(Command::Diff { .. })
             | Some(Command::Trace)
             | Some(Command::Continue)
