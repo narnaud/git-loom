@@ -24,6 +24,12 @@ To find your profile path, run `echo $PROFILE` in PowerShell.
 load(io.popen('git loom completions clink'):read("*a"))()
 ```
 
+To give your own doskey macros completion, list them in `loom_commands` before the `load` line; it defaults to `"loom"`:
+
+```lua
+loom_commands = "loom l"
+```
+
 ## Bash
 
 Add to `~/.bashrc`:

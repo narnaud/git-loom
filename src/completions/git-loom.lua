@@ -2,6 +2,12 @@
 -- Setup: save to %LocalAppData%\clink\git-loom.lua
 -- Or load dynamically: load(io.popen('git-loom completions clink'):read("*a"))()
 
+-- loom_commands: space-separated command names (doskey macros) that get
+-- completion. Set it before this script loads, e.g. loom_commands = "loom l".
+-- luacheck: globals loom_commands
+loom_commands = loom_commands or "loom"
+local loom_names = string.explode(loom_commands)
+
 -- Flag sets, one per command. Aliases that are a distinct word (fixup, rm, ...)
 -- reuse the matcher of the command they stand for; the ones that merely
 -- abbreviate it (ci, sh, ...) still work but are left out of the list below.
@@ -91,7 +97,7 @@ local agent_matcher = clink.argmatcher()
 local theme_matcher = clink.argmatcher()
     :addarg("auto", "dark", "light")
 
-clink.argmatcher("git-loom")
+clink.argmatcher("git-loom", table.unpack(loom_names))
     :addarg(
         -- Workflow
         "init"      .. plain_matcher,
