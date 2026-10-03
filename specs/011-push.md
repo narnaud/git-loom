@@ -40,7 +40,8 @@ git-loom push [branch] [--no-pr] [-f|--force]
   from elsewhere. It applies to every branch the push contains, not only the
   one named: a stack goes out in one `git push`, so forcing it overwrites the
   downstack and the re-published upstack too. Has no effect on a Gerrit
-  `refs/for/` review push, which never forces.
+  `refs/for/` review push, which never forces. Under `loom tui` (Spec 020),
+  where it is one key, the push asks first, naming every branch it forces.
 
 **Behavior:**
 
@@ -562,7 +563,9 @@ is the flag, so that is what is offered; typing it is the part that makes it
 their decision.
 
 A push that already carried `-f`, and a failure that was not a refused push, are
-left exactly as they were.
+left exactly as they were. A refused push is one git reports a `[rejected]` ref
+for (the lease, a non-fast-forward); credentials, the network, a hook, or a
+server's `[remote rejected]` are not, and forcing would not get past them.
 
 ### gh CLI as optional dependency
 

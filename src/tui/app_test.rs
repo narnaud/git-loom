@@ -1267,6 +1267,8 @@ fn commit_mode_blocks_action_keys() {
         KeyCode::Char('a'),
         KeyCode::Char('r'),
         KeyCode::Char('u'),
+        KeyCode::Char('p'),
+        KeyCode::Char('P'),
         KeyCode::Char('R'),
         KeyCode::Char('+'),
         KeyCode::Char('='),
@@ -4253,4 +4255,64 @@ fn update_runs_without_arguments() {
     let theme = make_theme();
     let app = make_app(make_snapshot(), &theme);
     assert_eq!(app.command_line(&Action::Update), "loom update");
+}
+
+#[test]
+fn push_takes_the_cursor_branch_else_lets_push_pick() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, "br:feature-a");
+    let action = app.action_push(false).unwrap();
+    assert_eq!(
+        action,
+        Action::Push {
+            branch: Some("feature-a".to_string())
+        }
+    );
+    let sid = app.sid_of("feature-a");
+    assert_eq!(app.command_line(&action), format!("loom push {}", sid));
+
+    move_cursor_to(&mut app, &oid('a').to_string());
+    let action = app.action_push(false).unwrap();
+    assert_eq!(action, Action::Push { branch: None });
+    assert_eq!(app.command_line(&action), "loom push");
+}
+
+#[test]
+fn force_push_needs_a_branch_row() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, &oid('a').to_string());
+    assert!(app.action_push(true).is_none());
+    assert_eq!(app.notice.as_deref(), Some("push -f: move to a branch"));
+
+    move_cursor_to(&mut app, "br:feature-a");
+    let action = app.action_push(true).unwrap();
+    assert_eq!(
+        action,
+        Action::ForcePush {
+            branch: "feature-a".to_string()
+        }
+    );
+    let sid = app.sid_of("feature-a");
+    assert_eq!(app.command_line(&action), format!("loom push {} -f", sid));
+}
+
+#[test]
+fn push_takes_a_selected_branch_over_the_cursor() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    app.selected.insert("br:feature-a".to_string());
+    move_cursor_to(&mut app, &oid('a').to_string());
+    assert_eq!(
+        app.action_push(true),
+        Some(Action::ForcePush {
+            branch: "feature-a".to_string()
+        })
+    );
+
+    app.selected.clear();
+    app.selected.insert(oid('a').to_string());
+    assert!(app.action_push(false).is_none());
+    assert_eq!(app.notice.as_deref(), Some("push: select one branch"));
 }

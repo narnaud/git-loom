@@ -281,6 +281,13 @@ pub fn run(branch: Option<String>, no_pr: bool, force: bool) -> Result<()> {
     let target_branch = extract_target_branch(&info.upstream.label);
     let plan = plan_push(&info, &branch_name, &target_branch);
 
+    if !no_pr {
+        refuse_stacked_azure(&remote_type, &plan)?;
+    }
+    if force && crate::core::ui::active() {
+        confirm_force(&remote_type, no_pr, &remote_name, &plan)?;
+    }
+
     if no_pr {
         let pushed = match remote_type {
             RemoteType::Gerrit { .. } => {
@@ -288,10 +295,8 @@ pub fn run(branch: Option<String>, no_pr: bool, force: bool) -> Result<()> {
             }
             _ => push_plain(&workdir, &remote_name, &plan, force),
         };
-        return pushed.map_err(|err| force_hint(err, &branch_name, no_pr, force));
+        return pushed.map_err(|err| push_hint(err, &branch_name, no_pr, force));
     }
-
-    refuse_stacked_azure(&remote_type, &plan)?;
 
     let pushed = match remote_type {
         RemoteType::Plain => push_plain(&workdir, &remote_name, &plan, force),
@@ -311,7 +316,7 @@ pub fn run(branch: Option<String>, no_pr: bool, force: bool) -> Result<()> {
             push_gerrit(&workdir, &remote_name, &branch_name, &target_branch)
         }
     };
-    pushed.map_err(|err| force_hint(err, &branch_name, no_pr, force))
+    pushed.map_err(|err| push_hint(err, &branch_name, no_pr, force))
 }
 
 fn resolve_branch(repo: &Repository, info: &repo::RepoInfo, branch_arg: &str) -> Result<String> {
@@ -552,27 +557,111 @@ pub(crate) fn fork_push_remote(
     (push_remote != extract_remote_name(upstream_label)).then_some(push_remote)
 }
 
-/// What a refused push bails with, and what [`force_hint`] recognises it by.
+/// What a failed `git push` bails with.
 const PUSH_FAILED: &str = "git push failed";
 
-/// Add the flag that gets past a refused push.
+/// How a `git push` failed, read from git's per-ref status lines; each one
+/// says [`PUSH_FAILED`]. Only a refused push is worth a force (Spec 011).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PushFailed {
+    /// `[rejected]`: the lease, or a non-fast-forward.
+    Refused,
+    /// `[remote rejected]` or `[remote failure]`: the server took the push and
+    /// declined it (a hook, a protected branch) or failed to report on it, so
+    /// it was reached, credentials and all.
+    ServerRejected,
+    /// No ref status: git failed before any ref was settled — credentials or
+    /// the network most often, but also a local `pre-push` hook.
+    NoRefStatus,
+}
+
+impl std::fmt::Display for PushFailed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(PUSH_FAILED)
+    }
+}
+
+impl std::error::Error for PushFailed {}
+
+/// Classify a failed push by its stderr. The bracketed statuses are not
+/// translated by git.
+fn classify_push_failure(stderr: &str) -> PushFailed {
+    let statuses: Vec<&str> = stderr
+        .lines()
+        .filter_map(|line| line.trim_start().strip_prefix("! "))
+        .collect();
+    if statuses.iter().any(|s| s.starts_with("[rejected]")) {
+        PushFailed::Refused
+    } else if statuses
+        .iter()
+        .any(|s| s.starts_with("[remote rejected]") || s.starts_with("[remote failure]"))
+    {
+        PushFailed::ServerRejected
+    } else {
+        PushFailed::NoRefStatus
+    }
+}
+
+/// Ask before a force push under `loom tui`, naming every branch it
+/// overwrites: there `-f` is one key, while on the command line typing it is
+/// the decision. A Gerrit review push never forces, so it is not asked about.
+fn confirm_force(
+    remote_type: &RemoteType,
+    no_pr: bool,
+    remote: &str,
+    plan: &PushPlan,
+) -> Result<()> {
+    let branches = match remote_type {
+        RemoteType::Gerrit { .. } if !no_pr => return Ok(()),
+        RemoteType::Gerrit { .. } => vec![plan.requested()],
+        _ => plan.branches(),
+    };
+    let prompt = format!(
+        "Force-push {} to `{}`?\nOverwrites whatever the remote holds for {}",
+        backticked(&branches),
+        remote,
+        if branches.len() == 1 { "it" } else { "them" }
+    );
+    if msg::confirm(&prompt, "")? {
+        Ok(())
+    } else {
+        Err(msg::cancelled())
+    }
+}
+
+/// Add the flag that gets past a refused push, or under `loom tui` the likely
+/// cause of a push that failed outright.
 ///
 /// A forge rebases a stacked branch for us when the pull request below it
 /// lands, after which `--force-with-lease`/`--force-if-includes` refuse every
 /// later push and nothing done locally helps; git's own "pull first" hint
 /// only merges back content the branch already carries. Whether the force is
-/// warranted is the user's call, so they have to type it.
-fn force_hint(err: anyhow::Error, branch: &str, no_pr: bool, force: bool) -> anyhow::Error {
-    if force || err.to_string() != PUSH_FAILED {
-        return err;
+/// warranted is the user's call, so they have to type it, or under `loom tui`
+/// press `P` and confirm it.
+fn push_hint(err: anyhow::Error, branch: &str, no_pr: bool, force: bool) -> anyhow::Error {
+    let failed = err.downcast_ref::<PushFailed>().copied();
+    let refused = failed == Some(PushFailed::Refused) && !force;
+    match (refused, crate::core::ui::active()) {
+        (true, true) => anyhow!(
+            "{}\nIf `{}` has diverged on the remote, force-push it with `P` on its row",
+            err,
+            branch
+        ),
+        (true, false) => anyhow!(
+            "{}\nIf `{}` has diverged on the remote, push again with `loom push {}{} -f`",
+            err,
+            branch,
+            branch,
+            if no_pr { " --no-pr" } else { "" }
+        ),
+        // Git may not prompt under the TUI (Spec 020).
+        (false, true) if failed == Some(PushFailed::NoRefStatus) => anyhow!(
+            "{}\nIf the remote needs credentials, run `loom push` in a terminal, \
+             or set up a credential helper or ssh-agent",
+            err
+        ),
+        _ => err,
     }
-    anyhow!(
-        "{}\nIf `{}` has diverged on the remote, push again with `loom push {}{} -f`",
-        err,
-        branch,
-        branch,
-        if no_pr { " --no-pr" } else { "" }
-    )
 }
 
 /// Run a `git push …`, trace-log it, bail on failure, and return its stderr.
@@ -582,10 +671,10 @@ fn force_hint(err: anyhow::Error, branch: &str, no_pr: bool, force: bool) -> any
 /// to the user via [`append_remote_urls`].
 fn run_push_capture(workdir: &Path, args: &[&str]) -> Result<String> {
     let start = Instant::now();
-    let output = Command::new("git")
-        .current_dir(workdir)
-        .args(args)
-        .output()?;
+    let mut command = Command::new("git");
+    command.current_dir(workdir).args(args);
+    git::no_terminal_prompt_under_tui(&mut command);
+    let output = command.output()?;
 
     let duration_ms = start.elapsed().as_millis();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
@@ -598,7 +687,7 @@ fn run_push_capture(workdir: &Path, args: &[&str]) -> Result<String> {
     );
 
     if !output.status.success() {
-        bail!("{}", PUSH_FAILED);
+        return Err(classify_push_failure(&stderr).into());
     }
 
     Ok(stderr)
@@ -764,9 +853,12 @@ fn run_gh(workdir: &Path, args: &[&str], stdin: Option<&str>) -> Option<String> 
     let start = Instant::now();
     let mut cmd = Command::new("gh");
     cmd.current_dir(workdir).args(args);
-    if stdin.is_some() {
-        cmd.stdin(Stdio::piped());
-    }
+    // An inherited stdin would race `loom tui` for its keys.
+    cmd.stdin(if stdin.is_some() {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    });
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = cmd.spawn().ok()?;
     if let (Some(input), Some(mut pipe)) = (stdin, child.stdin.take()) {
@@ -887,23 +979,48 @@ fn create_github_pr_web(
     title: &str,
     body: &str,
 ) -> Result<()> {
-    // Inherits stdio so the browser opens.
+    // gh opens the browser itself; stdio is inherited only so its own lines
+    // reach the terminal, which under `loom tui` they would write over. Not
+    // piped there: a browser gh starts inherits the pipes, and reading them
+    // to EOF would wait for the browser to exit. A file has no EOF to wait on.
     let args = vec![
         "pr", "create", "--web", "--head", head, "--base", base, "--repo", gh_repo, "--title",
         title, "--body", body,
     ];
 
     let start = Instant::now();
-    let status = Command::new("gh")
-        .current_dir(workdir)
-        .args(&args)
-        .status()?;
+    let mut cmd = Command::new("gh");
+    cmd.current_dir(workdir).args(&args);
+    let mut stderr_file = None;
+    if crate::core::ui::active() {
+        use std::process::Stdio;
+        let file = tempfile::tempfile().ok();
+        let stderr = match file.as_ref().and_then(|f| f.try_clone().ok()) {
+            Some(clone) => Stdio::from(clone),
+            None => Stdio::null(),
+        };
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(stderr);
+        stderr_file = file;
+    }
+    let success = cmd.status()?.success();
+    let stderr = stderr_file
+        .map(|mut file| {
+            use std::io::{Read, Seek};
+            let mut bytes = Vec::new();
+            let _ = file.rewind().and_then(|()| file.read_to_end(&mut bytes));
+            String::from_utf8_lossy(&bytes).into_owned()
+        })
+        .unwrap_or_default();
 
     let duration_ms = start.elapsed().as_millis();
-    loom_trace::log_command("gh", &args.join(" "), duration_ms, status.success(), "");
+    loom_trace::log_command("gh", &args.join(" "), duration_ms, success, &stderr);
 
-    if !status.success() {
+    if !success {
         msg::warn("PR creation may have failed — check your browser");
+    } else if crate::core::ui::active() {
+        msg::success(&format!("Opened the PR form for `{}` in the browser", head));
     }
     Ok(())
 }
@@ -1581,7 +1698,7 @@ fn push_gerrit_no_pr(workdir: &Path, remote: &str, branch: &str, force: bool) ->
         let mut args = vec!["push"];
         args.extend_from_slice(force_args(force));
         args.extend_from_slice(&[remote, &refspec]);
-        git::run_git(workdir, &args)?;
+        run_push_capture(workdir, &args)?;
         msg::success(&format!(
             "Pushed `{}` to `{}` as `{}`",
             branch, remote, wip_name

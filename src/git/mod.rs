@@ -130,12 +130,17 @@ fn captured_command(workdir: &Path, args: &[&str]) -> Command {
         .args(FORCED_CONFIG)
         .args(args)
         .env("GIT_EDITOR", "true");
-    // Under `loom tui` git would prompt for credentials on the raw-mode
-    // terminal the TUI is drawing; failing is the lesser evil (Spec 020).
+    no_terminal_prompt_under_tui(&mut command);
+    command
+}
+
+/// Set `GIT_TERMINAL_PROMPT=0` under `loom tui`: git would prompt for
+/// credentials on the raw-mode terminal the TUI is drawing, and failing is the
+/// lesser evil (Spec 020).
+pub fn no_terminal_prompt_under_tui(command: &mut Command) {
     if crate::core::ui::active() {
         command.env("GIT_TERMINAL_PROMPT", "0");
     }
-    command
 }
 
 /// Run a git command, capture output, trace-log it, and bail on failure.

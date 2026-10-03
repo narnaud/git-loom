@@ -542,15 +542,15 @@ fn extract_azure_remote_unrecognized() {
 
 #[test]
 fn a_refused_push_names_the_flag_that_gets_past_it() {
-    let refused = || anyhow::anyhow!("{}", super::PUSH_FAILED);
+    let refused = || anyhow::Error::new(super::PushFailed::Refused);
 
-    let hinted = super::force_hint(refused(), "feature-a", false, false);
+    let hinted = super::push_hint(refused(), "feature-a", false, false);
     assert!(
         hinted.to_string().contains("loom push feature-a -f"),
         "no way out offered: {}",
         hinted
     );
-    let hinted = super::force_hint(refused(), "feature-a", true, false);
+    let hinted = super::push_hint(refused(), "feature-a", true, false);
     assert!(
         hinted
             .to_string()
@@ -559,10 +559,68 @@ fn a_refused_push_names_the_flag_that_gets_past_it() {
         hinted
     );
 
-    let forced = super::force_hint(refused(), "feature-a", false, true);
+    let forced = super::push_hint(refused(), "feature-a", false, true);
     assert_eq!(forced.to_string(), super::PUSH_FAILED);
-    let other = super::force_hint(anyhow::anyhow!("Cancelled"), "feature-a", false, false);
+    let other = super::push_hint(anyhow::anyhow!("Cancelled"), "feature-a", false, false);
     assert_eq!(other.to_string(), "Cancelled");
+    for failed in [
+        super::PushFailed::ServerRejected,
+        super::PushFailed::NoRefStatus,
+    ] {
+        let hinted = super::push_hint(failed.into(), "feature-a", false, false);
+        assert_eq!(
+            hinted.to_string(),
+            super::PUSH_FAILED,
+            "{:?}: no force",
+            failed
+        );
+    }
+}
+
+#[test]
+fn a_refused_push_under_the_tui_names_its_key() {
+    let (tx, _rx) = std::sync::mpsc::channel();
+    crate::core::ui::install(tx);
+    let hint = |failed: super::PushFailed, force| {
+        super::push_hint(failed.into(), "feature-a", false, force).to_string()
+    };
+    let refused = hint(super::PushFailed::Refused, false);
+    let no_status = hint(super::PushFailed::NoRefStatus, false);
+    let declined = hint(super::PushFailed::ServerRejected, false);
+    let forced = hint(super::PushFailed::Refused, true);
+    crate::core::ui::uninstall();
+    assert!(refused.contains("`P`"), "{}", refused);
+    assert!(!refused.contains("loom push"), "{}", refused);
+    // Credentials, not a moved remote, are what git cannot ask for here.
+    assert!(no_status.contains("credentials"), "{}", no_status);
+    assert!(!no_status.contains("`P`"), "{}", no_status);
+    // The server took these, credentials and all.
+    assert_eq!(declined, super::PUSH_FAILED);
+    assert_eq!(forced, super::PUSH_FAILED);
+}
+
+#[test]
+fn a_push_failure_is_classified_by_its_ref_statuses() {
+    use super::PushFailed;
+    let refused = "To ../remote.git\n ! [rejected]        a -> a (stale info)\n";
+    let declined = "To ../remote.git\n ! [remote rejected] a -> a (pre-receive hook declined)\n";
+    let unreported =
+        "To ../remote.git\n ! [remote failure]  a -> a (remote failed to report status)\n";
+    let unreached = "fatal: could not read Username for 'https://example.com': \
+                     terminal prompts disabled\n";
+    assert_eq!(super::classify_push_failure(refused), PushFailed::Refused);
+    assert_eq!(
+        super::classify_push_failure(declined),
+        PushFailed::ServerRejected
+    );
+    assert_eq!(
+        super::classify_push_failure(unreported),
+        PushFailed::ServerRejected
+    );
+    assert_eq!(
+        super::classify_push_failure(unreached),
+        PushFailed::NoRefStatus
+    );
 }
 
 #[test]
@@ -582,7 +640,11 @@ fn force_pushes_when_the_lease_check_would_refuse() {
     .unwrap();
 
     let plan = super::PushPlan::single("feature-a");
-    assert!(super::push_plain(&workdir, "origin", &plan, false).is_err());
+    let refused = super::push_plain(&workdir, "origin", &plan, false).unwrap_err();
+    assert_eq!(
+        refused.downcast_ref::<super::PushFailed>(),
+        Some(&super::PushFailed::Refused)
+    );
     assert!(super::push_plain(&workdir, "origin", &plan, true).is_ok());
 
     let pushed =
@@ -1106,5 +1168,158 @@ fn plan_stack_registration_covers_every_shape() {
     assert_eq!(
         super::plan_stack_registration(&[None, Some(3)]),
         StackAction::Conflict
+    );
+}
+
+/// Run `push feature-a -f` as the TUI does, giving the confirmation `answer`,
+/// with the remote's `feature-a` moved where only a force replaces it.
+/// Returns the prompts, the result, and where the remote's `feature-a` ends.
+fn force_push_under_tui(answer: bool) -> (Vec<String>, anyhow::Result<()>, String, String) {
+    force_push_under_tui_of(answer, false)
+}
+
+/// `force_push_under_tui`, with `stacked` pushing `feature-b`, built on
+/// `feature-a`, instead.
+fn force_push_under_tui_of(
+    answer: bool,
+    stacked: bool,
+) -> (Vec<String>, anyhow::Result<()>, String, String) {
+    use crate::core::ui::{self, Answer, Request};
+
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    test_repo.create_branch("feature-a");
+    test_repo.switch_branch("feature-a");
+    let tip = test_repo.commit("feature commit", "a.txt");
+    let pushed_branch = if stacked {
+        test_repo.create_branch("feature-b");
+        test_repo.switch_branch("feature-b");
+        test_repo.commit("stacked commit", "b.txt");
+        "feature-b"
+    } else {
+        "feature-a"
+    };
+    test_repo.switch_branch("integration");
+    test_repo.merge_no_ff(pushed_branch);
+    crate::git::run_git(&workdir, &["push", "origin", "feature-a"]).unwrap();
+    let remote = test_repo.remote_path().unwrap();
+    crate::git::run_git(
+        &remote,
+        &["update-ref", "refs/heads/feature-a", "refs/heads/main"],
+    )
+    .unwrap();
+
+    let (prompts, result) = test_repo.in_dir(|| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            let worker = scope.spawn(move || {
+                ui::install(tx);
+                let result = super::run(Some(pushed_branch.to_string()), false, true);
+                ui::uninstall();
+                result
+            });
+            let mut prompts = Vec::new();
+            for request in rx {
+                if let Request::Prompt { prompt, reply, .. } = request {
+                    prompts.push(prompt);
+                    let _ = reply.send(Some(Answer::Bool(answer)));
+                }
+            }
+            (prompts, worker.join().unwrap())
+        })
+    });
+    let pushed =
+        crate::git::run_git_stdout(&remote, &["rev-parse", "refs/heads/feature-a"]).unwrap();
+    (prompts, result, pushed.trim().to_string(), tip.to_string())
+}
+
+#[test]
+fn a_force_push_under_the_tui_is_confirmed_naming_its_branches() {
+    let (prompts, result, pushed, tip) = force_push_under_tui(false);
+    assert_eq!(
+        prompts,
+        ["Force-push `feature-a` to `origin`?\nOverwrites whatever the remote holds for it"]
+    );
+    let err = result.unwrap_err();
+    assert!(
+        err.downcast_ref::<crate::core::ui::Cancelled>().is_some(),
+        "{}",
+        err
+    );
+    assert_ne!(pushed, tip, "declining leaves the remote alone");
+
+    let (prompts, result, pushed, tip) = force_push_under_tui(true);
+    assert_eq!(prompts.len(), 1);
+    assert!(result.is_ok(), "{:?}", result.err());
+    assert_eq!(pushed, tip, "confirming forces the push");
+}
+
+#[test]
+fn a_gerrit_review_push_never_asks_about_a_force() {
+    // With the receiver gone a prompt is cancelled at once instead of waiting.
+    let (tx, rx) = std::sync::mpsc::channel();
+    drop(rx);
+    crate::core::ui::install(tx);
+    let gerrit = super::RemoteType::Gerrit {
+        target_branch: "main".to_string(),
+    };
+    let plan = super::PushPlan::single("feature-a");
+    let asked = super::confirm_force(&gerrit, false, "origin", &plan);
+    crate::core::ui::uninstall();
+    assert!(asked.is_ok(), "a review push is never forced");
+}
+
+#[test]
+fn a_force_push_of_a_stacked_branch_names_the_branches_below_it() {
+    let (prompts, result, pushed, tip) = force_push_under_tui_of(true, true);
+    assert_eq!(
+        prompts,
+        ["Force-push `feature-a`, `feature-b` to `origin`?\n\
+          Overwrites whatever the remote holds for them"]
+    );
+    assert!(result.is_ok(), "{:?}", result.err());
+    assert_eq!(pushed, tip, "the force reaches the branch below");
+}
+
+#[test]
+fn a_push_that_cannot_reach_the_remote_is_not_refused() {
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    test_repo.create_branch("feature-a");
+    let gone = workdir.join("no-such-remote");
+    crate::git::run_git(&workdir, &["remote", "add", "gone", gone.to_str().unwrap()]).unwrap();
+
+    let plan = super::PushPlan::single("feature-a");
+    let failed = super::push_plain(&workdir, "gone", &plan, false).unwrap_err();
+    assert_eq!(
+        failed.downcast_ref::<super::PushFailed>(),
+        Some(&super::PushFailed::NoRefStatus)
+    );
+}
+
+#[test]
+fn a_push_a_hook_declines_is_server_rejected() {
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    test_repo.create_branch("feature-a");
+    let remote = test_repo.remote_path().unwrap();
+    let hooks = remote.join("hooks");
+    std::fs::create_dir_all(&hooks).unwrap();
+    // As in the fixtures: a `core.hooksPath` in the user's config would leave it inert.
+    let hooks_path = hooks.display().to_string().replace('\\', "/");
+    crate::git::run_git(&remote, &["config", "core.hooksPath", &hooks_path]).unwrap();
+    std::fs::write(hooks.join("pre-receive"), "#!/bin/sh\nexit 1\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let hook = hooks.join("pre-receive");
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    let plan = super::PushPlan::single("feature-a");
+    let failed = super::push_plain(&workdir, "origin", &plan, false).unwrap_err();
+    assert_eq!(
+        failed.downcast_ref::<super::PushFailed>(),
+        Some(&super::PushFailed::ServerRejected)
     );
 }

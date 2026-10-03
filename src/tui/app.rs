@@ -1,7 +1,7 @@
 //! Interactive status TUI (`loom tui`): the status tree on the left, the diff
 //! of the item under the cursor on the right.
 //!
-//! Actions (commit, fold, move, split, branch, drop, absorb, reword, update) run the regular loom
+//! Actions (commit, fold, move, split, branch, drop, absorb, reword, update, push) run the regular loom
 //! command on a worker thread while the TUI stays up: the command's prompts
 //! become popups and its messages a log (`core::ui`), and only an editor takes
 //! the terminal over. Fold, move and commit pick their target in a second step
@@ -44,7 +44,7 @@ use crate::tui::widgets::common::{colorize_diff, pane_block};
 use crate::tui::widgets::diff_pane::DiffPane;
 use crate::tui::widgets::list_pane::ListPane;
 use crate::tui::widgets::popup::{self, LogEntry, Notice, Prompt, PromptOutcome, TextField};
-use crate::{absorb, branch, commit, drop, fold, reword, split, update};
+use crate::{absorb, branch, commit, drop, fold, push, reword, split, update};
 
 // ── Data model ───────────────────────────────────────────────────────────
 
@@ -418,6 +418,10 @@ enum Action {
     },
     /// `loom update`: takes no target.
     Update,
+    /// `loom push [branch]`; no branch is push's own picker.
+    Push { branch: Option<String> },
+    /// `loom push <branch> -f`; push confirms it under the TUI.
+    ForcePush { branch: String },
 }
 
 /// Why the event loop returned.
@@ -637,6 +641,10 @@ const HELP: &[popup::HelpSection] = &[
             ("a", "absorb into the commits that touched the same lines"),
             ("r", "reword a commit, or rename a branch"),
             ("u", "update: pull-rebase onto upstream"),
+            (
+                "p / P",
+                "push a branch (else pick one) / force-push the branch",
+            ),
         ],
     ),
     (
@@ -793,6 +801,9 @@ fn execute_action(
         Action::Absorb { files } => absorb::run(false, files),
         Action::Reword { target, name } => reword::run(target, name),
         Action::Update => update::run(false),
+        Action::Push { branch } => push::run(branch, false, false),
+        // `push` itself confirms a force under the TUI, naming every branch.
+        Action::ForcePush { branch } => push::run(Some(branch), false, true),
     };
     crate::trace::finalize();
     result
@@ -1128,6 +1139,13 @@ impl<'a> App<'a> {
                 }
             }
             Action::Update => words.push("update".into()),
+            Action::Push { branch } => {
+                words.push("push".into());
+                words.extend(branch.iter().map(|b| sid(b)));
+            }
+            Action::ForcePush { branch } => {
+                words.extend(["push".into(), sid(branch), "-f".into()]);
+            }
         }
         words.join(" ")
     }
@@ -1412,8 +1430,8 @@ impl<'a> App<'a> {
             // Enter, and Esc apply — action keys must not fire and discard
             // the pending operation.
             KeyCode::Char(
-                ' ' | 'c' | 'C' | 'f' | 'F' | 'm' | 's' | 'S' | 'b' | 'd' | 'a' | 'r' | 'u' | 'R'
-                | '+' | '=' | '-',
+                ' ' | 'c' | 'C' | 'f' | 'F' | 'm' | 's' | 'S' | 'b' | 'd' | 'a' | 'r' | 'u' | 'p'
+                | 'P' | 'R' | '+' | '=' | '-',
             )
             | KeyCode::F(5)
                 if self.placing().is_some() =>
@@ -1459,6 +1477,8 @@ impl<'a> App<'a> {
             KeyCode::Char('a') => self.action_absorb(),
             KeyCode::Char('r') => self.action_reword(),
             KeyCode::Char('u') => Some(Action::Update),
+            KeyCode::Char('p') => self.action_push(false),
+            KeyCode::Char('P') => self.action_push(true),
             KeyCode::Char('R') | KeyCode::F(5) => {
                 self.reload();
                 None
@@ -2809,6 +2829,29 @@ impl<'a> App<'a> {
             Vec::new()
         };
         Some(Action::Absorb { files })
+    }
+
+    /// `p`/`P`: push the selected branch, else the cursor's; with neither `p`
+    /// lets push pick one, while `P` refuses, a force naming the branch it
+    /// overwrites. Push takes one branch: any other selection is refused.
+    fn action_push(&mut self, force: bool) -> Option<Action> {
+        let rows = self.picked_rows();
+        let branch = match rows.as_slice() {
+            [row] if matches!(row.kind, RowKind::BranchName { .. }) => row.target.clone(),
+            _ if !self.selected.is_empty() => {
+                self.notice = Some("push: select one branch".to_string());
+                return None;
+            }
+            _ => None,
+        };
+        match (branch, force) {
+            (branch, false) => Some(Action::Push { branch }),
+            (Some(branch), true) => Some(Action::ForcePush { branch }),
+            (None, true) => {
+                self.notice = Some("push -f: move to a branch".to_string());
+                None
+            }
+        }
     }
 
     /// `r`: reword the commit under the cursor, or start editing the branch

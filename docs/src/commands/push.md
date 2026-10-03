@@ -124,7 +124,7 @@ loom names the flag that does:
   › If `feature-a` has diverged on the remote, push again with `loom push feature-a -f`
 ```
 
-That is the push you ran, forced — `--no-pr` and the branch you named both survive it. loom does not check whether the remote really diverged, or whether what is there is yours: a colleague's commit and a forge's rebase look the same from your clone, and only you can tell them apart. Fetch and look if you are unsure. Typing the flag is what makes it your call.
+That is the push you ran, forced — `--no-pr` and the branch you named both survive it. loom does not check whether the remote really diverged, or whether what is there is yours: a colleague's commit and a forge's rebase look the same from your clone, and only you can tell them apart. Fetch and look if you are unsure. Typing the flag is what makes it your call. Only a push git refused gets this hint: a failure over credentials, the network, a hook, or a server that rejected the change itself is not one a force gets past.
 
 Pass `-f` / `--force` to push with plain `--force` instead, for when the lease check refuses a push you know is correct. It applies to every remote type except a Gerrit `refs/for/` review push, which never forces. It also applies to every branch the push contains, not only the one named: a stack goes out in a single `git push`, so forcing it overwrites the downstack and re-published upstack branches too.
 
