@@ -269,7 +269,7 @@ $_gitLoomCompleter = {
                     @{ Name = 'ls'; Description = 'Alias of list' },
                     @{ Name = 'drop'; Description = 'Remove a worktree' },
                     @{ Name = 'rm'; Description = 'Alias of drop' },
-                    @{ Name = 'cd'; Description = 'Change into a worktree' }
+                    @{ Name = 'path'; Description = 'Print a worktree path' }
                 )
                 return $worktreeSubs | Where-Object { $_.Name -like "$wordToComplete*" } | ForEach-Object {
                     [System.Management.Automation.CompletionResult]::new($_.Name, $_.Name, 'ParameterValue', $_.Description)
@@ -289,29 +289,7 @@ $_gitLoomCompleter = {
     }
 }
 
-# `loom`: git-loom, except that `loom wt cd <worktree>` changes the shell's
-# directory. A child process can never cd its parent, so `git-loom wt cd`
-# prints the path and this function, which runs in the shell itself, moves
-# there. An alias `loom` pointing at git-loom would shadow the function, so
-# it gives way; any other alias is left alone.
-if ((Get-Alias loom -ErrorAction SilentlyContinue).Definition -eq 'git-loom') {
-    Remove-Item Alias:loom
-}
-function loom {
-    if ($args.Count -ge 2 -and $args[0] -in 'wt', 'worktree' -and $args[1] -eq 'cd' -and
-        $args -cnotcontains '-h' -and $args -cnotcontains '--help') {
-        # In agent mode the JSON status follows the path, or replaces it on
-        # failure: move only to a path, and pass the rest through.
-        $output = @(git-loom @args)
-        if ($LASTEXITCODE -eq 0 -and $output.Count -gt 0 -and -not $output[0].StartsWith('{')) {
-            Set-Location -LiteralPath $output[0]
-            $output = @($output | Select-Object -Skip 1)
-        }
-        $output
-    } else {
-        git-loom @args
-    }
-}
-
-$_gitLoomNames = @('git-loom', 'loom') + @(Get-Alias -ErrorAction SilentlyContinue | Where-Object { $_.Definition -eq 'git-loom' } | Select-Object -ExpandProperty Name)
+# Completers bind to the typed name, never through an alias: `loom` is named
+# up front for an alias defined later, others only if they already exist.
+$_gitLoomNames = @('git-loom', 'loom') + @(Get-Alias -ErrorAction SilentlyContinue | Where-Object { $_.Definition -match '(^|[\\/])git-loom(\.exe)?$' } | Select-Object -ExpandProperty Name)
 Register-ArgumentCompleter -Native -CommandName $_gitLoomNames -ScriptBlock $_gitLoomCompleter

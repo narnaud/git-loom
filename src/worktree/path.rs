@@ -2,9 +2,9 @@ use anyhow::{Context, Result, bail};
 
 use crate::core::{msg, repo};
 
-/// Print a worktree's path, alone, for a shell function to `cd` into (Spec
-/// 022). Without an argument: the main worktree from a linked one, else a
-/// picker.
+/// Print a worktree's path, alone, for `cd` to take from a command substitution
+/// (Spec 022). Without an argument: the main worktree from a linked one, else
+/// a picker.
 pub fn run(target: Option<String>) -> Result<()> {
     let repo = repo::open_repo()?;
     let workdir = repo::require_workdir(&repo, "locate a worktree")?;
@@ -20,8 +20,7 @@ pub fn run(target: Option<String>) -> Result<()> {
             }
         }
     };
-    // Stdout even with `--agent`, ahead of its JSON status: the shell
-    // functions read it.
+    // Stdout even with `--agent`, ahead of its JSON status: scripts read it.
     println!("{}", entry.path.display());
     Ok(())
 }
@@ -38,7 +37,7 @@ fn pick(entries: Vec<super::Entry>) -> Result<super::Entry> {
     let chosen = msg::select(
         "Select worktree",
         items.clone(),
-        "re-run with: loom worktree cd <worktree>",
+        "re-run with: loom worktree path <worktree>",
     )?;
     let index = items
         .iter()
@@ -48,5 +47,5 @@ fn pick(entries: Vec<super::Entry>) -> Result<super::Entry> {
 }
 
 #[cfg(test)]
-#[path = "cd_test.rs"]
+#[path = "path_test.rs"]
 mod tests;

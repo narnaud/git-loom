@@ -1,7 +1,7 @@
 use crate::core::test_helpers::TestRepo;
 
 #[test]
-fn cd_resolves_a_worktree_and_the_main_one() {
+fn path_resolves_a_worktree_and_the_main_one() {
     let test_repo = TestRepo::new_with_remote();
     let path = test_repo.add_worktree("work-foo", &["-b", "integration-foo", "origin/main"]);
 
@@ -20,7 +20,7 @@ fn cd_resolves_a_worktree_and_the_main_one() {
 }
 
 #[test]
-fn cd_without_argument_in_the_main_worktree_needs_another_one() {
+fn path_without_argument_in_the_main_worktree_needs_another_one() {
     let test_repo = TestRepo::new_with_remote();
 
     let err = test_repo.in_dir(|| super::run(None)).unwrap_err();

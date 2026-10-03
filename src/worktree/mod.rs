@@ -1,10 +1,10 @@
 //! `loom worktree`: worktrees that each hold their own integration branch
 //! (Spec 022).
 
-pub mod cd;
 pub mod drop;
 pub mod list;
 pub mod new;
+pub mod path;
 
 use std::path::{Path, PathBuf};
 

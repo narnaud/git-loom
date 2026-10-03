@@ -10,7 +10,7 @@ Each worktree holds its own integration branch, tracking the same remote branch 
 git loom worktree new <name>
 git loom worktree [list]
 git loom worktree drop <worktree>
-git loom worktree cd [<worktree>]
+git loom worktree path [<worktree>]
 ```
 
 `worktree` has the alias `wt`, `list` the alias `ls`, and `drop` the alias `rm`. `worktree` alone runs `list`.
@@ -81,15 +81,21 @@ git loom wt drop ho
 # ✓ Deleted branch integration-hotfix
 ```
 
-## worktree cd
+## worktree path
 
 ```
-git loom worktree cd [<worktree>]
+git loom worktree path [<worktree>]
 ```
 
-Prints the worktree's path. A process cannot change its parent shell's directory, so the `loom` function the [shell setup](../shell-setup.md) defines turns it into a real `cd`. Without `<worktree>`, it goes back to the main checkout from a linked worktree, and offers a picker from the main checkout.
+Prints the worktree's path, for `cd` to use. Without `<worktree>`, it prints the main checkout's path from a linked worktree, and offers a picker from the main checkout.
 
 ```bash
-loom wt cd hotfix   # into repo-hotfix
-loom wt cd          # back to repo
+cd "$(git loom wt path hotfix)"   # bash, zsh: into repo-hotfix
+cd (git loom wt path)             # fish, PowerShell: back to repo
+```
+
+In cmd:
+
+```bat
+for /f "delims=" %p in ('git loom wt path hotfix') do cd /d "%p"
 ```
