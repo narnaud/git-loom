@@ -27,6 +27,7 @@ use ratatui::{
 
 use crate::core::graph::{self, Section};
 use crate::core::hunk_select::{self, HunkArgs};
+use crate::core::msg;
 use crate::core::repo::{self, BranchInfo, CommitInfo, FileChange, RemoteStatus, RepoInfo};
 use crate::core::shortid::IdAllocator;
 use crate::core::staging;
@@ -422,6 +423,13 @@ enum Action {
     Push { branch: Option<String> },
     /// `loom push <branch> -f`; push confirms it under the TUI.
     ForcePush { branch: String },
+    /// `loom continue`. Refused when what is paused is no longer `paused`, the
+    /// operation the view showed.
+    Continue { paused: PausedId },
+    /// `loom abort`, once `question` is confirmed: the CLI does not ask, but
+    /// here it is one key away from absorb's. Refused when what is paused is no
+    /// longer `paused`, the operation the question named.
+    Abort { question: String, paused: PausedId },
 }
 
 /// Why the event loop returned.
@@ -587,6 +595,141 @@ struct Running {
     ticks: usize,
 }
 
+/// What stands in for the tree while an operation is paused: HEAD is detached
+/// mid-rebase, so no tree can be gathered until the operation ends.
+struct Paused {
+    /// The command the loom state names; `None` for a git rebase or merge no
+    /// state describes.
+    command: Option<String>,
+    /// `rebase` or `merge`; `None` when git has neither left, the user having
+    /// finished it by hand.
+    git_op: Option<&'static str>,
+    step: Option<(usize, usize)>,
+    headline: &'static str,
+    files: Vec<FileChange>,
+    /// Index into `files`.
+    cursor: usize,
+    list: ListPane,
+    id: PausedId,
+}
+
+/// Rows above the files in the paused view: the headline and a gap.
+const PAUSED_HEADER_ROWS: usize = 2;
+
+/// What tells one paused operation from the next, even of the same command:
+/// the commit git started it from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PausedId {
+    command: Option<String>,
+    git_op: Option<&'static str>,
+    /// `orig-head` of a rebase, `MERGE_HEAD` of a merge.
+    origin: Option<String>,
+}
+
+impl PausedId {
+    /// The paused operation `main.rs` blocks other commands on, if any.
+    fn load(git_dir: &std::path::Path) -> Option<PausedId> {
+        let command = transaction::load(git_dir).ok().flatten().map(|s| s.command);
+        let (git_op, origin) = if git::rebase_is_in_progress(git_dir) {
+            let origin = ["rebase-merge", "rebase-apply"]
+                .iter()
+                .find_map(|d| std::fs::read_to_string(git_dir.join(d).join("orig-head")).ok());
+            (Some("rebase"), origin)
+        } else if git::merge_is_in_progress(git_dir) {
+            let origin = std::fs::read_to_string(git_dir.join("MERGE_HEAD")).ok();
+            (Some("merge"), origin)
+        } else {
+            (None, None)
+        };
+        if command.is_none() && git_op.is_none() {
+            return None;
+        }
+        Some(PausedId {
+            command,
+            git_op,
+            origin: origin.map(|o| o.trim().to_string()),
+        })
+    }
+}
+
+impl Paused {
+    fn load(workdir: &std::path::Path, git_dir: &std::path::Path) -> Option<Paused> {
+        let id = PausedId::load(git_dir)?;
+        let (command, git_op) = (id.command.clone(), id.git_op);
+        let step = match git_op {
+            Some("rebase") => git::rebase_progress(git_dir),
+            _ => None,
+        };
+        let files = git2::Repository::open(workdir)
+            .ok()
+            .and_then(|r| repo::get_working_changes(&r).ok())
+            .unwrap_or_default();
+        // `AUTO_MERGE` outlives the resolution until the step is committed, so
+        // with no conflict left it covers `rerere` and the user's own alike.
+        let headline = if git_op.is_none() {
+            "No rebase is in progress — c wraps the operation up, a discards it"
+        } else if files.iter().any(is_conflicted) {
+            "Conflicts — resolve them, stage each with Space, then c to continue"
+        } else if git::auto_merge_id(workdir).is_some() {
+            "No conflicts left — review the result, then c to continue"
+        } else {
+            "Stopped part-way — t shows why; c carries on once it is fixed"
+        };
+        Some(Paused {
+            command,
+            git_op,
+            step,
+            headline,
+            files,
+            cursor: 0,
+            list: ListPane::new(PAUSED_HEADER_ROWS),
+            id,
+        })
+    }
+
+    /// What is paused, as the pane title and the abort question name it.
+    fn subject(&self) -> String {
+        match (&self.command, self.git_op) {
+            (Some(command), _) => format!("`loom {}`", command),
+            (None, op) => format!("git {}", op.unwrap_or("rebase")),
+        }
+    }
+
+    fn title(&self) -> String {
+        let step = self
+            .step
+            .map(|(current, total)| format!(" — step {}/{}", current, total))
+            .unwrap_or_default();
+        format!(" Paused: {}{} ", self.subject().replace('`', ""), step)
+    }
+
+    fn abort_question(&self) -> String {
+        match &self.command {
+            Some(_) => format!(
+                "Abort the paused {}?\nIt rolls back to where the command started.",
+                self.subject()
+            ),
+            None => format!(
+                "Abort the {} in progress?\nNo loom state describes it: only git's own abort runs.",
+                self.subject()
+            ),
+        }
+    }
+
+    fn current(&self) -> Option<&FileChange> {
+        self.files.get(self.cursor)
+    }
+
+    fn move_cursor(&mut self, dir: isize) {
+        let last = self.files.len().saturating_sub(1);
+        self.cursor = self.cursor.saturating_add_signed(dir).min(last);
+    }
+}
+
+fn is_conflicted(change: &FileChange) -> bool {
+    graph::file_group(change.index, change.worktree) == graph::FileGroup::Conflicted
+}
+
 /// What is drawn over the panes and owns the keyboard.
 enum Popup {
     /// A prompt from the running command; the answer goes back on `reply`.
@@ -654,11 +797,19 @@ const HELP: &[popup::HelpSection] = &[
         ],
     ),
     (
+        "While an operation is paused",
+        &[
+            ("Space", "stage the file once it is resolved"),
+            ("c", "continue"),
+            ("a", "abort, once confirmed"),
+        ],
+    ),
+    (
         "Other",
         &[
             ("L", "action log"),
             ("t", "latest trace: the git commands an action ran"),
-            ("R / F5", "reload the tree"),
+            ("R / F5", "reload"),
             ("?", "this help"),
             ("q / Ctrl-C", "quit"),
         ],
@@ -667,10 +818,8 @@ const HELP: &[popup::HelpSection] = &[
 
 enum AfterNotice {
     Nothing,
-    /// The action failed: reload the tree to show whatever it left.
+    /// The action failed: reload to show whatever it left.
     Reload,
-    /// The action paused on conflicts: nothing else can run, so leave.
-    Quit,
 }
 
 const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -689,31 +838,66 @@ pub fn run(theme: graph::Theme) -> Result<()> {
     }
 
     let tui_theme = TuiTheme::from_graph_theme(&theme);
-    let context = crate::status::resolve_context(&repo::open_repo()?, None);
-    let snapshot = load_snapshot(context)?;
-    let git_dir = snapshot.git_dir.clone();
+    let repo = repo::open_repo()?;
+    let context = crate::status::resolve_context(&repo, None);
+    let workdir = repo::require_workdir(&repo, "display status")?.to_path_buf();
+    let git_dir = repo.path().to_path_buf();
+    let paused = Paused::load(&workdir, &git_dir);
+    let snapshot = match paused {
+        Some(_) => Snapshot::placeholder(workdir, git_dir.clone()),
+        None => load_snapshot(context)?,
+    };
 
     // Local changes start expanded.
     let mut expanded: HashSet<String> = HashSet::new();
     expanded.insert(LOCAL_CHANGES_KEY.to_string());
 
-    let app = App::new(snapshot, &tui_theme, theme, expanded, context);
+    let mut app = App::new(snapshot, &tui_theme, theme, expanded, context);
+    if let Some(paused) = paused {
+        app.show_paused(paused);
+    }
     let (_, Outcome::Quit) = Shell::new(app).run()?;
 
-    // The TUI leaves on a conflict pause; repeat the popup's guidance where
-    // it stays readable.
+    // Every other command is blocked until it ends: say so where it stays
+    // readable.
     if let Ok(Some(state)) = transaction::load(&git_dir) {
-        println!("{}", paused_message(&state.command));
+        println!(
+            "A `loom {}` is paused.\n\
+             Run `loom tui` to resolve it, or `loom continue` / `loom abort`.",
+            state.command
+        );
     }
     Ok(())
 }
 
-fn paused_message(command: &str) -> String {
-    format!(
-        "A `loom {}` is paused due to conflicts.\n\
-         Resolve them, then run `loom continue` to resume, or `loom abort` to cancel.",
-        command
-    )
+impl Snapshot {
+    /// Stands in until a tree can be gathered, for a session that opened on a
+    /// paused operation; never drawn, since the paused view replaces the tree.
+    fn placeholder(workdir: PathBuf, git_dir: PathBuf) -> Snapshot {
+        let info = RepoInfo {
+            branch_name: String::new(),
+            upstream: repo::UpstreamInfo {
+                label: String::new(),
+                tip_oid: git2::Oid::ZERO_SHA1,
+                merge_base_oid: git2::Oid::ZERO_SHA1,
+                base_short_id: String::new(),
+                base_message: String::new(),
+                base_date: String::new(),
+                commits_ahead: 0,
+            },
+            commits: Vec::new(),
+            branches: Vec::new(),
+            working_changes: Vec::new(),
+            context_commits: Vec::new(),
+        };
+        Snapshot {
+            workdir,
+            git_dir,
+            cwd_prefix: String::new(),
+            ids: IdAllocator::new(info.collect_entities()),
+            info,
+        }
+    }
 }
 
 /// Gather repo info, exactly like `loom status` with files enabled.
@@ -746,7 +930,13 @@ fn execute_action(
     git_dir: &std::path::Path,
     theme: &graph::Theme,
 ) -> Result<()> {
-    crate::trace::init(git_dir, &format!("loom tui: {}", command));
+    let trace_name = format!("loom tui: {}", command);
+    // As on the CLI, resuming adds to the trace of the command that paused.
+    if matches!(action, Action::Continue { .. } | Action::Abort { .. }) {
+        crate::trace::init_appending(git_dir, &trace_name);
+    } else {
+        crate::trace::init(git_dir, &trace_name);
+    }
     let result = match action {
         Action::Commit { source, dest } => {
             let (branch, integration) = match dest {
@@ -811,6 +1001,22 @@ fn execute_action(
         Action::Push { branch } => push::run(branch, false, false, None),
         // `push` itself confirms a force under the TUI, naming every branch.
         Action::ForcePush { branch } => push::run(Some(branch), false, true, None),
+        // The view reloads only on `R` or after an action.
+        Action::Continue { paused } if PausedId::load(git_dir).as_ref() != Some(&paused) => {
+            Err(anyhow::anyhow!(
+                "The paused operation changed since it was shown\nPress R to look at it again"
+            ))
+        }
+        Action::Continue { .. } => transaction::continue_run(),
+        Action::Abort { question, paused } => match msg::confirm(&question, "") {
+            // Another process may have finished or replaced it while asked.
+            Ok(true) if PausedId::load(git_dir).as_ref() != Some(&paused) => Err(anyhow::anyhow!(
+                "The paused operation changed while you were asked\nLook at it again before aborting"
+            )),
+            Ok(true) => transaction::abort_run(),
+            Ok(false) => Err(msg::cancelled()),
+            Err(e) => Err(e),
+        },
     };
     crate::trace::finalize();
     result
@@ -859,6 +1065,8 @@ struct App<'a> {
     running: Option<Running>,
     popup: Option<Popup>,
     log: Vec<LogEntry>,
+    /// Set while an operation is paused: the view replacing the tree.
+    paused: Option<Paused>,
 }
 
 impl<'a> App<'a> {
@@ -894,6 +1102,7 @@ impl<'a> App<'a> {
             running: None,
             popup: None,
             log: Vec::new(),
+            paused: None,
         };
         app.rows = app.build_rows();
         let cursor = app.rows.iter().position(|r| r.focusable).unwrap_or(0);
@@ -1153,6 +1362,8 @@ impl<'a> App<'a> {
             Action::ForcePush { branch } => {
                 words.extend(["push".into(), sid(branch), "-f".into()]);
             }
+            Action::Continue { .. } => words.push("continue".into()),
+            Action::Abort { .. } => words.push("abort".into()),
         }
         words.join(" ")
     }
@@ -1219,7 +1430,7 @@ impl<'a> App<'a> {
 
     /// The worker is done: report in the status bar (success), a popup
     /// (failure), or nothing (cancelled prompt). Returns whether the repo may
-    /// have changed, so the caller runs [`App::after_action`].
+    /// have changed, so the caller runs [`App::refresh`].
     fn finish_action(&mut self, result: Result<()>) -> bool {
         if result.is_err() {
             // Nothing was renamed or created: aim at the preview's origin row,
@@ -1239,8 +1450,21 @@ impl<'a> App<'a> {
                         .filter_map(|(_, text)| text.lines().next())
                         .collect()
                 });
+                // A command that paused, or a continue that stopped again,
+                // says so in a warning instead.
+                let warning = self.log.last().and_then(|entry| {
+                    entry
+                        .lines
+                        .iter()
+                        .rev()
+                        .find(|(level, _)| *level == Level::Warn)
+                        .and_then(|(_, text)| text.lines().next())
+                });
                 self.notice = Some(match successes.as_slice() {
-                    [] => "✓ done".to_string(),
+                    [] => match warning {
+                        Some(warning) => format!("! {}", warning),
+                        None => "✓ done".to_string(),
+                    },
                     [one] => format!("✓ {}", one),
                     [.., last] => {
                         format!("✓ {} (+{} more, L: log)", last, successes.len() - 1)
@@ -1273,28 +1497,43 @@ impl<'a> App<'a> {
         }
     }
 
-    /// After an action changed the repo: a conflict pause ends the session
-    /// (every other command is blocked until it's resolved), otherwise the
-    /// tree reloads.
-    fn after_action(&mut self) {
-        match transaction::load(&self.snapshot.git_dir) {
-            Ok(Some(state)) => {
-                self.popup = Some(Popup::Notice {
-                    notice: Notice::new("Paused", Level::Warn, &paused_message(&state.command)),
-                    then: AfterNotice::Quit,
-                });
-            }
-            _ => {
+    /// Re-read the repo after an action, or on `R`: the paused view while an
+    /// operation is paused (every other command is blocked until it ends),
+    /// otherwise the tree.
+    fn refresh(&mut self) {
+        match Paused::load(&self.snapshot.workdir, &self.snapshot.git_dir) {
+            Some(paused) => self.show_paused(paused),
+            None => {
+                self.paused = None;
+                self.diff_cache.clear();
                 self.reload();
             }
         }
     }
 
+    /// Replace the tree, or the previous paused view, with `paused`, keeping
+    /// the cursor on the same file when it is still listed.
+    fn show_paused(&mut self, mut paused: Paused) {
+        let path = self
+            .paused
+            .as_ref()
+            .and_then(Paused::current)
+            .map(|f| f.path.clone());
+        if let Some(i) = path.and_then(|p| paused.files.iter().position(|f| f.path == p)) {
+            paused.cursor = i;
+        }
+        self.mode = Mode::Normal;
+        self.clear_selection();
+        self.paused = Some(paused);
+        self.diff_cache.clear();
+        self.diff.reset();
+        self.ensure_diff_cached();
+    }
+
     fn dismiss_notice(&mut self, then: AfterNotice) {
         match then {
             AfterNotice::Nothing => {}
-            AfterNotice::Reload => self.after_action(),
-            AfterNotice::Quit => self.outcome = Some(Outcome::Quit),
+            AfterNotice::Reload => self.refresh(),
         }
     }
 
@@ -1533,8 +1772,10 @@ impl<'a> App<'a> {
             KeyCode::Char('u') => Some(Action::Update),
             KeyCode::Char('p') => self.action_push(false),
             KeyCode::Char('P') => self.action_push(true),
+            // A refresh rather than a reload: an operation paused from another
+            // terminal leaves no tree to load.
             KeyCode::Char('R') | KeyCode::F(5) => {
-                self.reload();
+                self.refresh();
                 None
             }
             // `=` is `+` without Shift on most layouts, next to `-`.
@@ -1551,6 +1792,104 @@ impl<'a> App<'a> {
         if let Some(action) = action {
             self.start_action(action);
         }
+    }
+
+    /// A key of the paused view, with no popup open and no action running.
+    fn handle_paused_key(&mut self, focused: PaneId, code: KeyCode) {
+        let Some(paused) = &mut self.paused else {
+            return;
+        };
+        let action = match code {
+            KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') => {
+                let dir = if matches!(code, KeyCode::Up | KeyCode::Char('k')) {
+                    -1
+                } else {
+                    1
+                };
+                match focused {
+                    PaneId::Left => {
+                        paused.move_cursor(dir);
+                        self.diff.reset();
+                    }
+                    PaneId::Right => self.diff.scroll_by(dir as i32),
+                }
+                None
+            }
+            KeyCode::PageUp => {
+                self.diff.scroll_page(-1);
+                None
+            }
+            KeyCode::PageDown => {
+                self.diff.scroll_page(1);
+                None
+            }
+            KeyCode::Char(' ') => {
+                self.stage_paused_file();
+                None
+            }
+            KeyCode::Char('c') => Some(Action::Continue {
+                paused: paused.id.clone(),
+            }),
+            KeyCode::Char('a') => Some(Action::Abort {
+                question: paused.abort_question(),
+                paused: paused.id.clone(),
+            }),
+            KeyCode::Char('L') => {
+                self.open_log();
+                None
+            }
+            KeyCode::Char('?') => {
+                self.open_help();
+                None
+            }
+            KeyCode::Char('t') => {
+                self.open_trace();
+                None
+            }
+            KeyCode::Char('R') | KeyCode::F(5) => {
+                self.refresh();
+                None
+            }
+            KeyCode::Esc => None,
+            _ => {
+                self.notice = Some(format!(
+                    "{} is paused: c to continue, a to abort",
+                    paused.subject()
+                ));
+                None
+            }
+        };
+        if let Some(action) = action {
+            self.start_action(action);
+        }
+    }
+
+    /// `git add` the file under the paused view's cursor, then move on to the
+    /// next one, as `Space` does in the tree.
+    fn stage_paused_file(&mut self) {
+        let Some((path, index)) = self
+            .paused
+            .as_ref()
+            .and_then(|p| p.current().map(|f| (f.path.clone(), p.cursor)))
+        else {
+            return;
+        };
+        if let Err(e) = git::stage_path(&self.snapshot.workdir, &path) {
+            self.show_error(&e.to_string(), AfterNotice::Reload);
+            return;
+        }
+        self.refresh();
+        if let Some(paused) = &mut self.paused {
+            if paused.current().is_some_and(|f| f.path == path) {
+                paused.move_cursor(1);
+            } else {
+                // Staged back to HEAD, it left the list: the next file took
+                // its index.
+                paused.cursor = index.min(paused.files.len().saturating_sub(1));
+            }
+            self.diff.reset();
+        }
+        self.notice = Some(format!("staged {}", path));
     }
 
     /// The command whose target the tree is walking, if any: only navigation,
@@ -3038,6 +3377,41 @@ impl<'a> App<'a> {
             .render(frame, area, items, block, self.theme.file_selected);
     }
 
+    fn render_paused(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
+        let Some(paused) = &mut self.paused else {
+            return;
+        };
+        let theme = self.theme;
+        let mut items = vec![
+            ListItem::new(Line::from(popup::highlight_backticks(
+                paused.headline,
+                theme.warn,
+                theme,
+            ))),
+            ListItem::new(""),
+        ];
+        if paused.files.is_empty() {
+            items.push(ListItem::new(Span::styled("  no changes", theme.dim)));
+        }
+        items.extend(
+            paused
+                .files
+                .iter()
+                .map(|file| ListItem::new(paused_file_line(file, theme))),
+        );
+        // The cursor never rests on the headline, and with no files it marks
+        // nothing.
+        let cursor = PAUSED_HEADER_ROWS + paused.cursor;
+        paused.list.set_cursor(cursor);
+        let highlight = if paused.files.is_empty() {
+            ratatui::style::Style::default()
+        } else {
+            theme.file_selected
+        };
+        let block = pane_block(&paused.title(), theme, focused);
+        paused.list.render(frame, area, items, block, highlight);
+    }
+
     fn render_diff(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
         let key = self.ensure_diff_cached();
         let lines = borrowed_lines(&self.diff_cache[&key]);
@@ -3049,6 +3423,20 @@ impl<'a> App<'a> {
     /// visit); returns the cache key. Called from the event path so rendering
     /// never shells out.
     fn ensure_diff_cached(&mut self) -> String {
+        if let Some(paused) = &self.paused {
+            let file = paused.current();
+            // Apart from every tree key: a file row's key is its short ID.
+            let key = format!("paused:{}", file.map_or("", |f| f.path.as_str()));
+            if !self.diff_cache.contains_key(&key) {
+                let text = match file {
+                    Some(file) => working_file_diff(&self.snapshot.workdir, file),
+                    None => "no changes".to_string(),
+                };
+                self.diff_cache
+                    .insert(key.clone(), colorize_diff(&text, self.theme));
+            }
+            return key;
+        }
         let key = match self.rows.get(self.tree.cursor()) {
             Some(row) => row.key.clone(),
             None => String::new(),
@@ -3159,6 +3547,8 @@ impl ShellApp for App<'_> {
                 // says it, and stay there until the next key.
                 _ => {}
             }
+        } else if self.paused.is_some() {
+            self.handle_paused_key(focused, code);
         } else {
             self.handle_tree_key(focused, code);
         }
@@ -3174,6 +3564,26 @@ impl ShellApp for App<'_> {
     }
 
     fn handle_mouse(&mut self, pane: PaneId, kind: MouseEventKind, pos: Position, area: Rect) {
+        if let (Some(paused), PaneId::Left) = (&mut self.paused, pane) {
+            match kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    let file = paused
+                        .list
+                        .hit_test(area, pos.y)
+                        .and_then(|row| row.checked_sub(PAUSED_HEADER_ROWS))
+                        .filter(|i| *i < paused.files.len());
+                    if let Some(i) = file {
+                        paused.cursor = i;
+                        self.diff.reset();
+                    }
+                }
+                MouseEventKind::ScrollUp => paused.move_cursor(-1),
+                MouseEventKind::ScrollDown => paused.move_cursor(1),
+                _ => {}
+            }
+            self.ensure_diff_cached();
+            return;
+        }
         match pane {
             PaneId::Left => match kind {
                 // A click while a commit is being placed would take the cursor
@@ -3222,6 +3632,7 @@ impl ShellApp for App<'_> {
 
     fn render_pane(&mut self, frame: &mut Frame, pane: PaneId, area: Rect, focused: bool) {
         match pane {
+            PaneId::Left if self.paused.is_some() => self.render_paused(frame, area, focused),
             PaneId::Left => self.render_tree(frame, area, focused),
             PaneId::Right => self.render_diff(frame, area, focused),
         }
@@ -3292,7 +3703,7 @@ impl ShellApp for App<'_> {
                     ))
                 });
                 if self.finish_action(result) {
-                    self.after_action();
+                    self.refresh();
                 }
             }
             changed = true;
@@ -3438,6 +3849,16 @@ impl ShellApp for App<'_> {
     }
 
     fn status_hints(&self, _focused: PaneId) -> Vec<Cow<'static, str>> {
+        if self.paused.is_some() {
+            return vec![
+                "Continue: c".into(),
+                "Abort: a".into(),
+                "Stage: Space".into(),
+                "Trace: t".into(),
+                "Help: ?".into(),
+                "Quit: q".into(),
+            ];
+        }
         vec![
             "Commit: c/C".into(),
             "Fold: f/F".into(),
@@ -3683,6 +4104,26 @@ fn row_line(
     Line::from(spans)
 }
 
+/// One file of the paused view, its status drawn as the tree draws it.
+fn paused_file_line(file: &FileChange, theme: &TuiTheme) -> Line<'static> {
+    let status = match graph::file_group(file.index, file.worktree) {
+        graph::FileGroup::Conflicted => vec![Span::styled(
+            "  !! ",
+            theme.unstaged_status.add_modifier(Modifier::BOLD),
+        )],
+        graph::FileGroup::Untracked => vec![Span::styled("  ⁕  ", theme.untracked)],
+        _ => vec![
+            Span::raw("  "),
+            Span::styled(file.index.to_string(), theme.staged_status),
+            Span::styled(file.worktree.to_string(), theme.unstaged_status),
+            Span::raw(" "),
+        ],
+    };
+    let mut spans = status;
+    spans.push(Span::raw(file.path.clone()));
+    Line::from(spans)
+}
+
 // ── Diff pane content ────────────────────────────────────────────────────
 
 /// Produce the raw diff text for a row by shelling out to git.
@@ -3704,10 +4145,14 @@ fn diff_text(snapshot: &Snapshot, row: &Row) -> String {
             index,
             worktree,
         } => {
-            if graph::file_group(*index, *worktree) == graph::FileGroup::Untracked {
-                return untracked_file_text(workdir, path);
-            }
-            git::diff_head_file_display(workdir, path)
+            return working_file_diff(
+                workdir,
+                &FileChange {
+                    path: path.clone(),
+                    index: *index,
+                    worktree: *worktree,
+                },
+            );
         }
         RowKind::BranchName { range, .. } => match range {
             Some((base, tip)) => git::diff_range(workdir, base, tip),
@@ -3735,6 +4180,19 @@ fn diff_text(snapshot: &Snapshot, row: &Row) -> String {
         RowKind::Spacer(_) => return String::new(),
     };
     match result {
+        Ok(text) if text.trim().is_empty() => "no changes".to_string(),
+        Ok(text) => text,
+        Err(e) => format!("error: {}", e),
+    }
+}
+
+/// A working file against HEAD: a conflicted one with its markers, an
+/// untracked one as added lines.
+fn working_file_diff(workdir: &std::path::Path, file: &FileChange) -> String {
+    if graph::file_group(file.index, file.worktree) == graph::FileGroup::Untracked {
+        return untracked_file_text(workdir, &file.path);
+    }
+    match git::diff_head_file_display(workdir, &file.path) {
         Ok(text) if text.trim().is_empty() => "no changes".to_string(),
         Ok(text) => text,
         Err(e) => format!("error: {}", e),

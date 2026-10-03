@@ -42,7 +42,7 @@ Short IDs are displayed like in `git loom status`, so the tree doubles as a chea
 | `?` | Show the help popup listing every key |
 | `L` | Show the action log |
 | `t` | Show the latest [trace](trace.md): the git commands the last finished action ran |
-| `R` / `F5` | Reload the tree from the repo |
+| `R` / `F5` | Reload from the repo |
 | `+` (or `=`) / `-` | Show one more / one fewer context commit before the base (starts at [`loom.statusContext`](../configuration.md#loomstatuscontext), never goes below 1) |
 | `Esc` | Cancel fold, commit, move, rename, or new-branch mode → clear selection (first that applies); it never quits |
 | `q` / `Ctrl-C` | Quit |
@@ -90,15 +90,28 @@ Every action suspends the TUI, runs the regular loom command — prompts and edi
 
 ## Conflicts
 
-If an action pauses on conflicts, the TUI exits with the standard guidance — every other command is blocked while an operation is paused, so the TUI cannot stay open:
+If an action pauses on conflicts, the tree gives way to the paused view; `git loom tui` also opens on it when an operation is already paused. It lists every changed file, conflicts marked `!!`, under a line saying what to do next, and the diff pane shows the file under the cursor, conflict markers included:
 
-```bash
-# ! A `loom fold` is paused due to conflicts.
-#   Resolve them, then run `loom continue` to resume,
-#   or `loom abort` to cancel.
+```
+┌ Paused: loom fold — step 2/5 ────────┐┌ Diff ─────────────────────────┐
+│ Conflicts — resolve them, stage each ││ <<<<<<< HEAD                  │
+│                                      ││ old line                      │
+│  !! src/main.rs                      ││ =======                       │
+│  M  src/lib.rs                       ││ new line                      │
+│                                      ││ >>>>>>> 1a2b3c4 Add parser    │
+└──────────────────────────────────────┘└───────────────────────────────┘
+ Continue: c | Abort: a | Stage: Space | Trace: t | Help: ? | Quit: q
 ```
 
-See [`continue`](continue.md) and [`abort`](abort.md) for details.
+Resolve the files in your editor, then:
+
+| Key | Effect |
+|-----|--------|
+| `Space` | Stage the file under the cursor (`git add`) and move to the next |
+| `c` | [`continue`](continue.md); another conflict keeps the paused view, otherwise the tree comes back |
+| `a` | [`abort`](abort.md), once a menu confirms it, restoring the state from before the command |
+| `t` | Show the trace, for an operation that stopped for another reason than a conflict |
+| `R` / `F5` | Reload, after resolving outside the TUI |
 
 ## Prerequisites
 
