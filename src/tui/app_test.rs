@@ -4316,3 +4316,40 @@ fn push_takes_a_selected_branch_over_the_cursor() {
     assert!(app.action_push(false).is_none());
     assert_eq!(app.notice.as_deref(), Some("push: select one branch"));
 }
+
+#[test]
+fn t_opens_the_latest_trace() {
+    let dir = tempfile::tempdir().unwrap();
+    let theme = make_theme();
+    let mut app = make_app(
+        Snapshot {
+            git_dir: dir.path().to_path_buf(),
+            ..make_snapshot()
+        },
+        &theme,
+    );
+
+    press(&mut app, KeyCode::Char('t'));
+    assert!(app.popup.is_none());
+    assert_eq!(
+        app.notice.as_deref(),
+        Some("no trace yet: run an action first")
+    );
+
+    crate::trace::init(dir.path(), "loom tui: loom drop a1");
+    crate::trace::log_command("git", "rebase --continue", 12, false, "boom");
+    crate::trace::finalize().unwrap();
+    press(&mut app, KeyCode::Char('t'));
+    let Some(Popup::Trace { lines, .. }) = &app.popup else {
+        panic!("no trace popup");
+    };
+    let text: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+    assert!(text[0].ends_with("loom tui: loom drop a1"), "{text:#?}");
+    assert!(
+        text.iter().any(|l| l.contains("[git] rebase --continue")),
+        "{text:#?}"
+    );
+
+    press(&mut app, KeyCode::Char('t'));
+    assert!(app.popup.is_none(), "t closes it too");
+}

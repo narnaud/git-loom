@@ -41,6 +41,7 @@ Short IDs are displayed like in `git loom status`, so the tree doubles as a chea
 | Mouse click / wheel | Focus, move, scroll |
 | `?` | Show the help popup listing every key |
 | `L` | Show the action log |
+| `t` | Show the latest [trace](trace.md): the git commands the last finished action ran |
 | `R` / `F5` | Reload the tree from the repo |
 | `+` (or `=`) / `-` | Show one more / one fewer context commit before the base (starts at [`loom.statusContext`](../configuration.md#loomstatuscontext), never goes below 1) |
 | `Esc` | Cancel fold, commit, move, rename, or new-branch mode → clear selection (first that applies); it never quits |

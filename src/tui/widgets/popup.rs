@@ -543,6 +543,24 @@ pub(crate) fn render_log(
     scroll.render(frame, rect, lines, block);
 }
 
+/// Draw `lines` under `title` over `area`; `scroll` persists across frames.
+pub(crate) fn render_text(
+    frame: &mut Frame,
+    area: Rect,
+    title: &str,
+    lines: &[Line<'static>],
+    scroll: &mut DiffPane,
+    theme: &TuiTheme,
+) {
+    let rect = centered(area, area.width * 4 / 5, area.height * 4 / 5);
+    frame.render_widget(Clear, rect);
+    let block = Block::default()
+        .title(title.to_string())
+        .borders(Borders::ALL)
+        .border_style(theme.border_active);
+    scroll.render(frame, rect, lines.to_vec(), block);
+}
+
 /// One group of the help popup: a header and its `(keys, effect)` rows.
 pub(crate) type HelpSection = (&'static str, &'static [(&'static str, &'static str)]);
 

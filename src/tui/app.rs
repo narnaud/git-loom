@@ -605,6 +605,12 @@ enum Popup {
     Help {
         scroll: DiffPane,
     },
+    /// The latest trace, read when the popup opened.
+    Trace {
+        title: String,
+        lines: Vec<Line<'static>>,
+        scroll: DiffPane,
+    },
 }
 
 /// The `?` popup: everything the status bar leaves out.
@@ -651,6 +657,7 @@ const HELP: &[popup::HelpSection] = &[
         "Other",
         &[
             ("L", "action log"),
+            ("t", "latest trace: the git commands an action ran"),
             ("R / F5", "reload the tree"),
             ("?", "this help"),
             ("q / Ctrl-C", "quit"),
@@ -1326,7 +1333,50 @@ impl<'a> App<'a> {
                     self.popup = Some(Popup::Help { scroll });
                 }
             },
+            Popup::Trace {
+                title,
+                lines,
+                mut scroll,
+            } => match code {
+                KeyCode::Esc | KeyCode::Char('q' | 't') => {}
+                _ => {
+                    scroll_popup(&mut scroll, code);
+                    self.popup = Some(Popup::Trace {
+                        title,
+                        lines,
+                        scroll,
+                    });
+                }
+            },
         }
+    }
+
+    /// Open the latest trace, as `loom trace` prints it; a notice when there
+    /// is none yet.
+    fn open_trace(&mut self) {
+        let Some(path) = crate::trace::latest_log_path(&self.snapshot.git_dir) else {
+            self.notice = Some("no trace yet: run an action first".to_string());
+            return;
+        };
+        let content = match std::fs::read_to_string(&path) {
+            Ok(content) => content,
+            Err(e) => {
+                self.show_error(
+                    &format!("could not read the trace: {}", e),
+                    AfterNotice::Nothing,
+                );
+                return;
+            }
+        };
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        self.popup = Some(Popup::Trace {
+            title: format!(" Trace {} — t or Esc to close ", name),
+            lines: trace_lines(&content, self.theme),
+            scroll: DiffPane::new(),
+        });
     }
 
     fn open_help(&mut self) {
@@ -1424,6 +1474,10 @@ impl<'a> App<'a> {
             }
             KeyCode::Char('?') => {
                 self.open_help();
+                None
+            }
+            KeyCode::Char('t') => {
+                self.open_trace();
                 None
             }
             // While picking a fold target or placing a commit only navigation,
@@ -3071,10 +3125,11 @@ impl ShellApp for App<'_> {
                 self.start_action(action);
             }
         } else if self.running.is_some() {
-            // The log and help are read-only; everything else waits.
+            // The log, help and trace are read-only; everything else waits.
             match code {
                 KeyCode::Char('L') => self.open_log(),
                 KeyCode::Char('?') => self.open_help(),
+                KeyCode::Char('t') => self.open_trace(),
                 _ => self.notice = Some("an action is running…".to_string()),
             }
         } else if self.pick.is_some() {
@@ -3086,6 +3141,7 @@ impl ShellApp for App<'_> {
             match code {
                 KeyCode::Char('L') => self.open_log(),
                 KeyCode::Char('?') => self.open_help(),
+                KeyCode::Char('t') => self.open_trace(),
                 // Marked, not dropped: the worker reads with `git`, so
                 // letting it outlive the pick would put it beside whatever
                 // action the freed keyboard starts next, over the same index.
@@ -3181,6 +3237,11 @@ impl ShellApp for App<'_> {
             Some(Popup::Help { scroll }) => {
                 popup::render_help(frame, area, HELP, scroll, self.theme)
             }
+            Some(Popup::Trace {
+                title,
+                lines,
+                scroll,
+            }) => popup::render_text(frame, area, title, lines, scroll, self.theme),
             None => {}
         }
     }
@@ -3678,6 +3739,36 @@ fn diff_text(snapshot: &Snapshot, row: &Row) -> String {
         Ok(text) => text,
         Err(e) => format!("error: {}", e),
     }
+}
+
+/// A trace log as `loom trace` colors it.
+fn trace_lines(content: &str, theme: &TuiTheme) -> Vec<Line<'static>> {
+    use crate::trace::TraceLine;
+    crate::trace::classify_log(content)
+        .into_iter()
+        .map(|line| match line {
+            TraceLine::Blank => Line::from(""),
+            TraceLine::Header(text) => Line::from(Span::styled(
+                text.to_string(),
+                theme.message.add_modifier(Modifier::BOLD),
+            )),
+            TraceLine::Rule(text) | TraceLine::Content(text) => {
+                Line::from(Span::styled(text.to_string(), theme.dim))
+            }
+            TraceLine::Command { text, failed } => {
+                let mut spans = vec![Span::styled(text.to_string(), theme.hunk_header)];
+                if failed {
+                    spans.push(Span::styled(
+                        " FAILED",
+                        theme.err.add_modifier(Modifier::BOLD),
+                    ));
+                }
+                Line::from(spans)
+            }
+            TraceLine::Stderr(text) => Line::from(Span::styled(text.to_string(), theme.err)),
+            TraceLine::Label(text) => Line::from(Span::styled(text.to_string(), theme.warn)),
+        })
+        .collect()
 }
 
 /// What a `C` commit will contain: the index the selector just staged.
