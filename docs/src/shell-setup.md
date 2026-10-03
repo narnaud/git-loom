@@ -23,3 +23,39 @@ To find your profile path, run `echo $PROFILE` in PowerShell.
 ```lua
 load(io.popen('git loom completions clink'):read("*a"))()
 ```
+
+## Bash
+
+Add to `~/.bashrc`:
+
+```bash
+eval "$(git loom completions bash)"
+```
+
+`git loom <Tab>` completes as well when git's own bash completion is loaded.
+
+Bash never completes through an alias, so `loom` gets completion by name. To give your own aliases completion, list them in `LOOM_COMMANDS` before the `eval` line; it defaults to `"loom"`:
+
+```bash
+LOOM_COMMANDS="loom gl"
+```
+
+## Zsh
+
+Add to `~/.zshrc`, after `compinit`:
+
+```zsh
+eval "$(git loom completions zsh)"
+```
+
+`git loom <Tab>` completes as well, through zsh's git completion. An alias for `git-loom` completes like it; a function needs `compdef _git-loom <name>`.
+
+## Fish
+
+Add to `~/.config/fish/config.fish`:
+
+```fish
+git loom completions fish | source
+```
+
+`git loom <Tab>` completes as well: fish's git completion hands custom commands to `git-loom`'s. An `alias` for `git-loom` completes like it; a function needs `--wraps git-loom`.

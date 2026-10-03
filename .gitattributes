@@ -1,5 +1,9 @@
 # Embedded assets are compiled into the binary with include_str! and are
 # byte-compared in tests, so they must always check out with LF endings.
 skills/** text eol=lf
+# Embedded Unix shell scripts: bash and zsh choke on a CR.
+src/completions/*.bash text eol=lf
+src/completions/*.zsh text eol=lf
+src/completions/*.fish text eol=lf
 # cmd.exe misparses batch files with LF-only endings.
 *.cmd text eol=crlf

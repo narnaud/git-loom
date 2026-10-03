@@ -392,10 +392,10 @@ enum Command {
     Abort,
 
     // -- Hidden --
-    /// Generate shell completions (powershell, clink)
+    /// Generate shell completions (powershell, clink, bash, zsh, fish)
     #[command(hide = true)]
     Completions {
-        /// Shell to generate completions for (powershell, clink)
+        /// Shell to generate completions for (powershell, clink, bash, zsh, fish)
         shell: String,
     },
     /// Internal: used as GIT_SEQUENCE_EDITOR to write a pre-generated todo file

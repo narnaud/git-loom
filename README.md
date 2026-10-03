@@ -13,7 +13,7 @@
 
 Full documentation is available at **<https://narnaud.github.io/git-loom/>**
 
-- [Shell setup](https://narnaud.github.io/git-loom/shell-setup.html) (completions for PowerShell, Clink)
+- [Shell setup](https://narnaud.github.io/git-loom/shell-setup.html) (completions for PowerShell, Clink, bash, zsh, fish)
 - [Configuration](https://narnaud.github.io/git-loom/configuration.html) (remote type, push remote, hidden branches)
 
 ## Commands
