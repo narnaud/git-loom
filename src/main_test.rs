@@ -89,6 +89,68 @@ fn cli_definition_is_valid() {
     Cli::command().debug_assert();
 }
 
+/// The completion scripts copy clap's command and flag tables by hand, and had
+/// already drifted. Only checks that each name appears somewhere in a script,
+/// not under the right subcommand.
+#[test]
+fn completion_scripts_cover_the_cli() {
+    fn walk(cmd: &clap::Command, path: &str, out: &mut Vec<(String, String)>) {
+        for arg in cmd
+            .get_arguments()
+            // Agents pass `--agent` themselves; nobody tab-completes it.
+            .filter(|a| !a.is_hide_set() && a.get_id() != "agent")
+        {
+            for flag in arg
+                .get_long()
+                .map(|l| format!("--{l}"))
+                .into_iter()
+                .chain(arg.get_short().map(|s| format!("-{s}")))
+            {
+                out.push((path.to_string(), flag));
+            }
+        }
+        for sub in cmd
+            .get_subcommands()
+            .filter(|s| !s.is_hide_set() && s.get_name() != "help")
+        {
+            out.push((path.to_string(), sub.get_name().to_string()));
+            walk(sub, &format!("{path} {}", sub.get_name()), out);
+        }
+    }
+    let mut expected = Vec::new();
+    walk(&Cli::command(), "git-loom", &mut expected);
+
+    let scripts = [
+        ("bash", include_str!("completions/git-loom.bash")),
+        ("zsh", include_str!("completions/git-loom.zsh")),
+        ("fish", include_str!("completions/git-loom.fish")),
+        ("powershell", include_str!("completions/git-loom.ps1")),
+        ("clink", include_str!("completions/git-loom.lua")),
+    ];
+    let mut missing = Vec::new();
+    for (shell, script) in scripts {
+        // fish spells `-t --target` as `-s t -l target`.
+        let script = if shell == "fish" {
+            script.replace(" -s ", " -").replace(" -l ", " --")
+        } else {
+            script.to_string()
+        };
+        let words: std::collections::HashSet<&str> = script
+            .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+            .collect();
+        for (path, word) in &expected {
+            if !words.contains(word.as_str()) {
+                missing.push(format!("{shell}: {path} {word}"));
+            }
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "missing from completions:\n{}",
+        missing.join("\n")
+    );
+}
+
 /// `commit -i` targets the integration branch and `-b` a feature branch;
 /// accepting both would silently drop one of them.
 #[test]

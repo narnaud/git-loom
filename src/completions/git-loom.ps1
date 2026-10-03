@@ -122,17 +122,23 @@ $_gitLoomCompleter = {
         'add' {
             $subFlags = @(
                 @{ Name = '-p'; Description = 'Interactively select hunks to stage' },
-                @{ Name = '--patch'; Description = 'Interactively select hunks to stage' }
+                @{ Name = '--patch'; Description = 'Interactively select hunks to stage' },
+                @{ Name = '--hunks'; Description = 'Hunk id to pick, once per id (needs --hunks-from)' },
+                @{ Name = '--hunks-from'; Description = 'Fingerprint of the listing --hunks came from' }
             )
         }
         'commit' {
             $subFlags = @(
                 @{ Name = '-b'; Description = 'Target feature branch' },
                 @{ Name = '--branch'; Description = 'Target feature branch' },
+                @{ Name = '-i'; Description = 'Commit to the integration branch (loose commit)' },
+                @{ Name = '--integration'; Description = 'Commit to the integration branch (loose commit)' },
                 @{ Name = '-m'; Description = 'Commit message' },
                 @{ Name = '--message'; Description = 'Commit message' },
                 @{ Name = '-p'; Description = 'Interactively select hunks to stage' },
-                @{ Name = '--patch'; Description = 'Interactively select hunks to stage' }
+                @{ Name = '--patch'; Description = 'Interactively select hunks to stage' },
+                @{ Name = '--hunks'; Description = 'Hunk id to pick, once per id (needs --hunks-from)' },
+                @{ Name = '--hunks-from'; Description = 'Fingerprint of the listing --hunks came from' }
             )
         }
         'fold' {
@@ -211,6 +217,11 @@ $_gitLoomCompleter = {
             }
 
             if ($agentSubcommand -eq 'init') {
+                if (-not ($wordToComplete -match '^-')) {
+                    return @('claude') | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+                        [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', 'Claude Code')
+                    }
+                }
                 $subFlags = @(
                     @{ Name = '--project'; Description = 'Install into the repository instead of the home directory' }
                 )

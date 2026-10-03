@@ -17,10 +17,11 @@ local push_matcher = clink.argmatcher()
     :addflags("--no-pr", "-f", "--force", "--help", "-h")
 
 local add_matcher = clink.argmatcher()
-    :addflags("-p", "--patch", "--help", "-h")
+    :addflags("-p", "--patch", "--hunks", "--hunks-from", "--help", "-h")
 
 local commit_matcher = clink.argmatcher()
-    :addflags("-b", "--branch", "-m", "--message", "-p", "--patch", "--help", "-h")
+    :addflags("-b", "--branch", "-i", "--integration", "-m", "--message", "-p", "--patch",
+        "--hunks", "--hunks-from", "--help", "-h")
 
 local fold_matcher = clink.argmatcher()
     :addflags("-c", "--create", "-p", "--patch", "--above", "--below", "--hunks",
