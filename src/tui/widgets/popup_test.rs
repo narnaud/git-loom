@@ -286,3 +286,11 @@ fn notice_and_log_render() {
     let text = render_text(|f, area| render_log(f, area, &[], &mut scroll, &theme));
     assert!(text.contains("no actions yet"));
 }
+
+#[test]
+fn plain_message_lines_are_shown_as_is() {
+    let theme = theme();
+    let lines = message_lines(Level::Plain, "From origin\n + a...b `x`", &theme);
+    let text: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+    assert_eq!(text, ["From origin", " + a...b `x`"]);
+}

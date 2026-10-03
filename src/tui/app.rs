@@ -1,7 +1,7 @@
 //! Interactive status TUI (`loom tui`): the status tree on the left, the diff
 //! of the item under the cursor on the right.
 //!
-//! Actions (commit, fold, move, split, branch, drop, absorb, reword) run the regular loom
+//! Actions (commit, fold, move, split, branch, drop, absorb, reword, update) run the regular loom
 //! command on a worker thread while the TUI stays up: the command's prompts
 //! become popups and its messages a log (`core::ui`), and only an editor takes
 //! the terminal over. Fold, move and commit pick their target in a second step
@@ -44,7 +44,7 @@ use crate::tui::widgets::common::{colorize_diff, pane_block};
 use crate::tui::widgets::diff_pane::DiffPane;
 use crate::tui::widgets::list_pane::ListPane;
 use crate::tui::widgets::popup::{self, LogEntry, Notice, Prompt, PromptOutcome, TextField};
-use crate::{absorb, branch, commit, drop, fold, reword, split};
+use crate::{absorb, branch, commit, drop, fold, reword, split, update};
 
 // ── Data model ───────────────────────────────────────────────────────────
 
@@ -416,6 +416,8 @@ enum Action {
         target: String,
         name: Option<String>,
     },
+    /// `loom update`: takes no target.
+    Update,
 }
 
 /// Why the event loop returned.
@@ -634,6 +636,7 @@ const HELP: &[popup::HelpSection] = &[
             ("d", "drop"),
             ("a", "absorb into the commits that touched the same lines"),
             ("r", "reword a commit, or rename a branch"),
+            ("u", "update: pull-rebase onto upstream"),
         ],
     ),
     (
@@ -789,6 +792,7 @@ fn execute_action(
         Action::Drop { targets } => drop::run(targets, false),
         Action::Absorb { files } => absorb::run(false, files),
         Action::Reword { target, name } => reword::run(target, name),
+        Action::Update => update::run(false),
     };
     crate::trace::finalize();
     result
@@ -1123,6 +1127,7 @@ impl<'a> App<'a> {
                     words.extend(["-m".into(), name.clone()]);
                 }
             }
+            Action::Update => words.push("update".into()),
         }
         words.join(" ")
     }
@@ -1407,8 +1412,8 @@ impl<'a> App<'a> {
             // Enter, and Esc apply — action keys must not fire and discard
             // the pending operation.
             KeyCode::Char(
-                ' ' | 'c' | 'C' | 'f' | 'F' | 'm' | 's' | 'S' | 'b' | 'd' | 'a' | 'r' | 'R' | '+'
-                | '=' | '-',
+                ' ' | 'c' | 'C' | 'f' | 'F' | 'm' | 's' | 'S' | 'b' | 'd' | 'a' | 'r' | 'u' | 'R'
+                | '+' | '=' | '-',
             )
             | KeyCode::F(5)
                 if self.placing().is_some() =>
@@ -1453,6 +1458,7 @@ impl<'a> App<'a> {
             KeyCode::Char('d') => self.action_drop(),
             KeyCode::Char('a') => self.action_absorb(),
             KeyCode::Char('r') => self.action_reword(),
+            KeyCode::Char('u') => Some(Action::Update),
             KeyCode::Char('R') | KeyCode::F(5) => {
                 self.reload();
                 None

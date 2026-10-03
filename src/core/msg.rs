@@ -167,9 +167,11 @@ pub fn human_stream_width() -> Option<u16> {
 
 /// Print text meant only for a person, which the JSON already carries or an
 /// agent has no use for: the status tree, `update`'s fetch summaries. Stderr in
-/// agent mode (spec 019); never reached from the TUI.
+/// agent mode (spec 019); a plain log line under the TUI.
 pub fn human(text: impl std::fmt::Display) {
-    if agent_mode::enabled() {
+    if ui::active() {
+        ui::message(Level::Plain, text.to_string().trim_end_matches('\n'));
+    } else if agent_mode::enabled() {
         eprint!("{}", text);
     } else {
         print!("{}", text);
@@ -178,7 +180,9 @@ pub fn human(text: impl std::fmt::Display) {
 
 /// Like [`human`], for a single line.
 pub fn human_line(text: impl std::fmt::Display) {
-    if agent_mode::enabled() {
+    if ui::active() {
+        ui::message(Level::Plain, &text.to_string());
+    } else if agent_mode::enabled() {
         eprintln!("{}", text);
     } else {
         println!("{}", text);

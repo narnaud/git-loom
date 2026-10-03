@@ -47,12 +47,18 @@ pub(crate) fn highlight_backticks(text: &str, base: Style, theme: &TuiTheme) -> 
 }
 
 /// The `✓`/`!`/`✗` line for a message and its `›` hint continuations, as the
-/// CLI prints them.
+/// CLI prints them; a `Plain` message is its lines as they are.
 pub(crate) fn message_lines(level: Level, text: &str, theme: &TuiTheme) -> Vec<Line<'static>> {
     let (symbol, style) = match level {
         Level::Success => ("✓", theme.ok),
         Level::Warn => ("!", theme.warn),
         Level::Error => ("✗", theme.err),
+        Level::Plain => {
+            return text
+                .lines()
+                .map(|line| Line::from(Span::raw(line.to_string())))
+                .collect();
+        }
     };
     text.lines()
         .enumerate()

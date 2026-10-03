@@ -172,3 +172,21 @@ fn a_dropped_suspend_ack_is_an_error() {
     }
     assert!(handle.join().unwrap().is_err());
 }
+
+/// `update`'s fetch summary used to print over the TUI's screen.
+#[test]
+fn human_text_is_a_plain_log_line() {
+    let (rx, handle) = with_sink(|| {
+        msg::human_line("From origin");
+        msg::human("tree\n");
+    });
+    handle.join().unwrap();
+    let got: Vec<String> = rx
+        .try_iter()
+        .map(|r| match r {
+            Request::Message { level, text } => format!("{level:?}:{text}"),
+            _ => "other".to_string(),
+        })
+        .collect();
+    assert_eq!(got, ["Plain:From origin", "Plain:tree"]);
+}

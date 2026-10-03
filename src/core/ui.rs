@@ -14,12 +14,14 @@ thread_local! {
     static SINK: RefCell<Option<Sender<Request>>> = const { RefCell::new(None) };
 }
 
-/// Severity of a message line, mirroring `msg::success/warn/error`.
+/// Severity of a message line, mirroring `msg::success/warn/error`; `Plain`
+/// is `msg::human` text, such as git's fetch summary, shown as is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Level {
     Success,
     Warn,
     Error,
+    Plain,
 }
 
 /// What a prompt asks for, mirroring the `msg` prompt functions.

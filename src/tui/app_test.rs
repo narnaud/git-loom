@@ -1256,11 +1256,17 @@ fn commit_mode_blocks_action_keys() {
     for code in [
         KeyCode::Char(' '),
         KeyCode::Char('c'),
+        KeyCode::Char('C'),
         KeyCode::Char('f'),
         KeyCode::Char('F'),
+        KeyCode::Char('m'),
+        KeyCode::Char('s'),
+        KeyCode::Char('S'),
         KeyCode::Char('b'),
         KeyCode::Char('d'),
+        KeyCode::Char('a'),
         KeyCode::Char('r'),
+        KeyCode::Char('u'),
         KeyCode::Char('R'),
         KeyCode::Char('+'),
         KeyCode::Char('='),
@@ -4240,4 +4246,11 @@ fn absorb_refuses_an_empty_working_tree() {
 
     assert!(app.action_absorb().is_none());
     assert_eq!(app.notice.as_deref(), Some("absorb: no local changes"));
+}
+
+#[test]
+fn update_runs_without_arguments() {
+    let theme = make_theme();
+    let app = make_app(make_snapshot(), &theme);
+    assert_eq!(app.command_line(&Action::Update), "loom update");
 }

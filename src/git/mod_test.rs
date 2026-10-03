@@ -107,3 +107,28 @@ fn empty_stop_is_spelled_ask_before_git_2_45() {
     assert_eq!(super::empty_stop_for(Some((2, 40))), "ask");
     assert_eq!(super::empty_stop_for(None), "ask");
 }
+
+/// Under the TUI a credential prompt would hang behind the raw-mode screen.
+#[test]
+fn git_never_prompts_on_the_terminal_under_the_tui() {
+    use crate::core::ui;
+    use std::ffi::OsStr;
+
+    // What the command sets, not what the child sees: an inherited
+    // `GIT_TERMINAL_PROMPT=0` would pass the latter without the fix.
+    let prompt_env = || {
+        let command = super::captured_command(std::path::Path::new("."), &["status"]);
+        command
+            .get_envs()
+            .find(|(key, _)| *key == OsStr::new("GIT_TERMINAL_PROMPT"))
+            .and_then(|(_, value)| value)
+            .map(|value| value.to_owned())
+    };
+    assert_eq!(prompt_env(), None);
+
+    let (sender, _receiver) = std::sync::mpsc::channel();
+    ui::install(sender);
+    let under_tui = prompt_env();
+    ui::uninstall();
+    assert_eq!(under_tui.as_deref(), Some(OsStr::new("0")));
+}

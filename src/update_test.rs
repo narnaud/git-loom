@@ -1393,3 +1393,150 @@ fn update_keeps_staging_across_continue() {
     assert!(!crate::git::rebase_is_in_progress(t.repo.path()));
     assert_eq!(t.status_porcelain(), before);
 }
+
+/// The question stands alone: under the TUI it is a menu, away from the log.
+#[test]
+fn removal_prompt_names_each_branch_and_why() {
+    let names = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    assert_eq!(
+        super::removal_prompt(&names(&["feat"]), &[]),
+        "Remove local branch?\n`feat`: fully merged upstream"
+    );
+    assert_eq!(
+        super::removal_prompt(&[], &names(&["feat"])),
+        "Remove local branch?\n`feat`: upstream gone"
+    );
+    assert_eq!(
+        super::removal_prompt(&names(&["a", "b"]), &names(&["c"])),
+        "Remove 3 local branches?\n`a`: fully merged upstream\n`b`: fully merged upstream\n`c`: upstream gone"
+    );
+    assert_eq!(
+        super::removal_prompt(&[], &names(&["c", "d"])),
+        "Remove 2 local branches?\n`c`: upstream gone\n`d`: upstream gone"
+    );
+}
+
+struct TuiUpdate {
+    test_repo: TestRepo,
+    prompts: Vec<String>,
+    warnings: Vec<String>,
+    result: anyhow::Result<()>,
+}
+
+impl TuiUpdate {
+    fn kept(&self) -> bool {
+        self.test_repo
+            .repo
+            .find_branch("feature-a", BranchType::Local)
+            .is_ok()
+    }
+}
+
+/// Run `update` as the TUI does, with `feature-a` fully merged upstream, and
+/// give every prompt `answer` (`None` dismisses it).
+fn update_under_tui(answer: Option<crate::core::ui::Answer>) -> TuiUpdate {
+    use crate::core::ui::{self, Request};
+
+    let test_repo = TestRepo::new_with_remote();
+    let merge_base_oid = test_repo.head_oid();
+    test_repo.create_branch_at_commit("feature-a", merge_base_oid);
+    test_repo.switch_branch("feature-a");
+    let feature_oid = test_repo.commit("Feature A work", "feature-a.txt");
+    test_repo.switch_branch("integration");
+    test_repo.merge_no_ff("feature-a");
+    test_repo.cherry_pick_to_remote(feature_oid, "Feature A work");
+
+    let (prompts, warnings, result) = test_repo.in_dir(|| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            let worker = scope.spawn(move || {
+                ui::install(tx);
+                let result = super::run(false);
+                ui::uninstall();
+                result
+            });
+            let (mut prompts, mut warnings) = (Vec::new(), Vec::new());
+            for request in rx {
+                match request {
+                    Request::Prompt { prompt, reply, .. } => {
+                        prompts.push(prompt);
+                        let _ = reply.send(answer.clone());
+                    }
+                    Request::Message {
+                        level: ui::Level::Warn,
+                        text,
+                    } => warnings.push(text),
+                    _ => {}
+                }
+            }
+            (prompts, warnings, worker.join().unwrap())
+        })
+    });
+    TuiUpdate {
+        test_repo,
+        prompts,
+        warnings,
+        result,
+    }
+}
+
+/// Under the TUI the warnings land in the log, out of sight of the menu: the
+/// question alone has to say what goes.
+#[test]
+fn update_asks_with_the_branches_named_in_the_question() {
+    use crate::core::ui::Answer;
+
+    let run = update_under_tui(Some(Answer::Bool(false)));
+    assert!(run.result.is_ok(), "{:?}", run.result.err());
+    assert_eq!(
+        run.prompts,
+        ["Remove local branch?\n`feature-a`: fully merged upstream"]
+    );
+    assert!(run.warnings.is_empty(), "{:?}", run.warnings);
+    assert!(run.kept(), "answering no keeps the branch");
+
+    let run = update_under_tui(Some(Answer::Bool(true)));
+    assert!(run.result.is_ok(), "{:?}", run.result.err());
+    assert!(!run.kept(), "answering yes removes the branch");
+}
+
+/// `Esc` on the menu used to end a landed update as `Cancelled`, which the
+/// TUI takes for "nothing changed": no reload, a "cancelled" notice.
+#[test]
+fn dismissing_the_cleanup_question_still_succeeds() {
+    let run = update_under_tui(None);
+    assert_eq!(run.prompts.len(), 1);
+    assert!(run.result.is_ok(), "{:?}", run.result.err());
+    assert!(run.kept(), "dismissing keeps the branch");
+}
+
+/// Under the TUI git may not prompt, so a failed fetch points at credentials.
+#[test]
+fn a_failed_fetch_under_the_tui_hints_at_credentials() {
+    use crate::core::ui;
+
+    let test_repo = TestRepo::new_with_remote();
+    test_repo
+        .repo
+        .remote_set_url("origin", "/nonexistent/remote.git")
+        .unwrap();
+
+    let message = test_repo.in_dir(|| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            let worker = scope.spawn(move || {
+                ui::install(tx);
+                let result = super::run(false);
+                ui::uninstall();
+                result
+            });
+            for _ in rx {}
+            worker.join().unwrap().unwrap_err().to_string()
+        })
+    });
+    assert!(message.starts_with("Fetch failed\n"), "{message}");
+    assert!(message.contains("credentials"), "{message}");
+
+    let outside_tui = test_repo.in_dir(|| super::run(false)).unwrap_err();
+    assert!(!outside_tui.to_string().contains("credentials"));
+}
