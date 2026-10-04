@@ -5,34 +5,34 @@
 
 ### Features ✨
 
-* **branch:** refuse to merge a branch woven into another worktree's integration branch ([4ed9997](https://github.com/narnaud/git-loom/commit/4ed9997566ea06c53965ac137ba89a70dc2ec70b))
-* **completions:** add bash, zsh and fish completion scripts ([5a829d8](https://github.com/narnaud/git-loom/commit/5a829d8bfc88759301faf76117f795f90c22a98e))
-* **completions:** let Clink users name their own loom macros ([395304d](https://github.com/narnaud/git-loom/commit/395304d82703f5f7adb4e4fce8bdf3b53b3c0aef))
-* **init:** name a linked worktree's integration branch after its directory ([9e4a137](https://github.com/narnaud/git-loom/commit/9e4a137dac04e495a461df29ce5c1c4cfc0f7e7a))
-* **tui:** run loom update with u ([e53929e](https://github.com/narnaud/git-loom/commit/e53929ee3143436c38ef2c46c30f838d43cbe1a7))
-* **worktree:** add worktree new, list and drop ([b92eda9](https://github.com/narnaud/git-loom/commit/b92eda92064536a32c27855a05ef23672068de7a))
-* **worktree:** add wt cd and the loom shell function that changes into a worktree ([547c4ba](https://github.com/narnaud/git-loom/commit/547c4bae026516214e7dcef08fe7253b8504a879))
-* **worktree:** list worktrees when wt is run without a subcommand ([13efe25](https://github.com/narnaud/git-loom/commit/13efe25b10366d0581b9f7157f77ca2ab3aa685e))
-* **worktree:** mark the main and linked worktrees with icons in wt list ([9a795fd](https://github.com/narnaud/git-loom/commit/9a795fd060c8e09650c1988a3ccf7e155caa062a))
-* **worktree:** replace wt cd with wt path and drop the loom shell function ([b880453](https://github.com/narnaud/git-loom/commit/b8804539c8acf07e0d1f430bbe34fe2936cd1b50))
+* **branch:** refuse to merge a branch woven into another worktree's integration branch ([4ed9997](https://github.com/narnaud/git-loom/commit/4ed9997566ea06c53965ac137ba89a70dc2ec70b)) by @narnaud
+* **completions:** add bash, zsh and fish completion scripts ([5a829d8](https://github.com/narnaud/git-loom/commit/5a829d8bfc88759301faf76117f795f90c22a98e)) by @narnaud
+* **completions:** let Clink users name their own loom macros ([395304d](https://github.com/narnaud/git-loom/commit/395304d82703f5f7adb4e4fce8bdf3b53b3c0aef)) by @narnaud
+* **init:** name a linked worktree's integration branch after its directory ([9e4a137](https://github.com/narnaud/git-loom/commit/9e4a137dac04e495a461df29ce5c1c4cfc0f7e7a)) by @narnaud
+* **tui:** run loom update with u ([e53929e](https://github.com/narnaud/git-loom/commit/e53929ee3143436c38ef2c46c30f838d43cbe1a7)) by @narnaud
+* **worktree:** add worktree new, list and drop ([b92eda9](https://github.com/narnaud/git-loom/commit/b92eda92064536a32c27855a05ef23672068de7a)) by @narnaud
+* **worktree:** add wt cd and the loom shell function that changes into a worktree ([547c4ba](https://github.com/narnaud/git-loom/commit/547c4bae026516214e7dcef08fe7253b8504a879)) by @narnaud
+* **worktree:** list worktrees when wt is run without a subcommand ([13efe25](https://github.com/narnaud/git-loom/commit/13efe25b10366d0581b9f7157f77ca2ab3aa685e)) by @narnaud
+* **worktree:** mark the main and linked worktrees with icons in wt list ([9a795fd](https://github.com/narnaud/git-loom/commit/9a795fd060c8e09650c1988a3ccf7e155caa062a)) by @narnaud
+* **worktree:** replace wt cd with wt path and drop the loom shell function ([b880453](https://github.com/narnaud/git-loom/commit/b8804539c8acf07e0d1f430bbe34fe2936cd1b50)) by @narnaud
 
 
 ### Bug Fixes 🐞
 
-* **completions:** bring pwsh and clink flags back in line with the CLI ([d8a2423](https://github.com/narnaud/git-loom/commit/d8a24235453354704adaee140a386ab977ceb7a5))
-* **fold:** keep staged work out of an uncommit from HEAD ([269f97e](https://github.com/narnaud/git-loom/commit/269f97e04ccd715faac6220ff62628e2ed740843))
-* **split,fold:** keep a rename's deletion in the -p commit hunk picker ([5af3252](https://github.com/narnaud/git-loom/commit/5af3252ac7514fa919761eac9d7dc2a5c89fd3ca))
-* **split,fold:** keep non-ASCII paths in the commit hunk picker ([6807bb2](https://github.com/narnaud/git-loom/commit/6807bb23c9e0ec51ae96ea5987e335d7c9a18583))
+* **completions:** bring pwsh and clink flags back in line with the CLI ([d8a2423](https://github.com/narnaud/git-loom/commit/d8a24235453354704adaee140a386ab977ceb7a5)) by @narnaud
+* **fold:** keep staged work out of an uncommit from HEAD ([269f97e](https://github.com/narnaud/git-loom/commit/269f97e04ccd715faac6220ff62628e2ed740843)) by @dfaure-kdab
+* **split,fold:** keep a rename's deletion in the -p commit hunk picker ([5af3252](https://github.com/narnaud/git-loom/commit/5af3252ac7514fa919761eac9d7dc2a5c89fd3ca)) by @dfaure-kdab
+* **split,fold:** keep non-ASCII paths in the commit hunk picker ([6807bb2](https://github.com/narnaud/git-loom/commit/6807bb23c9e0ec51ae96ea5987e335d7c9a18583)) by @dfaure-kdab
 
 
 ### Changes
 
-* **worktree:** allocate worktree short IDs among worktrees only ([1976980](https://github.com/narnaud/git-loom/commit/197698064c511736de65e70fd0f8353f000cb7d3))
+* **worktree:** allocate worktree short IDs among worktrees only ([1976980](https://github.com/narnaud/git-loom/commit/197698064c511736de65e70fd0f8353f000cb7d3)) by @narnaud
 
 
 ### Tests
 
-* **update:** pin loom.pruneGoneBranches in the TUI update test ([02bce60](https://github.com/narnaud/git-loom/commit/02bce60d3ae33529e95c68ed72fd424e3df2edef))
+* **update:** pin loom.pruneGoneBranches in the TUI update test ([02bce60](https://github.com/narnaud/git-loom/commit/02bce60d3ae33529e95c68ed72fd424e3df2edef)) by @narnaud
 
 ## [0.25.0](https://github.com/narnaud/git-loom/compare/v0.24.0...v0.25.0) (2026-09-27)
 
