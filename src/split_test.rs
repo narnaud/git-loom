@@ -627,6 +627,89 @@ fn split_with_editor_stamps_the_first_half_and_keeps_the_second() {
     assert_eq!(change_id_at(&test_repo, 0).as_deref(), Some(CHANGE_ID));
 }
 
+/// Aborting the editor fails the first commit; the HEAD path has no rebase
+/// abort to put the commit back, nor the user's staged changes onto it.
+#[test]
+fn an_aborted_first_commit_puts_the_head_commit_back() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("Base", "base.txt");
+    let target_oid = test_repo.commit_multi(&[("a.txt", "a"), ("b.txt", "b")], "Two files commit");
+    test_repo.write_file("base.txt", "staged edit\n");
+    test_repo.stage_files(&["base.txt"]);
+    test_repo.set_fake_editor("");
+
+    assert!(
+        super::split_commit(
+            &test_repo.repo,
+            &target_oid.to_string(),
+            None,
+            None,
+            vec!["a.txt".to_string()],
+            &crate::core::graph::Theme::dark(),
+        )
+        .is_err()
+    );
+
+    assert_eq!(test_repo.head_oid(), target_oid);
+    assert_eq!(test_repo.status_porcelain(), "M  base.txt\n");
+}
+
+#[test]
+fn an_aborted_first_commit_of_a_hunk_split_puts_the_head_commit_back() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("Base", "base.txt");
+    let target_oid = test_repo.commit_multi(&[("a.txt", "a"), ("b.txt", "b")], "Two files commit");
+    let workdir = test_repo.workdir();
+    let mut selections = crate::core::staging::collect_commit_hunks(&workdir, "HEAD", &[]).unwrap();
+    for file in &mut selections {
+        for hunk in &mut file.hunks {
+            hunk.selected = file.path == "a.txt";
+        }
+    }
+    test_repo.set_fake_editor("");
+
+    assert!(
+        super::perform_split_by_hunks(
+            &test_repo.repo,
+            &workdir,
+            target_oid,
+            &selections,
+            None,
+            "Two files commit",
+        )
+        .is_err()
+    );
+
+    assert_eq!(test_repo.head_oid(), target_oid);
+    assert_eq!(test_repo.status_porcelain(), "");
+}
+
+/// At the rebase pause the half not yet committed sits untracked, and `git
+/// rebase --abort` refuses to overwrite it until the commit is put back.
+#[test]
+fn an_aborted_first_commit_of_an_older_commit_leaves_history_alone() {
+    let test_repo = TestRepo::new_with_remote();
+    let target_oid = test_repo.commit_multi(&[("a.txt", "a"), ("b.txt", "b")], "Two files commit");
+    let head = test_repo.commit("Later commit", "later.txt");
+    test_repo.set_fake_editor("");
+
+    assert!(
+        super::split_commit(
+            &test_repo.repo,
+            &target_oid.to_string(),
+            None,
+            None,
+            vec!["a.txt".to_string()],
+            &crate::core::graph::Theme::dark(),
+        )
+        .is_err()
+    );
+
+    assert_eq!(test_repo.head_oid(), head);
+    assert!(!crate::git::rebase_is_in_progress(test_repo.repo.path()));
+    assert_eq!(test_repo.status_porcelain(), "");
+}
+
 // ── Replay hint ───────────────────────────────────────────────────────
 
 fn hint(message: Option<&str>, patch: bool, hunks: HunkArgs, files: &[&str]) -> String {

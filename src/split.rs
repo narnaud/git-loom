@@ -333,21 +333,43 @@ fn perform_head_split(
     msg1: Option<&str>,
     msg2: &str,
 ) -> Result<(String, String)> {
+    split_head_or_undo(workdir, |original| {
+        let selected_refs: Vec<&str> = selected.iter().map(|s| s.as_str()).collect();
+        git::stage_from(workdir, original, &selected_refs)?;
+        commit_or_editor(repo, workdir, msg1)?;
+
+        let remaining_refs: Vec<&str> = remaining.iter().map(|s| s.as_str()).collect();
+        git::stage_from(workdir, original, &remaining_refs)?;
+        git::commit(workdir, msg2)
+    })
+}
+
+/// Reset HEAD to its parent, let `make_commits` commit the two halves of the
+/// former HEAD (passed as `original`), and return their hashes.
+///
+/// Any failure puts HEAD and the index back on `original` (Spec 013).
+fn split_head_or_undo(
+    workdir: &std::path::Path,
+    make_commits: impl FnOnce(&str) -> Result<()>,
+) -> Result<(String, String)> {
     let original = git::rev_parse(workdir, "HEAD")?;
     git::reset_mixed(workdir, "HEAD~1")?;
 
-    let selected_refs: Vec<&str> = selected.iter().map(|s| s.as_str()).collect();
-    git::stage_from(workdir, &original, &selected_refs)?;
-    commit_or_editor(repo, workdir, msg1)?;
-
-    let remaining_refs: Vec<&str> = remaining.iter().map(|s| s.as_str()).collect();
-    git::stage_from(workdir, &original, &remaining_refs)?;
-    git::commit(workdir, msg2)?;
-
-    let hash2 = git::rev_parse(workdir, "HEAD")?;
-    let hash1 = git::rev_parse(workdir, "HEAD~1")?;
-
-    Ok((hash1, hash2))
+    let result = make_commits(&original).and_then(|()| {
+        Ok((
+            git::rev_parse(workdir, "HEAD~1")?,
+            git::rev_parse(workdir, "HEAD")?,
+        ))
+    });
+    if result.is_err()
+        && let Err(e) = git::reset_mixed(workdir, &original)
+    {
+        msg::warn(&format!(
+            "could not put the commit back on HEAD: {e}\n\
+             The commit being split is {original}"
+        ));
+    }
+    result
 }
 
 /// Perform the hunk-based split operation.
@@ -386,44 +408,38 @@ fn perform_head_split_by_hunks(
     msg1: Option<&str>,
     msg2: &str,
 ) -> Result<(String, String)> {
-    let original = git::rev_parse(workdir, "HEAD")?;
-
-    git::reset_mixed(workdir, "HEAD~1")?;
-
-    let mut selected_patch = String::new();
-    for file in selections {
-        let selected: Vec<_> = file
-            .hunks
-            .iter()
-            .filter(|h| h.selected)
-            .map(|h| &h.hunk)
-            .collect();
-        if selected.is_empty() {
-            continue;
+    split_head_or_undo(workdir, |original| {
+        let mut selected_patch = String::new();
+        for file in selections {
+            let selected: Vec<_> = file
+                .hunks
+                .iter()
+                .filter(|h| h.selected)
+                .map(|h| &h.hunk)
+                .collect();
+            if selected.is_empty() {
+                continue;
+            }
+            // A submodule is listed as binary, so it too comes whole from the commit.
+            if file.binary || file.index_status == 'D' {
+                git::stage_from(workdir, original, &[&file.path])?;
+            } else {
+                selected_patch.push_str(&diff::build_hunk_patch(&file.path, &selected));
+            }
         }
-        // A submodule is listed as binary, so it too comes whole from the commit.
-        if file.binary || file.index_status == 'D' {
-            git::stage_from(workdir, &original, &[&file.path])?;
-        } else {
-            selected_patch.push_str(&diff::build_hunk_patch(&file.path, &selected));
+        if !selected_patch.is_empty() {
+            git::apply_cached_patch(workdir, &selected_patch)?;
         }
-    }
-    if !selected_patch.is_empty() {
-        git::apply_cached_patch(workdir, &selected_patch)?;
-    }
 
-    commit_or_editor(repo, workdir, msg1)?;
+        commit_or_editor(repo, workdir, msg1)?;
 
-    for file in selections {
-        if file.hunks.iter().any(|h| !h.selected) {
-            git::stage_from(workdir, &original, &[&file.path])?;
+        for file in selections {
+            if file.hunks.iter().any(|h| !h.selected) {
+                git::stage_from(workdir, original, &[&file.path])?;
+            }
         }
-    }
-    git::commit(workdir, msg2)?;
-
-    let hash2 = git::rev_parse(workdir, "HEAD")?;
-    let hash1 = git::rev_parse(workdir, "HEAD~1")?;
-    Ok((hash1, hash2))
+        git::commit(workdir, msg2)
+    })
 }
 
 #[cfg(test)]

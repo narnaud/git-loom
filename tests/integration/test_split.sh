@@ -272,4 +272,43 @@ assert_exit_ok $? "staged_nonhead_preserved_ok"
 staged=$(git -C "$WORK" diff --cached --name-only)
 assert_contains "$staged" "staged_nonhead.txt" "staged_nonhead_still_staged"
 
+# A failing second commit is the one case where HEAD has already moved onto
+# the first half when the split is taken back. The hook keys on the subject
+# the second half keeps from the commit being split.
+reject_second_commit() {
+    mkdir -p "$WORK/.git/hooks"
+    git -C "$WORK" config core.hooksPath "$WORK/.git/hooks"
+    printf '#!/bin/sh\ngrep -q "Second half" "$1" && exit 1\nexit 0\n' > "$WORK/.git/hooks/commit-msg"
+    chmod +x "$WORK/.git/hooks/commit-msg"
+}
+
+describe "a failed second commit puts the HEAD commit back"
+setup_repo_with_remote
+echo "content a" > "$WORK/fa.txt"
+echo "content b" > "$WORK/fb.txt"
+git -C "$WORK" add fa.txt fb.txt
+git -C "$WORK" commit -q -m "Second half"
+failed_hash="$(head_hash)"
+reject_second_commit
+gl_capture split HEAD -m "First part" fa.txt
+assert_exit_fail "$CODE" "split_second_fails"
+assert_eq "$failed_hash" "$(head_hash)" "split_second_fails_head_back"
+assert_eq "" "$(git -C "$WORK" status --porcelain)" "split_second_fails_clean"
+
+describe "a failed second commit leaves an older commit's history alone"
+setup_repo_with_remote
+echo "content a" > "$WORK/ga.txt"
+echo "content b" > "$WORK/gb.txt"
+git -C "$WORK" add ga.txt gb.txt
+git -C "$WORK" commit -q -m "Second half"
+older_hash="$(head_hash)"
+commit_file "Above older" "above-older.txt"
+above_hash="$(head_hash)"
+reject_second_commit
+gl_capture split "$older_hash" -m "First part" ga.txt
+assert_exit_fail "$CODE" "split_older_second_fails"
+assert_eq "$above_hash" "$(head_hash)" "split_older_second_fails_head_back"
+assert_eq "" "$(git -C "$WORK" status --porcelain)" "split_older_second_fails_clean"
+[[ ! -d "$WORK/.git/rebase-merge" ]] || fail "[split_older_second_fails_no_rebase] still mid-rebase"
+
 pass

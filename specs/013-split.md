@@ -160,6 +160,11 @@ non-HEAD rebase, the rebase is aborted automatically and the repository is
 returned to its original state. `loom continue` / `loom abort` are not
 supported for split.
 
+A failed commit (a refusing hook, an emptied editor message) puts HEAD and the
+index back on the original commit with a mixed reset, leaving the working tree
+alone. On HEAD there is no rebase to abort; at a rebase pause the abort cannot
+run before it, since the half not yet committed can sit untracked.
+
 Pre-existing staged changes are always restored regardless of outcome.
 
 ## Prerequisites
