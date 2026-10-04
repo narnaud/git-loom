@@ -1438,6 +1438,13 @@ fn update_under_tui(answer: Option<crate::core::ui::Answer>) -> TuiUpdate {
     use crate::core::ui::{self, Request};
 
     let test_repo = TestRepo::new_with_remote();
+    // A global `loom.pruneGoneBranches = true` would skip the question.
+    test_repo
+        .repo
+        .config()
+        .unwrap()
+        .set_bool("loom.pruneGoneBranches", false)
+        .unwrap();
     let merge_base_oid = test_repo.head_oid();
     test_repo.create_branch_at_commit("feature-a", merge_base_oid);
     test_repo.switch_branch("feature-a");
