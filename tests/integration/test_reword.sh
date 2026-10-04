@@ -209,4 +209,32 @@ assert_exit_ok $? "reword_unstaged_ok"
 assert_head_msg "Unstaged reword done" "reword_unstaged_msg"
 assert_file_content "unstaged-reword.txt" "modified content" "reword_unstaged_restored"
 
+
+# ── GIT ARGUMENT FORWARDING ───────────────────────────────────────────────────
+
+describe "reword: a commit-msg hook is skipped with -- --no-verify"
+setup_repo_with_remote
+commit_file "Hooked reword" "hooked-reword.txt"
+commit_file "Above reword" "above-reword.txt"
+hooked_hash=$(git -C "$WORK" rev-parse HEAD~1)
+install_failing_hook commit-msg
+gl_capture reword "$hooked_hash" -m "Reworded"
+assert_exit_fail "$CODE" "reword_hook_blocks"
+assert_eq "Hooked reword" "$(msg_at 1)" "reword_hook_message_kept"
+gl_capture reword "$hooked_hash" -m "Reworded" -- --no-verify
+assert_exit_ok "$CODE" "reword_no_verify_ok"
+assert_eq "Reworded" "$(msg_at 1)" "reword_no_verify_message"
+
+describe "reword: a forwarded --dry-run aborts the reword"
+gl_capture reword HEAD -m "Never" -- --dry-run
+assert_exit_fail "$CODE" "reword_dry_run_fail"
+assert_contains "$OUT" "nothing was reworded" "reword_dry_run_msg"
+assert_eq "Above reword" "$(head_msg)" "reword_dry_run_message_kept"
+
+describe "reword: renaming a branch takes no arguments after --"
+git -C "$WORK" branch rename-me
+gl_capture reword rename-me -m renamed -- --no-verify
+assert_exit_fail "$CODE" "reword_branch_args_fail"
+assert_contains "$OUT" "renaming a branch" "reword_branch_args_msg"
+
 pass

@@ -38,16 +38,16 @@ itself uses. The cost is one extra `--`.
 | `fold`  | `git commit` |
 | `split` | `git commit`, both of them |
 | `absorb`| `git commit`, every `fixup!` commit |
+| `reword`| `git commit --amend` |
 
-The last three drive a rebase like the commands below, but they also make
+The last four drive a rebase like the commands below, but they also make
 commits of their own along the way, and those run the user's commit hooks. See
 [Fold Commits Too](#fold-commits-too) and [Other Commands That
 Commit](#other-commands-that-commit).
 
 Every other command either renders its output itself (`status`, `tui`, `trace`)
-or drives a rebase through Weave (`swap`, `drop`, `reword`, `branch`, `update`,
-`init`), where there is no single git command the arguments could belong to.
-`reword` also makes a commit of its own and is not covered yet.
+or only rebases (`swap`, `drop`, `branch`, `update`, `init`), where there is no
+single git command the arguments could belong to.
 
 ## What Happens
 
@@ -86,6 +86,7 @@ git-loom add f1 -- -f             # git add -f -- file1.txt
 git-loom fold f1 ab -- -n         # git commit -n --amend --no-edit --allow-empty
 git-loom split ab -m x f1 -- -n   # git commit -n -m x, twice
 git-loom absorb -- -n             # git commit -n -m 'fixup! …', per target
+git-loom reword ab -m x -- -n     # git commit --quiet -n --allow-empty --amend --only -m x
 ```
 
 Because the tokens are never inspected, an option's value may be attached or
@@ -115,12 +116,12 @@ agent on a pty — the failure `commit`'s own agent-mode guard exists to prevent
 uncaptured, forwarded arguments or not; capturing them would swallow the user's
 pager and colors along with everything else.
 
-`fold`, `split` and `absorb` do not step back either, for a different reason:
-each commit is one step of a rewrite that goes on from what git did (below), so
-loom keeps the run to itself. A forwarded `--dry-run` therefore prints into the
-trace log and ends in an error rather than on the terminal. Where loom opens the
-editor itself — `split` without `-m` — that commit runs uncaptured as it always
-does.
+`fold`, `split`, `absorb` and `reword` do not step back either, for a different
+reason: each commit is one step of a rewrite that goes on from what git did
+(below), so loom keeps the run to itself. A forwarded `--dry-run` therefore
+prints into the trace log and ends in an error rather than on the terminal.
+Where loom opens the editor itself — `split` or `reword` without `-m` — that
+commit runs uncaptured as it always does.
 
 ### Fold Commits Too
 
@@ -188,10 +189,10 @@ and the user's other staged files — before the error is reported.
 
 ### Other Commands That Commit
 
-`split` and `absorb` follow fold: everything is forwarded verbatim and placed
-before loom's own arguments, nothing is inspected, and what loom checks is the
-commit git made, before anything is rewritten. A failed check takes the attempt
-back whole and reports the error (Data Safety).
+`split`, `absorb` and `reword` follow fold: everything is forwarded verbatim and
+placed before loom's own arguments, nothing is inspected, and what loom checks
+is the commit git made, before anything is rewritten. A failed check takes the
+attempt back whole and reports the error (Data Safety).
 
 - `split` forwards to both commits, and a forwarded message source reaches
   both. With forwarded arguments the result must be the commit split in two:
@@ -205,6 +206,13 @@ back whole and reports the error (Data Safety).
   absorbed"*, and with forwarded arguments *"`git commit` made an empty
   `fixup!` commit, so nothing was absorbed"*. `-a` and `-i` sweep the changes
   absorb skipped into the first fixup, and so into its target.
+- `reword` forwards to the amend of a commit target; a branch target runs no
+  `git commit` and rejects the separator — *"renaming a branch runs no `git
+  commit`, so it takes no arguments after `--`"*. With forwarded arguments the
+  amend must leave HEAD on a different commit — *"`git commit --amend` left the
+  commit as it was, so nothing was reworded"* — and the rebase is aborted
+  otherwise. The working tree is autostashed at that pause, so `-a` has
+  nothing to sweep.
 
 **What changes:** nothing.
 
@@ -241,6 +249,7 @@ git-loom commit -m "wip" -- --no-verify
 git-loom add zz -- -f                # stage an ignored file too
 git-loom fold zz ab -- --no-verify   # skip the pre-commit hook on the amend
 git-loom absorb -- --no-verify       # ... on every fixup! commit
+git-loom reword ab -- --reset-author
 ```
 
 ## Design Notes

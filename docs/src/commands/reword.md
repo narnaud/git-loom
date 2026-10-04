@@ -5,7 +5,7 @@ Reword a commit message or rename a branch.
 ## Usage
 
 ```
-git loom reword <target> [-m <message>]
+git loom reword <target> [-m <message>] [-- <git args>...]
 ```
 
 ### Arguments
@@ -19,6 +19,22 @@ git loom reword <target> [-m <message>]
 | Option | Description |
 |--------|-------------|
 | `-m, --message <message>` | New commit message or branch name. Opens editor/prompt if omitted. |
+
+### Git Options
+
+When the target is a commit, anything after a `--` separator reaches the
+`git commit --amend` that rewrites it — see
+[Passing Options to Git](README.md#passing-options-to-git):
+
+```bash
+git loom reword ab -m "Better message" -- --no-verify
+git loom reword ab -- --reset-author
+```
+
+Loom's own `--amend` and `--only` go last, so they keep their meaning. An
+amend that leaves the commit as it was, such as a forwarded `--dry-run`, aborts
+the reword. Renaming a branch runs no `git commit`, so it takes no arguments
+after `--`.
 
 ## What It Does
 

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use git2::Repository;
 use serde::{Deserialize, Serialize};
 
@@ -25,8 +25,10 @@ struct RewordContext {
     new_hash: String,
 }
 
-/// Reword a commit message or rename a branch.
-pub fn run(target: String, message: Option<String>) -> Result<()> {
+/// Reword a commit message or rename a branch. `git_args` reach the amend of
+/// a commit reword (Spec 021).
+pub fn run(target: String, message: Option<String>, git_args: Vec<String>) -> Result<()> {
+    let git_opts: Vec<&str> = git_args.iter().map(String::as_str).collect();
     let repo = repo::open_repo()?;
 
     let resolved = repo::resolve_arg(
@@ -36,8 +38,13 @@ pub fn run(target: String, message: Option<String>) -> Result<()> {
     )?;
 
     match resolved {
-        Target::Commit(hash) => reword_commit(&repo, &hash, message),
+        Target::Commit(hash) => reword_commit(&repo, &hash, message, &git_opts),
         Target::Branch(name) => {
+            if !git_opts.is_empty() {
+                bail!(
+                    "renaming a branch runs no `git commit`, so it takes no arguments after `--`"
+                );
+            }
             let new_name = match message {
                 Some(msg) => msg,
                 None => {
@@ -73,14 +80,19 @@ pub fn run(target: String, message: Option<String>) -> Result<()> {
 /// Approach:
 /// 1. Build todo (via Weave or linear walk), mark target as `edit`
 /// 2. Run rebase (pauses at the target commit)
-/// 3. git commit --allow-empty --amend --only [-m "message"]
+/// 3. git commit [opts] --allow-empty --amend --only [-m "message"]
 /// 4. git rebase --continue
 ///
 /// Step 4 can conflict: rewriting the target changes the SHAs above it, so any
 /// merge commit in the way has to be rebuilt, and a merge that was resolved by
 /// hand conflicts again. That is resumable work, so the reword pauses for
 /// `loom continue` rather than throwing the amend away.
-pub fn reword_commit(repo: &Repository, commit_hash: &str, message: Option<String>) -> Result<()> {
+pub fn reword_commit(
+    repo: &Repository,
+    commit_hash: &str,
+    message: Option<String>,
+    git_opts: &[&str],
+) -> Result<()> {
     // Without -m the amend would open $GIT_EDITOR, which hangs a headless agent.
     if agent_mode::enabled() && message.is_none() {
         return Err(agent_mode::respond_needs_input(
@@ -114,10 +126,11 @@ pub fn reword_commit(repo: &Repository, commit_hash: &str, message: Option<Strin
         .inspect_err(|e| git::restore_or_park_after_abort(workdir, &saved_staged, e))?;
 
     // Step 2: Amend the commit message
-    let amend = git::commit_amend(workdir, message.as_deref()).and_then(|()| match message {
-        Some(_) => Ok(()),
-        None => changeid::ensure_on_head(repo, workdir, keep.as_deref()),
-    });
+    let amend =
+        git::commit_amend(workdir, message.as_deref(), git_opts).and_then(|()| match message {
+            Some(_) => Ok(()),
+            None => changeid::ensure_on_head(repo, workdir, keep.as_deref()),
+        });
     if let Err(e) = amend {
         // Outside the cleanup closure, for the reason given on step 1: a failed
         // abort skips it, and there is still no state file.

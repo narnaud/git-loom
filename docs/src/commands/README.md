@@ -61,9 +61,9 @@ git loom commit -m "wip" -- --no-verify
 git loom add zz -- -f
 ```
 
-`fold`, `split` and `absorb` take one too, for the commits they make themselves
-— see [fold](fold.md#git-options), [split](split.md#git-options) and
-[absorb](absorb.md#git-options).
+`fold`, `split`, `absorb` and `reword` take one too, for the commits they make
+themselves — see [fold](fold.md#git-options), [split](split.md#git-options),
+[absorb](absorb.md#git-options) and [reword](reword.md#git-options).
 
 Before the separator loom parses strictly, so an option it doesn't define is an
 error rather than a guess — the message tells you to move it after the `--`.
@@ -83,5 +83,4 @@ there is nobody there to close an editor.) `show` and `diff` are always
 uncaptured; displaying is all they do.
 
 The other commands don't take a `--`: they either render their own output or
-only rebase, where there is no single git command to forward to. `reword`
-commits too, and isn't covered yet.
+only rebase, where there is no single git command to forward to.

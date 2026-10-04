@@ -5,10 +5,10 @@
 ## CLI
 
 ```bash
-git-loom reword <target> [-m <message>]
+git-loom reword <target> [-m <message>] [-- <git args>...]
 ```
 
-`<target>` is a commit hash/revision/short ID or a local branch name/short ID. `-m, --message <message>` supplies the new commit message or branch name. Without `-m`, commits open the Git editor and branches use a single-line interactive prompt whose placeholder is the current name.
+`<target>` is a commit hash/revision/short ID or a local branch name/short ID. `-m, --message <message>` supplies the new commit message or branch name. Without `-m`, commits open the Git editor and branches use a single-line interactive prompt whose placeholder is the current name. `-- <git args>...` reaches the amend of a commit target and is rejected for a branch (Spec 021).
 
 ## Resolution
 

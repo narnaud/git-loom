@@ -18,6 +18,7 @@ fn reword_commit_with_message() {
         &test_repo.repo,
         &c1_oid.to_string(),
         Some("Updated first commit".to_string()),
+        &[],
     );
 
     if result.is_err() {
@@ -57,7 +58,7 @@ fn reword_commit_without_message() {
     // Set up a fake editor that replaces the message
     test_repo.set_fake_editor("Reworded by editor");
 
-    let result = super::reword_commit(&test_repo.repo, &c1_oid.to_string(), None);
+    let result = super::reword_commit(&test_repo.repo, &c1_oid.to_string(), None, &[]);
 
     if result.is_err() {
         eprintln!("Note: This test may fail due to platform-specific editor or PowerShell issues");
@@ -80,6 +81,7 @@ fn reword_root_commit() {
         &test_repo.repo,
         &root_oid.to_string(),
         Some("Updated initial commit".to_string()),
+        &[],
     );
 
     if result.is_err() {
@@ -115,6 +117,7 @@ fn reword_root_commit_with_descendants() {
         &test_repo.repo,
         &root_oid.to_string(),
         Some("Updated root".to_string()),
+        &[],
     );
 
     if result.is_err() {
@@ -152,6 +155,7 @@ fn reword_commit_with_working_tree_changes() {
         &test_repo.repo,
         &c1_oid.to_string(),
         Some("Updated first".to_string()),
+        &[],
     );
 
     if result.is_err() {
@@ -229,6 +233,7 @@ fn reword_commit_with_partial_hash() {
         &test_repo.repo,
         partial_hash,
         Some("Updated via partial hash".to_string()),
+        &[],
     );
 
     if result.is_err() {
@@ -252,6 +257,7 @@ fn reword_nonexistent_commit_fails() {
         &test_repo.repo,
         "0000000000000000000000000000000000000000",
         Some("New message".to_string()),
+        &[],
     );
 
     assert!(result.is_err(), "Should fail on nonexistent commit");
@@ -281,6 +287,7 @@ fn reword_branch_by_full_name_via_run() {
         super::run(
             "feature-original".to_string(),
             Some("feature-renamed".to_string()),
+            vec![],
         )
     });
 
@@ -371,6 +378,7 @@ fn reword_conflict_pauses_and_continues() {
         &test_repo.repo,
         &a1.to_string(),
         Some("A1 reworded".to_string()),
+        &[],
     );
     assert!(
         result.is_ok(),
@@ -431,6 +439,7 @@ fn reword_conflict_abort_restores_original_state() {
         &test_repo.repo,
         &a1.to_string(),
         Some("A1 reworded".to_string()),
+        &[],
     );
     assert!(
         result.is_ok(),
@@ -475,6 +484,7 @@ fn reword_without_conflict_leaves_no_state() {
         &test_repo.repo,
         &c1.to_string(),
         Some("Reworded first".to_string()),
+        &[],
     )
     .unwrap();
 
@@ -497,6 +507,7 @@ fn reword_refuses_when_the_replay_is_dropped() {
         &t.repo,
         &target.to_string(),
         Some("New message".to_string()),
+        &[],
     )
     .unwrap_err()
     .to_string();
@@ -520,6 +531,7 @@ fn reword_refuses_when_the_upstream_cherry_picked_the_target() {
         &t.repo,
         &target.to_string(),
         Some("New message".to_string()),
+        &[],
     )
     .unwrap_err()
     .to_string();
@@ -537,7 +549,13 @@ fn reword_gets_past_a_redundant_commit_below_the_target() {
     // reword goes through.
     let (t, _redundant, keeper) = crate::core::test_helpers::repo_with_a_redundant_commit_below();
 
-    super::reword_commit(&t.repo, &keeper.to_string(), Some("Reworded".to_string())).unwrap();
+    super::reword_commit(
+        &t.repo,
+        &keeper.to_string(),
+        Some("Reworded".to_string()),
+        &[],
+    )
+    .unwrap();
 
     assert_eq!(t.branch_commit_summary("alpha"), "Reworded");
     assert!(!t.commit_messages().contains(&"branch change".to_string()));
@@ -550,7 +568,13 @@ fn reword_gets_past_a_redundant_commit_above_the_target() {
     // rather than the first run — a stop there is not a conflict either.
     let (t, keeper) = crate::core::test_helpers::repo_with_a_redundant_commit_above();
 
-    super::reword_commit(&t.repo, &keeper.to_string(), Some("Reworded".to_string())).unwrap();
+    super::reword_commit(
+        &t.repo,
+        &keeper.to_string(),
+        Some("Reworded".to_string()),
+        &[],
+    )
+    .unwrap();
 
     assert!(t.commit_messages().contains(&"Reworded".to_string()));
     assert!(!t.commit_messages().contains(&"branch change".to_string()));
@@ -567,7 +591,7 @@ fn reword_works_with_a_short_core_abbrev() {
     let c1 = t.commit("First commit", "file1.txt");
     t.commit("Second commit", "file2.txt");
 
-    super::reword_commit(&t.repo, &c1.to_string(), Some("Reworded".to_string())).unwrap();
+    super::reword_commit(&t.repo, &c1.to_string(), Some("Reworded".to_string()), &[]).unwrap();
 
     assert_eq!(t.get_subject(1), "Reworded");
 }
@@ -586,6 +610,7 @@ fn reword_with_message_keeps_the_change_id() {
         &test_repo.repo,
         &c1_oid.to_string(),
         Some("Updated first".to_string()),
+        &[],
     )
     .unwrap();
 
@@ -602,7 +627,7 @@ fn reword_with_editor_restores_a_dropped_change_id() {
     test_repo.commit("Second", "file2.txt");
     test_repo.set_fake_editor("Reworded by editor");
 
-    super::reword_commit(&test_repo.repo, &c1_oid.to_string(), None).unwrap();
+    super::reword_commit(&test_repo.repo, &c1_oid.to_string(), None, &[]).unwrap();
 
     assert_eq!(
         test_repo.get_message(1),
@@ -619,7 +644,7 @@ fn reword_with_editor_keeps_a_change_id_the_editor_wrote() {
     let other = "I9999999999999999999999999999999999999999";
     test_repo.set_fake_editor(&format!("Reworded by editor\n\nChange-Id: {other}"));
 
-    super::reword_commit(&test_repo.repo, &c1_oid.to_string(), None).unwrap();
+    super::reword_commit(&test_repo.repo, &c1_oid.to_string(), None, &[]).unwrap();
 
     assert_eq!(
         test_repo.get_message(0),
@@ -636,6 +661,7 @@ fn reword_mints_a_change_id_for_a_commit_without_one() {
         &test_repo.repo,
         &c1_oid.to_string(),
         Some("Updated first".to_string()),
+        &[],
     )
     .unwrap();
 
@@ -648,6 +674,7 @@ fn reword_mints_a_change_id_for_a_commit_without_one() {
         &test_repo.repo,
         &c2_oid.to_string(),
         Some("Still plain".to_string()),
+        &[],
     )
     .unwrap();
     assert_eq!(test_repo.get_message(0), "Still plain");
@@ -682,6 +709,7 @@ fn reword_keeps_staging_on_success() {
         &t.repo,
         &c2.to_string(),
         Some("Second, reworded".to_string()),
+        &[],
     )
     .unwrap();
 
@@ -707,6 +735,7 @@ fn reword_keeps_staging_across_continue() {
         &test_repo.repo,
         &a1.to_string(),
         Some("A1 reworded".to_string()),
+        &[],
     )
     .unwrap();
     assert!(crate::git::rebase_is_in_progress(test_repo.repo.path()));
@@ -718,4 +747,100 @@ fn reword_keeps_staging_across_continue() {
 
     assert!(!crate::git::rebase_is_in_progress(test_repo.repo.path()));
     assert_eq!(test_repo.status_porcelain(), before);
+}
+
+// ── Forwarded git arguments (Spec 021) ──────────────────────────────────
+
+#[test]
+fn reword_forwards_to_the_amend() {
+    let test_repo = TestRepo::new();
+    let c1 = test_repo.commit("First commit", "file1.txt");
+    test_repo.commit("Second commit", "file2.txt");
+
+    super::reword_commit(
+        &test_repo.repo,
+        &c1.to_string(),
+        Some("Reworded".to_string()),
+        &["--author=Someone Else <else@example.com>"],
+    )
+    .unwrap();
+
+    let author = crate::git::run_git_stdout(
+        &test_repo.workdir(),
+        &["log", "-1", "--format=%an", "HEAD~1"],
+    )
+    .unwrap();
+    assert_eq!(author.trim(), "Someone Else");
+    assert_eq!(test_repo.get_subject(1), "Reworded");
+    assert_eq!(test_repo.get_subject(0), "Second commit");
+}
+
+/// A dry run exits 0 without amending, so the reword would report a message
+/// it never wrote.
+#[test]
+fn a_forwarded_dry_run_aborts_the_reword() {
+    let test_repo = TestRepo::new();
+    let c1 = test_repo.commit("First commit", "file1.txt");
+    let head = test_repo.commit("Second commit", "file2.txt");
+    test_repo.write_file("file1.txt", "staged edit\n");
+    test_repo.stage_files(&["file1.txt"]);
+    let before = test_repo.status_porcelain();
+
+    let err = super::reword_commit(
+        &test_repo.repo,
+        &c1.to_string(),
+        Some("Reworded".to_string()),
+        &["--dry-run"],
+    )
+    .unwrap_err();
+
+    assert!(err.to_string().contains("nothing was reworded"), "{err}");
+    assert_eq!(test_repo.head_oid(), head);
+    assert!(!crate::git::rebase_is_in_progress(test_repo.repo.path()));
+    assert_eq!(test_repo.status_porcelain(), before);
+}
+
+#[test]
+fn renaming_a_branch_rejects_the_separator() {
+    let test_repo = TestRepo::new();
+    test_repo.create_branch("feature");
+
+    let err = test_repo
+        .in_dir(|| {
+            super::run(
+                "feature".to_string(),
+                Some("renamed".to_string()),
+                vec!["--no-verify".to_string()],
+            )
+        })
+        .unwrap_err();
+
+    assert!(err.to_string().contains("runs no `git commit`"), "{err}");
+}
+
+#[cfg(unix)]
+#[test]
+fn reword_skips_the_commit_msg_hook_with_no_verify() {
+    let build = || {
+        let test_repo = TestRepo::new();
+        let c1 = test_repo.commit("First commit", "file1.txt");
+        test_repo.commit("Second commit", "file2.txt");
+        test_repo.install_hook("commit-msg", "exit 1\n");
+        (test_repo, c1)
+    };
+    let reword = |test_repo: &TestRepo, c1: git2::Oid, opts: &[&str]| {
+        super::reword_commit(
+            &test_repo.repo,
+            &c1.to_string(),
+            Some("Reworded".to_string()),
+            opts,
+        )
+    };
+
+    let (test_repo, c1) = build();
+    assert!(reword(&test_repo, c1, &[]).is_err());
+
+    let (test_repo, c1) = build();
+    reword(&test_repo, c1, &["--no-verify"]).unwrap();
+    assert_eq!(test_repo.get_subject(1), "Reworded");
 }

@@ -3,29 +3,39 @@ use std::path::Path;
 use anyhow::{Result, bail};
 
 /// Amend the current commit, optionally replacing its message
-/// (`git commit --quiet --allow-empty --amend --only [-m msg]`). `--only` keeps
-/// staged changes out, `--quiet` suppresses the summary on the editor path, and
-/// a `None` message inherits stdio so git can open the user's editor.
-pub fn commit_amend(workdir: &Path, message: Option<&str>) -> Result<()> {
-    if let Some(msg) = message {
-        super::run_git(
-            workdir,
-            &[
-                "commit",
-                "--quiet",
-                "--allow-empty",
-                "--amend",
-                "--only",
-                "-m",
-                msg,
-            ],
-        )
+/// (`git commit --quiet [opts] --allow-empty --amend --only [-m msg]`).
+/// `--only` keeps staged changes out, `--quiet` suppresses the summary on the
+/// editor path, and a `None` message inherits stdio so git can open the user's
+/// editor.
+///
+/// `opts` is what followed a `--` on a `reword` command line (Spec 021),
+/// placed before loom's own arguments so git's last-wins parse keeps
+/// `--amend` and `--only`. Errs when git printed instead of amending, which it
+/// can do while exiting 0.
+pub fn commit_amend(workdir: &Path, message: Option<&str>, opts: &[&str]) -> Result<()> {
+    let before = if opts.is_empty() {
+        None
     } else {
-        super::run_git_interactive(
-            workdir,
-            &["commit", "--quiet", "--allow-empty", "--amend", "--only"],
-        )
+        Some(super::rev_parse(workdir, "HEAD")?)
+    };
+
+    let mut args = vec!["commit", "--quiet"];
+    args.extend(opts);
+    args.extend(["--allow-empty", "--amend", "--only"]);
+    if let Some(msg) = message {
+        args.extend(["-m", msg]);
+        super::run_git(workdir, &args)?;
+    } else {
+        super::run_git_interactive(workdir, &args)?;
     }
+
+    if before.is_some_and(|head| super::rev_parse(workdir, "HEAD").is_ok_and(|now| now == head)) {
+        bail!(
+            "`git commit --amend` left the commit as it was, so nothing was reworded\n\
+             An argument after `--` kept git from committing"
+        );
+    }
+    Ok(())
 }
 
 /// Replace the current commit's message with `--no-verify`, so the

@@ -791,7 +791,7 @@ fn execute_action(
         Action::NewBranch { name, target } => branch::new::run(Some(name), target),
         Action::Drop { targets } => drop::run(targets, false),
         Action::Absorb { files } => absorb::run(false, files, vec![]),
-        Action::Reword { target, name } => reword::run(target, name),
+        Action::Reword { target, name } => reword::run(target, name, vec![]),
         Action::Update => update::run(false),
     };
     crate::trace::finalize();

@@ -309,6 +309,9 @@ enum Command {
         /// New message or branch name (if not provided, opens editor for commits)
         #[arg(short, long)]
         message: Option<String>,
+        /// Arguments forwarded verbatim to the `git commit --amend` of a commit reword (everything after `--`)
+        #[arg(last = true, num_args = 0.., allow_hyphen_values = true, value_name = "GIT_ARG")]
+        git_args: Vec<String>,
     },
     /// Swap two commits within the same sequence
     Swap {
@@ -687,7 +690,11 @@ fn main() {
             Some(BranchAction::Unmerge { branch }) => branch::unmerge::run(branch),
             None => branch::new::run(cmd.new_args.name, cmd.new_args.target),
         },
-        Some(Command::Reword { target, message }) => reword::run(target, message),
+        Some(Command::Reword {
+            target,
+            message,
+            git_args,
+        }) => reword::run(target, message, git_args),
         Some(Command::Commit {
             branch,
             integration,
