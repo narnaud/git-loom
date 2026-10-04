@@ -11,7 +11,7 @@ fn absorb_single_file() {
     test_repo.write_file("file1.txt", "modified content");
 
     test_repo.in_dir(|| {
-        let result = super::run(false, vec![]);
+        let result = super::run(false, vec![], vec![]);
         assert!(result.is_ok(), "absorb failed: {:?}", result);
 
         test_repo.assert_working_tree_clean();
@@ -31,7 +31,7 @@ fn absorb_multiple_files_different_commits() {
     test_repo.write_file("file2.txt", "modified file2");
 
     test_repo.in_dir(|| {
-        let result = super::run(false, vec![]);
+        let result = super::run(false, vec![], vec![]);
         assert!(result.is_ok(), "absorb failed: {:?}", result);
 
         test_repo.assert_working_tree_clean();
@@ -56,6 +56,7 @@ fn absorb_skips_new_file() {
         let result = super::run(
             false,
             vec!["file1.txt".to_string(), "new_file.txt".to_string()],
+            vec![],
         );
         assert!(result.is_ok(), "absorb failed: {:?}", result);
 
@@ -73,7 +74,7 @@ fn absorb_skips_pure_addition() {
     test_repo.write_file("file1.txt", "line1\nline2\nnew line3\n");
 
     test_repo.in_dir(|| {
-        let result = super::run(true, vec![]);
+        let result = super::run(true, vec![], vec![]);
         // Should succeed as dry-run but skip the file (pure addition)
         // The error "No files could be absorbed" is expected when all are skipped
         assert!(result.is_err());
@@ -95,7 +96,7 @@ fn absorb_dry_run() {
     test_repo.write_file("file1.txt", "modified content");
 
     test_repo.in_dir(|| {
-        let result = super::run(true, vec![]);
+        let result = super::run(true, vec![], vec![]);
         assert!(result.is_ok(), "dry-run absorb failed: {:?}", result);
 
         // HEAD should NOT have changed (dry-run)
@@ -119,7 +120,7 @@ fn absorb_with_file_filter() {
     test_repo.write_file("file2.txt", "modified file2");
 
     test_repo.in_dir(|| {
-        let result = super::run(false, vec!["file1.txt".to_string()]);
+        let result = super::run(false, vec!["file1.txt".to_string()], vec![]);
         assert!(result.is_ok(), "absorb failed: {:?}", result);
 
         assert_eq!(
@@ -136,7 +137,7 @@ fn absorb_no_changes_error() {
     test_repo.commit("Add file1", "file1.txt");
 
     test_repo.in_dir(|| {
-        let result = super::run(false, vec![]);
+        let result = super::run(false, vec![], vec![]);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(
@@ -160,6 +161,7 @@ fn absorb_preserves_skipped_changes() {
         let result = super::run(
             false,
             vec!["tracked.txt".to_string(), "untracked.txt".to_string()],
+            vec![],
         );
         assert!(result.is_ok(), "absorb failed: {:?}", result);
 
@@ -184,7 +186,7 @@ fn absorb_skips_multiple_sources() {
     test_repo.write_file("shared.txt", "MODIFIED line1\nMODIFIED line2\n");
 
     test_repo.in_dir(|| {
-        let result = super::run(true, vec![]);
+        let result = super::run(true, vec![], vec![]);
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(
@@ -204,7 +206,7 @@ fn absorb_skips_out_of_scope() {
     test_repo.write_file("in_scope.txt", "modified");
 
     test_repo.in_dir(|| {
-        let result = super::run(false, vec![]);
+        let result = super::run(false, vec![], vec![]);
         assert!(result.is_ok(), "absorb should succeed for in-scope file");
     });
 }
@@ -226,7 +228,7 @@ fn absorb_with_woven_branches() {
     test_repo.write_file("feature.txt", "updated feature content");
 
     test_repo.in_dir(|| {
-        let result = super::run(false, vec![]);
+        let result = super::run(false, vec![], vec![]);
         assert!(
             result.is_ok(),
             "absorb with woven branches failed: {:?}",
@@ -266,7 +268,7 @@ fn absorb_split_hunks_to_different_commits() {
     );
 
     test_repo.in_dir(|| {
-        let result = super::run(false, vec![]);
+        let result = super::run(false, vec![], vec![]);
         assert!(
             result.is_ok(),
             "hunk-level absorb should succeed: {:?}",
@@ -294,7 +296,7 @@ fn absorb_split_with_pure_addition_hunk() {
     );
 
     test_repo.in_dir(|| {
-        let result = super::run(false, vec![]);
+        let result = super::run(false, vec![], vec![]);
         assert!(
             result.is_ok(),
             "mixed split absorb should succeed: {:?}",
@@ -329,6 +331,7 @@ fn absorb_skipped_patch_only_contains_skipped_files() {
         let result = super::run(
             false,
             vec!["absorbable.txt".to_string(), "skippable.txt".to_string()],
+            vec![],
         );
         assert!(result.is_ok(), "absorb failed: {:?}", result);
 
@@ -358,7 +361,7 @@ fn absorb_file_with_sql_comment_lines() {
     test_repo.write_file("query.sql", "SELECT *\n-- updated query\nFROM users\n");
 
     test_repo.in_dir(|| {
-        let result = super::run(false, vec![]);
+        let result = super::run(false, vec![], vec![]);
         assert!(
             result.is_ok(),
             "absorb should handle -- lines: {:?}",
@@ -382,7 +385,7 @@ fn absorb_staged_only_changes() {
     test_repo.stage_files(&["target.txt"]);
 
     test_repo.in_dir(|| {
-        let result = super::run(false, vec![]);
+        let result = super::run(false, vec![], vec![]);
         assert!(
             result.is_ok(),
             "absorb should handle staged-only changes: {:?}",
@@ -501,7 +504,7 @@ fn absorb_rolls_back_when_the_rebase_refuses_to_start() {
     );
     let worktree_before = test_repo.read_file("a1.txt");
 
-    let result = test_repo.in_dir(|| super::run(false, vec![]));
+    let result = test_repo.in_dir(|| super::run(false, vec![], vec![]));
 
     assert!(result.is_err(), "the rebase cannot start, so absorb fails");
     assert_eq!(
@@ -530,7 +533,7 @@ fn run_in_tui(test_repo: &TestRepo, yes: bool) -> (String, anyhow::Result<()>) {
         let (tx, rx) = std::sync::mpsc::channel();
         let worker = std::thread::spawn(move || {
             ui::install(tx);
-            let result = super::run(false, vec![]);
+            let result = super::run(false, vec![], vec![]);
             ui::uninstall();
             result
         });
@@ -593,7 +596,7 @@ fn tui_absorb_with_nothing_to_absorb_says_why_without_asking() {
     let result = test_repo.in_dir(|| {
         let (tx, _rx) = std::sync::mpsc::channel();
         crate::core::ui::install(tx);
-        let result = super::run(false, vec![]);
+        let result = super::run(false, vec![], vec![]);
         crate::core::ui::uninstall();
         result
     });
@@ -602,4 +605,99 @@ fn tui_absorb_with_nothing_to_absorb_says_why_without_asking() {
         result.unwrap_err().to_string(),
         "No files could be absorbed\nfile1.txt -- skipped (pure addition)"
     );
+}
+
+// ── Forwarded git arguments (Spec 021) ──────────────────────────────────
+
+#[test]
+fn absorb_forwards_to_the_fixup_commits() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("Add file1", "file1.txt");
+    test_repo.commit("Add file2", "file2.txt");
+    test_repo.write_file("file1.txt", "modified file1");
+
+    test_repo.in_dir(|| super::run(false, vec![], vec!["--no-verify".to_string()]).unwrap());
+
+    test_repo.assert_working_tree_clean();
+    assert_eq!(test_repo.commit_messages(), ["Add file2", "Add file1"]);
+    assert_eq!(
+        crate::git::run_git_stdout(&test_repo.workdir(), &["show", "HEAD~1:file1.txt"]).unwrap(),
+        "modified file1"
+    );
+}
+
+/// `--amend` turns the fixup into an amend of the user's HEAD commit, which
+/// the squash would then have folded into the target and lost.
+#[test]
+fn a_forwarded_amend_leaves_history_alone() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("Add file1", "file1.txt");
+    let head = test_repo.commit("Add file2", "file2.txt");
+    test_repo.write_file("file1.txt", "modified file1");
+
+    let err = test_repo
+        .in_dir(|| super::run(false, vec![], vec!["--amend".to_string()]))
+        .unwrap_err();
+
+    assert!(err.to_string().contains("nothing was absorbed"), "{err}");
+    assert_eq!(test_repo.head_oid(), head);
+    assert_eq!(test_repo.read_file("file1.txt"), "modified file1");
+    assert_eq!(test_repo.status_porcelain(), " M file1.txt\n");
+}
+
+#[test]
+fn a_forwarded_dry_run_leaves_history_alone() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("Add file1", "file1.txt");
+    let head = test_repo.commit("Add file2", "file2.txt");
+    test_repo.write_file("file1.txt", "modified file1");
+
+    let err = test_repo
+        .in_dir(|| super::run(false, vec![], vec!["--dry-run".to_string()]))
+        .unwrap_err();
+
+    assert!(err.to_string().contains("left no new commit"), "{err}");
+    assert_eq!(test_repo.head_oid(), head);
+    assert_eq!(test_repo.status_porcelain(), " M file1.txt\n");
+}
+
+#[test]
+fn an_empty_fixup_commit_leaves_history_alone() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("Add file1", "file1.txt");
+    let head = test_repo.commit("Add file2", "file2.txt");
+    test_repo.write_file("file1.txt", "modified file1");
+
+    let err = test_repo
+        .in_dir(|| {
+            super::run(
+                false,
+                vec![],
+                vec!["--only".to_string(), "--allow-empty".to_string()],
+            )
+        })
+        .unwrap_err();
+
+    assert!(err.to_string().contains("empty `fixup!` commit"), "{err}");
+    assert_eq!(test_repo.head_oid(), head);
+    assert_eq!(test_repo.status_porcelain(), " M file1.txt\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn absorb_skips_the_pre_commit_hook_with_no_verify() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("Add file1", "file1.txt");
+    let head = test_repo.commit("Add file2", "file2.txt");
+    test_repo.write_file("file1.txt", "modified file1");
+    test_repo.install_hook("pre-commit", "exit 1\n");
+
+    test_repo.in_dir(|| {
+        assert!(super::run(false, vec![], vec![]).is_err());
+        assert_eq!(test_repo.head_oid(), head);
+        super::run(false, vec![], vec!["--no-verify".to_string()]).unwrap();
+    });
+
+    test_repo.assert_working_tree_clean();
+    assert_eq!(test_repo.commit_messages(), ["Add file2", "Add file1"]);
 }

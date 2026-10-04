@@ -274,6 +274,9 @@ enum Command {
         dry_run: bool,
         /// Files to restrict absorption to (default: all tracked changed files)
         files: Vec<String>,
+        /// Arguments forwarded verbatim to the `git commit` of each `fixup!` commit absorb makes (everything after `--`)
+        #[arg(last = true, num_args = 0.., allow_hyphen_values = true, value_name = "GIT_ARG")]
+        git_args: Vec<String>,
     },
     /// Split a commit into two sequential commits
     Split {
@@ -702,7 +705,11 @@ fn main() {
         ),
         Some(Command::Swap { a, b }) => swap::run(a, b),
         Some(Command::Drop { targets, yes }) => drop::run(targets, yes),
-        Some(Command::Absorb { dry_run, files }) => absorb::run(dry_run, files),
+        Some(Command::Absorb {
+            dry_run,
+            files,
+            git_args,
+        }) => absorb::run(dry_run, files, git_args),
         Some(Command::Show { target, git_args }) => show::run(target, git_args),
         Some(Command::Diff {
             args,

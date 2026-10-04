@@ -154,6 +154,15 @@ switch_to() { git -C "$WORK" checkout -q "$1"; }
 # Write a file in $WORK without committing.
 write_file() { echo "$2" > "$WORK/$1"; }
 
+# Install a git hook that always fails. The global config may point
+# core.hooksPath elsewhere; aim it back at the repo.
+install_failing_hook() {
+    mkdir -p "$WORK/.git/hooks"
+    git -C "$WORK" config core.hooksPath "$WORK/.git/hooks"
+    printf '#!/bin/sh\nexit 1\n' > "$WORK/.git/hooks/$1"
+    chmod +x "$WORK/.git/hooks/$1"
+}
+
 # Run gl, capturing stdout+stderr into OUT and exit code into CODE.
 # Prevents set -e from aborting the script on failure.
 # Clears the variables gl_capture_json owns, as it clears OUT: whichever helper

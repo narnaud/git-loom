@@ -61,8 +61,8 @@ git loom commit -m "wip" -- --no-verify
 git loom add zz -- -f
 ```
 
-`fold` takes one too, for the commit it makes itself — see
-[fold](fold.md#git-options).
+`fold` and `absorb` take one too, for the commits they make themselves — see
+[fold](fold.md#git-options) and [absorb](absorb.md#git-options).
 
 Before the separator loom parses strictly, so an option it doesn't define is an
 error rather than a guess — the message tells you to move it after the `--`.
@@ -83,4 +83,4 @@ uncaptured; displaying is all they do.
 
 The other commands don't take a `--`: they either render their own output or
 only rebase, where there is no single git command to forward to. A few of them
-commit too — `split`, `absorb` and `reword` — and aren't covered yet.
+commit too — `split` and `reword` — and aren't covered yet.

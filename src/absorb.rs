@@ -75,8 +75,10 @@ struct AbsorbPlan {
     num_commits: usize,
 }
 
-/// Absorb working tree changes into the commits that last touched the affected lines.
-pub fn run(dry_run: bool, user_files: Vec<String>) -> Result<()> {
+/// Absorb working tree changes into the commits that last touched the affected
+/// lines. `git_args` reach the `git commit` of every `fixup!` commit (Spec 021).
+pub fn run(dry_run: bool, user_files: Vec<String>, git_args: Vec<String>) -> Result<()> {
+    let git_opts: Vec<&str> = git_args.iter().map(String::as_str).collect();
     let repo = repo::open_repo()?;
     let workdir = repo::require_workdir(&repo, "absorb")?;
     let git_dir = repo.path().to_path_buf();
@@ -120,7 +122,7 @@ pub fn run(dry_run: bool, user_files: Vec<String>) -> Result<()> {
         if !msg::confirm(&question, "")? {
             return Err(msg::cancelled());
         }
-        return apply_plan(&repo, workdir, &git_dir, plan);
+        return apply_plan(&repo, workdir, &git_dir, plan, &git_opts);
     }
 
     for line in &plan.lines {
@@ -138,7 +140,7 @@ pub fn run(dry_run: bool, user_files: Vec<String>) -> Result<()> {
         return Ok(());
     }
 
-    apply_plan(&repo, workdir, &git_dir, plan)
+    apply_plan(&repo, workdir, &git_dir, plan, &git_opts)
 }
 
 /// Analyze changed files and build an absorb plan; one with no hunk is the
@@ -247,7 +249,13 @@ fn build_plan(
 }
 
 /// Apply an absorb plan: create fixup commits and run the rebase.
-fn apply_plan(repo: &Repository, workdir: &Path, git_dir: &Path, plan: AbsorbPlan) -> Result<()> {
+fn apply_plan(
+    repo: &Repository,
+    workdir: &Path,
+    git_dir: &Path,
+    plan: AbsorbPlan,
+    git_opts: &[&str],
+) -> Result<()> {
     let saved_head = repo::head_oid(repo)?.to_string();
     let saved_refs = repo::snapshot_branch_refs(repo)?;
 
@@ -307,6 +315,7 @@ fn apply_plan(repo: &Repository, workdir: &Path, git_dir: &Path, plan: AbsorbPla
             saved_refs: &saved_refs,
             snapshot: &snapshot,
         },
+        git_opts,
     )?;
 
     // Save diffs for skipped files and restore their working-tree state before the rebase.
@@ -387,6 +396,7 @@ fn create_fixup_commits(
     groups: &HashMap<Oid, Vec<String>>,
     hunk_groups: &HashMap<Oid, Vec<(String, Vec<DiffHunk>)>>,
     pre_rebase: &PreRebaseState<'_>,
+    git_opts: &[&str],
 ) -> Result<Vec<(Oid, Oid)>> {
     let mut fixup_pairs: Vec<(Oid, Oid)> = Vec::new();
 
@@ -396,7 +406,14 @@ fn create_fixup_commits(
             pre_rebase.roll_back(workdir);
             return Err(e);
         }
-        commit_fixup(repo, workdir, target_oid, pre_rebase, &mut fixup_pairs)?;
+        commit_fixup(
+            repo,
+            workdir,
+            target_oid,
+            pre_rebase,
+            git_opts,
+            &mut fixup_pairs,
+        )?;
     }
 
     for (target_oid, file_hunks) in hunk_groups {
@@ -408,7 +425,14 @@ fn create_fixup_commits(
             pre_rebase.roll_back(workdir);
             return Err(e);
         }
-        commit_fixup(repo, workdir, target_oid, pre_rebase, &mut fixup_pairs)?;
+        commit_fixup(
+            repo,
+            workdir,
+            target_oid,
+            pre_rebase,
+            git_opts,
+            &mut fixup_pairs,
+        )?;
     }
 
     Ok(fixup_pairs)
@@ -420,6 +444,7 @@ fn commit_fixup(
     workdir: &Path,
     target_oid: &Oid,
     pre_rebase: &PreRebaseState<'_>,
+    git_opts: &[&str],
     fixup_pairs: &mut Vec<(Oid, Oid)>,
 ) -> Result<()> {
     let subject = repo
@@ -428,7 +453,14 @@ fn commit_fixup(
         .map(|c| repo::commit_subject(&c))
         .unwrap_or_else(|| target_oid.to_string());
     let msg = format!("fixup! {}", subject);
-    if let Err(e) = git::commit(workdir, &msg) {
+    // The rebase squashes whatever sits on HEAD into the target, so a commit
+    // a forwarded argument skipped, emptied or turned into an amend of the
+    // user's own HEAD is caught here, before anything is rewritten.
+    let committed = git::rev_parse(workdir, "HEAD").and_then(|head| {
+        git::commit_captured(workdir, &msg, git_opts)?;
+        git::check_fixup_commit(workdir, &head, git_opts, "absorbed")
+    });
+    if let Err(e) = committed {
         pre_rebase.roll_back(workdir);
         return Err(e);
     }

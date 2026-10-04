@@ -4780,19 +4780,6 @@ fn fold_commit_file_to_commit_keeps_staging_on_success() {
 
 // ── Forwarded git arguments (Spec 021) ──────────────────────────────────
 
-/// The fixup path squashes whatever sits on HEAD, so it has to know that git
-/// put a commit there; `--amend` would have replaced the user's own instead.
-#[test]
-fn committed_onto_sees_what_git_did() {
-    let t = TestRepo::new();
-    let base = t.commit("Base", "base.txt");
-    assert!(!super::committed_onto(&t.workdir(), base));
-
-    let child = t.commit("Child", "child.txt");
-    assert!(super::committed_onto(&t.workdir(), base));
-    assert!(!super::committed_onto(&t.workdir(), child));
-}
-
 /// The fixup path's last resort, reachable only through an argument loom does
 /// not know: git amended HEAD instead of committing on top of it, and the
 /// squash would have taken the user's own commit into the target.

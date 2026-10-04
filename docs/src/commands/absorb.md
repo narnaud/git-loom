@@ -5,7 +5,7 @@ Automatically distribute working tree changes into the commits that last touched
 ## Usage
 
 ```
-git loom absorb [-n] [files...]
+git loom absorb [-n] [files...] [-- <git args>...]
 ```
 
 ### Options
@@ -19,6 +19,23 @@ git loom absorb [-n] [files...]
 | Argument | Description |
 |----------|-------------|
 | `[files...]` | Files to restrict absorption to (default: all tracked changed files) |
+
+### Git Options
+
+Anything after a `--` separator reaches the `git commit` of every `fixup!`
+commit absorb makes — the one place your commit hooks run. See
+[Passing Options to Git](README.md#passing-options-to-git):
+
+```bash
+git loom absorb -- --no-verify
+```
+
+The arguments reach git as written, with the same gaps as
+[fold](fold.md#git-options): `-a` and `-i` sweep changes absorb skipped into
+the first `fixup!` commit, and so into its target. `-n` before the separator
+is absorb's own dry run; a `--dry-run` after it makes git commit nothing, which
+loom catches. Every `fixup!` commit must be a new, non-empty commit on HEAD, or
+loom takes the whole attempt back before anything is rewritten.
 
 ## How It Works
 

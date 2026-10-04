@@ -36,16 +36,18 @@ itself uses. The cost is one extra `--`.
 | `commit`| `git commit` |
 | `add`   | `git add`    |
 | `fold`  | `git commit` |
+| `absorb`| `git commit`, every `fixup!` commit |
 
-`fold` drives a rebase like the commands below, but it also makes a commit of
-its own along the way — the amend, or the `fixup!` commit for a non-HEAD target
-— and that one runs the user's commit hooks. See [Fold Commits Too](#fold-commits-too).
+The last two drive a rebase like the commands below, but they also make
+commits of their own along the way, and those run the user's commit hooks. See
+[Fold Commits Too](#fold-commits-too) and [Other Commands That
+Commit](#other-commands-that-commit).
 
 Every other command either renders its output itself (`status`, `tui`, `trace`)
-or drives a rebase through Weave (`absorb`, `split`, `swap`, `drop`, `reword`,
-`branch`, `update`, `init`), where there is no single git command the arguments
-could belong to. Some of those also make a commit of their own — `split`,
-`absorb` and `reword` — and are not covered yet.
+or drives a rebase through Weave (`split`, `swap`, `drop`, `reword`, `branch`,
+`update`, `init`), where there is no single git command the arguments could
+belong to. `split` and `reword` also make a commit of their own and are not
+covered yet.
 
 ## What Happens
 
@@ -67,7 +69,7 @@ diagnostic.
 A forwarded `--` reaches git as written too, but only `show` leaves it alone:
 `diff` appends a `--` of its own when the user named file targets, and `add`
 always appends one, so a second separator lands in a command line that already
-has one and git rejects the result. `commit` and `fold` place loom's own
+has one and git rejects the result. The commands that commit place loom's own
 arguments after the forwarded ones, so a forwarded `--` turns those into
 pathspecs and git fails on them instead.
 
@@ -82,6 +84,7 @@ git-loom diff f1 -- --stat        # git diff --stat -- file1.txt
 git-loom commit -m x -- -S        # git commit -S -m x
 git-loom add f1 -- -f             # git add -f -- file1.txt
 git-loom fold f1 ab -- -n         # git commit -n --amend --no-edit --allow-empty
+git-loom absorb -- -n             # git commit -n -m 'fixup! …', per target
 ```
 
 Because the tokens are never inspected, an option's value may be attached or
@@ -111,10 +114,10 @@ agent on a pty — the failure `commit`'s own agent-mode guard exists to prevent
 uncaptured, forwarded arguments or not; capturing them would swallow the user's
 pager and colors along with everything else.
 
-`fold` does not step back either, for a different reason: it reads what git
-did and rewrites history on that answer (below), which an uncaptured run
-cannot report. A forwarded `--dry-run` therefore prints into the trace log and
-ends in an error rather than on the terminal.
+`fold` and `absorb` do not step back either, for a different reason: each commit
+is one step of a rewrite that goes on from what git did (below), so loom keeps
+the run to itself. A forwarded `--dry-run` therefore prints into the trace log
+and ends in an error rather than on the terminal.
 
 ### Fold Commits Too
 
@@ -180,6 +183,23 @@ and the user's other staged files — before the error is reported.
 
 **What stays the same:** everything.
 
+### Other Commands That Commit
+
+`absorb` follows fold: everything is forwarded verbatim and placed before loom's
+own arguments, nothing is inspected, and what loom checks is the commit git
+made, before anything is rewritten. A failed check takes the attempt back whole
+and reports the error (Data Safety).
+
+- `absorb` forwards to every `fixup!` commit, and checks each one as fold
+  checks its own: *"`git commit` left no new commit on HEAD, so nothing was
+  absorbed"*, and with forwarded arguments *"`git commit` made an empty
+  `fixup!` commit, so nothing was absorbed"*. `-a` and `-i` sweep the changes
+  absorb skipped into the first fixup, and so into its target.
+
+**What changes:** nothing.
+
+**What stays the same:** everything.
+
 ### When the Command Doesn't Take Them
 
 `--` is not defined on the other commands, so the tokens after it are rejected
@@ -210,6 +230,7 @@ git-loom diff ab..d0 -- --name-only
 git-loom commit -m "wip" -- --no-verify
 git-loom add zz -- -f                # stage an ignored file too
 git-loom fold zz ab -- --no-verify   # skip the pre-commit hook on the amend
+git-loom absorb -- --no-verify       # ... on every fixup! commit
 ```
 
 ## Design Notes
@@ -222,9 +243,10 @@ meanings of both are one `--` away. Keeping loom's short flags consistent across
 commands matters more than mirroring git's spelling on the two commands that
 happen to collide.
 
-### Forwarded arguments reach one git command
+### Forwarded arguments reach the commits loom makes
 
-They go to the git command the loom command wraps, and nothing else. `loom
-commit -- --author=…` shapes the commit loom creates, not the rebase that
-relocates it onto the feature branch, and `loom fold -- --author=…` shapes the
-amend, not the commits the rebase replays over it.
+They go to the git command the loom command wraps, or to every commit it makes
+itself, and nothing else. `loom commit -- --author=…` shapes the commit loom
+creates, not the rebase that relocates it onto the feature branch, and `loom
+fold -- --author=…` shapes the amend, not the commits the rebase replays over
+it.

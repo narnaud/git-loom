@@ -186,4 +186,33 @@ assert_contains "$OUT" "Aborted" "absorb_abort_msg"
 assert_no_state_file   "absorb_abort_state_removed"
 assert_eq "$old_head" "$(head_hash)" "absorb_abort_head_restored"
 
+
+# ── GIT ARGUMENT FORWARDING ───────────────────────────────────────────────────
+
+describe "absorb: a pre-commit hook is skipped with -- --no-verify"
+setup_repo_with_remote
+commit_file "Hooked absorb" "hooked-absorb.txt"
+commit_file "Above absorb" "above-absorb.txt"
+install_failing_hook pre-commit
+write_file "hooked-absorb.txt" "absorbed"
+gl_capture absorb
+assert_exit_fail "$CODE" "absorb_hook_blocks"
+assert_eq "absorbed" "$(cat "$WORK/hooked-absorb.txt")" "absorb_hook_change_kept"
+gl_capture absorb -- --no-verify
+assert_exit_ok "$CODE" "absorb_no_verify_ok"
+assert_eq "absorbed" "$(git -C "$WORK" show HEAD~1:hooked-absorb.txt)" "absorb_no_verify_content"
+assert_eq "Above absorb" "$(head_msg)" "absorb_no_verify_keeps_the_commit_above"
+
+describe "absorb: a forwarded --amend rolls back"
+setup_repo_with_remote
+commit_file "Amend target" "amend-target.txt"
+commit_file "Amend head" "amend-head.txt"
+amend_head=$(head_hash)
+write_file "amend-target.txt" "changed"
+gl_capture absorb -- --amend
+assert_exit_fail "$CODE" "absorb_amend_fail"
+assert_contains "$OUT" "nothing was absorbed" "absorb_amend_msg"
+assert_eq "$amend_head" "$(head_hash)" "absorb_amend_head_intact"
+assert_eq "changed" "$(cat "$WORK/amend-target.txt")" "absorb_amend_change_kept"
+
 pass

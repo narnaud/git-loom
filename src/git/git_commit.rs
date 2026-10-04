@@ -186,12 +186,56 @@ pub fn commit(workdir: &Path, message: &str) -> Result<()> {
 /// needs the terminal.
 /// Unlike [`commit_amend_no_edit`] this does not check that git committed —
 /// what proves it differs per caller — so a caller that then rewrites history
-/// must check for itself (see `fold::committed_onto`).
+/// must check for itself (see [`check_fixup_commit`]).
 pub fn commit_captured(workdir: &Path, message: &str, opts: &[&str]) -> Result<()> {
     let mut args = vec!["commit"];
     args.extend(opts);
     args.extend(["-m", message]);
     super::run_git(workdir, &args)
+}
+
+/// Errs unless HEAD is now a new `fixup!` commit on `parent`, which is what a `git
+/// commit` that ran leaves behind; `opts` were forwarded to it. With forwarded
+/// arguments the commit must also hold a different tree: `--only` with no
+/// pathspec commits none of the index, and `--allow-empty` lets the result
+/// through. `done` says what the caller would have done with the commit
+/// ("folded").
+pub fn check_fixup_commit(workdir: &Path, parent: &str, opts: &[&str], done: &str) -> Result<()> {
+    if !committed_onto(workdir, parent) {
+        let blame = if opts.is_empty() {
+            ""
+        } else {
+            "\nAn argument after `--` stopped it from committing"
+        };
+        bail!("`git commit` left no new commit on HEAD, so nothing was {done}{blame}");
+    }
+    if !opts.is_empty() && committed_the_same_tree(workdir, parent) {
+        bail!(
+            "`git commit` made an empty `fixup!` commit, so nothing was {done}\n\
+             An argument after `--` kept the staged changes out of it"
+        );
+    }
+    Ok(())
+}
+
+/// Whether HEAD is now a commit made on top of `parent`. False for a root
+/// HEAD, and for a `git commit` that committed nothing or amended `parent`
+/// away.
+fn committed_onto(workdir: &Path, parent: &str) -> bool {
+    super::rev_parse(workdir, "HEAD^").is_ok_and(|first| first == parent)
+}
+
+/// Whether HEAD holds the same tree as `parent`. A git that cannot answer
+/// says yes, so the caller takes the commit back rather than rewriting history
+/// on top of it.
+fn committed_the_same_tree(workdir: &Path, parent: &str) -> bool {
+    match (
+        super::rev_parse(workdir, "HEAD^{tree}"),
+        super::rev_parse(workdir, &format!("{parent}^{{tree}}")),
+    ) {
+        (Ok(now), Ok(before)) => now == before,
+        _ => true,
+    }
 }
 
 /// Create a commit, with extra `git commit` options from the user.

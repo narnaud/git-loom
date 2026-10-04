@@ -1636,28 +1636,14 @@ fn fold_files_into_commit(
         }
 
         // Data safety: a forwarded argument git takes but loom does not know
-        // can leave no commit behind, or amend HEAD in place. The squash below
-        // would then feed the user's own HEAD commit into the target and lose
-        // it, so check what git actually did before anything is rewritten.
-        if !committed_onto(workdir, head_oid) {
+        // can leave no commit behind, amend HEAD in place, or commit nothing.
+        // The squash below would then feed the user's own HEAD commit into the
+        // target and lose it, or rewrite the target with nothing in it, so
+        // check what git actually did before anything is rewritten.
+        if let Err(e) = git::check_fixup_commit(workdir, &head_oid.to_string(), git_opts, "folded")
+        {
             undo_commit_attempt(workdir, head_oid, staged_by_loom, staged);
-            let blame = if git_opts.is_empty() {
-                ""
-            } else {
-                "\nAn argument after `--` stopped it from committing"
-            };
-            bail!("`git commit` left no new commit on HEAD, so nothing was folded{blame}");
-        }
-        // The parent check alone accepts a child that holds nothing: `--only`
-        // with no pathspec commits none of the index, and `--allow-empty` lets
-        // the result through. The squash would then rewrite the target with
-        // nothing in it and report the fold as done.
-        if !git_opts.is_empty() && committed_the_same_tree(workdir, head_oid) {
-            undo_commit_attempt(workdir, head_oid, staged_by_loom, staged);
-            bail!(
-                "`git commit` made an empty `fixup!` commit, so nothing was folded\n\
-                 An argument after `--` kept the staged changes out of it"
-            );
+            return Err(e);
         }
 
         // From here the repository carries a commit the user never asked for,
@@ -1713,27 +1699,6 @@ fn fold_files_into_commit(
     ));
 
     Ok(())
-}
-
-/// Whether HEAD is now a commit made on top of `parent`, which is what a `git
-/// commit` that ran leaves behind. False for a root HEAD, and for a `git
-/// commit` that committed nothing or amended `parent` away.
-fn committed_onto(workdir: &Path, parent: git2::Oid) -> bool {
-    git::rev_parse(workdir, "HEAD^").is_ok_and(|first| first == parent.to_string())
-}
-
-/// Whether the commit git just made holds the same tree as `parent`, which
-/// [`committed_onto`] accepts because it reads the parent alone. A git that
-/// cannot answer says yes, so the caller takes the commit back rather than
-/// rewriting history on top of it.
-fn committed_the_same_tree(workdir: &Path, parent: git2::Oid) -> bool {
-    match (
-        git::rev_parse(workdir, "HEAD^{tree}"),
-        git::rev_parse(workdir, &format!("{parent}^{{tree}}")),
-    ) {
-        (Ok(now), Ok(before)) => now == before,
-        _ => true,
-    }
 }
 
 /// Take back a `git commit` that did not do what fold asked: whatever it did to

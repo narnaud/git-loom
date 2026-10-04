@@ -1045,18 +1045,10 @@ assert_eq "$(git -C "$WORK" log --format=%s -1 outer)" "Outer O1" "move_inner_ou
 
 # ── GIT ARGUMENT FORWARDING ───────────────────────────────────────────────────
 
-# The global config may point core.hooksPath elsewhere; aim it back at the repo.
-install_failing_pre_commit() {
-  mkdir -p "$WORK/.git/hooks"
-  git -C "$WORK" config core.hooksPath "$WORK/.git/hooks"
-  printf '#!/bin/sh\nexit 1\n' > "$WORK/.git/hooks/pre-commit"
-  chmod +x "$WORK/.git/hooks/pre-commit"
-}
-
 describe "amend: a pre-commit hook is skipped with -- --no-verify"
 setup_repo_with_remote
 commit_file "Hooked base" "hooked.txt"
-install_failing_pre_commit
+install_failing_hook pre-commit
 write_file "hooked.txt" "amended"
 gl_capture fold hooked.txt HEAD
 assert_exit_fail "$CODE" "fold_hook_blocks"
@@ -1069,7 +1061,7 @@ setup_repo_with_remote
 commit_file "H1" "h1.txt"
 h1_hash=$(head_hash)
 commit_file "H2" "h2.txt"
-install_failing_pre_commit
+install_failing_hook pre-commit
 write_file "h1.txt" "folded"
 gl_capture fold h1.txt "$h1_hash"
 assert_exit_fail "$CODE" "fold_fixup_hook_blocks"

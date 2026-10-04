@@ -169,3 +169,16 @@ fn commit_amend_no_edit_takes_an_argument_that_does_commit() {
     assert_eq!(test_repo.get_message(0), "First commit");
     assert_eq!(test_repo.status_porcelain().trim(), "");
 }
+
+/// A fixup path squashes whatever sits on HEAD, so it has to know that git
+/// put a commit there; `--amend` would have replaced the user's own instead.
+#[test]
+fn committed_onto_sees_what_git_did() {
+    let t = TestRepo::new();
+    let base = t.commit("Base", "base.txt").to_string();
+    assert!(!super::committed_onto(&t.workdir(), &base));
+
+    let child = t.commit("Child", "child.txt").to_string();
+    assert!(super::committed_onto(&t.workdir(), &base));
+    assert!(!super::committed_onto(&t.workdir(), &child));
+}
