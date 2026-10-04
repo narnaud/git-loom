@@ -173,11 +173,6 @@ pub fn stage_from(workdir: &Path, source: &str, files: &[&str]) -> Result<()> {
     super::run_git(workdir, &args)
 }
 
-/// Create a commit with a message (`git commit -m <message>`).
-pub fn commit(workdir: &Path, message: &str) -> Result<()> {
-    commit_captured(workdir, message, &[])
-}
-
 /// Create a commit with forwarded options, always captured — unlike
 /// [`commit_opts`], which steps back once the user forwards anything.
 ///
@@ -311,12 +306,6 @@ fn run_add(workdir: &Path, args: &[&str], opts: &[&str]) -> Result<()> {
     } else {
         super::run_git(workdir, args)
     }
-}
-
-/// Create a commit by opening the user's editor for the message (`git commit`,
-/// no `-m`). Inherits stdio so the editor reaches the terminal.
-pub fn commit_with_editor(workdir: &Path) -> Result<()> {
-    commit_opts(workdir, None, &[])
 }
 
 #[cfg(test)]

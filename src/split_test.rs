@@ -20,6 +20,7 @@ fn split_head_commit() {
         &target_oid.to_string(),
         vec!["file_a.txt".to_string()],
         "First part".to_string(),
+        &[],
     );
 
     assert!(result.is_ok(), "split_head_commit failed: {:?}", result);
@@ -62,6 +63,7 @@ fn split_head_commit_with_absolute_path() {
             &target_oid.to_string(),
             vec![abs.clone()],
             "First part".to_string(),
+            &[],
         )
     });
 
@@ -96,6 +98,7 @@ fn split_non_head_commit() {
         &target_oid.to_string(),
         vec!["file_a.txt".to_string()],
         "First part".to_string(),
+        &[],
     );
 
     assert!(result.is_ok(), "split_non_head_commit failed: {:?}", result);
@@ -120,6 +123,7 @@ fn split_single_file_fails() {
         &c1_oid.to_string(),
         vec!["only.txt".to_string()],
         "Should fail".to_string(),
+        &[],
     );
 
     assert!(result.is_err(), "Should fail on single-file commit");
@@ -151,6 +155,7 @@ fn split_merge_commit_fails() {
         &merge_oid.to_string(),
         vec!["file1.txt".to_string()],
         "Should fail".to_string(),
+        &[],
     );
 
     assert!(result.is_err(), "Should fail on merge commit");
@@ -184,6 +189,7 @@ fn split_preserves_other_commits() {
         &split_oid.to_string(),
         vec!["file_a.txt".to_string()],
         "First part".to_string(),
+        &[],
     );
 
     assert!(
@@ -227,6 +233,7 @@ fn split_with_woven_branches() {
         &split_oid.to_string(),
         vec!["fa1.txt".to_string()],
         "Feature A part 1".to_string(),
+        &[],
     );
 
     assert!(
@@ -269,6 +276,7 @@ fn split_head_commit_with_a_deletion() {
         &target_oid.to_string(),
         vec!["file1.txt".to_string()],
         "Delete file1".to_string(),
+        &[],
     );
 
     assert!(result.is_ok(), "split of a deletion failed: {:?}", result);
@@ -317,6 +325,7 @@ fn split_head_takes_the_files_from_the_commit_not_the_working_tree() {
         "HEAD",
         vec!["a[1].txt".to_string()],
         "First".to_string(),
+        &[],
     )
     .unwrap();
 
@@ -350,6 +359,7 @@ fn split_head_keeps_a_staged_and_an_unstaged_edit_of_one_file() {
         "HEAD",
         vec!["a.txt".to_string()],
         "First".to_string(),
+        &[],
     )
     .unwrap();
 
@@ -389,6 +399,7 @@ fn split_head_by_hunks_takes_whole_files_from_the_commit() {
         &selections,
         Some("Binary"),
         "Text",
+        &[],
     )
     .unwrap();
 
@@ -427,6 +438,7 @@ fn split_head_by_hunks_of_a_rename_keeps_the_tree() {
         &selections,
         Some("Plain"),
         "Rename",
+        &[],
     )
     .unwrap();
 
@@ -477,6 +489,7 @@ fn split_by_hunks_takes_a_submodule_from_the_commit() {
         &selections,
         Some("first"),
         "second",
+        &[],
     )
     .unwrap();
 
@@ -499,6 +512,7 @@ fn split_refuses_when_the_replay_is_dropped() {
         &target.to_string(),
         vec!["one.txt".to_string()],
         "First part".to_string(),
+        &[],
     )
     .unwrap_err()
     .to_string();
@@ -535,6 +549,7 @@ fn split_keeps_the_change_id_on_the_second_commit_and_mints_one_for_the_first() 
         &target_oid.to_string(),
         vec!["file_a.txt".to_string()],
         "First part".to_string(),
+        &[],
     )
     .unwrap();
 
@@ -562,6 +577,7 @@ fn split_mints_change_ids_for_both_halves_of_a_plain_commit() {
         &target_oid.to_string(),
         vec!["file_a.txt".to_string()],
         "First part".to_string(),
+        &[],
     )
     .unwrap();
 
@@ -591,6 +607,7 @@ fn split_gives_distinct_ids_when_both_halves_share_the_message() {
         &target_oid.to_string(),
         vec!["file_a.txt".to_string()],
         "Two files commit".to_string(),
+        &[],
     )
     .unwrap();
 
@@ -615,6 +632,7 @@ fn split_with_editor_stamps_the_first_half_and_keeps_the_second() {
         None,
         None,
         vec!["file_a.txt".to_string()],
+        &[],
         &crate::core::graph::Theme::dark(),
     )
     .unwrap();
@@ -625,89 +643,6 @@ fn split_with_editor_stamps_the_first_half_and_keeps_the_second() {
             .starts_with("First part by editor\n\nChange-Id: I")
     );
     assert_eq!(change_id_at(&test_repo, 0).as_deref(), Some(CHANGE_ID));
-}
-
-/// Aborting the editor fails the first commit; the HEAD path has no rebase
-/// abort to put the commit back, nor the user's staged changes onto it.
-#[test]
-fn an_aborted_first_commit_puts_the_head_commit_back() {
-    let test_repo = TestRepo::new();
-    test_repo.commit("Base", "base.txt");
-    let target_oid = test_repo.commit_multi(&[("a.txt", "a"), ("b.txt", "b")], "Two files commit");
-    test_repo.write_file("base.txt", "staged edit\n");
-    test_repo.stage_files(&["base.txt"]);
-    test_repo.set_fake_editor("");
-
-    assert!(
-        super::split_commit(
-            &test_repo.repo,
-            &target_oid.to_string(),
-            None,
-            None,
-            vec!["a.txt".to_string()],
-            &crate::core::graph::Theme::dark(),
-        )
-        .is_err()
-    );
-
-    assert_eq!(test_repo.head_oid(), target_oid);
-    assert_eq!(test_repo.status_porcelain(), "M  base.txt\n");
-}
-
-#[test]
-fn an_aborted_first_commit_of_a_hunk_split_puts_the_head_commit_back() {
-    let test_repo = TestRepo::new();
-    test_repo.commit("Base", "base.txt");
-    let target_oid = test_repo.commit_multi(&[("a.txt", "a"), ("b.txt", "b")], "Two files commit");
-    let workdir = test_repo.workdir();
-    let mut selections = crate::core::staging::collect_commit_hunks(&workdir, "HEAD", &[]).unwrap();
-    for file in &mut selections {
-        for hunk in &mut file.hunks {
-            hunk.selected = file.path == "a.txt";
-        }
-    }
-    test_repo.set_fake_editor("");
-
-    assert!(
-        super::perform_split_by_hunks(
-            &test_repo.repo,
-            &workdir,
-            target_oid,
-            &selections,
-            None,
-            "Two files commit",
-        )
-        .is_err()
-    );
-
-    assert_eq!(test_repo.head_oid(), target_oid);
-    assert_eq!(test_repo.status_porcelain(), "");
-}
-
-/// At the rebase pause the half not yet committed sits untracked, and `git
-/// rebase --abort` refuses to overwrite it until the commit is put back.
-#[test]
-fn an_aborted_first_commit_of_an_older_commit_leaves_history_alone() {
-    let test_repo = TestRepo::new_with_remote();
-    let target_oid = test_repo.commit_multi(&[("a.txt", "a"), ("b.txt", "b")], "Two files commit");
-    let head = test_repo.commit("Later commit", "later.txt");
-    test_repo.set_fake_editor("");
-
-    assert!(
-        super::split_commit(
-            &test_repo.repo,
-            &target_oid.to_string(),
-            None,
-            None,
-            vec!["a.txt".to_string()],
-            &crate::core::graph::Theme::dark(),
-        )
-        .is_err()
-    );
-
-    assert_eq!(test_repo.head_oid(), head);
-    assert!(!crate::git::rebase_is_in_progress(test_repo.repo.path()));
-    assert_eq!(test_repo.status_porcelain(), "");
 }
 
 // ── Replay hint ───────────────────────────────────────────────────────
@@ -760,4 +695,243 @@ fn hint_quotes_every_selection_argument() {
 fn hint_omits_the_selection_when_none_was_given() {
     let hunks = HunkArgs::new(vec![], Some("abc123".to_string()));
     assert_eq!(hint(Some("m"), true, hunks, &[]), "loom split ab -m m -p");
+}
+
+// ── Forwarded git arguments (Spec 021) ──────────────────────────────────
+
+fn author_at(test_repo: &TestRepo, steps_back: usize) -> String {
+    let rev = format!("HEAD~{steps_back}");
+    crate::git::run_git_stdout(&test_repo.workdir(), &["log", "-1", "--format=%an", &rev])
+        .unwrap()
+        .trim()
+        .to_string()
+}
+
+#[test]
+fn split_forwards_to_both_commits() {
+    let test_repo = TestRepo::new_with_remote();
+    let target_oid = test_repo.commit_multi(&[("a.txt", "a"), ("b.txt", "b")], "Two files commit");
+    test_repo.commit("Later commit", "later.txt");
+
+    super::split_commit_with_selection(
+        &test_repo.repo,
+        &target_oid.to_string(),
+        vec!["a.txt".to_string()],
+        "First part".to_string(),
+        &["--author=Someone Else <else@example.com>"],
+    )
+    .unwrap();
+
+    assert_eq!(test_repo.get_subject(2), "First part");
+    assert_eq!(author_at(&test_repo, 2), "Someone Else");
+    assert_eq!(author_at(&test_repo, 1), "Someone Else");
+    assert_ne!(author_at(&test_repo, 0), "Someone Else");
+}
+
+/// On the HEAD path a commit that never happened would leave HEAD on the
+/// parent, and the commit being split out of the branch.
+#[test]
+fn a_forwarded_dry_run_puts_the_head_commit_back() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("Base", "base.txt");
+    let target_oid = test_repo.commit_multi(&[("a.txt", "a"), ("b.txt", "b")], "Two files commit");
+    test_repo.write_file("base.txt", "staged edit\n");
+    test_repo.stage_files(&["base.txt"]);
+    let before = test_repo.status_porcelain();
+
+    let err = super::split_commit_with_selection(
+        &test_repo.repo,
+        &target_oid.to_string(),
+        vec!["a.txt".to_string()],
+        "First part".to_string(),
+        &["--dry-run"],
+    )
+    .unwrap_err();
+
+    assert!(err.to_string().contains("nothing was split"), "{err}");
+    assert_eq!(test_repo.head_oid(), target_oid);
+    assert_eq!(test_repo.status_porcelain(), before);
+}
+
+/// `--amend` folds the first half into the parent: the commits add up, but
+/// not on the parent the split started from.
+#[test]
+fn a_forwarded_amend_puts_the_head_commit_back() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("Base", "base.txt");
+    let target_oid = test_repo.commit_multi(&[("a.txt", "a"), ("b.txt", "b")], "Two files commit");
+
+    let err = super::split_commit_with_selection(
+        &test_repo.repo,
+        &target_oid.to_string(),
+        vec!["a.txt".to_string()],
+        "First part".to_string(),
+        &["--amend"],
+    )
+    .unwrap_err();
+
+    assert!(err.to_string().contains("nothing was split"), "{err}");
+    assert_eq!(test_repo.head_oid(), target_oid);
+    assert_eq!(test_repo.get_subject(1), "Base");
+    assert_eq!(test_repo.status_porcelain(), "");
+}
+
+/// `-a` sweeps the user's unstaged edit into the first half.
+#[test]
+fn a_forwarded_all_leaves_the_working_tree_alone() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("Base", "base.txt");
+    let target_oid = test_repo.commit_multi(&[("a.txt", "a"), ("b.txt", "b")], "Two files commit");
+    test_repo.write_file("base.txt", "unstaged edit\n");
+
+    let err = super::split_commit_with_selection(
+        &test_repo.repo,
+        &target_oid.to_string(),
+        vec!["a.txt".to_string()],
+        "First part".to_string(),
+        &["-a"],
+    )
+    .unwrap_err();
+
+    assert!(err.to_string().contains("nothing was split"), "{err}");
+    assert_eq!(test_repo.head_oid(), target_oid);
+    assert_eq!(test_repo.status_porcelain(), " M base.txt\n");
+    assert_eq!(test_repo.read_file("base.txt"), "unstaged edit\n");
+}
+
+#[test]
+fn a_forwarded_dry_run_on_an_older_commit_leaves_history_alone() {
+    let test_repo = TestRepo::new_with_remote();
+    let target_oid = test_repo.commit_multi(&[("a.txt", "a"), ("b.txt", "b")], "Two files commit");
+    let head = test_repo.commit("Later commit", "later.txt");
+
+    let err = super::split_commit_with_selection(
+        &test_repo.repo,
+        &target_oid.to_string(),
+        vec!["a.txt".to_string()],
+        "First part".to_string(),
+        &["--dry-run"],
+    )
+    .unwrap_err();
+
+    assert!(err.to_string().contains("nothing was split"), "{err}");
+    assert_eq!(test_repo.head_oid(), head);
+    assert!(!crate::git::rebase_is_in_progress(test_repo.repo.path()));
+}
+
+/// Aborting the editor fails the first commit; the HEAD path has no rebase
+/// abort to put the commit back, nor the user's staged changes onto it.
+#[test]
+fn an_aborted_first_commit_puts_the_head_commit_back() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("Base", "base.txt");
+    let target_oid = test_repo.commit_multi(&[("a.txt", "a"), ("b.txt", "b")], "Two files commit");
+    test_repo.write_file("base.txt", "staged edit\n");
+    test_repo.stage_files(&["base.txt"]);
+    test_repo.set_fake_editor("");
+
+    assert!(
+        super::split_commit(
+            &test_repo.repo,
+            &target_oid.to_string(),
+            None,
+            None,
+            vec!["a.txt".to_string()],
+            &[],
+            &crate::core::graph::Theme::dark(),
+        )
+        .is_err()
+    );
+
+    assert_eq!(test_repo.head_oid(), target_oid);
+    assert_eq!(test_repo.status_porcelain(), "M  base.txt\n");
+}
+
+#[test]
+fn an_aborted_first_commit_of_a_hunk_split_puts_the_head_commit_back() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("Base", "base.txt");
+    let target_oid = test_repo.commit_multi(&[("a.txt", "a"), ("b.txt", "b")], "Two files commit");
+    let workdir = test_repo.workdir();
+    let mut selections = crate::core::staging::collect_commit_hunks(&workdir, "HEAD", &[]).unwrap();
+    for file in &mut selections {
+        for hunk in &mut file.hunks {
+            hunk.selected = file.path == "a.txt";
+        }
+    }
+    test_repo.set_fake_editor("");
+
+    assert!(
+        super::perform_split_by_hunks(
+            &test_repo.repo,
+            &workdir,
+            target_oid,
+            &selections,
+            None,
+            "Two files commit",
+            &[],
+        )
+        .is_err()
+    );
+
+    assert_eq!(test_repo.head_oid(), target_oid);
+    assert_eq!(test_repo.status_porcelain(), "");
+}
+
+/// At the rebase pause the half not yet committed sits untracked, and `git
+/// rebase --abort` refuses to overwrite it until the commit is put back.
+#[test]
+fn an_aborted_first_commit_of_an_older_commit_leaves_history_alone() {
+    let test_repo = TestRepo::new_with_remote();
+    let target_oid = test_repo.commit_multi(&[("a.txt", "a"), ("b.txt", "b")], "Two files commit");
+    let head = test_repo.commit("Later commit", "later.txt");
+    test_repo.set_fake_editor("");
+
+    assert!(
+        super::split_commit(
+            &test_repo.repo,
+            &target_oid.to_string(),
+            None,
+            None,
+            vec!["a.txt".to_string()],
+            &[],
+            &crate::core::graph::Theme::dark(),
+        )
+        .is_err()
+    );
+
+    assert_eq!(test_repo.head_oid(), head);
+    assert!(!crate::git::rebase_is_in_progress(test_repo.repo.path()));
+    assert_eq!(test_repo.status_porcelain(), "");
+}
+
+#[cfg(unix)]
+#[test]
+fn split_skips_the_hooks_with_no_verify() {
+    let build = || {
+        let test_repo = TestRepo::new();
+        test_repo.commit("Base", "base.txt");
+        let target_oid =
+            test_repo.commit_multi(&[("a.txt", "a"), ("b.txt", "b")], "Two files commit");
+        test_repo.install_hook("pre-commit", "exit 1\n");
+        (test_repo, target_oid)
+    };
+    let split = |test_repo: &TestRepo, target_oid: git2::Oid, opts: &[&str]| {
+        super::split_commit_with_selection(
+            &test_repo.repo,
+            &target_oid.to_string(),
+            vec!["a.txt".to_string()],
+            "First part".to_string(),
+            opts,
+        )
+    };
+
+    let (test_repo, target_oid) = build();
+    assert!(split(&test_repo, target_oid, &[]).is_err());
+    assert_eq!(test_repo.head_oid(), target_oid);
+
+    let (test_repo, target_oid) = build();
+    split(&test_repo, target_oid, &["--no-verify"]).unwrap();
+    assert_eq!(test_repo.get_subject(1), "First part");
+    assert_eq!(test_repo.get_subject(0), "Two files commit");
 }

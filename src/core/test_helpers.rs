@@ -617,7 +617,7 @@ impl TestRepo {
 
     /// Commit already-staged files with a message.
     pub fn commit_staged(&self, message: &str) {
-        crate::git::commit(self.workdir().as_path(), message).unwrap();
+        crate::git::commit_captured(self.workdir().as_path(), message, &[]).unwrap();
     }
 
     /// Get the names of files that differ from HEAD.

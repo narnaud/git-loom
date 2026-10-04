@@ -36,18 +36,18 @@ itself uses. The cost is one extra `--`.
 | `commit`| `git commit` |
 | `add`   | `git add`    |
 | `fold`  | `git commit` |
+| `split` | `git commit`, both of them |
 | `absorb`| `git commit`, every `fixup!` commit |
 
-The last two drive a rebase like the commands below, but they also make
+The last three drive a rebase like the commands below, but they also make
 commits of their own along the way, and those run the user's commit hooks. See
 [Fold Commits Too](#fold-commits-too) and [Other Commands That
 Commit](#other-commands-that-commit).
 
 Every other command either renders its output itself (`status`, `tui`, `trace`)
-or drives a rebase through Weave (`split`, `swap`, `drop`, `reword`, `branch`,
-`update`, `init`), where there is no single git command the arguments could
-belong to. `split` and `reword` also make a commit of their own and are not
-covered yet.
+or drives a rebase through Weave (`swap`, `drop`, `reword`, `branch`, `update`,
+`init`), where there is no single git command the arguments could belong to.
+`reword` also makes a commit of its own and is not covered yet.
 
 ## What Happens
 
@@ -84,6 +84,7 @@ git-loom diff f1 -- --stat        # git diff --stat -- file1.txt
 git-loom commit -m x -- -S        # git commit -S -m x
 git-loom add f1 -- -f             # git add -f -- file1.txt
 git-loom fold f1 ab -- -n         # git commit -n --amend --no-edit --allow-empty
+git-loom split ab -m x f1 -- -n   # git commit -n -m x, twice
 git-loom absorb -- -n             # git commit -n -m 'fixup! …', per target
 ```
 
@@ -114,10 +115,12 @@ agent on a pty — the failure `commit`'s own agent-mode guard exists to prevent
 uncaptured, forwarded arguments or not; capturing them would swallow the user's
 pager and colors along with everything else.
 
-`fold` and `absorb` do not step back either, for a different reason: each commit
-is one step of a rewrite that goes on from what git did (below), so loom keeps
-the run to itself. A forwarded `--dry-run` therefore prints into the trace log
-and ends in an error rather than on the terminal.
+`fold`, `split` and `absorb` do not step back either, for a different reason:
+each commit is one step of a rewrite that goes on from what git did (below), so
+loom keeps the run to itself. A forwarded `--dry-run` therefore prints into the
+trace log and ends in an error rather than on the terminal. Where loom opens the
+editor itself — `split` without `-m` — that commit runs uncaptured as it always
+does.
 
 ### Fold Commits Too
 
@@ -185,11 +188,18 @@ and the user's other staged files — before the error is reported.
 
 ### Other Commands That Commit
 
-`absorb` follows fold: everything is forwarded verbatim and placed before loom's
-own arguments, nothing is inspected, and what loom checks is the commit git
-made, before anything is rewritten. A failed check takes the attempt back whole
-and reports the error (Data Safety).
+`split` and `absorb` follow fold: everything is forwarded verbatim and placed
+before loom's own arguments, nothing is inspected, and what loom checks is the
+commit git made, before anything is rewritten. A failed check takes the attempt
+back whole and reports the error (Data Safety).
 
+- `split` forwards to both commits, and a forwarded message source reaches
+  both. With forwarded arguments the result must be the commit split in two:
+  two commits on the original parent, neither empty, that add up to the
+  original's tree — *"`git commit` did not leave the commit split in two, so
+  nothing was split"*. That catches `--dry-run`, `--amend`, and `-a`, `-i` or a
+  pathspec that commits the working tree's copy. On HEAD the commit is put
+  back with a mixed reset; elsewhere the rebase is aborted (Spec 013).
 - `absorb` forwards to every `fixup!` commit, and checks each one as fold
   checks its own: *"`git commit` left no new commit on HEAD, so nothing was
   absorbed"*, and with forwarded arguments *"`git commit` made an empty

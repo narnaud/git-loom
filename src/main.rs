@@ -297,6 +297,9 @@ enum Command {
         hunks_from: Option<String>,
         /// Files for the first commit (shows interactive picker if omitted)
         files: Vec<String>,
+        /// Arguments forwarded verbatim to both `git commit`s split makes (everything after `--`)
+        #[arg(last = true, num_args = 0.., allow_hyphen_values = true, value_name = "GIT_ARG")]
+        git_args: Vec<String>,
     },
     /// Reword a commit message or rename a branch
     #[command(visible_alias = "rw")]
@@ -724,12 +727,14 @@ fn main() {
             hunks,
             hunks_from,
             files,
+            git_args,
         }) => split::run(
             target,
             message,
             patch,
             HunkArgs::new(hunks, hunks_from),
             files,
+            git_args,
             &theme,
         ),
         Some(Command::Push {

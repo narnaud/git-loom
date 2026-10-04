@@ -48,11 +48,12 @@ fn commit_or_editor(
     repo: &Repository,
     workdir: &std::path::Path,
     message: Option<&str>,
+    git_opts: &[&str],
 ) -> Result<()> {
     match message {
-        Some(m) => git::commit(workdir, m),
+        Some(m) => git::commit_captured(workdir, m, git_opts),
         None => {
-            git::commit_with_editor(workdir)?;
+            git::commit_opts(workdir, None, git_opts)?;
             changeid::ensure_on_head_or_warn(repo, workdir, None);
             Ok(())
         }
@@ -67,9 +68,12 @@ pub fn run(
     patch: bool,
     hunks: HunkArgs,
     files: Vec<String>,
+    git_args: Vec<String>,
     theme: &graph::Theme,
 ) -> Result<()> {
-    let prompt_hint = invocation(&target, message.as_deref(), patch, &hunks, &files);
+    let git_opts: Vec<&str> = git_args.iter().map(String::as_str).collect();
+    let git_suffix = hunk_select::git_args_suffix(&git_opts);
+    let prompt_hint = invocation(&target, message.as_deref(), patch, &hunks, &files) + &git_suffix;
 
     // Without -m the first commit would open $GIT_EDITOR, which hangs a headless agent.
     if agent_mode::enabled() && message.is_none() {
@@ -98,11 +102,13 @@ pub fn run(
         hunks,
         // Both commits it writes are the one it lists.
         target_hash: None,
-        git_args: String::new(),
+        git_args: git_suffix,
     });
 
     match resolved {
-        Target::Commit(hash) => split_commit(&repo, &hash, message, picker, files, theme),
+        Target::Commit(hash) => {
+            split_commit(&repo, &hash, message, picker, files, &git_opts, theme)
+        }
         _ => unreachable!(),
     }
 }
@@ -115,6 +121,7 @@ fn split_commit(
     message: Option<String>,
     picker: Option<Picker>,
     files: Vec<String>,
+    git_opts: &[&str],
     theme: &graph::Theme,
 ) -> Result<()> {
     let workdir = repo::require_workdir(repo, COMMAND)?;
@@ -159,6 +166,7 @@ fn split_commit(
             &selections,
             message.as_deref(),
             &original_msg,
+            git_opts,
         );
     }
 
@@ -190,6 +198,7 @@ fn split_commit(
         &remaining,
         message.as_deref(),
         &original_msg,
+        git_opts,
     )
 }
 
@@ -200,9 +209,18 @@ pub fn split_commit_with_selection(
     commit_hash: &str,
     selected: Vec<String>,
     message: String,
+    git_opts: &[&str],
 ) -> Result<()> {
     let theme = graph::Theme::dark();
-    split_commit(repo, commit_hash, Some(message), None, selected, &theme)
+    split_commit(
+        repo,
+        commit_hash,
+        Some(message),
+        None,
+        selected,
+        git_opts,
+        &theme,
+    )
 }
 
 /// Show an interactive file picker for splitting.
@@ -268,6 +286,7 @@ fn perform_non_head_with(
 }
 
 /// Perform the file-based split operation.
+#[allow(clippy::too_many_arguments)]
 fn perform_split(
     repo: &Repository,
     workdir: &std::path::Path,
@@ -276,16 +295,16 @@ fn perform_split(
     remaining: &[String],
     msg1: Option<&str>,
     msg2: &str,
+    git_opts: &[&str],
 ) -> Result<()> {
     let (msg1, msg2) = stamped_messages(repo, workdir, msg1, msg2)?;
     let (msg1, msg2) = (msg1.as_deref(), msg2.as_str());
+    let split = || perform_head_split(repo, workdir, selected, remaining, msg1, msg2, git_opts);
     run_split(repo, workdir, commit_oid, |is_head| {
         if is_head {
-            perform_head_split(repo, workdir, selected, remaining, msg1, msg2)
+            split()
         } else {
-            perform_non_head_with(repo, workdir, commit_oid, || {
-                perform_head_split(repo, workdir, selected, remaining, msg1, msg2)
-            })
+            perform_non_head_with(repo, workdir, commit_oid, split)
         }
     })
 }
@@ -332,30 +351,39 @@ fn perform_head_split(
     remaining: &[String],
     msg1: Option<&str>,
     msg2: &str,
+    git_opts: &[&str],
 ) -> Result<(String, String)> {
-    split_head_or_undo(workdir, |original| {
+    split_head_or_undo(workdir, git_opts, |original| {
         let selected_refs: Vec<&str> = selected.iter().map(|s| s.as_str()).collect();
         git::stage_from(workdir, original, &selected_refs)?;
-        commit_or_editor(repo, workdir, msg1)?;
+        commit_or_editor(repo, workdir, msg1, git_opts)?;
 
         let remaining_refs: Vec<&str> = remaining.iter().map(|s| s.as_str()).collect();
         git::stage_from(workdir, original, &remaining_refs)?;
-        git::commit(workdir, msg2)
+        git::commit_captured(workdir, msg2, git_opts)
     })
 }
 
 /// Reset HEAD to its parent, let `make_commits` commit the two halves of the
 /// former HEAD (passed as `original`), and return their hashes.
 ///
-/// Any failure puts HEAD and the index back on `original` (Spec 013).
+/// Any failure puts HEAD and the index back on `original` (Spec 013). With
+/// forwarded `git_opts` (Spec 021) the result must also be the commit split in
+/// two, since `git commit` can exit 0 without committing, amend, or sweep in
+/// more.
 fn split_head_or_undo(
     workdir: &std::path::Path,
+    git_opts: &[&str],
     make_commits: impl FnOnce(&str) -> Result<()>,
 ) -> Result<(String, String)> {
     let original = git::rev_parse(workdir, "HEAD")?;
-    git::reset_mixed(workdir, "HEAD~1")?;
+    let base = git::rev_parse(workdir, "HEAD~1")?;
+    git::reset_mixed(workdir, &base)?;
 
     let result = make_commits(&original).and_then(|()| {
+        if !git_opts.is_empty() {
+            check_split_in_two(workdir, &base, &original)?;
+        }
         Ok((
             git::rev_parse(workdir, "HEAD~1")?,
             git::rev_parse(workdir, "HEAD")?,
@@ -372,6 +400,23 @@ fn split_head_or_undo(
     result
 }
 
+/// Errs unless HEAD and its parent are two non-empty commits on `base` that
+/// add up to `original`'s tree.
+fn check_split_in_two(workdir: &std::path::Path, base: &str, original: &str) -> Result<()> {
+    let tree = |rev: &str| git::rev_parse(workdir, &format!("{rev}^{{tree}}"));
+    let in_two = git::rev_parse(workdir, "HEAD~2").is_ok_and(|b| b == base)
+        && tree(base)? != tree("HEAD~1")?
+        && tree("HEAD~1")? != tree("HEAD")?
+        && tree("HEAD")? == tree(original)?;
+    if !in_two {
+        bail!(
+            "`git commit` did not leave the commit split in two, so nothing was split\n\
+             An argument after `--` changed what it committed"
+        );
+    }
+    Ok(())
+}
+
 /// Perform the hunk-based split operation.
 fn perform_split_by_hunks(
     repo: &Repository,
@@ -380,16 +425,16 @@ fn perform_split_by_hunks(
     selections: &[FileEntry],
     msg1: Option<&str>,
     msg2: &str,
+    git_opts: &[&str],
 ) -> Result<()> {
     let (msg1, msg2) = stamped_messages(repo, workdir, msg1, msg2)?;
     let (msg1, msg2) = (msg1.as_deref(), msg2.as_str());
+    let split = || perform_head_split_by_hunks(repo, workdir, selections, msg1, msg2, git_opts);
     run_split(repo, workdir, commit_oid, |is_head| {
         if is_head {
-            perform_head_split_by_hunks(repo, workdir, selections, msg1, msg2)
+            split()
         } else {
-            perform_non_head_with(repo, workdir, commit_oid, || {
-                perform_head_split_by_hunks(repo, workdir, selections, msg1, msg2)
-            })
+            perform_non_head_with(repo, workdir, commit_oid, split)
         }
     })
 }
@@ -407,8 +452,9 @@ fn perform_head_split_by_hunks(
     selections: &[FileEntry],
     msg1: Option<&str>,
     msg2: &str,
+    git_opts: &[&str],
 ) -> Result<(String, String)> {
-    split_head_or_undo(workdir, |original| {
+    split_head_or_undo(workdir, git_opts, |original| {
         let mut selected_patch = String::new();
         for file in selections {
             let selected: Vec<_> = file
@@ -431,14 +477,14 @@ fn perform_head_split_by_hunks(
             git::apply_cached_patch(workdir, &selected_patch)?;
         }
 
-        commit_or_editor(repo, workdir, msg1)?;
+        commit_or_editor(repo, workdir, msg1, git_opts)?;
 
         for file in selections {
             if file.hunks.iter().any(|h| !h.selected) {
                 git::stage_from(workdir, original, &[&file.path])?;
             }
         }
-        git::commit(workdir, msg2)
+        git::commit_captured(workdir, msg2, git_opts)
     })
 }
 

@@ -5,7 +5,7 @@ Split a commit into two sequential commits by selecting which files (or hunks) g
 ## Usage
 
 ```
-git loom split [-p] [-m <message>] <target> [<files>...]
+git loom split [-p] [-m <message>] <target> [<files>...] [-- <git args>...]
 ```
 
 ### Arguments
@@ -23,6 +23,24 @@ git loom split [-p] [-m <message>] <target> [<files>...]
 | `-p, --patch` | Interactively pick individual hunks for the first commit |
 | `--hunks <id>` | Take that hunk for the first commit instead of opening the picker; repeat it per hunk. Needs `-p` and `--hunks-from`; see [agent mode](agent.md). |
 | `--hunks-from <fingerprint>` | Fingerprint of the listing `--hunks` came from. Loom refuses a selection taken from a diff that has since changed. |
+
+### Git Options
+
+Anything after a `--` separator reaches both `git commit`s split makes — see
+[Passing Options to Git](README.md#passing-options-to-git):
+
+```bash
+git loom split ab -m "Extract config" config.rs -- --no-verify
+```
+
+Loom's own `-m` goes last, so a forwarded `-m` lands in both messages ahead
+of it.
+
+Loom then checks that the result is the commit split in two: two non-empty
+commits on the original parent that add up to the original tree. `--dry-run`,
+`--amend`, `-a` or a pathspec that commits the working tree's copy of a file
+all fail that check, and loom puts the commit back as it was rather than
+rewriting history around it.
 
 ## What It Does
 

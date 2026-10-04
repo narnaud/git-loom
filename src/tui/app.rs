@@ -786,7 +786,7 @@ fn execute_action(
         } => {
             let patch = hunks.is_some();
             let hunks = hunks.unwrap_or_default();
-            split::run(commit, None, patch, hunks, files, theme)
+            split::run(commit, None, patch, hunks, files, vec![], theme)
         }
         Action::NewBranch { name, target } => branch::new::run(Some(name), target),
         Action::Drop { targets } => drop::run(targets, false),
