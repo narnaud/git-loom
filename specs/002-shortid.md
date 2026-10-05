@@ -69,7 +69,8 @@ replays copy the message verbatim); merges and `fixup!` commits get none.
 - Format: `Change-Id: I<40 lowercase hex>`. When `gerrit.reviewUrl` is set, the
   trailer is instead `Link: <url>/id/I<hex>`, as Gerrit's `commit-msg` hook
   writes it. Both forms are read; the last matching trailer in the trailer
-  block wins; hex is matched case-insensitively.
+  block wins; hex is matched case-insensitively. A `---` line is message
+  text, not the patch divider `git interpret-trailers` stops at.
 - Value: the current Gerrit hook's recipe — the blob hash of
   `<git var GIT_COMMITTER_IDENT>`, a newline, `HEAD`'s hash (the empty-tree
   hash on an unborn branch; after an editor-path commit, the new commit

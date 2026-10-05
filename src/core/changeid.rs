@@ -28,7 +28,7 @@ pub fn normalize(value: &str) -> Option<String> {
 /// `Change-Id:` trailer, or the last `Link:` trailer ending in `/id/I<hex>`
 /// (the form Gerrit's hook writes when `gerrit.reviewUrl` is set).
 pub fn from_message(message: &str) -> Option<String> {
-    let trailers = git2::message_trailers_strs(message).ok()?;
+    let trailers = message_trailers(message)?;
     let mut found = None;
     for (key, value) in trailers.iter() {
         if key.eq_ignore_ascii_case(TRAILER) {
@@ -43,6 +43,21 @@ pub fn from_message(message: &str) -> Option<String> {
         }
     }
     found
+}
+
+/// The trailers of a commit message. libgit2, like `git interpret-trailers`,
+/// stops at a `---<space>` line as if a patch followed; a commit message has
+/// none, so such lines (e.g. `--- Notes ---`) are kept as plain text, as
+/// Gerrit's server-side footer parser does.
+fn message_trailers(message: &str) -> Option<git2::MessageTrailersStrs> {
+    let text: String = message
+        .split_inclusive('\n')
+        .map(|line| match line.strip_prefix("---") {
+            Some(rest) => format!("-{rest}"),
+            None => line.to_string(),
+        })
+        .collect();
+    git2::message_trailers_strs(&text).ok()
 }
 
 /// Reverse-hex letters, jujutsu's change-id alphabet: `0→z … f→k`. A
@@ -142,9 +157,8 @@ pub fn trailer_line(change_id: &str, link_base: Option<&str>) -> String {
 /// config, which is why loom never uses `git commit --trailer`.
 pub fn stamp(message: &str, change_id: &str, link_base: Option<&str>) -> String {
     let body = message.trim_end();
-    let has_block = git2::message_trailers_strs(&format!("{body}\n"))
-        .map(|t| t.iter().next().is_some())
-        .unwrap_or(false);
+    let has_block =
+        message_trailers(&format!("{body}\n")).is_some_and(|t| t.iter().next().is_some());
     let separator = if has_block { "\n" } else { "\n\n" };
     format!("{body}{separator}{}\n", trailer_line(change_id, link_base))
 }

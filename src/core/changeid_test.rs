@@ -44,6 +44,14 @@ fn from_message_ignores_mentions_outside_the_trailer_block() {
     assert!(from_message("Subject only\n").is_none());
 }
 
+// A `--- Notes ---` body line used to read as a patch divider, hiding the
+// trailer block: the commit lost its persistent ID and reword stamped a second.
+#[test]
+fn from_message_reads_past_a_dash_line() {
+    let msg = format!("Subject\n\n--- Notes ---\n- detail\n\nType: fix\nChange-Id: {ID}\n");
+    assert_eq!(from_message(&msg).as_deref(), Some(ID));
+}
+
 #[test]
 fn letters_use_jujutsu_reverse_hex() {
     assert_eq!(to_letters("0f"), "zk");
@@ -121,6 +129,14 @@ fn stamp_joins_an_existing_trailer_block() {
     assert_eq!(
         stamp("Fix bug\n\nSigned-off-by: A <a@x>\n", ID, None),
         format!("Fix bug\n\nSigned-off-by: A <a@x>\nChange-Id: {ID}\n")
+    );
+}
+
+#[test]
+fn stamp_joins_a_trailer_block_after_a_dash_line() {
+    assert_eq!(
+        stamp("Fix bug\n\n--- Notes ---\n- x\n\nType: fix\n", ID, None),
+        format!("Fix bug\n\n--- Notes ---\n- x\n\nType: fix\nChange-Id: {ID}\n")
     );
 }
 
