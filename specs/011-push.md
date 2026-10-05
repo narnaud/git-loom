@@ -155,13 +155,14 @@ If the API call fails — for example on a
 host without stacked pull requests — the PR bases are still in place and a
 warning points at `gh extension install github/gh-stack` and `loom trace`.
 
-**PR creation in a chain.** A push covering one branch keeps the
-`gh pr create --web` flow (the browser opens on the PR form). In a chain,
-missing PRs are created
-directly with `gh pr create` (title and description as in
-[PR Title and Description](#pr-title-and-description)) and their URLs printed
-(`PR created: <url>`), because `--web` leaves the PR uncreated until the form
-is submitted and the stack could never be registered in the same run.
+**PR creation.** Missing PRs are created directly with `gh pr create`
+(title and description as in
+[PR Title and Description](#pr-title-and-description)), never through the
+`--web` form, which leaves the PR uncreated until submitted so a stack could
+not be registered in the same run. Each created PR's URL is printed
+(`PR created: <url>`). Only the lowest PR the push creates is then opened,
+with `gh pr view <n> --web` after any stack registration: one tab, whose
+stack map links the other layers.
 
 **Forks.** GitHub does not support stacks across forks. In a fork setup
 (pushing to `origin`, PRs on `upstream`) a warning is printed once,
@@ -274,10 +275,10 @@ git push --force-with-lease --force-if-includes [--atomic] -u <remote> <branch>.
 # If PR exists:
 #   Pushed `feature-a` to `origin`
 #   PR updated: https://github.com/owner/repo/pull/42
-# If no PR, a lone branch opens the PR form in the browser
-gh pr create --web --head <head> --base <target> --repo <owner/repo>
-# in a stack every PR is created directly, targeting the branch below
-gh pr create --head <head> --base <branch below> --repo <owner/repo>
+# If no PR, it is created (in a stack, targeting the branch below)
+gh pr create --head <head> --base <target> --repo <owner/repo> --title <t> --body <b>
+# and the lowest PR created opened in the browser
+gh pr view <n> --web --repo <owner/repo>
 # and an existing PR whose base is wrong is retargeted
 gh pr edit <n> --repo <owner/repo> --base <branch below>
 ```
@@ -463,7 +464,8 @@ git-loom push feature-a
 ```bash
 git-loom push feature-a
 # Pushed `feature-a` to `origin`
-# (browser opens to PR creation page)
+# PR created: https://github.com/owner/repo/pull/42
+# (browser opens on the new PR)
 ```
 
 ### Push to Azure DevOps (with az CLI)

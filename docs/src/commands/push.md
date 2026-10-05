@@ -52,7 +52,7 @@ Each pushed branch gets a PR that targets the branch below it; the bottom one ta
 | Azure DevOps | Not supported — pushing a stacked branch is refused (see [Azure DevOps](#azure-devops)) |
 | Gerrit | Unchanged |
 
-On GitHub the stack shows a stack map on every PR, reviewers see one layer at a time, and when the bottom PR merges GitHub rebases and retargets the ones above by itself. Nothing is stored locally: loom reads each PR's stack membership back through `gh api` on every push and creates or extends the stack as needed. In a stack, new PRs are created directly and their URLs printed instead of opening the browser, because the stack can only be linked once every PR exists.
+On GitHub the stack shows a stack map on every PR, reviewers see one layer at a time, and when the bottom PR merges GitHub rebases and retargets the ones above by itself. Nothing is stored locally: loom reads each PR's stack membership back through `gh api` on every push and creates or extends the stack as needed. When a push creates several PRs, all their URLs are printed but only the lowest one is opened in the browser; its stack map leads to the others.
 
 ```bash
 git loom push b
@@ -135,7 +135,7 @@ Any `remote:` lines containing an `http(s)` URL are shown below the success mess
 Pushes the branch with `--force-with-lease`, then checks whether a PR already exists for the branch:
 
 - **PR exists** — prints the PR URL (`PR updated: https://github.com/owner/repo/pull/42`) without opening the browser
-- **No PR** — creates the PR via `gh pr create` with an auto-generated title and description (see [PR Title and Description](#pr-title-and-description) below)
+- **No PR** — creates the PR via `gh pr create` with an auto-generated title and description (see [PR Title and Description](#pr-title-and-description) below), prints its URL (`PR created: …`) and opens it in the browser
 
 For a stacked branch, see [Stacked Branches](#stacked-branches). If `gh` is not installed, the push succeeds with a message suggesting to install it.
 
@@ -229,7 +229,8 @@ git loom push feature-a
 ```bash
 git loom push feature-a
 # Pushed 'feature-a' to origin
-# (browser opens to PR creation page)
+# PR created: https://github.com/owner/repo/pull/42
+# (browser opens on the new PR)
 ```
 
 ### Push to GitHub (PR already exists)
