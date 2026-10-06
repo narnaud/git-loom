@@ -515,22 +515,6 @@ fn extract_azure_remote_ssh() {
 }
 
 #[test]
-fn extract_azure_remote_visualstudio_has_no_project() {
-    let test_repo = TestRepo::new_with_remote();
-    test_repo
-        .repo
-        .remote_set_url(
-            "origin",
-            "https://myorg.visualstudio.com/myproject/_git/myrepo",
-        )
-        .unwrap();
-    let azure = super::extract_azure_remote(&test_repo.repo, "origin").unwrap();
-    assert_eq!(azure.org_url, "https://myorg.visualstudio.com");
-    assert_eq!(azure.project, None);
-    assert_eq!(azure.repository.as_deref(), Some("myrepo"));
-}
-
-#[test]
 fn extract_azure_remote_unrecognized() {
     let test_repo = TestRepo::new_with_remote();
     test_repo

@@ -174,6 +174,8 @@ No browser is opened in either case.
 
 The organization, project and repository are read from the remote URL and passed explicitly; `--detect` is only used when the URL cannot be parsed. If `az` is not installed, the push succeeds with a message suggesting to install it.
 
+Legacy `https://<org>.visualstudio.com/...` remotes are not supported: they are not auto-detected, and even with `loom.remote-type azure` the `--detect` fallback fails on them. Point the remote at its `dev.azure.com` URL instead.
+
 ### Gerrit
 
 ```bash

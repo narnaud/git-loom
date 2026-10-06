@@ -1315,8 +1315,8 @@ struct AzureRemote {
 }
 
 /// Extract the Azure DevOps organization URL, project, and repository from a
-/// remote URL (`dev.azure.com` HTTPS or SSH, or legacy `<org>.visualstudio.com`
-/// which yields the org only). `None` when the URL is unrecognised.
+/// `dev.azure.com` HTTPS or SSH remote URL. `None` when the URL is
+/// unrecognised.
 ///
 /// The project matters because `az repos pr create` only auto-detects it for
 /// the HTTPS form; an SSH remote needs it passed via `--project`.
@@ -1359,20 +1359,6 @@ fn extract_azure_remote(repo: &Repository, remote: &str) -> Option<AzureRemote> 
             org_url: format!("https://dev.azure.com/{}", org),
             project,
             repository,
-        });
-    }
-
-    if let Some(rest) = url.strip_prefix("https://")
-        && let Some((host, path)) = rest.split_once('/')
-        && host.ends_with(".visualstudio.com")
-    {
-        // Legacy collection URLs are ambiguous about the project segment, so
-        // leave it to az auto-detection rather than guessing.
-        let parts: Vec<&str> = path.split('/').collect();
-        return Some(AzureRemote {
-            org_url: format!("https://{}", host),
-            project: None,
-            repository: repository(&parts),
         });
     }
 

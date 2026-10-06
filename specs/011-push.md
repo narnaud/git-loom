@@ -349,6 +349,8 @@ built from the JSON it returns. No browser is ever opened. The organization,
 project and repository are read from the remote URL and passed explicitly,
 because az stops auto-detecting the project and repository once `--org` is
 given; `--detect` stands in for all three only when the URL cannot be parsed.
+Legacy `<org>.visualstudio.com` remotes are unsupported: not detected, not
+parsed, and `--detect` fails on them.
 If `az` is not installed, prints a helpful message with a link to install it.
 
 ### Gerrit
