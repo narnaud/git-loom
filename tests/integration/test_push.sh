@@ -6,6 +6,14 @@ source "$(dirname "$0")/helpers.sh"
 remote_has()    { git -C "$TMPROOT/remote.git" rev-parse --verify "refs/heads/$1" > /dev/null 2>&1; }
 remote_oid()    { git -C "$TMPROOT/remote.git" rev-parse "refs/heads/$1"; }
 
+# Install stdin as the bare remote's pre-receive hook. The global config may
+# point core.hooksPath elsewhere; aim it back at the remote.
+remote_pre_receive() {
+    git -C "$TMPROOT/remote.git" config core.hooksPath "$TMPROOT/remote.git/hooks"
+    cat > "$TMPROOT/remote.git/hooks/pre-receive"
+    chmod +x "$TMPROOT/remote.git/hooks/pre-receive"
+}
+
 # b (B1) stacked on a (A1), woven as one merge with a's tip inside b's
 # section — the shape loom itself produces; x (X1) independent and woven.
 # Single-commit branches keep PR creation from prompting for a title.
@@ -129,8 +137,7 @@ build_stack
 gitlab_origin
 gl_capture push b
 assert_exit_ok "$CODE" "gitlab_stack_ok"
-assert_contains "$OUT" 'Pushed a to origin' "gitlab_stack_a"
-assert_contains "$OUT" 'Pushed b to origin' "gitlab_stack_b"
+assert_contains "$OUT" 'Pushed a, b to origin' "gitlab_stack_pushed"
 trace="$(gl trace)"
 assert_contains "$trace" "-o merge_request.create -o merge_request.target=$BASE_BRANCH -u origin a" "gitlab_stack_opts_a"
 assert_contains "$trace" "-o merge_request.create -o merge_request.target=a -u origin b" "gitlab_stack_opts_b"
@@ -141,12 +148,67 @@ gl reword "$a1_sid" -m "A1 reworded" > /dev/null
 gl_capture push a
 assert_exit_ok "$CODE" "gitlab_republish_ok"
 assert_contains "$OUT" 'Pushed a to origin' "gitlab_republish_a"
-assert_contains "$OUT" 'Pushed b to origin' "gitlab_republish_b"
+assert_contains "$OUT" 'Re-pushed above a: b' "gitlab_republish_b"
 assert_eq "$(remote_oid b)" "$(branch_oid b)" "gitlab_republish_b_oid"
 trace="$(gl trace)"
 assert_contains "$trace" "-o merge_request.create -o merge_request.target=$BASE_BRANCH -u origin a" "gitlab_republish_opts_a"
 assert_contains "$trace" "-o merge_request.target=a -u origin b" "gitlab_republish_opts_b"
 assert_not_contains "$trace" "merge_request.create -o merge_request.target=a -u origin b" "gitlab_republish_no_create"
+
+# Make the bare remote answer like GitLab: an MR link per pushed branch, only
+# its create form for one named in $TMPROOT/form-only, and a rejection for one
+# named in $TMPROOT/reject.
+gitlab_hook() {
+    remote_pre_receive <<'HOOK'
+#!/usr/bin/env bash
+root="$(dirname "$PWD")"
+while read -r _ _ ref; do
+    branch="${ref#refs/heads/}"
+    [[ "$branch" == "$(cat "$root/reject" 2>/dev/null)" ]] && exit 1
+    if [[ "$branch" == "$(cat "$root/form-only" 2>/dev/null)" ]]; then
+        echo "https://gitlab.example.com/g/r/-/merge_requests/new?merge_request%5Bsource_branch%5D=$branch"
+    else
+        echo "https://gitlab.example.com/g/r/-/merge_requests/$branch"
+    fi
+done
+HOOK
+}
+
+describe "gitlab: a branch new on the remote reads created, a known one updated"
+build_stack
+gitlab_origin
+gitlab_hook
+gl_capture push b
+assert_exit_ok "$CODE" "gitlab_created_ok"
+assert_contains "$OUT" "PR created: https://gitlab.example.com/g/r/-/merge_requests/a" "gitlab_created_a"
+assert_contains "$OUT" "PR created: https://gitlab.example.com/g/r/-/merge_requests/b" "gitlab_created_b"
+a1_sid="$(commit_sid_from_status "A1")"
+gl reword "$a1_sid" -m "A1 reworded" > /dev/null
+gl_capture push b
+assert_exit_ok "$CODE" "gitlab_updated_ok"
+assert_contains "$OUT" "PR updated: https://gitlab.example.com/g/r/-/merge_requests/a" "gitlab_updated_a"
+assert_contains "$OUT" "PR updated: https://gitlab.example.com/g/r/-/merge_requests/b" "gitlab_updated_b"
+
+describe "gitlab: a branch GitLab opened no MR for gets its create form"
+build_stack
+gitlab_origin
+gitlab_hook
+echo x > "$TMPROOT/form-only"
+gl_capture push x
+assert_exit_ok "$CODE" "gitlab_form_ok"
+assert_contains "$OUT" "PR not created for x: GitLab did not create it" "gitlab_form_reason"
+assert_contains "$OUT" "Create it at https://gitlab.example.com/g/r/-/merge_requests/new" "gitlab_form_link"
+
+describe "gitlab: a push failing on an upper layer reports the MRs below it"
+build_stack
+gitlab_origin
+gitlab_hook
+echo b > "$TMPROOT/reject"
+gl_capture push b
+assert_exit_fail "$CODE" "gitlab_partial_fails"
+assert_contains "$OUT" "Pushed a to origin" "gitlab_partial_pushed"
+assert_contains "$OUT" "PR created: https://gitlab.example.com/g/r/-/merge_requests/a" "gitlab_partial_mr"
+remote_has b && fail "gitlab_partial: b should not be on the remote"
 
 # ── GITHUB (gh shim) ──────────────────────────────────────────────────────────
 # The shim is a shell script on PATH; Rust's Command cannot spawn one on
@@ -274,7 +336,8 @@ echo "2 $BASE_BRANCH" > "$GH_STATE/pr_b"
 : > "$GH_LOG"
 gl_gh_capture push b
 assert_exit_ok "$CODE" "gh_retarget_ok"
-assert_contains "$OUT" 'PR retargeted to a: https://github.com/owner/repo/pull/2' "gh_retarget_msg"
+assert_contains "$OUT" 'PR updated: https://github.com/owner/repo/pull/2' "gh_retarget_msg"
+assert_contains "$OUT" 'Retargeted to a' "gh_retarget_base"
 assert_contains "$(cat "$GH_LOG")" "pr edit 2 --repo owner/repo --base a" "gh_retarget_edit"
 
 describe "github: a new layer is added to the existing stack"
@@ -334,13 +397,62 @@ assert_not_contains "$(cat "$GH_LOG")" "pr view" "gh_lone_no_browser"
 assert_not_contains "$(cat "$GH_LOG")" "pr create --web" "gh_lone_no_form"
 assert_not_contains "$(cat "$GH_LOG")" "stacks" "gh_lone_no_stack"
 
+# A `gh` whose `--version` fails counts as not installed.
+install_broken_gh() {
+    install_gh_shim
+    printf '#!/usr/bin/env bash\nexit 1\n' > "$GH_SHIM/gh"
+}
+
+describe "github without gh: a lone branch is pushed with a link to create its PR"
+build_stack
+install_broken_gh
+github_origin
+printf '#!/usr/bin/env bash\necho https://github.com/owner/repo/pull/new/x\n' | remote_pre_receive
+gl_gh_capture push x
+assert_exit_ok "$CODE" "nogh_lone_ok"
+assert_not_contains "$OUT" "/pull/new/" "nogh_lone_no_server_hint"
+assert_contains "$OUT" 'Pushed x to origin' "nogh_lone_pushed"
+assert_contains "$OUT" "PR not created for x: gh is not installed" "nogh_lone_reason"
+assert_contains "$OUT" "Create it at https://github.com/owner/repo/compare/$BASE_BRANCH...x?expand=1" "nogh_lone_link"
+assert_contains "$OUT" "Install gh to have loom create it: https://cli.github.com" "nogh_lone_hint"
+
+describe "github without gh: an Enterprise host keeps the server's link"
+build_stack
+install_broken_gh
+github_origin
+git -C "$WORK" remote set-url origin "git@ghe.example.com:owner/repo.git"
+printf '#!/usr/bin/env bash\necho https://ghe.example.com/owner/repo/pull/new/x\n' | remote_pre_receive
+gl_gh_capture push x
+assert_exit_ok "$CODE" "nogh_server_link_ok"
+assert_contains "$OUT" "https://ghe.example.com/owner/repo/pull/new/x" "nogh_server_link"
+assert_contains "$OUT" "PR not created for x: gh is not installed" "nogh_server_link_reason"
+assert_not_contains "$OUT" "Create it at" "nogh_server_link_no_form"
+
+describe "github without gh: a stack is refused before the push"
+build_stack
+install_broken_gh
+github_origin
+gl_gh_capture push b
+assert_exit_fail "$CODE" "nogh_stack_fails"
+assert_contains "$OUT" "Cannot create stacked PRs: b is stacked on a" "nogh_stack_msg"
+assert_contains "$OUT" "Stacked pull requests need gh" "nogh_stack_why"
+remote_has a && fail "nogh_stack: a should not have been pushed"
+remote_has b && fail "nogh_stack: b should not have been pushed"
+
+describe "github without gh: --no-pr still pushes the stack"
+gl_gh_capture push b --no-pr
+assert_exit_ok "$CODE" "nogh_nopr_ok"
+assert_contains "$OUT" 'Pushed a, b to origin' "nogh_nopr_pushed"
+assert_not_contains "$OUT" "PR not created" "nogh_nopr_no_warning"
+
 describe "github: agent mode never creates PRs and skips the stack"
 build_stack
 install_gh_shim
 github_origin
 gl_gh_capture --agent push b
 assert_exit_ok "$CODE" "gh_agent_ok"
-assert_contains "$OUT" "Skipped creating a PR" "gh_agent_skipped"
+assert_contains "$OUT" "PR not created for b: agent mode" "gh_agent_skipped"
+assert_contains "$OUT" "Create it at https://github.com/owner/repo/compare/a...b?expand=1" "gh_agent_link"
 assert_not_contains "$(cat "$GH_LOG")" "pr create" "gh_agent_no_create"
 assert_not_contains "$(cat "$GH_LOG")" "stacks" "gh_agent_no_stack"
 

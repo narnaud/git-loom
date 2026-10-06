@@ -383,7 +383,7 @@ fn append_remote_urls_extracts_gitlab_mr_link() {
                   remote:   https://gitlab.com/group/repo/-/merge_requests/new?x=1\n\
                   remote: \n";
     let mut message = String::from("Pushed");
-    super::append_remote_urls(&mut message, stderr);
+    super::append_remote_urls(&mut message, stderr, None);
     assert_eq!(
         message,
         "Pushed\nhttps://gitlab.com/group/repo/-/merge_requests/new?x=1"
@@ -394,7 +394,7 @@ fn append_remote_urls_extracts_gitlab_mr_link() {
 fn append_remote_urls_wraps_gerrit_tag() {
     let stderr = "remote:   https://gerrit.example.com/c/proj/+/123 [NEW]\n";
     let mut message = String::from("Pushed");
-    super::append_remote_urls(&mut message, stderr);
+    super::append_remote_urls(&mut message, stderr, None);
     assert_eq!(
         message,
         "Pushed\nhttps://gerrit.example.com/c/proj/+/123 `[NEW]`"
@@ -405,8 +405,22 @@ fn append_remote_urls_wraps_gerrit_tag() {
 fn append_remote_urls_ignores_non_url_lines() {
     let stderr = "remote: Counting objects: 5, done.\nSwitched to branch\n";
     let mut message = String::from("Pushed");
-    super::append_remote_urls(&mut message, stderr);
+    super::append_remote_urls(&mut message, stderr, None);
     assert_eq!(message, "Pushed");
+}
+
+#[test]
+fn append_remote_urls_skips_only_the_new_pr_hint() {
+    let stderr = "remote: Create a pull request for 'a' on GitHub by visiting:\n\
+                  remote:      https://github.com/owner/repo/pull/new/a\n\
+                  remote: GitHub found 1 vulnerability on owner/repo's default branch:\n\
+                  remote:      https://github.com/owner/repo/security/dependabot\n";
+    let mut message = String::from("Pushed");
+    super::append_remote_urls(&mut message, stderr, Some("/pull/new/"));
+    assert_eq!(
+        message,
+        "Pushed\nhttps://github.com/owner/repo/security/dependabot"
+    );
 }
 
 #[test]
@@ -439,6 +453,29 @@ fn push_github_skips_pr_for_upstream_branch() {
     let branch = "feature-a";
     let target_branch = "main";
     assert_ne!(branch, target_branch, "feature branch should not skip");
+}
+
+#[test]
+fn on_github_com_reads_the_host_of_every_url_form() {
+    let test_repo = TestRepo::new_with_remote();
+    for (url, expected) in [
+        ("git@github.com:owner/repo.git", true),
+        ("https://github.com/owner/repo.git", true),
+        ("https://user:token@github.com/owner/repo.git", true),
+        ("ssh://git@GitHub.com:22/owner/repo.git", true),
+        ("git@ghe.corp:owner/repo.git", false),
+        ("https://github.com.evil.example/owner/repo", false),
+        ("https://ghe.corp/github.com/repo", false),
+        ("github-work:owner/repo", false),
+    ] {
+        test_repo.repo.remote_set_url("origin", url).unwrap();
+        assert_eq!(
+            super::on_github_com(&test_repo.repo, "origin"),
+            expected,
+            "{}",
+            url
+        );
+    }
 }
 
 // ── extract_gh_repo tests ─────────────────────────────────────────────────
@@ -481,6 +518,72 @@ fn extract_gh_repo_nonexistent_remote() {
     let test_repo = TestRepo::new_with_remote();
     let result = super::extract_gh_repo(&test_repo.repo, "nonexistent");
     assert_eq!(result, None);
+}
+
+// ── PR links ──────────────────────────────────────────────────────────────
+
+#[test]
+fn github_compare_url_encodes_names_but_keeps_paths_and_forks() {
+    assert_eq!(
+        super::github_compare_url("owner/repo", "main", "feat/x"),
+        "https://github.com/owner/repo/compare/main...feat/x?expand=1"
+    );
+    assert_eq!(
+        super::github_compare_url("owner/repo", "main", "forker:a#b"),
+        "https://github.com/owner/repo/compare/main...forker:a%23b?expand=1"
+    );
+}
+
+#[test]
+fn azure_create_pr_url_needs_project_and_repository() {
+    let test_repo = TestRepo::new_with_remote();
+    for url in [
+        "https://dev.azure.com/org/my%20project/_git/my%20repo",
+        "git@ssh.dev.azure.com:v3/org/my%20project/my%20repo",
+    ] {
+        test_repo.repo.remote_set_url("origin", url).unwrap();
+        let azure = super::extract_azure_remote(&test_repo.repo, "origin");
+        assert_eq!(
+            super::azure_create_pr_url(azure.as_ref(), "feat/x y", "main").as_deref(),
+            Some(
+                "https://dev.azure.com/org/my%20project/_git/my%20repo/pullrequestcreate\
+                 ?sourceRef=feat/x%20y&targetRef=main"
+            ),
+            "{}",
+            url
+        );
+    }
+    let legacy = super::AzureRemote {
+        org_url: "https://dev.azure.com/org".into(),
+        project: None,
+        repository: Some("repo".into()),
+    };
+    assert_eq!(super::azure_create_pr_url(Some(&legacy), "x", "main"), None);
+    assert_eq!(super::azure_create_pr_url(None, "x", "main"), None);
+}
+
+#[test]
+fn gitlab_mr_links_tell_the_mr_from_the_form() {
+    let view = "remote: \n\
+                remote: View merge request for a:\n\
+                remote:   https://gitlab.com/g/r/-/merge_requests/42\n";
+    assert_eq!(
+        super::gitlab_mr_links(view),
+        super::GitlabMrLinks {
+            view: Some("https://gitlab.com/g/r/-/merge_requests/42".into()),
+            create: None,
+        }
+    );
+    let create = "remote: To create a merge request for a, visit:\n\
+                  remote:   https://gitlab.com/g/r/-/merge_requests/new?x=1\n";
+    assert_eq!(
+        super::gitlab_mr_links(create),
+        super::GitlabMrLinks {
+            view: None,
+            create: Some("https://gitlab.com/g/r/-/merge_requests/new?x=1".into()),
+        }
+    );
+    assert_eq!(super::gitlab_mr_links(""), super::GitlabMrLinks::default());
 }
 
 // ── extract_azure_remote tests ────────────────────────────────────────────
@@ -910,21 +1013,56 @@ fn is_chain_counts_republished_layers_too() {
 }
 
 #[test]
-fn azure_refuses_a_stacked_branch() {
+fn unsupported_stacks_are_refused_with_one_message() {
     let info = stack_info(None, None, None);
     let stacked = super::plan_push(&info, "b", "main");
-    let err = super::refuse_stacked_azure(&super::RemoteType::AzureDevOps, &stacked)
-        .unwrap_err()
-        .to_string();
+    let refusal = |remote_type, has_cli| {
+        super::refuse_unsupported_stack(&remote_type, &stacked, has_cli)
+            .unwrap_err()
+            .to_string()
+    };
     assert_eq!(
-        err,
-        "`b` is stacked on `a` — Azure DevOps has no stacked pull requests\n\
-         Land the branches below it first, or push without a PR (`--no-pr`)"
+        refusal(super::RemoteType::AzureDevOps, true),
+        "Cannot create stacked PRs: `b` is stacked on `a`\n\
+         Azure DevOps has no stacked pull requests\n\
+         Land `a` first, or push without PRs (`--no-pr`)"
+    );
+    assert_eq!(
+        refusal(super::RemoteType::GitHub, false),
+        "Cannot create stacked PRs: `b` is stacked on `a`\n\
+         Stacked pull requests need `gh`: https://cli.github.com\n\
+         Install it, or push without PRs (`--no-pr`)"
     );
 
+    for supported in [
+        super::RemoteType::GitHub,
+        super::RemoteType::GitLab,
+        super::RemoteType::Plain,
+    ] {
+        assert!(super::refuse_unsupported_stack(&supported, &stacked, true).is_ok());
+    }
     let lone = super::plan_push(&info, "x", "main");
-    assert!(super::refuse_stacked_azure(&super::RemoteType::AzureDevOps, &lone).is_ok());
-    assert!(super::refuse_stacked_azure(&super::RemoteType::GitHub, &stacked).is_ok());
+    assert!(super::refuse_unsupported_stack(&super::RemoteType::AzureDevOps, &lone, false).is_ok());
+    assert!(super::refuse_unsupported_stack(&super::RemoteType::GitHub, &lone, false).is_ok());
+}
+
+#[test]
+fn pr_not_created_message_lists_link_then_hint() {
+    assert_eq!(
+        super::pr_not_created_message(
+            "a",
+            &super::missing_cli_reason("gh"),
+            Some("https://example.com/new"),
+            Some(&super::install_hint("gh", super::GH_INSTALL_URL)),
+        ),
+        "PR not created for `a`: `gh` is not installed\n\
+         Create it at https://example.com/new\n\
+         Install `gh` to have loom create it: https://cli.github.com"
+    );
+    assert_eq!(
+        super::pr_not_created_message("a", "agent mode", None, None),
+        "PR not created for `a`: agent mode"
+    );
 }
 
 #[test]

@@ -216,21 +216,74 @@ fn report_not_pushed(plan: &PushPlan) {
     }
 }
 
-/// Refuse a stacked branch on Azure DevOps.
+const GH_INSTALL_URL: &str = "https://cli.github.com";
+const AZ_INSTALL_URL: &str = "https://learn.microsoft.com/cli/azure/install-azure-cli";
+
+/// Refuse, before anything reaches the remote, a stacked branch whose PRs the
+/// forge cannot chain; `has_cli` is whether the forge's CLI answered.
 ///
 /// Azure has no stacked pull requests, and `az repos pr update` cannot even
 /// retarget an existing one, so a stack would land as PRs whose base says
-/// nothing a reviewer can rely on. Every other remote type stacks freely.
-fn refuse_stacked_azure(remote_type: &RemoteType, plan: &PushPlan) -> Result<()> {
-    if *remote_type != RemoteType::AzureDevOps || !plan.is_stacked() {
+/// nothing a reviewer can rely on. GitHub chains them only through `gh`
+/// (`--base`, retargeting, stack registration), which no link can carry.
+fn refuse_unsupported_stack(
+    remote_type: &RemoteType,
+    plan: &PushPlan,
+    has_cli: bool,
+) -> Result<()> {
+    if !plan.is_stacked() {
         return Ok(());
     }
+    let below = backticked(plan.layers.iter().rev().skip(1).map(|l| &l.branch));
+    let (why, remedy) = match remote_type {
+        RemoteType::AzureDevOps => (
+            "Azure DevOps has no stacked pull requests".to_string(),
+            format!("Land {} first", below),
+        ),
+        RemoteType::GitHub if !has_cli => (
+            format!("Stacked pull requests need `gh`: {}", GH_INSTALL_URL),
+            "Install it".to_string(),
+        ),
+        _ => return Ok(()),
+    };
     bail!(
-        "`{}` is stacked on {} — Azure DevOps has no stacked pull requests\n\
-         Land the branches below it first, or push without a PR (`--no-pr`)",
+        "Cannot create stacked PRs: `{}` is stacked on {}\n{}\n{}, or push without PRs (`--no-pr`)",
         plan.requested(),
-        backticked(plan.layers.iter().rev().skip(1).map(|l| &l.branch))
+        below,
+        why,
+        remedy
     )
+}
+
+/// The warning for a branch loom pushed but opened no PR for, every forge
+/// alike: the reason, then the forge's own new-PR form when one could be
+/// built, then `hint`.
+fn pr_not_created_message(
+    branch: &str,
+    reason: &str,
+    create_url: Option<&str>,
+    hint: Option<&str>,
+) -> String {
+    let mut message = format!("PR not created for `{}`: {}", branch, reason);
+    if let Some(url) = create_url {
+        message.push_str(&format!("\nCreate it at {}", url));
+    }
+    if let Some(hint) = hint {
+        message.push_str(&format!("\n{}", hint));
+    }
+    message
+}
+
+fn missing_cli_reason(cli: &str) -> String {
+    format!("`{}` is not installed", cli)
+}
+
+fn install_hint(cli: &str, url: &str) -> String {
+    format!("Install `{}` to have loom create it: {}", cli, url)
+}
+
+fn agent_mode_hint(branch: &str) -> String {
+    format!("Or run `loom push {}` interactively", branch)
 }
 
 /// Push a feature branch to remote, dispatching on the detected remote type
@@ -281,8 +334,15 @@ pub fn run(branch: Option<String>, no_pr: bool, force: bool) -> Result<()> {
     let target_branch = extract_target_branch(&info.upstream.label);
     let plan = plan_push(&info, &branch_name, &target_branch);
 
+    // Probed before the push, so an unsupported stack is refused untouched.
+    let has_cli = !no_pr
+        && match remote_type {
+            RemoteType::GitHub => cli_available("gh", Command::new("gh")),
+            RemoteType::AzureDevOps => cli_available("az", az_command()),
+            _ => true,
+        };
     if !no_pr {
-        refuse_stacked_azure(&remote_type, &plan)?;
+        refuse_unsupported_stack(&remote_type, &plan, has_cli)?;
     }
     if force && crate::core::ui::active() {
         confirm_force(&remote_type, no_pr, &remote_name, &plan)?;
@@ -300,17 +360,13 @@ pub fn run(branch: Option<String>, no_pr: bool, force: bool) -> Result<()> {
 
     let pushed = match remote_type {
         RemoteType::Plain => push_plain(&workdir, &remote_name, &plan, force),
-        RemoteType::GitHub => push_github(
-            &repo,
-            &workdir,
-            &remote_name,
-            &plan,
-            &info,
-            &info.upstream.label,
-            force,
-        ),
-        RemoteType::GitLab => push_gitlab(&workdir, &remote_name, &plan, force),
-        RemoteType::AzureDevOps => push_azure(&repo, &workdir, &remote_name, &plan, &info, force),
+        RemoteType::GitHub => {
+            push_github(&repo, &workdir, &remote_name, &plan, &info, has_cli, force)
+        }
+        RemoteType::GitLab => push_gitlab(&workdir, &remote_name, &plan, &info, force),
+        RemoteType::AzureDevOps => {
+            push_azure(&repo, &workdir, &remote_name, &plan, &info, has_cli, force)
+        }
         // Gerrit uploads the whole ancestry as a relation chain by itself.
         RemoteType::Gerrit { target_branch } => {
             push_gerrit(&workdir, &remote_name, &branch_name, &target_branch)
@@ -505,6 +561,22 @@ fn extract_gh_repo(repo: &Repository, remote: &str) -> Option<String> {
     None
 }
 
+/// Whether `remote`'s URL points at github.com itself.
+fn on_github_com(repo: &Repository, remote: &str) -> bool {
+    let Some(url) = repo
+        .find_remote(remote)
+        .ok()
+        .and_then(|r| r.url().ok().map(str::to_string))
+    else {
+        return false;
+    };
+    let rest = url.split_once("://").map_or(url.as_str(), |(_, rest)| rest);
+    let authority = rest.split('/').next().unwrap_or("");
+    let host_port = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    let host = host_port.split(':').next().unwrap_or("");
+    host.eq_ignore_ascii_case("github.com")
+}
+
 /// Extract the target branch from an upstream label like "origin/main" → "main".
 fn extract_target_branch(upstream_label: &str) -> String {
     let branch = repo::upstream_local_branch(upstream_label);
@@ -693,27 +765,105 @@ fn run_push_capture(workdir: &Path, args: &[&str]) -> Result<String> {
     Ok(stderr)
 }
 
+/// The `http(s)` URLs on the server's `remote:` lines of a push's stderr.
+fn remote_urls(stderr: &str) -> impl Iterator<Item = &str> {
+    stderr.lines().filter_map(|line| {
+        let url = line.strip_prefix("remote:")?.trim();
+        (url.starts_with("http://") || url.starts_with("https://")).then_some(url)
+    })
+}
+
 /// Append `remote:` URLs found in git push stderr to `message` as indented
-/// continuation lines. A trailing `[tag]` (Gerrit) is wrapped in backticks.
-fn append_remote_urls(message: &mut String, stderr: &str) {
-    for line in stderr.lines() {
-        if let Some(rest) = line.strip_prefix("remote:") {
-            let trimmed = rest.trim();
-            if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
-                message.push('\n');
-                if trimmed.ends_with(']') {
-                    if let Some(pos) = trimmed.rfind('[') {
-                        let (before, tag) = trimmed.split_at(pos);
-                        message.push_str(&format!("{}`{}`", before, tag));
-                    } else {
-                        message.push_str(trimmed);
-                    }
-                } else {
-                    message.push_str(trimmed);
-                }
+/// continuation lines, leaving out those containing `skip`. A trailing `[tag]`
+/// (Gerrit) is wrapped in backticks.
+fn append_remote_urls(message: &mut String, stderr: &str, skip: Option<&str>) {
+    for url in remote_urls(stderr).filter(|url| skip.is_none_or(|skip| !url.contains(skip))) {
+        message.push('\n');
+        match url.rfind('[').filter(|_| url.ends_with(']')) {
+            Some(pos) => {
+                let (before, tag) = url.split_at(pos);
+                message.push_str(&format!("{}`{}`", before, tag));
             }
+            None => message.push_str(url),
         }
     }
+}
+
+/// Whether a forge CLI answers `--version`; traced like any command.
+fn cli_available(name: &str, mut cmd: Command) -> bool {
+    let start = Instant::now();
+    let available = cmd
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success());
+    loom_trace::log_command(
+        name,
+        "--version",
+        start.elapsed().as_millis(),
+        available,
+        "",
+    );
+    available
+}
+
+/// Percent-encode a name for a URL, keeping `/` and the fork `owner:` prefix
+/// so GitHub's `compare/<base>...<head>` path reads as written.
+fn url_encode(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    for byte in name.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' | b':' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{:02X}", byte)),
+        }
+    }
+    out
+}
+
+/// GitHub's new-PR form for `head` (`owner:branch` in a fork) onto `base`.
+/// It shows the open PR instead when there is one.
+fn github_compare_url(repo: &str, base: &str, head: &str) -> String {
+    format!(
+        "https://github.com/{}/compare/{}...{}?expand=1",
+        repo,
+        url_encode(base),
+        url_encode(head)
+    )
+}
+
+/// Azure DevOps' new-PR form, or `None` when the remote URL did not give the
+/// project and repository; those two are copied as the URL encodes them.
+fn azure_create_pr_url(azure: Option<&AzureRemote>, source: &str, target: &str) -> Option<String> {
+    let azure = azure?;
+    Some(format!(
+        "{}/{}/_git/{}/pullrequestcreate?sourceRef={}&targetRef={}",
+        azure.org_url,
+        azure.project.as_ref()?,
+        azure.repository.as_ref()?,
+        url_encode(source),
+        url_encode(target)
+    ))
+}
+
+/// The merge request links GitLab prints on a push: the branch's MR, or the
+/// form to create one when it has none.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct GitlabMrLinks {
+    view: Option<String>,
+    create: Option<String>,
+}
+
+fn gitlab_mr_links(stderr: &str) -> GitlabMrLinks {
+    let mut links = GitlabMrLinks::default();
+    for url in remote_urls(stderr) {
+        if url.contains("/merge_requests/new") {
+            links.create.get_or_insert_with(|| url.to_string());
+        } else if url.contains("/merge_requests/") {
+            links.view.get_or_insert_with(|| url.to_string());
+        }
+    }
+    links
 }
 
 /// Flags that let a push overwrite the remote branch.
@@ -835,11 +985,26 @@ fn pr_title_and_description(
     Ok((title, description))
 }
 
-/// Push every branch in the plan and report what went out.
+/// Push every branch in the plan and report what went out, with the links the
+/// server printed.
 fn push_plain(workdir: &Path, remote: &str, plan: &PushPlan, force: bool) -> Result<()> {
+    push_plan(workdir, remote, plan, force, None)
+}
+
+/// Push every branch in the plan and report what went out, with the links the
+/// server printed except those containing `pr_form`: a forge that reports its
+/// own `PR created`/`PR updated` lines drops its new-PR hint that way, when it
+/// can build that form itself.
+fn push_plan(
+    workdir: &Path,
+    remote: &str,
+    plan: &PushPlan,
+    force: bool,
+    pr_form: Option<&str>,
+) -> Result<()> {
     let stderr = git_push(workdir, remote, &plan.branches(), force)?;
     let mut message = pushed_message(remote, plan);
-    append_remote_urls(&mut message, &stderr);
+    append_remote_urls(&mut message, &stderr, pr_form);
     msg::success(&message);
     report_not_pushed(plan);
     Ok(())
@@ -1126,7 +1291,9 @@ fn register_github_stack(workdir: &Path, gh_repo: &str, numbers: &[u64]) {
 /// For each layer, bottom to top: an existing PR is retargeted if its base is
 /// wrong and reported; a missing one is created directly, so a stack can be
 /// registered in the same run. Re-published upstack branches never get a PR
-/// created. Nothing opens a browser: the URLs are printed.
+/// created. Nothing opens a browser: the URLs are printed. Without `gh` the
+/// lone branch gets GitHub's new-PR form instead; a stack never gets here
+/// (`refuse_unsupported_stack`).
 ///
 /// In a fork workflow the PR is based on the integration branch's remote with
 /// its head on the push remote; GitHub cannot stack PRs across forks, so
@@ -1138,44 +1305,35 @@ fn push_github(
     remote: &str,
     plan: &PushPlan,
     info: &repo::RepoInfo,
-    upstream_label: &str,
+    has_gh: bool,
     force: bool,
 ) -> Result<()> {
-    push_plain(workdir, remote, plan, force)?;
-
-    // Skip PR creation when pushing the upstream target branch itself
     if plan.requested() == plan.target_branch {
-        return Ok(());
-    }
-
-    let start = Instant::now();
-    let gh_check = Command::new("gh").arg("--version").output();
-    let gh_available = gh_check.as_ref().is_ok_and(|o| o.status.success());
-    let duration_ms = start.elapsed().as_millis();
-    loom_trace::log_command("gh", "--version", duration_ms, gh_available, "");
-
-    if !gh_available {
-        msg::warn("Install 'gh' CLI to create pull requests: https://cli.github.com");
-        return Ok(());
+        return push_plain(workdir, remote, plan, force);
     }
 
     // Fork workflow: the upstream branch's remote is the PR base, the push
     // remote holds the head. Non-fork: both are the same.
-    let integration_remote = extract_remote_name(upstream_label);
-    let (pr_target_remote, pr_target_repo) = extract_gh_repo(repo, &integration_remote)
+    let integration_remote = extract_remote_name(&info.upstream.label);
+    let target = extract_gh_repo(repo, &integration_remote)
         .map(|r| (integration_remote.as_str(), r))
-        .or_else(|| {
-            // Integration remote missing: fall back to the push remote.
-            extract_gh_repo(repo, remote).map(|r| (remote, r))
-        })
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "Could not determine target repository for PR creation\n\
-                 Run `gh repo set-default` to select a default remote repository"
-            )
-        })?;
+        // Integration remote missing: fall back to the push remote.
+        .or_else(|| extract_gh_repo(repo, remote).map(|r| (remote, r)));
+    // The form is built on github.com only; an Enterprise host or SSH alias
+    // keeps the server's own links instead.
+    let form_repo = target
+        .as_ref()
+        .filter(|(r, _)| on_github_com(repo, r))
+        .map(|(_, r)| r);
+    push_plan(
+        workdir,
+        remote,
+        plan,
+        force,
+        form_repo.and(Some("/pull/new/")),
+    )?;
 
-    let is_fork = remote != pr_target_remote;
+    let is_fork = target.as_ref().is_some_and(|(r, _)| *r != remote);
     // Owner of the repository the branches land in; PR lookups are pinned to
     // it because `gh pr list --head` matches the branch name across forks.
     let head_owner =
@@ -1185,6 +1343,30 @@ fn push_github(
         (Some(owner), true) => format!("{}:{}", owner, branch),
         _ => branch.to_string(),
     };
+    let create_url = |layer: &Layer| {
+        form_repo.map(|r| github_compare_url(r, &layer.base, &head_for(&layer.branch)))
+    };
+
+    if !has_gh {
+        let layer = plan.layers.last().expect("a plan has at least one layer");
+        msg::warn(&pr_not_created_message(
+            &layer.branch,
+            &missing_cli_reason("gh"),
+            create_url(layer).as_deref(),
+            Some(&install_hint("gh", GH_INSTALL_URL)),
+        ));
+        return Ok(());
+    }
+
+    let pr_target_repo: &str = &target
+        .as_ref()
+        .ok_or_else(|| {
+            anyhow!(
+                "Could not determine target repository for PR creation\n\
+                 Run `gh repo set-default` to select a default remote repository"
+            )
+        })?
+        .1;
 
     let mut layers: Vec<(Layer, bool)> = plan
         .pr_layers()
@@ -1207,13 +1389,16 @@ fn push_github(
     for (layer, republish) in &layers {
         let pr = match find_existing_github_pr(
             workdir,
-            &pr_target_repo,
+            pr_target_repo,
             &layer.branch,
             head_owner.as_deref(),
         ) {
             Some(pr) if pr.base != layer.base => {
-                if retarget_github_pr(workdir, &pr_target_repo, pr.number, &layer.base) {
-                    msg::success(&format!("PR retargeted to `{}`: {}", layer.base, pr.url));
+                if retarget_github_pr(workdir, pr_target_repo, pr.number, &layer.base) {
+                    msg::success(&format!(
+                        "PR updated: {}\nRetargeted to `{}`",
+                        pr.url, layer.base
+                    ));
                     Some(pr)
                 } else {
                     msg::warn(&format!(
@@ -1235,10 +1420,11 @@ fn push_github(
                 // Post-mutation: the branch is already pushed, and PR creation
                 // opens a browser or prompts for a title — never do that behind
                 // an agent's back (see spec 019).
-                msg::warn(&format!(
-                    "Skipped creating a PR for `{}` (agent mode)\n\
-                     Create it on GitHub, or run `loom push {}` interactively",
-                    layer.branch, layer.branch
+                msg::warn(&pr_not_created_message(
+                    &layer.branch,
+                    "agent mode",
+                    create_url(layer).as_deref(),
+                    Some(&agent_mode_hint(&layer.branch)),
                 ));
                 None
             }
@@ -1247,7 +1433,7 @@ fn push_github(
                     pr_title_and_description(repo, info, &layer.branch, &layer.base)?;
                 let pr = create_github_pr(
                     workdir,
-                    &pr_target_repo,
+                    pr_target_repo,
                     &head_for(&layer.branch),
                     &layer.base,
                     &title,
@@ -1255,9 +1441,11 @@ fn push_github(
                 );
                 match &pr {
                     Some(pr) => msg::success(&format!("PR created: {}", pr.url)),
-                    None => msg::warn(&format!(
-                        "Could not create a PR for `{}` — see `loom trace`",
-                        layer.branch
+                    None => msg::warn(&pr_not_created_message(
+                        &layer.branch,
+                        "`gh pr create` failed — see `loom trace`",
+                        create_url(layer).as_deref(),
+                        None,
                     )),
                 }
                 pr
@@ -1268,25 +1456,35 @@ fn push_github(
 
     let numbers = stack_pr_numbers(&chain);
     if register && numbers.len() >= 2 {
-        register_github_stack(workdir, &pr_target_repo, &numbers);
+        register_github_stack(workdir, pr_target_repo, &numbers);
     }
 
     Ok(())
 }
 
 /// Push to GitLab: push each branch with `merge_request.create` push options
-/// so GitLab creates or updates a merge request, then surface the MR URL from
-/// the push output. Re-published upstack layers carry only the target option,
-/// updating an existing MR without creating one.
+/// so GitLab creates or updates a merge request, then report each MR from the
+/// link GitLab prints. Re-published upstack layers carry only the target
+/// option, updating an existing MR without creating one.
 ///
 /// Push options apply to the whole push and each layer targets a different
-/// branch, so layers go out one push at a time, bottom first. Pushing the
-/// upstream target branch itself falls back to a plain push.
-fn push_gitlab(workdir: &Path, remote: &str, plan: &PushPlan, force: bool) -> Result<()> {
+/// branch, so layers go out one push at a time, bottom first. GitLab prints the
+/// same link for a new MR and an existing one, so a branch that was not on the
+/// remote before reads as created. A layer the push leaves unchanged gets no
+/// line: the server prints nothing for it. Pushing the upstream target branch
+/// itself falls back to a plain push.
+fn push_gitlab(
+    workdir: &Path,
+    remote: &str,
+    plan: &PushPlan,
+    info: &repo::RepoInfo,
+    force: bool,
+) -> Result<()> {
     if plan.requested() == plan.target_branch {
         return push_plain(workdir, remote, plan, force);
     }
 
+    let mut pushed: Vec<(&Layer, bool, String)> = Vec::new();
     for (layer, republish) in plan.pr_layers() {
         let target_opt = format!("merge_request.target={}", layer.base);
         let mut args = vec!["push"];
@@ -1295,13 +1493,48 @@ fn push_gitlab(workdir: &Path, remote: &str, plan: &PushPlan, force: bool) -> Re
             args.extend_from_slice(&["-o", "merge_request.create"]);
         }
         args.extend_from_slice(&["-o", &target_opt, "-u", remote, &layer.branch]);
-        let stderr = run_push_capture(workdir, &args)?;
-        let mut message = format!("Pushed `{}` to `{}`", layer.branch, remote);
-        append_remote_urls(&mut message, &stderr);
-        msg::success(&message);
+        match run_push_capture(workdir, &args) {
+            Ok(stderr) => pushed.push((layer, republish, stderr)),
+            Err(err) => {
+                // The layers below are on the server already.
+                if !pushed.is_empty() {
+                    msg::success(&format!(
+                        "Pushed {} to `{}`",
+                        backticked(pushed.iter().map(|(l, _, _)| &l.branch)),
+                        remote
+                    ));
+                    report_gitlab_mrs(info, &pushed);
+                }
+                return Err(err);
+            }
+        }
     }
+    msg::success(&pushed_message(remote, plan));
     report_not_pushed(plan);
+    report_gitlab_mrs(info, &pushed);
     Ok(())
+}
+
+/// Report the MR GitLab printed for each pushed layer; see [`push_gitlab`].
+fn report_gitlab_mrs(info: &repo::RepoInfo, pushed: &[(&Layer, bool, String)]) {
+    for (layer, republish, stderr) in pushed {
+        let links = gitlab_mr_links(stderr);
+        if let Some(url) = links.view {
+            let existed = matches!(
+                remote_status(info, &layer.branch),
+                Some(RemoteStatus::Different | RemoteStatus::Synced)
+            );
+            let verb = if existed { "updated" } else { "created" };
+            msg::success(&format!("PR {}: {}", verb, url));
+        } else if let Some(url) = links.create.filter(|_| !republish) {
+            msg::warn(&pr_not_created_message(
+                &layer.branch,
+                "GitLab did not create it",
+                Some(&url),
+                None,
+            ));
+        }
+    }
 }
 
 /// Azure DevOps coordinates parsed from a git remote URL.
@@ -1415,36 +1648,42 @@ fn on_path(file: &str) -> bool {
 ///
 /// An existing PR is reported as is (`az repos pr update` cannot change its
 /// target); a missing one is created with `az repos pr create` and its URL
-/// printed. A stacked branch never reaches here — see
-/// [`refuse_stacked_azure`].
+/// printed. Without `az` the branch gets Azure's new-PR form instead. A stacked
+/// branch never reaches here — see [`refuse_unsupported_stack`].
 fn push_azure(
     repo: &Repository,
     workdir: &Path,
     remote: &str,
     plan: &PushPlan,
     info: &repo::RepoInfo,
+    has_az: bool,
     force: bool,
 ) -> Result<()> {
-    push_plain(workdir, remote, plan, force)?;
-
-    let start = Instant::now();
-    let az_check = az_command().arg("--version").output();
-    let az_available = az_check.as_ref().is_ok_and(|o| o.status.success());
-    let duration_ms = start.elapsed().as_millis();
-    loom_trace::log_command("az", "--version", duration_ms, az_available, "");
-
-    if !az_available {
-        msg::warn(
-            "Install 'az' CLI to create pull requests: \
-             https://learn.microsoft.com/cli/azure/install-azure-cli",
-        );
-        return Ok(());
-    }
-
     // Extract the org URL so we can pass --org explicitly rather than relying
     // on --detect, which produces a misleading "need to login" error when it
     // fails to infer the organisation from the remote URL.
     let azure = extract_azure_remote(repo, remote);
+    let create_url =
+        |layer: &Layer| azure_create_pr_url(azure.as_ref(), &layer.branch, &layer.base);
+    let own_form = create_url(plan.layers.last().expect("a plan has at least one layer")).is_some();
+    push_plan(
+        workdir,
+        remote,
+        plan,
+        force,
+        own_form.then_some("pullrequestcreate"),
+    )?;
+
+    if !has_az {
+        let layer = plan.layers.last().expect("a plan has at least one layer");
+        msg::warn(&pr_not_created_message(
+            &layer.branch,
+            &missing_cli_reason("az"),
+            create_url(layer).as_deref(),
+            Some(&install_hint("az", AZ_INSTALL_URL)),
+        ));
+        return Ok(());
+    }
 
     for (layer, republish) in plan.pr_layers() {
         if let Some(pr_url) = find_existing_azure_pr(workdir, &layer.branch, azure.as_ref()) {
@@ -1459,17 +1698,25 @@ fn push_azure(
         // browser or prompts for a title — never do that behind an agent's
         // back (see spec 019).
         if agent_mode::enabled() {
-            msg::warn(&format!(
-                "Skipped creating a PR for `{}` (agent mode)\n\
-                 Create it on Azure DevOps, or run `loom push {}` interactively",
-                layer.branch, layer.branch
+            msg::warn(&pr_not_created_message(
+                &layer.branch,
+                "agent mode",
+                create_url(layer).as_deref(),
+                Some(&agent_mode_hint(&layer.branch)),
             ));
             continue;
         }
 
         let (title, description) =
             pr_title_and_description(repo, info, &layer.branch, &layer.base)?;
-        create_azure_pr(workdir, layer, &title, &description, azure.as_ref())?;
+        create_azure_pr(
+            workdir,
+            layer,
+            &title,
+            &description,
+            azure.as_ref(),
+            create_url(layer).as_deref(),
+        )?;
     }
 
     Ok(())
@@ -1482,6 +1729,7 @@ fn create_azure_pr(
     title: &str,
     description: &str,
     azure: Option<&AzureRemote>,
+    create_url: Option<&str>,
 ) -> Result<()> {
     // Write description to a temp file and pass `--description @<path>` to az,
     // so lines that start with `-` (e.g. `---` separators) are never taken
@@ -1527,9 +1775,11 @@ fn create_azure_pr(
     );
 
     if !output.status.success() {
-        msg::warn(&format!(
-            "Could not create a PR for `{}` — see `loom trace`",
-            layer.branch
+        msg::warn(&pr_not_created_message(
+            &layer.branch,
+            "`az repos pr create` failed — see `loom trace`",
+            create_url,
+            None,
         ));
         return Ok(());
     }
@@ -1644,7 +1894,7 @@ fn push_gerrit(workdir: &Path, remote: &str, branch: &str, target_branch: &str) 
         "Pushed `{}` to `{}` (Gerrit: `refs/for/{}`)",
         branch, remote, target_branch
     );
-    append_remote_urls(&mut message, &stderr);
+    append_remote_urls(&mut message, &stderr, None);
     msg::success(&message);
 
     Ok(())

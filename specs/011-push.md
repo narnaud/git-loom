@@ -104,22 +104,26 @@ above it takes the nearest branch below that the push does leave there, and
 
 | Remote | Base handling |
 |--------|---------------|
-| GitHub | `--base <below>` on creation; an existing PR whose base differs is retargeted with `gh pr edit --base` (`PR retargeted to `a`: <url>`). |
+| GitHub | `--base <below>` on creation; an existing PR whose base differs is retargeted with `gh pr edit --base` (`PR updated: <url>` with `Retargeted to `a``). |
 | GitLab | `-o merge_request.target=<below>` on each branch's push. GitLab renders dependent MRs and retargets them on merge itself. A re-published layer is pushed without `merge_request.create`: the target option updates its existing MR, and none is created. |
 | Azure DevOps | Refused — see below. |
 | Gerrit | Unchanged: `refs/for/<upstream>`; Gerrit builds the relation chain. |
 
-**Azure DevOps.** Azure has no stacked pull requests, and `az repos pr update`
-cannot retarget an existing one either, so a stack would land as PRs whose base
-says nothing a reviewer can rely on. Pushing a stacked branch is refused before
-anything reaches the remote:
+**Unsupported stacks.** A stack whose PRs the forge cannot chain is refused
+before anything reaches the remote, with one message whatever the forge:
 
 ```
-✗ `b` is stacked on `a` — Azure DevOps has no stacked pull requests
-  Land the branches below it first, or push without a PR (`--no-pr`)
+✗ Cannot create stacked PRs: `b` is stacked on `a`
+  › <why>
+  › <remedy>, or push without PRs (`--no-pr`)
 ```
 
-`--no-pr` still pushes the whole plan, PRs being what Azure cannot express.
+| Forge | Why | Remedy |
+|-------|-----|--------|
+| Azure DevOps | `Azure DevOps has no stacked pull requests`: `az repos pr update` cannot retarget an existing one either, so a stack would land as PRs whose base says nothing a reviewer can rely on | `Land `a` first` |
+| GitHub without `gh` | `Stacked pull requests need `gh`: <install url>`: `--base`, retargeting and stack registration all go through it, and no link carries them | `Install it` |
+
+`--no-pr` still pushes the whole plan.
 
 When a lower branch has landed upstream and `loom update` has rebased the
 integration branch, the stack simply shrinks: the next branch becomes the
@@ -170,7 +174,7 @@ Every layer still gets its PR: missing ones are created directly, as in any
 stack, only the registration step is skipped.
 
 **Agent mode.** PRs are never created behind an agent's back (spec 019): the
-skipped layer is reported (`Skipped creating a PR for `b` (agent mode)`) and,
+skipped layer is reported (`PR not created for `b`: agent mode`) and,
 having no PR, ends the run of layers the stack registration links, like any
 other layer without one.
 
@@ -243,6 +247,60 @@ Detection priority (first match wins):
 
 This allows fork workflows where the integration branch tracks the upstream repository but branches are pushed to a personal fork. For non-standard remote names, set `loom.push-remote` explicitly.
 
+## PR Messages
+
+GitHub, GitLab and Azure DevOps report a push alike: one success line naming
+every branch pushed, then one line per PR the push looks after, bottom first.
+
+```
+✓ Pushed `a`, `b` to `origin`
+  › Re-pushed above `b`: `c`
+✓ PR updated: https://github.com/owner/repo/pull/41
+✓ PR created: https://github.com/owner/repo/pull/42
+```
+
+`PR created` names a PR this push opened, `PR updated` one that existed (GitLab
+tells them apart by the branch alone, see [GitLab](#gitlab)); a retargeted PR
+adds `Retargeted to `a``. The success line carries the server's `remote:`
+links as on a plain remote, except its new-PR hint (GitHub's `/pull/new/`,
+Azure's `pullrequestcreate`), which the PR lines stand for — kept when loom
+cannot build the forge's new-PR form (below). GitHub then adds its stack line
+([GitHub stack registration](#github-stack-registration)).
+
+A pushed branch loom would open a PR for but leaves without one gets one
+warning, whatever the cause (a re-published layer is never one):
+
+```
+! PR not created for `a`: `gh` is not installed
+  › Create it at https://github.com/owner/repo/compare/main...a?expand=1
+  › Install `gh` to have loom create it: https://cli.github.com
+```
+
+| Cause | Reason | Last hint |
+|-------|--------|-----------|
+| CLI missing | `` `gh` is not installed `` / `` `az` is not installed `` | `Install `gh` to have loom create it: <install url>` |
+| Agent mode (spec 019) | `agent mode` | `Or run `loom push a` interactively` |
+| CLI call failed | `` `gh pr create` failed — see `loom trace` `` (`az repos pr create` alike) | none |
+| GitLab printed only its create form | `GitLab did not create it` | none |
+
+`Create it at` is the forge's new-PR form, which shows the open PR instead when
+there is one; the line is left out when no form can be built:
+
+| Forge | Form |
+|-------|------|
+| GitHub | `https://github.com/<owner/repo>/compare/<base>...<head>?expand=1`, `head` being `<fork-owner>:<branch>` in a fork; left out unless the target remote's host is `github.com` |
+| Azure DevOps | `<org-url>/<project>/_git/<repo>/pullrequestcreate?sourceRef=<branch>&targetRef=<base>`, left out when the remote URL lacks the project or repository |
+| GitLab | the `merge_requests/new` link GitLab printed |
+
+Branch names in a built form are percent-encoded, `/` and `:` kept; Azure's
+project and repository are copied from the remote URL, already encoded. `gh` and `az` are
+probed (`--version`) before the push, so a stack they are missing for is
+refused untouched ([Unsupported stacks](#pr-base-per-layer)); a lone branch
+without them is pushed and gets the warning.
+
+Gerrit and plain remotes have no PR step: their success line carries the
+`remote:` URLs the server printed.
+
 ## Push Strategies
 
 ### Plain (default)
@@ -290,8 +348,7 @@ the push remote's URL; in the rare setup where it cannot be read, the first
 match stands in and the narrowing does not apply. If a PR exists, prints its
 URL. If no PR exists, creates the PR via the `gh` CLI with an auto-generated
 title and description (see [PR Title and Description](#pr-title-and-description)
-below) and prints its URL. If `gh` is not installed, prints a helpful message with a link to
-install it.
+below) and prints its URL. Without `gh`, see [PR Messages](#pr-messages).
 
 **Fork workflow:** When the integration branch tracks `upstream/main` (a fork
 setup), feature branches are pushed to `origin` (the user's fork) instead.
@@ -312,15 +369,19 @@ git push --force-with-lease --force-if-includes \
 # a re-published layer keeps its MR: the target option without merge_request.create
 git push --force-with-lease --force-if-includes \
     -o merge_request.target=<branch below> -u <remote> <branch>
-# Pushed `feature-a` to `origin`
-#   https://gitlab.com/group/repo/-/merge_requests/42
+# ✓ Pushed `feature-a` to `origin`
+# ✓ PR created: https://gitlab.com/group/repo/-/merge_requests/42
 ```
 
 Uses GitLab [push options](https://docs.gitlab.com/ee/user/project/push_options.html)
 so the server creates a merge request (or points to the existing one) as part of
-the push. The MR URL GitLab prints in the push output is surfaced below the
-success message, reusing the same `remote:` URL extraction as the plain and
-Gerrit strategies. No extra CLI tool is required.
+the push. No extra CLI tool is required. GitLab prints the same MR link for a
+new MR and an existing one, so it is reported as `PR created` when the branch
+was not on the remote before the push and `PR updated` otherwise; a layer the
+push leaves unchanged gets no line, the server printing nothing for it. The
+layers go out one push each and are named in one success line once all are
+through; a push that fails after some layers landed names those first, with
+their PR lines.
 
 If the branch being pushed is the upstream target branch itself, the MR push
 options are skipped and it falls back to a plain push.
@@ -351,7 +412,7 @@ because az stops auto-detecting the project and repository once `--org` is
 given; `--detect` stands in for all three only when the URL cannot be parsed.
 Legacy `<org>.visualstudio.com` remotes are unsupported: not detected, not
 parsed, and `--detect` fails on them.
-If `az` is not installed, prints a helpful message with a link to install it.
+Without `az`, see [PR Messages](#pr-messages).
 
 ### Gerrit
 
@@ -426,20 +487,19 @@ git-loom push abc123
 # error: Target must be a branch, not a commit.
 ```
 
-### gh CLI not installed (GitHub remote)
+### Forge CLI not installed (GitHub, Azure DevOps)
 
 ```bash
 git-loom push feature-a
-# Pushed `feature-a` to `origin`
-# Install 'gh' CLI to create pull requests: https://cli.github.com
-```
+# ✓ Pushed `feature-a` to `origin`
+# ! PR not created for `feature-a`: `az` is not installed
+#   › Create it at https://dev.azure.com/org/project/_git/repo/pullrequestcreate?sourceRef=feature-a&targetRef=main
+#   › Install `az` to have loom create it: https://learn.microsoft.com/cli/azure/install-azure-cli
 
-### az CLI not installed (Azure DevOps remote)
-
-```bash
-git-loom push feature-a
-# Pushed `feature-a` to `origin`
-# Install 'az' CLI to create pull requests: https://learn.microsoft.com/cli/azure/install-azure-cli
+git-loom push feature-b        # stacked on feature-a, GitHub without gh
+# ✗ Cannot create stacked PRs: `feature-b` is stacked on `feature-a`
+#   › Stacked pull requests need `gh`: https://cli.github.com
+#   › Install it, or push without PRs (`--no-pr`)
 ```
 
 ### Push fails (e.g., no network)
@@ -568,10 +628,11 @@ left exactly as they were. A refused push is one git reports a `[rejected]` ref
 for (the lease, a non-fast-forward); credentials, the network, a hook, or a
 server's `[remote rejected]` are not, and forcing would not get past them.
 
-### gh CLI as optional dependency
+### Forge CLIs as optional dependencies
 
-The `gh` CLI is not required. When absent, the push still succeeds — only
-the PR creation step is skipped with a helpful installation message.
+Neither `gh` nor `az` is required for a branch of its own: the push succeeds
+and links the forge's new-PR form instead of creating the PR. Only a GitHub
+stack needs `gh`, its PR chain being what no link can express.
 
 ### GitHub Fork Workflow
 

@@ -13,7 +13,7 @@ git-loom detects your remote type automatically and runs the appropriate command
 - **Gerrit** — pushes to `refs/for/<target>` (where `<target>` is your upstream branch, e.g. `main` or `master`). Review URLs from the Gerrit remote are displayed after the push.
 - **Plain Git** — pushes with `--force-with-lease`.
 
-If `gh` or `az` are not installed, the push still succeeds — you just won't get the automatic PR creation.
+If `gh` or `az` are not installed, the push still succeeds and prints a link to the forge's new pull request page, with a hint to install the CLI. Only a stacked branch on GitHub needs `gh`; without it the push is refused unless you pass `--no-pr`.
 
 If `feature-auth` is stacked on another branch in the same repository, the lower branch is pushed with it and each PR targets the branch below. GitHub links the PRs into a [stack](https://docs.github.com/en/pull-requests/get-started/about-stacked-prs). Fork PRs instead target upstream and are not linked; see [Stacked Branches](../commands/push.md#stacked-branches).
 

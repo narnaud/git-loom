@@ -21,6 +21,35 @@ git loom push [branch] [--no-pr] [-f|--force]
 | `--no-pr` | Push without creating a PR or Gerrit review (see below) |
 | `-f`, `--force` | Push with `--force` instead of `--force-with-lease --force-if-includes` |
 
+## Forges at a Glance
+
+| Forge | Detected by | CLI | Branch of its own | Stacked branch | Without the CLI | `--no-pr` |
+|-------|-------------|-----|-------------------|----------------|-----------------|-----------|
+| GitHub | `github.com` in the remote URL | `gh` | PR created or updated | One PR per layer, each targeting the one below, linked into a GitHub stack | Link to create the PR; a stacked branch is refused | Pushes the branch and its stack, no PR |
+| GitLab | `gitlab` in the remote URL | none (push options) | MR created or updated | One MR per layer, each targeting the one below | Not needed | Pushes without the MR push options |
+| Azure DevOps | `dev.azure.com` in the remote URL | `az` | PR created or updated | Refused: Azure has no stacked PRs | Link to create the PR | Pushes the branch and its stack, no PR |
+| Gerrit | Gerrit `commit-msg` hook, or port 29418 (asked once) | none (`refs/for/`) | Review created or updated | Relation chain, built by Gerrit | Not needed | Pushes a branch, asking first unless it starts with `wip/` |
+| Plain Git | anything else | none | Push only | Push only | Not needed | Same as without |
+
+Set `git config loom.remote-type` (`github`, `gitlab`, `azure`, `gerrit`, `plain`) when detection guesses wrong, for example on a self-hosted GitLab. Forgejo, Gitea and Bitbucket are pushed as plain Git; the link their server prints after the push is shown.
+
+GitHub, GitLab and Azure DevOps report a push the same way:
+
+```bash
+git loom push b                 # b stacked on a
+# ✓ Pushed `a`, `b` to `origin`
+# ✓ PR updated: https://github.com/owner/repo/pull/41
+# ✓ PR created: https://github.com/owner/repo/pull/42
+```
+
+A pushed branch left without a PR gets one warning, whatever the reason: the CLI is missing, agent mode, or the CLI call failed. It links the forge's own page to create the PR when one can be built. A stacked branch the forge cannot handle is refused before anything is pushed:
+
+```bash
+# ✗ Cannot create stacked PRs: `b` is stacked on `a`
+#   › Azure DevOps has no stacked pull requests
+#   › Land `a` first, or push without PRs (`--no-pr`)
+```
+
 ## Stacked Branches
 
 A branch is *stacked* on another when it is built on top of it — its oldest commit's parent is the other branch's tip. That is exactly what `git loom status` draws with `│├─` between two branches. Stacks can be several branches deep.
@@ -47,10 +76,12 @@ Each pushed branch gets a PR that targets the branch below it; the bottom one ta
 
 | Remote | What loom does |
 |--------|----------------|
-| GitHub | Creates missing PRs with `--base <branch below>`, retargets an existing PR whose base is wrong (`PR retargeted to 'a': …`), then links the PRs into a [GitHub stack](https://docs.github.com/en/pull-requests/get-started/about-stacked-prs) |
+| GitHub | Creates missing PRs with `--base <branch below>`, retargets an existing PR whose base is wrong (`PR updated: …` with `Retargeted to 'a'`), then links the PRs into a [GitHub stack](https://docs.github.com/en/pull-requests/get-started/about-stacked-prs) |
 | GitLab | Pushes each branch with `merge_request.target=<branch below>`; GitLab shows the dependency and retargets on merge. A re-pushed upper branch keeps its existing MR and gets no new one |
 | Azure DevOps | Not supported — pushing a stacked branch is refused (see [Azure DevOps](#azure-devops)) |
 | Gerrit | Unchanged |
+
+On GitHub, stacked PRs need the `gh` CLI. Without it, pushing a stacked branch is refused before anything is pushed, with the same message as on Azure DevOps; `--no-pr` still pushes the whole stack.
 
 On GitHub the stack shows a stack map on every PR, reviewers see one layer at a time, and when the bottom PR merges GitHub rebases and retargets the ones above by itself. Nothing is stored locally: loom reads each PR's stack membership back through `gh api` on every push and creates or extends the stack as needed. When a push creates several PRs, all their URLs are printed; the stack map on each PR leads to the others.
 
@@ -139,7 +170,7 @@ Pushes the branch with `--force-with-lease`, then checks whether a PR already ex
 
 No browser is opened in either case.
 
-For a stacked branch, see [Stacked Branches](#stacked-branches). If `gh` is not installed, the push succeeds with a message suggesting to install it.
+For a stacked branch, see [Stacked Branches](#stacked-branches). If `gh` is not installed, see [Without the forge CLI](#without-the-forge-cli).
 
 In a **fork workflow** (tracking `upstream/main`), pushes go to `origin` (your fork) and the PR targets the upstream repository automatically.
 
@@ -152,15 +183,16 @@ git push --force-with-lease --force-if-includes \
     -o merge_request.create -o merge_request.target=<target> -u <remote> <branch>
 ```
 
-Uses GitLab [push options](https://docs.gitlab.com/ee/user/project/push_options.html) so the server creates a merge request (or points to the existing one) during the push. The MR URL GitLab prints is shown below the success message. No extra CLI tool is required. If the branch being pushed is the upstream target branch itself, the MR push options are skipped.
+Uses GitLab [push options](https://docs.gitlab.com/ee/user/project/push_options.html) so the server creates a merge request (or points to the existing one) during the push. The MR GitLab reports is printed as `PR created: …` when the branch is new on the remote, and `PR updated: …` otherwise, like the other forges. No extra CLI tool is required. If the branch being pushed is the upstream target branch itself, the MR push options are skipped.
 
 ### Azure DevOps
 
 Azure has no stacked pull requests, and `az repos pr update` cannot retarget an existing one either, so a stack would land as PRs whose base says nothing a reviewer can rely on. Pushing a stacked branch is refused before anything reaches the remote:
 
 ```
-✗ `b` is stacked on `a` — Azure DevOps has no stacked pull requests
-  Land the branches below it first, or push without a PR (`--no-pr`)
+✗ Cannot create stacked PRs: `b` is stacked on `a`
+  › Azure DevOps has no stacked pull requests
+  › Land `a` first, or push without PRs (`--no-pr`)
 ```
 
 `--no-pr` still pushes the whole stack; it is the pull requests Azure cannot express.
@@ -172,9 +204,23 @@ For a branch of its own, loom pushes it with `--force-with-lease`, then checks w
 
 No browser is opened in either case.
 
-The organization, project and repository are read from the remote URL and passed explicitly; `--detect` is only used when the URL cannot be parsed. If `az` is not installed, the push succeeds with a message suggesting to install it.
+The organization, project and repository are read from the remote URL and passed explicitly; `--detect` is only used when the URL cannot be parsed. If `az` is not installed, see [Without the forge CLI](#without-the-forge-cli).
 
 Legacy `https://<org>.visualstudio.com/...` remotes are not supported: they are not auto-detected, and even with `loom.remote-type azure` the `--detect` fallback fails on them. Point the remote at its `dev.azure.com` URL instead.
+
+### Without the forge CLI
+
+If `gh` or `az` is not installed, a branch of its own is still pushed, and *git-loom* prints a link to the forge's new pull request page for it, with a hint to install the CLI:
+
+```bash
+git loom push feature-a
+# ✓ Pushed `feature-a` to `origin`
+# ! PR not created for `feature-a`: `gh` is not installed
+#   › Create it at https://github.com/owner/repo/compare/main...feature-a?expand=1
+#   › Install `gh` to have loom create it: https://cli.github.com
+```
+
+The page shows the open PR instead when there is one. The same warning appears whenever a pushed branch is left without a PR, for example in agent mode or when the CLI call fails. A stacked branch is refused without `gh`, as described in [Pull requests per layer](#pull-requests-per-layer).
 
 ### Gerrit
 
@@ -320,5 +366,5 @@ git loom push feature-a
 - Must be on an integration branch with upstream tracking
 - The target branch must be woven into the integration branch
 - Network access to the remote
-- `gh` CLI (optional, for GitHub PR creation)
+- `gh` CLI (for GitHub PR creation; required to push a stacked branch with PRs)
 - `az` CLI (optional, for Azure DevOps PR creation)
