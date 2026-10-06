@@ -160,9 +160,7 @@ warning points at `gh extension install github/gh-stack` and `loom trace`.
 [PR Title and Description](#pr-title-and-description)), never through the
 `--web` form, which leaves the PR uncreated until submitted so a stack could
 not be registered in the same run. Each created PR's URL is printed
-(`PR created: <url>`). Only the lowest PR the push creates is then opened,
-with `gh pr view <n> --web` after any stack registration: one tab, whose
-stack map links the other layers.
+(`PR created: <url>`); no browser is ever opened.
 
 **Forks.** GitHub does not support stacks across forks. In a fork setup
 (pushing to `origin`, PRs on `upstream`) a warning is printed once,
@@ -277,8 +275,7 @@ git push --force-with-lease --force-if-includes [--atomic] -u <remote> <branch>.
 #   PR updated: https://github.com/owner/repo/pull/42
 # If no PR, it is created (in a stack, targeting the branch below)
 gh pr create --head <head> --base <target> --repo <owner/repo> --title <t> --body <b>
-# and the lowest PR created opened in the browser
-gh pr view <n> --web --repo <owner/repo>
+#   PR created: https://github.com/owner/repo/pull/43
 # and an existing PR whose base is wrong is retargeted
 gh pr edit <n> --repo <owner/repo> --base <branch below>
 ```
@@ -291,10 +288,9 @@ repository (`headRepositoryOwner`), so a stranger's PR from a same-named
 branch is not reported, retargeted, or taken for ours. That owner comes from
 the push remote's URL; in the rare setup where it cannot be read, the first
 match stands in and the narrowing does not apply. If a PR exists, prints its
-URL without opening the browser. If no PR exists,
-creates the PR via the `gh` CLI with an auto-generated title and
-description (see [PR Title and Description](#pr-title-and-description)
-below). If `gh` is not installed, prints a helpful message with a link to
+URL. If no PR exists, creates the PR via the `gh` CLI with an auto-generated
+title and description (see [PR Title and Description](#pr-title-and-description)
+below) and prints its URL. If `gh` is not installed, prints a helpful message with a link to
 install it.
 
 **Fork workflow:** When the integration branch tracks `upstream/main` (a fork
@@ -339,15 +335,17 @@ git push --force-with-lease --force-if-includes [--atomic] -u <remote> <branch>.
 #   PR updated: https://dev.azure.com/org/project/_git/repo/pullrequest/42
 # If no PR:
 # always for one branch: a stacked branch never gets this far
-az repos pr create --open --source-branch <branch> --target-branch <target> \
+az repos pr create --output json --source-branch <branch> --target-branch <target> \
     --org <org-url> --project <project> --repository <repo>
+#   PR created: https://dev.azure.com/org/project/_git/repo/pullrequest/43
 ```
 
 Pushes the branch with `--force-with-lease` (same safety as plain), then checks
 whether a PR already exists for the branch using `az repos pr list`. If a PR exists,
-prints its URL without opening the browser. If no PR exists, creates the PR
-via the `az` CLI with an auto-generated title and description (see
-[PR Title and Description](#pr-title-and-description) below). The organization,
+prints its URL. If no PR exists, creates the PR via the `az` CLI with an
+auto-generated title and description (see
+[PR Title and Description](#pr-title-and-description) below) and prints the URL
+built from the JSON it returns. No browser is ever opened. The organization,
 project and repository are read from the remote URL and passed explicitly,
 because az stops auto-detecting the project and repository once `--org` is
 given; `--detect` stands in for all three only when the URL cannot be parsed.
@@ -465,7 +463,6 @@ git-loom push feature-a
 git-loom push feature-a
 # Pushed `feature-a` to `origin`
 # PR created: https://github.com/owner/repo/pull/42
-# (browser opens on the new PR)
 ```
 
 ### Push to Azure DevOps (with az CLI)
@@ -473,7 +470,7 @@ git-loom push feature-a
 ```bash
 git-loom push feature-a
 # Pushed `feature-a` to `origin`
-# (browser opens to PR creation page)
+# PR created: https://dev.azure.com/org/project/_git/repo/pullrequest/42
 ```
 
 ### Push to Gerrit

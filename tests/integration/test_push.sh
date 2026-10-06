@@ -192,8 +192,6 @@ case "$1 ${2:-}" in
         number=$(( $(ls "$GH_STATE" | grep -c '^pr_' || true) + 1 ))
         echo "$number $base $owner" > "$GH_STATE/pr_$head"
         echo "https://github.com/$repo/pull/$number" ;;
-    "pr view")
-        ;;
     "pr edit")
         number="$3"
         base="$(arg_after --base "$@")"
@@ -260,8 +258,7 @@ assert_contains "$log" "pr create --head b --base a --repo owner/repo" "gh_stack
 assert_contains "$log" "api repos/owner/repo/pulls/1 --jq .stack" "gh_stack_membership"
 assert_contains "$log" "api --method POST repos/owner/repo/stacks --input -" "gh_stack_post"
 assert_contains "$log" 'STDIN: {"pull_requests":[1,2]}' "gh_stack_body"
-assert_contains "$log" "pr view 1 --web --repo owner/repo" "gh_stack_open_a"
-assert_not_contains "$log" "pr view 2" "gh_stack_no_open_b"
+assert_not_contains "$log" "pr view" "gh_stack_no_browser"
 
 describe "github: pushing again leaves the complete stack alone"
 : > "$GH_LOG"
@@ -296,7 +293,7 @@ log="$(cat "$GH_LOG")"
 assert_contains "$log" "pr create --head c --base b --repo owner/repo" "gh_extend_create_c"
 assert_contains "$log" "api --method POST repos/owner/repo/stacks/7/add --input -" "gh_extend_post"
 assert_contains "$log" 'STDIN: {"pull_requests":[3]}' "gh_extend_body"
-assert_contains "$log" "pr view 3 --web --repo owner/repo" "gh_extend_open_c"
+assert_not_contains "$log" "pr view" "gh_extend_no_browser"
 
 describe "github: an upstack layer already in sync ends the stack run"
 # d on c on b on a, all published without PRs; PRs exist but no stack yet.
@@ -327,13 +324,13 @@ assert_contains "$OUT" 'Re-pushed above b: d' "gh_gap_republished"
 assert_contains "$OUT" "Stack #7 registered with 2 PRs" "gh_gap_registered"
 assert_contains "$(cat "$GH_LOG")" 'STDIN: {"pull_requests":[1,2]}' "gh_gap_body"
 
-describe "github: a lone branch gets its PR created and opened"
+describe "github: a lone branch gets its PR created without a browser"
 : > "$GH_LOG"
 gl_gh_capture push x
 assert_exit_ok "$CODE" "gh_lone_ok"
 assert_contains "$OUT" "PR created: https://github.com/owner/repo/pull/5" "gh_lone_created"
 assert_contains "$(cat "$GH_LOG")" "pr create --head x --base $BASE_BRANCH --repo owner/repo" "gh_lone_create"
-assert_contains "$(cat "$GH_LOG")" "pr view 5 --web --repo owner/repo" "gh_lone_open"
+assert_not_contains "$(cat "$GH_LOG")" "pr view" "gh_lone_no_browser"
 assert_not_contains "$(cat "$GH_LOG")" "pr create --web" "gh_lone_no_form"
 assert_not_contains "$(cat "$GH_LOG")" "stacks" "gh_lone_no_stack"
 
@@ -374,7 +371,7 @@ assert_contains "$log" "pr create --head forker:a --base $BASE_BRANCH --repo own
 # b already targets the base, so the fork rule leaves it alone instead of
 # retargeting it onto a.
 assert_not_contains "$log" "pr edit" "gh_fork_no_retarget"
-assert_contains "$log" "pr view 2 --web --repo owner/repo" "gh_fork_open_a"
+assert_not_contains "$log" "pr view" "gh_fork_no_browser"
 assert_not_contains "$log" "stacks" "gh_fork_no_stack"
 
 describe "github: a stranger's PR with the same branch name is left alone"

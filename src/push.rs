@@ -970,53 +970,6 @@ fn create_github_pr(
     })
 }
 
-/// Open a PR's page in the browser; a failure only warns, as the PR exists.
-fn open_github_pr(workdir: &Path, gh_repo: &str, pr: &GhPr) {
-    // gh opens the browser itself; stdio is inherited only so its own lines
-    // reach the terminal, which under `loom tui` they would write over. Not
-    // piped there: a browser gh starts inherits the pipes, and reading them
-    // to EOF would wait for the browser to exit. A file has no EOF to wait on.
-    let number = pr.number.to_string();
-    let args = ["pr", "view", &number, "--web", "--repo", gh_repo];
-
-    let start = Instant::now();
-    let mut cmd = Command::new("gh");
-    cmd.current_dir(workdir).args(args);
-    let mut stderr_file = None;
-    if crate::core::ui::active() {
-        use std::process::Stdio;
-        let file = tempfile::tempfile().ok();
-        let stderr = match file.as_ref().and_then(|f| f.try_clone().ok()) {
-            Some(clone) => Stdio::from(clone),
-            None => Stdio::null(),
-        };
-        cmd.stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(stderr);
-        stderr_file = file;
-    }
-    let status = cmd.status();
-    let success = status.as_ref().is_ok_and(|s| s.success());
-    let stderr = match status {
-        Err(e) => e.to_string(),
-        Ok(_) => stderr_file
-            .map(|mut file| {
-                use std::io::{Read, Seek};
-                let mut bytes = Vec::new();
-                let _ = file.rewind().and_then(|()| file.read_to_end(&mut bytes));
-                String::from_utf8_lossy(&bytes).into_owned()
-            })
-            .unwrap_or_default(),
-    };
-
-    let duration_ms = start.elapsed().as_millis();
-    loom_trace::log_command("gh", &args.join(" "), duration_ms, success, &stderr);
-
-    if !success {
-        msg::warn(&format!("Could not open {} in the browser", pr.url));
-    }
-}
-
 /// Point an existing PR at a different base branch.
 fn retarget_github_pr(workdir: &Path, gh_repo: &str, number: u64, base: &str) -> bool {
     let number = number.to_string();
@@ -1172,8 +1125,8 @@ fn register_github_stack(workdir: &Path, gh_repo: &str, numbers: &[u64]) {
 ///
 /// For each layer, bottom to top: an existing PR is retargeted if its base is
 /// wrong and reported; a missing one is created directly, so a stack can be
-/// registered in the same run. The lowest PR the push creates is opened in
-/// the browser. Re-published upstack branches never get a PR created.
+/// registered in the same run. Re-published upstack branches never get a PR
+/// created. Nothing opens a browser: the URLs are printed.
 ///
 /// In a fork workflow the PR is based on the integration branch's remote with
 /// its head on the push remote; GitHub cannot stack PRs across forks, so
@@ -1251,7 +1204,6 @@ fn push_github(
 
     // Each layer with its PR number, bottom to top, for the stack registration.
     let mut chain: Vec<(Layer, Option<u64>)> = Vec::new();
-    let mut first_created: Option<GhPr> = None;
     for (layer, republish) in &layers {
         let pr = match find_existing_github_pr(
             workdir,
@@ -1302,10 +1254,7 @@ fn push_github(
                     &body,
                 );
                 match &pr {
-                    Some(pr) => {
-                        msg::success(&format!("PR created: {}", pr.url));
-                        first_created.get_or_insert_with(|| pr.clone());
-                    }
+                    Some(pr) => msg::success(&format!("PR created: {}", pr.url)),
                     None => msg::warn(&format!(
                         "Could not create a PR for `{}` — see `loom trace`",
                         layer.branch
@@ -1320,10 +1269,6 @@ fn push_github(
     let numbers = stack_pr_numbers(&chain);
     if register && numbers.len() >= 2 {
         register_github_stack(workdir, &pr_target_repo, &numbers);
-    }
-    // One tab only: the lowest new PR, whose stack map links the others.
-    if let Some(pr) = &first_created {
-        open_github_pr(workdir, &pr_target_repo, pr);
     }
 
     Ok(())
@@ -1483,8 +1428,8 @@ fn on_path(file: &str) -> bool {
 /// Push to Azure DevOps: push the plan's branches, then look after their PRs.
 ///
 /// An existing PR is reported as is (`az repos pr update` cannot change its
-/// target); a missing one is created with `az repos pr create`, which opens
-/// the browser on it. A stacked branch never reaches here — see
+/// target); a missing one is created with `az repos pr create` and its URL
+/// printed. A stacked branch never reaches here — see
 /// [`refuse_stacked_azure`].
 fn push_azure(
     repo: &Repository,
@@ -1544,8 +1489,7 @@ fn push_azure(
     Ok(())
 }
 
-/// Run `az repos pr create` for one layer, with `--open` so the browser
-/// shows the new PR.
+/// Run `az repos pr create` for one layer and print the new PR's URL.
 fn create_azure_pr(
     workdir: &Path,
     layer: &Layer,
@@ -1564,12 +1508,12 @@ fn create_azure_pr(
     let desc_path = desc_file.path().to_string_lossy().into_owned();
     let desc_arg = format!("@{}", desc_path);
 
-    // `--open` shows the new PR in the browser, so nothing reads stdout back.
     let mut args: Vec<&str> = vec![
         "repos",
         "pr",
         "create",
-        "--open",
+        "--output",
+        "json",
         "--source-branch",
         &layer.branch,
         "--target-branch",
@@ -1601,6 +1545,16 @@ fn create_azure_pr(
             "Could not create a PR for `{}` — see `loom trace`",
             layer.branch
         ));
+        return Ok(());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    match serde_json::from_str::<serde_json::Value>(stdout.trim())
+        .ok()
+        .and_then(|pr| azure_pr_url(&pr))
+    {
+        Some(url) => msg::success(&format!("PR created: {}", url)),
+        None => msg::success(&format!("PR created for `{}`", layer.branch)),
     }
 
     Ok(())
