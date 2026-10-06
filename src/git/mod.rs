@@ -3,6 +3,7 @@ pub mod git_branch;
 pub mod git_commit;
 pub mod git_diff;
 pub mod git_merge;
+pub mod git_mtime;
 pub mod git_rebase;
 pub mod git_worktree;
 
@@ -30,6 +31,7 @@ pub use git_diff::{
     show_commit_patch,
 };
 pub use git_merge::{MergeOutcome, continue_merge, merge_abort, merge_is_in_progress, merge_no_ff};
+pub use git_mtime::{discard_mtimes, restore_mtimes, snapshot_mtimes};
 #[cfg(test)]
 pub use git_rebase::rebase_onto;
 pub use git_rebase::{

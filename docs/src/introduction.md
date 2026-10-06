@@ -35,6 +35,8 @@ Feature branches are independent branches combined into the integration branch. 
 
 When a feature branch is created inside the integration branch, *git-loom* automatically **weaves** it into the topology — restructuring the linear history into a merge-based layout where each feature branch appears as a side branch joined by a merge commit. This is what makes `git loom status` able to display the clear branch-aware graph.
 
+Weaving rewrites history with `git rebase`, which rewrites every file the replayed commits touch even when its content is unchanged. *git-loom* puts the modification times of those files back afterwards, so a reword or a swap does not make your build tool rebuild everything; only files whose bytes actually changed get a new timestamp. Keep watcher-driven builds (`cargo watch`, an IDE building on save) off the tree while a loom operation runs: one that reads files mid-rebase compiles intermediate content and then treats its output as current.
+
 ### Short IDs
 
 *git-loom* assigns compact, human-friendly identifiers to branches, commits, and files shown in `git loom status`. You can use these short IDs with any command instead of typing full hashes or branch names. What you see in the status output is what you type.

@@ -257,6 +257,7 @@ fn pause_reason(workdir: &Path, before: Option<&str>) -> PauseReason {
 /// A conflict to resolve is the usual reason, but not the only one, so the
 /// message follows what git left behind.
 pub fn warn_paused(workdir: &Path, command: &str) {
+    git::discard_mtimes();
     let (note, hint, cause) = match pause_reason(workdir, None) {
         PauseReason::Conflicts => (
             format!("Conflicts detected — the `loom {}` is paused", command),
@@ -294,6 +295,7 @@ pub fn warn_paused(workdir: &Path, command: &str) {
 /// no state file to say which one it was — and then `loom abort` cancels the
 /// rebase without rolling anything else back, so it must not promise more.
 pub fn warn_paused_at_edit(command: Option<&str>) {
+    git::discard_mtimes();
     let (owner, abort_hint) = match command {
         Some(c) => (
             format!("The `loom {}` is paused at an `edit` step", c),

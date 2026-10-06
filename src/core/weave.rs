@@ -1789,6 +1789,7 @@ fn run_rebase_with_empty(
         }
     }
 
+    git::snapshot_mtimes(workdir, upstream);
     let start = Instant::now();
     let output = cmd.output()?;
     let duration_ms = start.elapsed().as_millis();

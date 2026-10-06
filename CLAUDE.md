@@ -43,6 +43,7 @@ keep it terse and normative, and do not duplicate rules, docs, or examples.
 | `specs/020-tui.md` | Interactive status TUI: tree + diff panes, with actions |
 | `specs/021-git-args.md` | Forwarding arguments to git after a `--` separator |
 | `specs/022-worktree.md` | Worktrees, each holding its own integration branch |
+| `specs/023-mtime.md` | Working-tree mtimes kept across a rebase for files whose bytes are unchanged |
 
 ## Commands
 

@@ -101,6 +101,9 @@ the index back on both paths (Spec 014). The non-resumable
 abort that left the rebase on disk, and an index left unmerged by a replay git
 could not finish are the exceptions — that index was never loom's to touch.
 
+The replay and the autostash also rewrite files whose bytes end up unchanged;
+their mtimes are recorded before the rebase and put back after it (Spec 023).
+
 ## Worktree ref safety
 
 Before rebase, enumerate `git worktree list --porcelain` and reject the entire operation if **any branch the todo can move** is checked out in another non-prunable worktree. This includes refs moved by `update-ref` and HEAD's own branch, moved on rebase completion. The error MUST name the branch and worktree path.

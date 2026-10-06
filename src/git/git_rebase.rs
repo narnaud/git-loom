@@ -36,9 +36,13 @@ pub fn continue_rebase(workdir: &Path) -> Result<RebaseOutcome> {
 /// Exit 0 does not mean the rebase is over: git also exits 0 when it stops at
 /// an `edit` or `break` step (`Paused`). A failure that left state behind is
 /// `Stopped`, whatever stopped it; any other failure (bad args, missing ref)
-/// is returned as `Err`.
+/// is returned as `Err`. A rebase found over has its recorded mtimes put back
+/// here (Spec 023).
 pub fn rebase_outcome(git_dir: &Path, result: Result<()>) -> Result<RebaseOutcome> {
     let in_progress = rebase_is_in_progress(git_dir);
+    if !in_progress {
+        super::restore_mtimes();
+    }
     match result {
         Ok(()) if in_progress => Ok(RebaseOutcome::Paused),
         Ok(()) => Ok(RebaseOutcome::Completed),
@@ -50,6 +54,7 @@ pub fn rebase_outcome(git_dir: &Path, result: Result<()>) -> Result<RebaseOutcom
 /// Run a plain `git rebase` onto `upstream`; see [`rebase_outcome`] for the
 /// result.
 pub fn rebase(git_dir: &Path, workdir: &Path, upstream: &str) -> Result<RebaseOutcome> {
+    super::snapshot_mtimes(workdir, Some(upstream));
     rebase_outcome(
         git_dir,
         super::run_git(
@@ -518,9 +523,11 @@ pub fn rebase_never_started(err: &anyhow::Error) -> bool {
     err.downcast_ref::<RebaseNotStarted>().is_some()
 }
 
-/// Abort an in-progress rebase.
+/// Abort an in-progress rebase, putting recorded mtimes back (Spec 023).
 pub fn rebase_abort(workdir: &Path) -> Result<()> {
-    super::run_git(workdir, &["rebase", "--abort"])
+    super::run_git(workdir, &["rebase", "--abort"])?;
+    super::restore_mtimes();
+    Ok(())
 }
 
 /// Whether no rebase is left on disk.
