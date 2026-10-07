@@ -240,6 +240,36 @@ same order (Spec 001), same short IDs — so an agent never parses glyphs:
 - Hidden branches and `--all` behave as they do on the tree: IDs are allocated
   before hiding, so they do not shift.
 
+### The push report
+
+`loom push` adds a `push` object to its `ok` line: what went out and where
+each PR stands, so an agent can open and chain PRs without parsing
+`messages`. It is absent when the push failed.
+
+```json
+{"status":"ok","messages":["…"],"push":{"remote":"origin","forge":"github",
+ "pushed":["a","b"],"republished":["c"],"not_pushed":["d"],
+ "prs":[{"branch":"a","base":"main","state":"updated","url":"https://github.com/o/r/pull/41","retargeted":true},
+        {"branch":"b","base":"a","state":"not_created","reason":"it has several commits and no `--title`",
+         "create_url":"https://github.com/o/r/compare/a...b?expand=1","hint":"Re-run with `loom push b --title <title>`"}],
+ "stack":7}}
+```
+
+- `forge` is the `loom.remote-type` in effect (Spec 011); `pushed` the named
+  branch and its downstack, bottom first (a Gerrit `wip/` push names the
+  `wip/` branch); `republished` and `not_pushed` the upstack branches of
+  [Stacked Branches](011-push.md#stacked-branches). Empty lists are left out.
+- `links` are the server's `remote:` URLs the success line shows (a Gerrit
+  review, a plain remote's create link), tags dropped.
+- `prs` has one entry per PR line, bottom first: `state` is `created`,
+  `updated` or `not_created`; `url` is present unless `not_created` (or Azure
+  printed none); `retargeted` when its base was just moved to `base`.
+  `not_created` carries the warning's `reason`, and `create_url` and `hint`
+  when it shows them (Spec 011, PR Messages). An existing PR whose retarget
+  failed is `updated` with the warning as `reason` and its actual `base`.
+- `stack` is the GitHub stack linking the PRs, when one was registered or
+  already linked them.
+
 ### Prompt sites
 
 Every interactive prompt behaves as follows in agent mode. Prompts are
@@ -261,8 +291,7 @@ mentions the skipped action in `messages`).
 | `push` branch picker (no branch) | pre-flight | `needs_input` (select) listing woven branches; hint: `loom push <branch>` |
 | `push` remote type menu (no `loom.remote-type`, nothing detected) | pre-flight | `needs_input` (select) with every type; hint: `git config loom.remote-type <github\|gitlab\|azure\|gerrit\|plain>`, then re-run |
 | `push` Gerrit `wip/` prefix choice (`--no-pr`) | pre-flight | `needs_input` (select) with the three choices; no flag exists to answer it — ask the user, then rename with `loom reword` or re-run interactively |
-| `push` PR title (GitHub/Azure, multi-commit branch) | post-mutation | branch is already pushed → skip PR creation, report `ok`; `messages` notes the skip |
-| `push` browser opening (`gh pr view --web`, `az repos pr create --open`) | post-mutation | never opens a browser in agent mode → skip PR creation, report `ok`; `messages` notes the skip and how to create the PR |
+| `push` PR title (GitHub/Azure, multi-commit layer, no `--title` for it) | post-mutation | branch is already pushed → that PR is not created, report `ok`; its `push.prs` entry is `not_created` with the `hint` `Re-run with `loom push <branch> --title <title>`` (Spec 011). Every other PR is created as in a terminal; no browser is ever opened |
 | `update` gone-branch prune confirmation | post-mutation | the pull-rebase already succeeded → skip pruning, report `ok`; `messages` notes the skipped branches and `loom update -y` |
 | `branch new` name prompt (no name) | pre-flight | `needs_input` (text); hint: `loom branch new <name>` |
 | `branch merge` / `branch unmerge` / `switch` pickers | pre-flight | `needs_input` (select) listing candidates; hint: `loom branch merge <branch>` etc. |
@@ -617,8 +646,9 @@ able to tell "I called this wrong" (2) from "the command needs an answer"
 Answering `needs_input` implies nothing happened, so it is only correct for
 prompts that fire before the repository is touched. The two prompts that fire
 after the main work succeeded (`update`'s prune confirmation, `push`'s PR
-title/browser step) instead take the safe default — skip the optional
-follow-up — and report `ok` with the skipped action in `messages`. Reporting
+title) instead take the safe default — skip the optional follow-up — and
+report `ok` with the skipped action in `messages` (and, for `push`, in its
+report). Reporting
 `needs_input` there would falsely tell the agent the push or update did not
 happen.
 

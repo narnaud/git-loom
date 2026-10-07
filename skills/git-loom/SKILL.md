@@ -100,10 +100,30 @@ The `graph` fields:
 | Create branch | Usually commit with `-b <new-name>`; empty branch: `git loom branch new <name>`. |
 | Merge/unmerge | `git loom branch merge <branch>` / `git loom branch unmerge <branch>`. A branch woven into another worktree's integration branch is refused: unmerge it there first. |
 | Pull-rebase | `git loom update -y`. |
-| Push / PR | `git loom push <branch>`; `--no-pr` skips PR/review creation. A stacked push includes lower branches. Same-repo PRs target the branch below; GitHub fork PRs target upstream. |
+| Push / PR | `git loom push <branch> [--title "<title>"]` pushes and opens or updates its PR (see Pull requests); `--no-pr` skips PR/review creation. |
 | Diff/show | `git loom diff` / `git loom show`; short IDs work; Git options follow `--`. |
 | Test branch | `git loom switch <branch>`. |
 | Worktrees | Each worktree holds its own integration branch and runs every command as the main one does. `git loom wt new <name>` creates `../<dir>-<name>` on `integration-<name>`; `git loom wt` (or `git loom wt list`) lists them; `git loom wt path <id>` prints a path; `git loom wt drop <id>` refuses dirty or paused worktrees and keeps a branch with unique commits. `git loom init` in a plain git worktree names the branch the same way. |
+
+## Pull requests
+
+`git loom push <branch>` publishes the branch with the branches below it and
+opens or updates one PR per branch (GitHub, GitLab, Azure DevOps; a Gerrit
+review). Push only when the user asked to publish: it is visible to others.
+
+- Same-repo PRs target the branch below, and GitHub links them as a stack;
+  GitHub fork PRs target upstream. Azure refuses a stacked branch.
+- A one-commit branch's PR takes the commit's subject and body. Give
+  `--title "<title>"` for a branch with several commits; it titles the named
+  branch's PR only, the description still comes from the commits.
+- Read the `push` object of the `ok` line: `pushed`, then `prs[]` with
+  `branch`, `base`, `state` (`created` / `updated` / `not_created`) and `url`.
+  A `not_created` entry says why in `reason`; when it has a `hint` (a lower
+  branch with several commits and no title), run that hint, which pushes again
+  harmlessly and creates the PR. Otherwise report `reason` and `create_url` to
+  the user.
+- If the remote type is unknown, push answers `needs_input` listing the forges:
+  ask the user, then set `git config loom.remote-type <value>` as the hint says.
 
 ## Hunk selection
 

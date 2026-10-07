@@ -183,6 +183,9 @@ enum Command {
         /// Push with --force instead of --force-with-lease --force-if-includes
         #[arg(short = 'f', long)]
         force: bool,
+        /// Title of the PR created for this branch (default: its lone commit's subject, else asked)
+        #[arg(long, conflicts_with = "no_pr")]
+        title: Option<String>,
     },
     /// Set up AI agent integration (unrelated to `init`)
     Agent(AgentCmd),
@@ -748,7 +751,8 @@ fn main() {
             branch,
             no_pr,
             force,
-        }) => push::run(branch, no_pr, force),
+            title,
+        }) => push::run(branch, no_pr, force, title),
         Some(Command::Update { yes }) => update::run(yes),
         Some(Command::Fold {
             create,

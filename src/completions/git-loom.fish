@@ -127,6 +127,7 @@ complete -c git-loom -n '__git_loom_is update' -s y -l yes -d 'Remove local bran
 
 complete -c git-loom -n '__git_loom_is push' -l no-pr -d 'Push without creating a PR or Gerrit review'
 complete -c git-loom -n '__git_loom_is push' -s f -l force -d 'Push with --force instead of --force-with-lease'
+complete -c git-loom -n '__git_loom_is push' -l title -x -d 'Title of the PR created for this branch'
 
 complete -c git-loom -n '__git_loom_is add' -s p -l patch -d 'Interactively select hunks to stage'
 complete -c git-loom -n '__git_loom_is add' -l hunks -x -d 'Hunk id to pick, once per id (needs --hunks-from)'

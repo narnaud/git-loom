@@ -21,7 +21,7 @@ varies significantly depending on the hosting platform:
 ## CLI
 
 ```bash
-git-loom push [branch] [--no-pr] [-f|--force]
+git-loom push [branch] [--no-pr] [-f|--force] [--title <title>]
 ```
 
 **Arguments:**
@@ -42,6 +42,10 @@ git-loom push [branch] [--no-pr] [-f|--force]
   downstack and the re-published upstack too. Has no effect on a Gerrit
   `refs/for/` review push, which never forces. Under `loom tui` (Spec 020),
   where it is one key, the push asks first, naming every branch it forces.
+- `--title <title>`: Title of the PR created for the named branch, not for
+  the layers below it (see [PR Title and Description](#pr-title-and-description)).
+  Conflicts with `--no-pr`. On a plain or Gerrit remote, which have no PR to
+  give it to, it is refused before anything is pushed.
 
 **Behavior:**
 
@@ -173,8 +177,9 @@ every layer's PR targets the upstream branch, and no stack is registered.
 Every layer still gets its PR: missing ones are created directly, as in any
 stack, only the registration step is skipped.
 
-**Agent mode.** PRs are never created behind an agent's back (spec 019): the
-skipped layer is reported (`PR not created for `b`: agent mode`) and,
+**Agent mode.** PRs are created as in a terminal (spec 019), except that a
+layer needing a title it was not given cannot ask for one: it is reported
+(`PR not created for `b`: it has several commits and no `--title``) and,
 having no PR, ends the run of layers the stack registration links, like any
 other layer without one.
 
@@ -275,7 +280,7 @@ warning, whatever the cause (a re-published layer is never one):
 | Cause | Reason | Last hint |
 |-------|--------|-----------|
 | CLI missing | `` `gh` is not installed `` / `` `az` is not installed `` | `Install `gh` to have loom create it: <install url>` |
-| Agent mode (spec 019) | `agent mode` | `Or run `loom push a` interactively` |
+| Agent mode, several commits, no `--title` (spec 019) | `` it has several commits and no `--title` `` | `Re-run with `loom push a --title <title>`` |
 | CLI call failed | `` `gh pr create` failed — see `loom trace` `` (`az repos pr create` alike) | none |
 | GitLab printed only its create form | `GitLab did not create it` | none |
 
@@ -296,6 +301,9 @@ without them is pushed and gets the warning.
 
 Gerrit and plain remotes have no PR step: their success line carries the
 `remote:` URLs the server printed.
+
+Agent mode records all of the above in the `push` object of its `ok` line
+([The push report](019-agent.md#the-push-report)).
 
 ## Push Strategies
 
@@ -371,6 +379,7 @@ git push --force-with-lease --force-if-includes \
 # a re-published layer keeps its MR: the target option without merge_request.create
 git push --force-with-lease --force-if-includes \
     -o merge_request.target=<branch below> -u <remote> <branch>
+# --title adds -o merge_request.title=<title> to the named branch's push
 # ✓ Pushed `feature-a` to `origin`
 # ✓ PR created: https://gitlab.com/group/repo/-/merge_requests/42
 ```
@@ -441,14 +450,21 @@ layer below was dropped as merged, the PR's diff spans the branches in between
 and the description spans them too, so it always describes what a reviewer
 sees:
 
+- **`--title`** (named branch only): the PR title. The description is built
+  as for multiple commits, even from a single one.
 - **Single commit**: the commit subject becomes the PR title and the commit
   body becomes the PR description.
 - **Multiple commits**: the user is prompted for a PR title via an
-  interactive input naming the branch (`PR title for `b``). The description is built by concatenating all commit
-  messages (oldest to newest), separated by `---` dividers. Each entry
-  includes the commit subject and body.
-- **No commits** (empty branch): the branch name is used as the title with
-  an empty description.
+  interactive input naming the branch (`PR title for `b``); agent mode cannot
+  ask, so that PR is not created (see [PR Messages](#pr-messages)). The
+  description is built by concatenating all commit messages (oldest to
+  newest), separated by `---` dividers. Each entry includes the commit subject
+  and body.
+- **No commits** (empty branch): `--title`, else the branch name, is the title,
+  with an empty description.
+
+On GitLab the server builds the MR itself; `--title` is passed as
+`merge_request.title`, which GitLab also applies to an existing MR.
 
 Merge commits in the branch are skipped when gathering commit messages.
 

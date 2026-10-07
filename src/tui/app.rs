@@ -808,9 +808,9 @@ fn execute_action(
         Action::Absorb { files } => absorb::run(false, files, vec![]),
         Action::Reword { target, name } => reword::run(target, name, vec![]),
         Action::Update => update::run(false),
-        Action::Push { branch } => push::run(branch, false, false),
+        Action::Push { branch } => push::run(branch, false, false, None),
         // `push` itself confirms a force under the TUI, naming every branch.
-        Action::ForcePush { branch } => push::run(Some(branch), false, true),
+        Action::ForcePush { branch } => push::run(Some(branch), false, true, None),
     };
     crate::trace::finalize();
     result

@@ -808,12 +808,13 @@ fn force_pushes_when_the_lease_check_would_refuse() {
     .unwrap();
 
     let plan = super::PushPlan::single("feature-a");
-    let refused = super::push_plain(&workdir, "origin", &plan, false).unwrap_err();
+    let refused =
+        super::push_plain(&workdir, "origin", &plan, false, &mut Default::default()).unwrap_err();
     assert_eq!(
         refused.downcast_ref::<super::PushFailed>(),
         Some(&super::PushFailed::Refused)
     );
-    assert!(super::push_plain(&workdir, "origin", &plan, true).is_ok());
+    assert!(super::push_plain(&workdir, "origin", &plan, true, &mut Default::default()).is_ok());
 
     let pushed =
         crate::git::run_git_stdout(&remote, &["rev-parse", "refs/heads/feature-a"]).unwrap();
@@ -1184,6 +1185,108 @@ fn gather_branch_commits_yields_only_the_branch_own_commits() {
 }
 
 #[test]
+fn pr_title_comes_from_a_lone_commit_or_title_or_nothing_when_none_can_be_asked() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("A1\n\nWhy A1", "a1.txt");
+    test_repo.create_branch("feature-a");
+    test_repo.commit("B1", "b1.txt");
+    test_repo.commit("B2\n\nWhy B2", "b2.txt");
+    test_repo.create_branch("feature-b");
+    let info = crate::core::repo::gather_repo_info(&test_repo.repo, false, 1).unwrap();
+    let pr = |branch: &str, base: &str, title: Option<&str>| {
+        super::pr_title_and_description(&test_repo.repo, &info, branch, base, title, false).unwrap()
+    };
+
+    assert_eq!(
+        pr("feature-a", "main", None),
+        Some(("A1".to_string(), "Why A1".to_string()))
+    );
+    assert_eq!(
+        pr("feature-a", "main", Some("Add A")),
+        Some(("Add A".to_string(), "A1\n\nWhy A1".to_string()))
+    );
+    assert_eq!(pr("feature-b", "feature-a", None), None);
+    assert_eq!(
+        pr("feature-b", "feature-a", Some("Add B")),
+        Some(("Add B".to_string(), "B1\n\n---\n\nB2\n\nWhy B2".to_string()))
+    );
+}
+
+#[test]
+fn push_report_serializes_only_what_happened() {
+    let layer = |branch: &str, base: &str| super::Layer {
+        branch: branch.to_string(),
+        base: base.to_string(),
+    };
+    let mut report = super::PushReport::new("origin", &super::RemoteType::GitHub);
+    let info = stack_info(None, Some(RemoteStatus::Different), None);
+    report.pushed(&super::plan_push(&info, "b", "main"), []);
+    report.pr(
+        &layer("a", "main"),
+        super::PrState::Updated,
+        Some("https://github.com/o/r/pull/1"),
+        true,
+    );
+    report.pr_not_created(
+        &layer("b", "a"),
+        super::UNTITLED_REASON,
+        Some("https://github.com/o/r/compare/a...b?expand=1"),
+        Some(&super::title_hint("b")),
+    );
+    report.stack = Some(7);
+    assert_eq!(
+        serde_json::to_value(&report).unwrap(),
+        serde_json::json!({
+            "remote": "origin",
+            "forge": "github",
+            "pushed": ["a", "b"],
+            "republished": ["c"],
+            "not_pushed": ["d"],
+            "prs": [
+                {"branch": "a", "base": "main", "state": "updated",
+                 "url": "https://github.com/o/r/pull/1", "retargeted": true},
+                {"branch": "b", "base": "a", "state": "not_created",
+                 "reason": "it has several commits and no `--title`",
+                 "create_url": "https://github.com/o/r/compare/a...b?expand=1",
+                 "hint": "Re-run with `loom push b --title <title>`"}
+            ],
+            "stack": 7
+        })
+    );
+}
+
+#[test]
+fn a_title_is_refused_where_no_pr_takes_it() {
+    let gerrit = super::RemoteType::Gerrit {
+        target_branch: "main".to_string(),
+    };
+    for remote_type in [&super::RemoteType::Plain, &gerrit] {
+        let err = super::refuse_unused_title(remote_type, Some("T")).unwrap_err();
+        assert!(
+            err.to_string().contains("`--title` names a pull request"),
+            "{}",
+            err
+        );
+        assert!(super::refuse_unused_title(remote_type, None).is_ok());
+    }
+    for remote_type in [
+        super::RemoteType::GitHub,
+        super::RemoteType::GitLab,
+        super::RemoteType::AzureDevOps,
+    ] {
+        assert!(super::refuse_unused_title(&remote_type, Some("T")).is_ok());
+    }
+}
+
+#[test]
+fn remote_types_round_trip_through_their_config_value() {
+    for (value, _) in super::REMOTE_TYPES {
+        let remote_type = super::parse_remote_type(value, "origin/main").unwrap();
+        assert_eq!(remote_type.config_value(), value);
+    }
+}
+
+#[test]
 fn gather_branch_commits_spans_the_stack_when_the_pr_targets_the_trunk() {
     let test_repo = TestRepo::new_with_remote();
     test_repo.commit("A1", "a1.txt");
@@ -1237,7 +1340,9 @@ fn push_plain_sends_the_whole_chain_in_one_push() {
     let plan = super::plan_push(&info, "feature-b", "main");
     assert_eq!(plan.branches(), vec!["feature-a", "feature-b"]);
 
-    super::push_plain(&workdir, "origin", &plan, false).unwrap();
+    let mut report = super::PushReport::new("origin", &super::RemoteType::Plain);
+    super::push_plain(&workdir, "origin", &plan, false, &mut report).unwrap();
+    assert_eq!(report.pushed, ["feature-a", "feature-b"]);
 
     let remote = test_repo.remote_path().unwrap();
     let rev = |r: &str| {
@@ -1418,7 +1523,7 @@ fn force_push_under_tui_of(
         std::thread::scope(|scope| {
             let worker = scope.spawn(move || {
                 ui::install(tx);
-                let result = super::run(Some(pushed_branch.to_string()), false, true);
+                let result = super::run(Some(pushed_branch.to_string()), false, true, None);
                 ui::uninstall();
                 result
             });
@@ -1494,7 +1599,8 @@ fn a_push_that_cannot_reach_the_remote_is_not_refused() {
     crate::git::run_git(&workdir, &["remote", "add", "gone", gone.to_str().unwrap()]).unwrap();
 
     let plan = super::PushPlan::single("feature-a");
-    let failed = super::push_plain(&workdir, "gone", &plan, false).unwrap_err();
+    let failed =
+        super::push_plain(&workdir, "gone", &plan, false, &mut Default::default()).unwrap_err();
     assert_eq!(
         failed.downcast_ref::<super::PushFailed>(),
         Some(&super::PushFailed::NoRefStatus)
@@ -1521,7 +1627,8 @@ fn a_push_a_hook_declines_is_server_rejected() {
     }
 
     let plan = super::PushPlan::single("feature-a");
-    let failed = super::push_plain(&workdir, "origin", &plan, false).unwrap_err();
+    let failed =
+        super::push_plain(&workdir, "origin", &plan, false, &mut Default::default()).unwrap_err();
     assert_eq!(
         failed.downcast_ref::<super::PushFailed>(),
         Some(&super::PushFailed::ServerRejected)

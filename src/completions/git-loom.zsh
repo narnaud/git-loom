@@ -120,6 +120,7 @@ _git-loom() {
                 '--no-pr:Push without creating a PR or Gerrit review'
                 '-f:Push with --force instead of --force-with-lease'
                 '--force:Push with --force instead of --force-with-lease'
+                '--title:Title of the PR created for this branch'
             ) ;;
         add)
             flags=(

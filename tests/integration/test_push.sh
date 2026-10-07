@@ -140,6 +140,21 @@ gl_capture push x --no-pr
 assert_exit_ok "$CODE" "remote_type_saved_ok"
 assert_eq "github" "$(git -C "$WORK" config --get loom.remote-type)" "remote_type_saved"
 
+describe "agent mode reports a plain push as JSON"
+build_stack
+gl_capture_json --agent push a
+assert_exit_ok "$CODE" "agent_plain_ok"
+assert_contains "$(json_line)" '"push":{"remote":"origin","forge":"plain","pushed":["a"],"not_pushed":["b"]}' "agent_plain_json"
+
+describe "--title is refused where no PR takes it"
+build_stack
+gl_capture push x --title "T"
+assert_exit_fail "$CODE" "title_plain_fails"
+assert_contains "$OUT" "--title names a pull request" "title_plain_msg"
+remote_has x && fail "title_plain: x should not be on the remote"
+gl_capture push x --no-pr --title "T"
+assert_eq "2" "$CODE" "title_no_pr_conflicts"
+
 describe "--no-pr pushes the downstack too"
 build_stack
 gl_capture push b --no-pr
@@ -233,6 +248,17 @@ assert_exit_fail "$CODE" "gitlab_partial_fails"
 assert_contains "$OUT" "Pushed a to origin" "gitlab_partial_pushed"
 assert_contains "$OUT" "PR created: https://gitlab.example.com/g/r/-/merge_requests/a" "gitlab_partial_mr"
 remote_has b && fail "gitlab_partial: b should not be on the remote"
+
+describe "gitlab: agent mode reports the push and its MRs as JSON, --title on the named branch"
+build_stack
+gitlab_origin
+gitlab_hook
+gl_capture_json --agent push b --title "Add B"
+assert_exit_ok "$CODE" "gitlab_agent_ok"
+assert_contains "$(json_line)" '"push":{"remote":"origin","forge":"gitlab","pushed":["a","b"],"prs":[{"branch":"a","base":"'"$BASE_BRANCH"'","state":"created","url":"https://gitlab.example.com/g/r/-/merge_requests/a"},{"branch":"b","base":"a","state":"created","url":"https://gitlab.example.com/g/r/-/merge_requests/b"}]}' "gitlab_agent_json"
+trace="$(gl trace)"
+assert_contains "$trace" "-o merge_request.title=Add B -o merge_request.target=a -u origin b" "gitlab_title_on_b"
+assert_not_contains "$trace" "merge_request.title=Add B -o merge_request.target=$BASE_BRANCH" "gitlab_title_not_on_a"
 
 # ── GITHUB (gh shim) ──────────────────────────────────────────────────────────
 # The shim is a shell script on PATH; Rust's Command cannot spawn one on
@@ -476,16 +502,27 @@ assert_exit_ok "$CODE" "nogh_nopr_ok"
 assert_contains "$OUT" 'Pushed a, b to origin' "nogh_nopr_pushed"
 assert_not_contains "$OUT" "PR not created" "nogh_nopr_no_warning"
 
-describe "github: agent mode never creates PRs and skips the stack"
+describe "github: agent mode creates PRs, leaving a multi-commit one to --title"
 build_stack
 install_gh_shim
 github_origin
+write_file "b2.txt" "B2"
+gl commit -b b -m "B2" zz > /dev/null
 gl_gh_capture --agent push b
 assert_exit_ok "$CODE" "gh_agent_ok"
-assert_contains "$OUT" "PR not created for b: agent mode" "gh_agent_skipped"
-assert_contains "$OUT" "Create it at https://github.com/owner/repo/compare/a...b?expand=1" "gh_agent_link"
-assert_not_contains "$(cat "$GH_LOG")" "pr create" "gh_agent_no_create"
-assert_not_contains "$(cat "$GH_LOG")" "stacks" "gh_agent_no_stack"
+assert_contains "$OUT" '"push":{"remote":"origin","forge":"github","pushed":["a","b"]' "gh_agent_json_pushed"
+assert_contains "$OUT" '{"branch":"a","base":"'"$BASE_BRANCH"'","state":"created","url":"https://github.com/owner/repo/pull/1"}' "gh_agent_json_a"
+assert_contains "$OUT" '"branch":"b","base":"a","state":"not_created"' "gh_agent_json_b"
+assert_contains "$OUT" "PR not created for b: it has several commits and no --title" "gh_agent_untitled"
+assert_contains "$OUT" "Re-run with loom push b --title <title>" "gh_agent_title_hint"
+assert_not_contains "$(cat "$GH_LOG")" "stacks" "gh_agent_no_stack_yet"
+
+describe "github: --title creates the PR the agent was told to re-run for"
+gl_gh_capture --agent push b --title "Add B"
+assert_exit_ok "$CODE" "gh_title_ok"
+assert_contains "$(cat "$GH_LOG")" "--base a --repo owner/repo --title Add B" "gh_title_passed"
+assert_contains "$OUT" '{"branch":"b","base":"a","state":"created","url":"https://github.com/owner/repo/pull/2"}' "gh_title_json"
+assert_contains "$OUT" '"stack":7' "gh_title_json_stack"
 
 describe "github: a fork stack gets a PR per layer targeting the base and no stack"
 build_stack

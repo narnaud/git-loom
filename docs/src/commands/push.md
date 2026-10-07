@@ -5,7 +5,7 @@ Push a feature branch to the remote, together with the branches it is stacked on
 ## Usage
 
 ```
-git loom push [branch] [--no-pr] [-f|--force]
+git loom push [branch] [--no-pr] [-f|--force] [--title <title>]
 ```
 
 ### Arguments
@@ -20,6 +20,7 @@ git loom push [branch] [--no-pr] [-f|--force]
 |------|-------------|
 | `--no-pr` | Push without creating a PR or Gerrit review (see below) |
 | `-f`, `--force` | Push with `--force` instead of `--force-with-lease --force-if-includes` |
+| `--title <title>` | Title of the PR created for this branch (see [PR Title and Description](#pr-title-and-description)) |
 
 ## Forges at a Glance
 
@@ -42,7 +43,7 @@ git loom push b                 # b stacked on a
 # ✓ PR created: https://github.com/owner/repo/pull/42
 ```
 
-A pushed branch left without a PR gets one warning, whatever the reason: the CLI is missing, agent mode, or the CLI call failed. It links the forge's own page to create the PR when one can be built. A stacked branch the forge cannot handle is refused before anything is pushed:
+A pushed branch left without a PR gets one warning, whatever the reason: the CLI is missing, the CLI call failed, or, in agent mode, a branch of several commits has no `--title`. It links the forge's own page to create the PR when one can be built. A stacked branch the forge cannot handle is refused before anything is pushed:
 
 ```bash
 # ✗ Cannot create stacked PRs: `b` is stacked on `a`
@@ -246,9 +247,31 @@ Uses the `refs/for/` refspec. No topic is set. After pushing, any review URLs re
 
 When creating a new PR (GitHub or Azure DevOps), *git-loom* auto-generates the title and description from the commits the PR contains — those between its base and the branch tip. A stacked PR includes only its branch's own commits. When a PR targets the trunk instead (in a fork, or because its lower layer was dropped as merged), it also includes commits from the lower layers, so the description always matches the diff a reviewer sees:
 
+- **`--title`** — sets the title of the branch you named (not of the branches below it); the description is built from all its commits.
 - **Single commit** — the commit subject becomes the PR title and the commit body becomes the description.
 - **Multiple commits** — you are prompted for a PR title (the prompt names the branch). The description is built by concatenating all commit messages (oldest to newest), separated by `---` dividers.
 - **Empty branch** — the branch name is used as the title with an empty description.
+
+On GitLab, `--title` is passed as the `merge_request.title` push option, which GitLab applies to an existing MR too. Plain and Gerrit remotes have no PR, so `--title` is refused there.
+
+```bash
+git loom push feature-b --title "Add the login page"
+```
+
+## Agent mode
+
+With `--agent`, `push` creates PRs as it does in a terminal and adds a `push` object to its JSON `ok` line:
+
+```json
+{"status":"ok","messages":["…"],"push":{"remote":"origin","forge":"github","pushed":["a","b"],
+ "prs":[{"branch":"a","base":"main","state":"created","url":"https://github.com/owner/repo/pull/41"},
+        {"branch":"b","base":"a","state":"not_created","reason":"it has several commits and no `--title`",
+         "create_url":"https://github.com/owner/repo/compare/a...b?expand=1","hint":"Re-run with `loom push b --title <title>`"}]}}
+```
+
+A branch of several commits cannot be asked for its title once the push is done, so its PR is reported `not_created` with the command to re-run; pass `--title` up front to avoid that.
+
+`republished`, `not_pushed`, the server's `links` and the GitHub `stack` number appear when they apply; an updated PR whose base was just moved carries `"retargeted":true`.
 
 ## Pushing Without a PR or Review
 

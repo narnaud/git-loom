@@ -66,7 +66,7 @@ In agent mode:
 - Interactive prompts never render — they answer `needs_input`/`needs_confirmation` instead.
 - `-p`/`--patch` answers with a hunk listing instead of opening the picker (see below) — on [`add`](add.md), [`commit`](commit.md), [`fold`](fold.md) and [`split`](split.md) alike.
 - `commit`, `split`, and `reword` require `-m` (no editor is opened).
-- `push` never opens a browser: PR creation is skipped and reported in `messages`.
+- `push` creates PRs as it does in a terminal, never opening a browser, and attaches a `push` object to its `ok` line: the branches pushed and each PR's `state` (`created`, `updated`, `not_created`) and `url` — see [push](push.md#agent-mode). A branch with several commits needs `--title`; without it, that PR is reported `not_created` with the command to re-run.
 - `update` skips the gone-branch pruning question (use `-y` to prune).
 - `show`/`diff` disable the git pager.
 - `status` attaches the whole branch graph to its `ok` object as `graph` — see [status](status.md#agent-mode).

@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::Serialize;
 
+use crate::core::push_json::PushReport;
 use crate::core::status_json::StatusGraph;
 
 static ENABLED: AtomicBool = AtomicBool::new(false);
@@ -21,6 +22,8 @@ static MESSAGES: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static PENDING: Mutex<Option<AgentResponse>> = Mutex::new(None);
 /// The status graph, stored by `loom status` and emitted by `finish`.
 static GRAPH: Mutex<Option<StatusGraph>> = Mutex::new(None);
+/// What `loom push` did, stored by it and emitted by `finish`.
+static PUSH: Mutex<Option<PushReport>> = Mutex::new(None);
 
 /// Enable or disable agent mode. Called once from `main()` before dispatch.
 pub fn set(enabled: bool) {
@@ -85,6 +88,9 @@ pub enum AgentResponse {
         /// The status graph; `loom status` only (spec 019).
         #[serde(skip_serializing_if = "Option::is_none")]
         graph: Option<Box<StatusGraph>>,
+        /// What was pushed and each PR's state; `loom push` only (spec 019).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        push: Option<Box<PushReport>>,
     },
     NeedsInput {
         kind: InputKind,
@@ -146,6 +152,15 @@ pub fn record_message(message: &str) {
 pub fn set_graph(graph: StatusGraph) {
     if enabled() {
         *GRAPH.lock().unwrap() = Some(graph);
+    }
+}
+
+/// Store the push report for the final `ok` response (spec 019).
+///
+/// No-op when agent mode is off.
+pub fn set_push(report: PushReport) {
+    if enabled() {
+        *PUSH.lock().unwrap() = Some(report);
     }
 }
 
@@ -218,6 +233,7 @@ pub fn finish(result: &anyhow::Result<()>) -> i32 {
     let pending = PENDING.lock().unwrap().take();
     let collected = std::mem::take(&mut *MESSAGES.lock().unwrap());
     let graph = GRAPH.lock().unwrap().take().map(Box::new);
+    let push = PUSH.lock().unwrap().take().map(Box::new);
     let response = match result {
         // Only a conflict pause overrides success; a leftover `needs_*`
         // response here means its marker error was swallowed and the command
@@ -231,6 +247,7 @@ pub fn finish(result: &anyhow::Result<()>) -> i32 {
             _ => AgentResponse::Ok {
                 messages: collected,
                 graph,
+                push,
             },
         },
         Err(e) if e.downcast_ref::<NeedsInput>().is_some() => {
@@ -258,6 +275,7 @@ mod tests {
         let r = AgentResponse::Ok {
             messages: vec!["Created commit `1a2b3c4`".to_string()],
             graph: None,
+            push: None,
         };
         assert_eq!(
             r.to_json(),
@@ -271,6 +289,7 @@ mod tests {
         let r = AgentResponse::Ok {
             messages: vec![],
             graph: None,
+            push: None,
         };
         assert_eq!(r.to_json(), r#"{"status":"ok"}"#);
     }
@@ -282,6 +301,7 @@ mod tests {
             graph: Some(Box::new(crate::core::test_helpers::status_graph(
                 crate::core::test_helpers::base_info(),
             ))),
+            push: None,
         };
         let json = r.to_json();
         assert!(json.starts_with(r#"{"status":"ok","messages":["Done"],"graph":{"#));

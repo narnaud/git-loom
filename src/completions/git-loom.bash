@@ -75,7 +75,7 @@ __git_loom_candidates() {
     local flags=
     case $sub in
         update) flags="-y --yes" ;;
-        push) flags="--no-pr -f --force" ;;
+        push) flags="--no-pr -f --force --title" ;;
         add) flags="-p --patch --hunks --hunks-from" ;;
         commit) flags="-b --branch -i --integration -m --message -p --patch --hunks --hunks-from" ;;
         fold) flags="-c --create -p --patch --above --below --hunks --hunks-from" ;;

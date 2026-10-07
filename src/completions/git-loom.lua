@@ -20,7 +20,7 @@ local update_matcher = clink.argmatcher()
     :addflags("-y", "--yes", "--help", "-h")
 
 local push_matcher = clink.argmatcher()
-    :addflags("--no-pr", "-f", "--force", "--help", "-h")
+    :addflags("--no-pr", "-f", "--force", "--title", "--help", "-h")
 
 local add_matcher = clink.argmatcher()
     :addflags("-p", "--patch", "--hunks", "--hunks-from", "--help", "-h")
