@@ -128,7 +128,7 @@ fn deletion_already_staged(workdir: &Path, path: &str) -> Result<bool> {
             "--name-only",
             "--diff-filter=D",
             "--",
-            path,
+            &super::literal_pathspec(path),
         ],
     )?;
     Ok(!out.trim().is_empty())
@@ -155,10 +155,11 @@ pub fn stage_files_opts(workdir: &Path, files: &[&str], opts: &[&str]) -> Result
     if to_add.is_empty() {
         return Ok(());
     }
+    let literal = super::literal_pathspecs(&to_add);
     let mut args = vec!["add"];
     args.extend(opts);
     args.push("--");
-    args.extend(&to_add);
+    args.extend(literal.iter().map(String::as_str));
     run_add(workdir, &args, opts)
 }
 
@@ -175,8 +176,7 @@ pub fn stage_from(workdir: &Path, source: &str, files: &[&str]) -> Result<()> {
     if files.is_empty() {
         return Ok(());
     }
-    // `:(literal)` for the reason [`super::ls_files`] gives.
-    let literal: Vec<String> = files.iter().map(|f| format!(":(literal){f}")).collect();
+    let literal = super::literal_pathspecs(files);
     let source = format!("--source={source}");
     let mut args = vec!["restore", "--staged", source.as_str(), "--"];
     args.extend(literal.iter().map(|f| f.as_str()));

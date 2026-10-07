@@ -790,6 +790,49 @@ fn drop_file_restores_tracked_modifications() {
     );
 }
 
+/// Dropping `a[12].txt` must not discard the changes in `a1.txt`.
+#[test]
+fn drop_file_takes_the_path_literally() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("Add a1", "a1.txt");
+    test_repo.commit("Add a[12]", "a[12].txt");
+    test_repo.write_file("a1.txt", "changed");
+    test_repo.write_file("a[12].txt", "changed");
+
+    super::drop_files(&test_repo.repo, &["a[12].txt".to_string()], true).unwrap();
+
+    assert_eq!(test_repo.status_porcelain(), " M a1.txt\n");
+}
+
+#[test]
+fn drop_staged_new_file_takes_the_path_literally() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("Add a1", "a1.txt");
+    test_repo.write_file("a[12].txt", "new");
+    test_repo.stage_files(&["a[12].txt"]);
+
+    super::drop_files(&test_repo.repo, &["a[12].txt".to_string()], true).unwrap();
+
+    assert_eq!(test_repo.read_file("a1.txt"), "Add a1");
+    assert!(test_repo.status_porcelain().is_empty());
+}
+
+#[test]
+fn drop_dir_with_tracked_changes_takes_the_path_literally() {
+    let test_repo = TestRepo::new_with_remote();
+    std::fs::create_dir_all(test_repo.workdir().join("d1")).unwrap();
+    std::fs::create_dir_all(test_repo.workdir().join("d[12]")).unwrap();
+    test_repo.commit("Add d1", "d1/f.txt");
+    test_repo.commit("Add d[12]", "d[12]/f.txt");
+    test_repo.write_file("d1/f.txt", "changed");
+    test_repo.write_file("d1/new.txt", "new");
+    test_repo.write_file("d[12]/f.txt", "changed");
+
+    super::drop_files(&test_repo.repo, &["d[12]".to_string()], true).unwrap();
+
+    assert_eq!(test_repo.status_porcelain(), " M d1/f.txt\n?? d1/new.txt\n");
+}
+
 #[test]
 fn drop_file_deletes_untracked_file() {
     let test_repo = TestRepo::new_with_remote();

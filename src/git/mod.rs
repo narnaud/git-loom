@@ -324,16 +324,18 @@ fn run_interactive(workdir: &Path, args: &[&str], ok: fn(ExitStatus) -> bool) ->
 /// Unstage specific files (`git reset HEAD -- <files>`), leaving the working
 /// tree alone.
 pub fn unstage_files(workdir: &Path, files: &[&str]) -> Result<()> {
+    let literal = literal_pathspecs(files);
     let mut args = vec!["reset", "HEAD", "--"];
-    args.extend(files);
+    args.extend(literal.iter().map(String::as_str));
     run_git(workdir, &args)
 }
 
 /// Restore tracked files in the working tree to their HEAD state
 /// (`git checkout HEAD -- <files>`).
 pub fn restore_files_to_head(workdir: &Path, files: &[&str]) -> Result<()> {
+    let literal = literal_pathspecs(files);
     let mut args = vec!["checkout", "HEAD", "--"];
-    args.extend(files);
+    args.extend(literal.iter().map(String::as_str));
     run_git(workdir, &args)
 }
 
@@ -343,6 +345,15 @@ pub fn checkout_index_force(workdir: &Path, files: &[&str]) -> Result<()> {
     let mut args = vec!["checkout-index", "-f", "--"];
     args.extend(files);
     run_git(workdir, &args)
+}
+
+/// `path` as a `:(literal)` pathspec, for the reason [`ls_files`] gives.
+pub(crate) fn literal_pathspec(path: &str) -> String {
+    format!(":(literal){path}")
+}
+
+pub(crate) fn literal_pathspecs(paths: &[&str]) -> Vec<String> {
+    paths.iter().map(|p| literal_pathspec(p)).collect()
 }
 
 /// The subset of `files` that the index knows about; empty for an empty list.
@@ -358,7 +369,7 @@ pub fn ls_files(workdir: &Path, files: &[&str]) -> Result<Vec<String>> {
     if files.is_empty() {
         return Ok(Vec::new());
     }
-    let literal: Vec<String> = files.iter().map(|f| format!(":(literal){f}")).collect();
+    let literal = literal_pathspecs(files);
     let mut args = vec!["ls-files", "-z", "--"];
     args.extend(literal.iter().map(|f| f.as_str()));
     Ok(run_git_stdout(workdir, &args)?
