@@ -259,7 +259,7 @@ mentions the skipped action in `messages`).
 | `reword` branch-rename prompt (no `-m`) | pre-flight | `needs_input` (text); hint: `loom reword <target> -m <new-name>` |
 | `drop` confirmations | pre-flight | `needs_confirmation`; hint: `loom drop <target> -y` |
 | `push` branch picker (no branch) | pre-flight | `needs_input` (select) listing woven branches; hint: `loom push <branch>` |
-| `push` Gerrit-suspicion confirmation | pre-flight | `needs_confirmation`; hint: `git config loom.remote-type gerrit` (or `plain`), then re-run |
+| `push` remote type menu (no `loom.remote-type`, nothing detected) | pre-flight | `needs_input` (select) with every type; hint: `git config loom.remote-type <github\|gitlab\|azure\|gerrit\|plain>`, then re-run |
 | `push` Gerrit `wip/` prefix choice (`--no-pr`) | pre-flight | `needs_input` (select) with the three choices; no flag exists to answer it — ask the user, then rename with `loom reword` or re-run interactively |
 | `push` PR title (GitHub/Azure, multi-commit branch) | post-mutation | branch is already pushed → skip PR creation, report `ok`; `messages` notes the skip |
 | `push` browser opening (`gh pr view --web`, `az repos pr create --open`) | post-mutation | never opens a browser in agent mode → skip PR creation, report `ok`; `messages` notes the skip and how to create the PR |

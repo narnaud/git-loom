@@ -32,6 +32,7 @@ build_stack() {
     commit_file "X1" "x1.txt"
     switch_to integration
     weave_branch "x"
+    git -C "$WORK" config loom.remote-type plain
 }
 
 # ── PRECONDITIONS ─────────────────────────────────────────────────────────────
@@ -115,6 +116,29 @@ assert_contains "$OUT" 'Pushed a to origin' "republish_msg"
 assert_contains "$OUT" 'Re-pushed above a: b' "republish_hint"
 assert_eq "$(remote_oid a)" "$(branch_oid a)" "republish_a_oid"
 assert_eq "$(remote_oid b)" "$(branch_oid b)" "republish_b_oid"
+
+describe "an undetected remote type is asked about, saving nothing unanswered"
+build_stack
+git -C "$WORK" config --unset loom.remote-type
+gl_capture --agent push x
+assert_eq "10" "$CODE" "remote_type_menu_exit"
+assert_contains "$OUT" '"status":"needs_input"' "remote_type_menu_status"
+assert_contains "$OUT" "Which kind of remote is" "remote_type_menu_prompt"
+for forge in GitHub GitLab "Azure DevOps" Gerrit "Plain Git"; do
+    assert_contains "$OUT" "$forge" "remote_type_menu_lists_$forge"
+done
+assert_contains "$OUT" "git config loom.remote-type" "remote_type_menu_hint"
+remote_has x && fail "remote_type_menu: x should not be on the remote"
+git -C "$WORK" config --get loom.remote-type && fail "remote_type_menu: nothing should be saved"
+
+describe "a detected remote type is saved"
+build_stack
+git -C "$WORK" config --unset loom.remote-type
+git -C "$WORK" remote set-url origin "https://github.com/owner/repo.git"
+git -C "$WORK" remote set-url --push origin "$TMPROOT/remote.git"
+gl_capture push x --no-pr
+assert_exit_ok "$CODE" "remote_type_saved_ok"
+assert_eq "github" "$(git -C "$WORK" config --get loom.remote-type)" "remote_type_saved"
 
 describe "--no-pr pushes the downstack too"
 build_stack

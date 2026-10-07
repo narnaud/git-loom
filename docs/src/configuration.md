@@ -4,7 +4,7 @@
 
 | Setting | Values | Default | Description |
 |---------|--------|---------|-------------|
-| `loom.remote-type` | `github`, `gitlab`, `azure`, `gerrit`, `plain` | Auto-detected | Override the remote type for `git loom push` |
+| `loom.remote-type` | `github`, `gitlab`, `azure`, `gerrit`, `plain` | Auto-detected, else asked; then saved | The remote type for `git loom push` |
 | `loom.push-remote` | Any remote name | Auto-detected | Override which remote to push to (e.g., `personal` for fork workflows) |
 | `loom.hideBranchPattern` | Any prefix string | `local-` | Prefix for branches hidden from `loom status` by default |
 | `loom.statusContext` | Integer ≥ 1 | `1` | Context commits shown at and before the base by `loom status` and `loom tui` |
@@ -13,15 +13,14 @@
 
 ### `loom.remote-type`
 
-By default, `git loom push` auto-detects the remote type:
+When it is unset, `git loom push` auto-detects the remote type and saves it here:
 
 - **GitHub** — if the remote URL contains `github.com`
 - **GitLab** — if the remote URL contains `gitlab`
 - **Azure DevOps** — if the remote URL contains `dev.azure.com`
-- **Gerrit** — if `.git/hooks/commit-msg` contains "gerrit", or you confirm the prompt when the remote looks like Gerrit
-- **Plain Git** — otherwise
+- **Gerrit** — if `.git/hooks/commit-msg` contains "gerrit"
 
-You can override this with:
+When nothing is detected, it asks you to pick the forge from a menu and saves your pick. You can set or change it with:
 
 ```bash
 git config loom.remote-type github   # Force GitHub push (push + PR, stacked PRs)

@@ -28,10 +28,10 @@ git loom push [branch] [--no-pr] [-f|--force]
 | GitHub | `github.com` in the remote URL | `gh` | PR created or updated | One PR per layer, each targeting the one below, linked into a GitHub stack | Link to create the PR; a stacked branch is refused | Pushes the branch and its stack, no PR |
 | GitLab | `gitlab` in the remote URL | none (push options) | MR created or updated | One MR per layer, each targeting the one below | Not needed | Pushes without the MR push options |
 | Azure DevOps | `dev.azure.com` in the remote URL | `az` | PR created or updated | Refused: Azure has no stacked PRs | Link to create the PR | Pushes the branch and its stack, no PR |
-| Gerrit | Gerrit `commit-msg` hook, or port 29418 (asked once) | none (`refs/for/`) | Review created or updated | Relation chain, built by Gerrit | Not needed | Pushes a branch, asking first unless it starts with `wip/` |
-| Plain Git | anything else | none | Push only | Push only | Not needed | Same as without |
+| Gerrit | Gerrit `commit-msg` hook | none (`refs/for/`) | Review created or updated | Relation chain, built by Gerrit | Not needed | Pushes a branch, asking first unless it starts with `wip/` |
+| Plain Git | your pick in the menu | none | Push only | Push only | Not needed | Same as without |
 
-Set `git config loom.remote-type` (`github`, `gitlab`, `azure`, `gerrit`, `plain`) when detection guesses wrong, for example on a self-hosted GitLab. Forgejo, Gitea and Bitbucket are pushed as plain Git; the link their server prints after the push is shown.
+When nothing is detected, for example on a self-hosted GitLab, `git loom push` asks which forge it is. Set `git config loom.remote-type` (`github`, `gitlab`, `azure`, `gerrit`, `plain`) when detection guesses wrong. Forgejo, Gitea and Bitbucket are pushed as plain Git; the link their server prints after the push is shown.
 
 GitHub, GitLab and Azure DevOps report a push the same way:
 
@@ -108,17 +108,27 @@ When the bottom PR merges, `git loom update` rebases your integration branch and
 
 ## Remote Type Detection
 
-Detection priority (first match wins):
+The remote type is settled once per repository (first match wins):
 
 1. **Explicit config** — `git config loom.remote-type` set to `github`, `gitlab`, `azure`, `gerrit`, or `plain`
-2. **URL heuristics** — remote URL contains `github.com` → GitHub
-3. **URL heuristics** — remote URL contains `gitlab` → GitLab
-4. **URL heuristics** — remote URL contains `dev.azure.com` → Azure DevOps
-5. **Hook inspection** — `.git/hooks/commit-msg` contains "gerrit" → Gerrit
-6. **Gerrit confirmation** — if nothing matched but the remote URL uses Gerrit's standard SSH port (`:29418/`), you are asked to confirm; the answer is saved as `loom.remote-type` (`gerrit` or `plain`) so you are only asked once
-7. **Fallback** — Plain Git
+2. **Auto-detection** — the result is saved as `loom.remote-type`:
+   - remote URL contains `github.com` → GitHub
+   - remote URL contains `gitlab` → GitLab
+   - remote URL contains `dev.azure.com` → Azure DevOps
+   - `.git/hooks/commit-msg` contains "gerrit" → Gerrit
+3. **Menu** — when nothing is detected, you pick the forge from a menu listing every type (in `loom tui` too); your pick is saved as `loom.remote-type`
 
-Self-hosted GitLab whose hostname does not contain `gitlab` (e.g. `invent.kde.org`) is not auto-detected — set `git config loom.remote-type gitlab`. Even without detection, a plain push still surfaces the MR link the server prints.
+```bash
+git loom push feature-a
+# ? Which kind of remote is `origin`? (saved as `loom.remote-type`)
+# > GitHub
+#   GitLab
+#   Azure DevOps
+#   Gerrit
+#   Plain Git
+```
+
+Self-hosted GitLab whose hostname does not contain `gitlab` (e.g. `invent.kde.org`) is not auto-detected, so pick GitLab in the menu. Since the type is saved, change `loom.remote-type` if the remote later moves to another forge.
 
 ## Push Remote Selection
 

@@ -211,31 +211,27 @@ local branch is removed too.
 
 ## Remote Type Detection
 
-Detection priority (first match wins):
+The remote type is settled once per repository, first match wins:
 
-1. **Explicit config**: `git config loom.remote-type` — values: `github`, `gitlab`, `azure`, `gerrit`, `plain`
-2. **URL heuristics**: Remote URL contains `github.com` → GitHub
-3. **URL heuristics**: Remote URL contains `gitlab` → GitLab
-4. **URL heuristics**: Remote URL contains `dev.azure.com` → Azure DevOps
-5. **Hook inspection**: `.git/hooks/commit-msg` contains "gerrit" (case-insensitive) → Gerrit
-6. **Gerrit confirmation**: if nothing matched but the remote *looks* like
-   Gerrit — the remote URL uses Gerrit's standard SSH port (`:29418/`) — the
-   user is asked to confirm. The answer is saved as
-   `git config loom.remote-type` (`gerrit` or `plain`) so the question is asked
-   at most once per repository. This catches Gerrit repos where the hook check
-   fails, e.g. when [pre-commit](https://pre-commit.com) manages the commit-msg
-   hook and the generated wrapper never mentions "gerrit". A `Change-Id:`
-   trailer is not a hint: loom puts one on every commit it creates (Spec 002).
-7. **Fallback**: Plain
+1. **Explicit config**: `git config loom.remote-type` — values: `github`, `gitlab`, `azure`, `gerrit`, `plain`. An unknown value is warned about and treated as unset.
+2. **Auto-detection**, saved as `loom.remote-type`:
+   - remote URL contains `github.com` → GitHub
+   - remote URL contains `gitlab` → GitLab
+   - remote URL contains `dev.azure.com` → Azure DevOps
+   - `.git/hooks/commit-msg` contains "gerrit" (case-insensitive) → Gerrit
+3. **Menu**: nothing detected, so the user picks from every type (GitHub,
+   GitLab, Azure DevOps, Gerrit, Plain Git), in the CLI or as a `loom tui`
+   popup; the pick is saved as `loom.remote-type`. Cancelling saves nothing.
+   Agent mode answers `needs_input` instead (Spec 019).
 
-Self-hosted GitLab instances whose hostname does not contain `gitlab` (e.g.
-`invent.kde.org`) are not auto-detected — set `git config loom.remote-type
-gitlab` for those. Even without detection, a plain push still surfaces the MR
-link the server prints (see [Plain](#plain-default)).
+Saving means a later change of URL or hook is not re-detected: change
+`loom.remote-type` instead. A plain push still surfaces the MR link the server
+prints (see [Plain](#plain-default)).
 
-The Gerrit confirmation prompt only runs in `git loom push` itself. The
-detection helper is also used non-interactively (e.g. by `git loom update` to
-resolve the fork push remote), where it silently falls back to Plain.
+Only `git loom push` asks and saves. The detection helper is also used
+non-interactively (e.g. by `git loom update` to resolve the fork push remote),
+where it reads the config, then auto-detects, then falls back to Plain, without
+saving.
 
 ## Push Remote Selection
 

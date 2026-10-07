@@ -325,10 +325,7 @@ pub fn run(branch: Option<String>, no_pr: bool, force: bool) -> Result<()> {
     // down a direct push of it too, that being a push of the hidden commits.
     status::apply_hidden_branches(&repo, &mut info);
 
-    let mut remote_type = detect_remote_type(&repo, &workdir, &info.upstream.label)?;
-    if remote_type == RemoteType::Plain && looks_like_gerrit(&repo, &info.upstream.label) {
-        remote_type = confirm_gerrit(&workdir, &info.upstream.label)?;
-    }
+    let remote_type = resolve_remote_type(&repo, &workdir, &info.upstream.label)?;
     let remote_name = resolve_push_remote(&repo, &workdir, &info.upstream.label, &remote_type);
 
     let target_branch = extract_target_branch(&info.upstream.label);
@@ -429,53 +426,59 @@ fn pick_branch(info: &repo::RepoInfo, hide_pattern: &str) -> Result<String> {
     )
 }
 
-/// Detect the remote type from config, URL heuristics, or hook inspection.
-///
-/// Priority: git config `loom.remote-type` → URL contains `github.com` →
-/// `.git/hooks/commit-msg` contains "gerrit" → Plain fallback.
-fn detect_remote_type(
-    repo: &Repository,
-    workdir: &Path,
-    upstream_label: &str,
-) -> Result<RemoteType> {
-    if let Ok(config_value) = git::run_git_stdout(workdir, &["config", "--get", "loom.remote-type"])
-    {
-        let value = config_value.trim().to_lowercase();
-        if value == "github" {
-            return Ok(RemoteType::GitHub);
-        }
-        if value == "gitlab" {
-            return Ok(RemoteType::GitLab);
-        }
-        if value == "azure" {
-            return Ok(RemoteType::AzureDevOps);
-        }
-        if value == "gerrit" {
-            let target_branch = extract_target_branch(upstream_label);
-            return Ok(RemoteType::Gerrit { target_branch });
-        }
-        if value == "plain" {
-            return Ok(RemoteType::Plain);
-        }
+/// The values `loom.remote-type` takes, with the name the menu shows for each.
+const REMOTE_TYPES: [(&str, &str); 5] = [
+    ("github", "GitHub"),
+    ("gitlab", "GitLab"),
+    ("azure", "Azure DevOps"),
+    ("gerrit", "Gerrit"),
+    ("plain", "Plain Git"),
+];
+
+fn parse_remote_type(value: &str, upstream_label: &str) -> Option<RemoteType> {
+    Some(match value {
+        "github" => RemoteType::GitHub,
+        "gitlab" => RemoteType::GitLab,
+        "azure" => RemoteType::AzureDevOps,
+        "gerrit" => RemoteType::Gerrit {
+            target_branch: extract_target_branch(upstream_label),
+        },
+        "plain" => RemoteType::Plain,
+        _ => return None,
+    })
+}
+
+/// The remote type `loom.remote-type` names; an unknown value is warned about
+/// and treated as unset.
+fn configured_remote_type(workdir: &Path, upstream_label: &str) -> Option<RemoteType> {
+    let value = git::run_git_stdout(workdir, &["config", "--get", "loom.remote-type"]).ok()?;
+    let value = value.trim();
+    let remote_type = parse_remote_type(&value.to_lowercase(), upstream_label);
+    if remote_type.is_none() {
         msg::warn(&format!(
             "Unknown loom.remote-type '{}' — falling back to auto-detection.\n\
              Valid values: github, gitlab, azure, gerrit, plain",
-            config_value.trim()
+            value
         ));
     }
+    remote_type
+}
 
+/// Guess the remote type from the remote URL, then from a Gerrit
+/// `commit-msg` hook; `None` when neither tells.
+fn auto_detect_remote_type(repo: &Repository, upstream_label: &str) -> Option<&'static str> {
     let remote_name = extract_remote_name(upstream_label);
     if let Ok(remote) = repo.find_remote(&remote_name)
         && let Ok(url) = remote.url()
     {
         if url.contains("github.com") {
-            return Ok(RemoteType::GitHub);
+            return Some("github");
         }
         if url.contains("gitlab") {
-            return Ok(RemoteType::GitLab);
+            return Some("gitlab");
         }
         if url.contains("dev.azure.com") {
-            return Ok(RemoteType::AzureDevOps);
+            return Some("azure");
         }
     }
 
@@ -484,41 +487,60 @@ fn detect_remote_type(
     if let Ok(content) = std::fs::read_to_string(&hook_path)
         && content.to_lowercase().contains("gerrit")
     {
-        let target_branch = extract_target_branch(upstream_label);
-        return Ok(RemoteType::Gerrit { target_branch });
+        return Some("gerrit");
     }
-
-    Ok(RemoteType::Plain)
+    None
 }
 
-/// Hint of a Gerrit remote: the standard SSH port (29418). Only a hint — the
-/// hook check in [`detect_remote_type`] can miss (e.g. pre-commit owns
-/// commit-msg) — so callers confirm with the user first. `Change-Id` trailers
-/// are no hint: loom itself puts one on every commit (Spec 002).
-fn looks_like_gerrit(repo: &Repository, upstream_label: &str) -> bool {
-    let remote_name = extract_remote_name(upstream_label);
-    repo.find_remote(&remote_name)
-        .ok()
-        .and_then(|remote| remote.url().ok().map(|url| url.contains(":29418/")))
-        .unwrap_or(false)
-}
-
-/// Ask the user to confirm a suspected Gerrit remote, saving the answer as
-/// `loom.remote-type` so the question is asked at most once per repository.
-fn confirm_gerrit(workdir: &Path, upstream_label: &str) -> Result<RemoteType> {
-    let is_gerrit = msg::confirm(
-        "This remote looks like Gerrit (SSH port 29418). Is it a Gerrit remote?",
-        "set `git config loom.remote-type gerrit` (or plain), then re-run: loom push <branch>",
-    )?;
-    let value = if is_gerrit { "gerrit" } else { "plain" };
-    git::run_git(workdir, &["config", "loom.remote-type", value])?;
-    if is_gerrit {
-        Ok(RemoteType::Gerrit {
-            target_branch: extract_target_branch(upstream_label),
+/// The remote type without asking or saving anything: config, then
+/// auto-detection, then Plain. For callers that cannot prompt.
+fn detect_remote_type(repo: &Repository, workdir: &Path, upstream_label: &str) -> RemoteType {
+    configured_remote_type(workdir, upstream_label)
+        .or_else(|| {
+            auto_detect_remote_type(repo, upstream_label)
+                .and_then(|value| parse_remote_type(value, upstream_label))
         })
-    } else {
-        Ok(RemoteType::Plain)
+        .unwrap_or(RemoteType::Plain)
+}
+
+/// The remote type `loom push` uses: `loom.remote-type`, else what
+/// auto-detection finds, else the user's pick from every type. A detected or
+/// picked type is saved as `loom.remote-type`, so it is settled once per
+/// repository.
+fn resolve_remote_type(
+    repo: &Repository,
+    workdir: &Path,
+    upstream_label: &str,
+) -> Result<RemoteType> {
+    if let Some(remote_type) = configured_remote_type(workdir, upstream_label) {
+        return Ok(remote_type);
     }
+    let value = match auto_detect_remote_type(repo, upstream_label) {
+        Some(value) => value,
+        None => ask_remote_type(upstream_label)?,
+    };
+    git::run_git(workdir, &["config", "loom.remote-type", value])?;
+    Ok(parse_remote_type(value, upstream_label).expect("a known remote type"))
+}
+
+/// Ask which kind of server the upstream remote is, offering every type.
+fn ask_remote_type(upstream_label: &str) -> Result<&'static str> {
+    let picked = msg::select(
+        &format!(
+            "Which kind of remote is `{}`? (saved as `loom.remote-type`)",
+            extract_remote_name(upstream_label)
+        ),
+        REMOTE_TYPES
+            .iter()
+            .map(|(_, name)| name.to_string())
+            .collect(),
+        "set `git config loom.remote-type <github|gitlab|azure|gerrit|plain>`, then re-run",
+    )?;
+    REMOTE_TYPES
+        .iter()
+        .find(|(_, name)| *name == picked)
+        .map(|(value, _)| *value)
+        .ok_or_else(|| anyhow!("Unknown remote type `{}`", picked))
 }
 
 /// Extract the remote name from an upstream label like "origin/main" → "origin".
@@ -624,7 +646,7 @@ pub(crate) fn fork_push_remote(
     workdir: &Path,
     upstream_label: &str,
 ) -> Option<String> {
-    let remote_type = detect_remote_type(repo, workdir, upstream_label).ok()?;
+    let remote_type = detect_remote_type(repo, workdir, upstream_label);
     let push_remote = resolve_push_remote(repo, workdir, upstream_label, &remote_type);
     (push_remote != extract_remote_name(upstream_label)).then_some(push_remote)
 }

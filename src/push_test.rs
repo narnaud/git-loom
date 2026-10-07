@@ -31,8 +31,7 @@ fn detect_remote_type_plain_by_default() {
     test_repo.commit("C1", "c1.txt");
 
     let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
-    assert!(result.is_ok());
-    assert_eq!(result.unwrap(), super::RemoteType::Plain);
+    assert_eq!(result, super::RemoteType::Plain);
 }
 
 #[test]
@@ -44,9 +43,8 @@ fn detect_remote_type_gerrit_by_config() {
     test_repo.set_config("loom.remote-type", "gerrit");
 
     let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
-    assert!(result.is_ok());
     assert_eq!(
-        result.unwrap(),
+        result,
         super::RemoteType::Gerrit {
             target_branch: "main".to_string()
         }
@@ -62,8 +60,7 @@ fn detect_remote_type_github_by_config() {
     test_repo.set_config("loom.remote-type", "github");
 
     let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
-    assert!(result.is_ok());
-    assert_eq!(result.unwrap(), super::RemoteType::GitHub);
+    assert_eq!(result, super::RemoteType::GitHub);
 }
 
 #[test]
@@ -77,9 +74,8 @@ fn detect_remote_type_config_overrides_url() {
     test_repo.set_config("loom.remote-type", "gerrit");
 
     let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
-    assert!(result.is_ok());
     assert_eq!(
-        result.unwrap(),
+        result,
         super::RemoteType::Gerrit {
             target_branch: "main".to_string()
         }
@@ -102,9 +98,8 @@ fn detect_remote_type_gerrit_by_hook() {
     .unwrap();
 
     let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
-    assert!(result.is_ok());
     assert_eq!(
-        result.unwrap(),
+        result,
         super::RemoteType::Gerrit {
             target_branch: "main".to_string()
         }
@@ -117,52 +112,143 @@ fn detect_remote_type_plain_by_config() {
     let workdir = test_repo.workdir();
     test_repo.commit("C1", "c1.txt");
 
-    // A saved "plain" answer (from the Gerrit confirmation prompt) must be
-    // honored without warning about an unknown value
+    // A saved "plain" answer (from the remote type menu) must be honored
+    // without warning about an unknown value
     test_repo.set_config("loom.remote-type", "plain");
 
     let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
-    assert!(result.is_ok());
-    assert_eq!(result.unwrap(), super::RemoteType::Plain);
+    assert_eq!(result, super::RemoteType::Plain);
 }
 
-// ── looks_like_gerrit tests ──────────────────────────────────────────────
+// ── resolve_remote_type tests ────────────────────────────────────────────
+
+fn remote_type_config(test_repo: &TestRepo) -> Option<String> {
+    crate::git::run_git_stdout(
+        &test_repo.workdir(),
+        &["config", "--get", "loom.remote-type"],
+    )
+    .ok()
+    .map(|v| v.trim().to_string())
+}
+
+/// Resolve the remote type under the TUI, answering a menu with `pick`;
+/// returns the prompts shown, with their items, and the result.
+fn resolve_remote_type_under_tui(
+    test_repo: &TestRepo,
+    pick: &str,
+) -> (
+    Vec<(String, Vec<String>)>,
+    anyhow::Result<super::RemoteType>,
+) {
+    use crate::core::ui::{self, Answer, PromptKind, Request};
+
+    let workdir = test_repo.workdir();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::scope(|scope| {
+        let worker = scope.spawn(|| {
+            ui::install(tx);
+            let repo = git2::Repository::open(&workdir).unwrap();
+            let result = super::resolve_remote_type(&repo, &workdir, "origin/main");
+            ui::uninstall();
+            result
+        });
+        let mut prompts = Vec::new();
+        for request in rx {
+            if let Request::Prompt {
+                kind,
+                prompt,
+                reply,
+                ..
+            } = request
+            {
+                let items = match kind {
+                    PromptKind::Select { items, .. } => items,
+                    _ => vec![],
+                };
+                prompts.push((prompt, items));
+                let _ = reply.send(Some(Answer::Text(pick.to_string())));
+            }
+        }
+        (prompts, worker.join().unwrap())
+    })
+}
 
 #[test]
-fn looks_like_gerrit_by_ssh_port() {
+fn resolve_remote_type_saves_a_detected_type() {
     let test_repo = TestRepo::new_with_remote();
-    test_repo.commit("C1", "c1.txt");
-
     test_repo
         .repo
-        .remote_set_url(
-            "origin",
-            "ssh://nicolas@review.example.com:29418/kdab/Project",
-        )
+        .remote_set_url("origin", "https://github.com/owner/repo.git")
         .unwrap();
 
-    assert!(super::looks_like_gerrit(&test_repo.repo, "origin/main"));
+    let (prompts, result) = resolve_remote_type_under_tui(&test_repo, "Plain Git");
+    assert!(prompts.is_empty(), "{:?}", prompts);
+    assert_eq!(result.unwrap(), super::RemoteType::GitHub);
+    assert_eq!(remote_type_config(&test_repo).as_deref(), Some("github"));
 }
 
-/// Every loom commit carries a Change-Id, so a trailer says nothing about the
-/// remote; treating it as a hint would prompt on every plain push.
 #[test]
-fn looks_like_gerrit_ignores_change_id_trailers() {
+fn resolve_remote_type_keeps_the_configured_type() {
     let test_repo = TestRepo::new_with_remote();
-    test_repo.commit(
-        "C1\n\nChange-Id: I61096b677887afc82613103d8467808b77ecbd50",
-        "c1.txt",
+    test_repo
+        .repo
+        .remote_set_url("origin", "https://github.com/owner/repo.git")
+        .unwrap();
+    test_repo.set_config("loom.remote-type", "plain");
+
+    let (prompts, result) = resolve_remote_type_under_tui(&test_repo, "GitHub");
+    assert!(prompts.is_empty(), "{:?}", prompts);
+    assert_eq!(result.unwrap(), super::RemoteType::Plain);
+    assert_eq!(remote_type_config(&test_repo).as_deref(), Some("plain"));
+}
+
+#[test]
+fn resolve_remote_type_asks_with_every_type_and_saves_the_pick() {
+    let test_repo = TestRepo::new_with_remote();
+
+    let (prompts, result) = resolve_remote_type_under_tui(&test_repo, "Gerrit");
+    assert_eq!(
+        prompts,
+        [(
+            "Which kind of remote is `origin`? (saved as `loom.remote-type`)".to_string(),
+            ["GitHub", "GitLab", "Azure DevOps", "Gerrit", "Plain Git"]
+                .map(String::from)
+                .to_vec()
+        )]
     );
-
-    assert!(!super::looks_like_gerrit(&test_repo.repo, "origin/main"));
+    assert_eq!(
+        result.unwrap(),
+        super::RemoteType::Gerrit {
+            target_branch: "main".to_string()
+        }
+    );
+    assert_eq!(remote_type_config(&test_repo).as_deref(), Some("gerrit"));
 }
 
 #[test]
-fn looks_like_gerrit_negative_without_hints() {
-    let test_repo = TestRepo::new_with_remote();
-    test_repo.commit("C1", "c1.txt");
+fn resolve_remote_type_saves_nothing_when_the_menu_is_cancelled() {
+    use crate::core::ui::{self, Request};
 
-    assert!(!super::looks_like_gerrit(&test_repo.repo, "origin/main"));
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let result = std::thread::scope(|scope| {
+        let worker = scope.spawn(|| {
+            ui::install(tx);
+            let repo = git2::Repository::open(&workdir).unwrap();
+            let result = super::resolve_remote_type(&repo, &workdir, "origin/main");
+            ui::uninstall();
+            result
+        });
+        for request in rx {
+            if let Request::Prompt { reply, .. } = request {
+                let _ = reply.send(None);
+            }
+        }
+        worker.join().unwrap()
+    });
+    assert!(result.is_err());
+    assert_eq!(remote_type_config(&test_repo), None);
 }
 
 // ── resolve_push_remote tests ────────────────────────────────────────────
@@ -298,8 +384,7 @@ fn detect_remote_type_azure_by_config() {
     test_repo.set_config("loom.remote-type", "azure");
 
     let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
-    assert!(result.is_ok());
-    assert_eq!(result.unwrap(), super::RemoteType::AzureDevOps);
+    assert_eq!(result, super::RemoteType::AzureDevOps);
 }
 
 #[test]
@@ -335,9 +420,8 @@ fn detect_remote_type_gerrit_in_worktree() {
 
     // detect_remote_type should still find the Gerrit hook via repo.path()
     let result = super::detect_remote_type(&wt_repo, &wt_path, "origin/main");
-    assert!(result.is_ok(), "detect_remote_type failed: {:?}", result);
     assert_eq!(
-        result.unwrap(),
+        result,
         super::RemoteType::Gerrit {
             target_branch: "main".to_string()
         },
@@ -354,8 +438,7 @@ fn detect_remote_type_gitlab_by_config() {
     test_repo.set_config("loom.remote-type", "gitlab");
 
     let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
-    assert!(result.is_ok());
-    assert_eq!(result.unwrap(), super::RemoteType::GitLab);
+    assert_eq!(result, super::RemoteType::GitLab);
 }
 
 #[test]
@@ -370,8 +453,7 @@ fn detect_remote_type_gitlab_by_url() {
         .unwrap();
 
     let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
-    assert!(result.is_ok());
-    assert_eq!(result.unwrap(), super::RemoteType::GitLab);
+    assert_eq!(result, super::RemoteType::GitLab);
 }
 
 // ── append_remote_urls tests ─────────────────────────────────────────────
@@ -438,8 +520,7 @@ fn detect_remote_type_azure_by_url() {
         .unwrap();
 
     let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
-    assert!(result.is_ok());
-    assert_eq!(result.unwrap(), super::RemoteType::AzureDevOps);
+    assert_eq!(result, super::RemoteType::AzureDevOps);
 }
 
 #[test]
@@ -1310,6 +1391,7 @@ fn force_push_under_tui_of(
 
     let test_repo = TestRepo::new_with_remote();
     let workdir = test_repo.workdir();
+    test_repo.set_config("loom.remote-type", "plain");
     test_repo.create_branch("feature-a");
     test_repo.switch_branch("feature-a");
     let tip = test_repo.commit("feature commit", "a.txt");
