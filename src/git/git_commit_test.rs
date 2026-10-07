@@ -91,6 +91,34 @@ fn stage_path_accepts_already_staged_deletion() {
     assert_eq!(test_repo.status_porcelain().trim(), "D  file1.txt");
 }
 
+/// A path is never a glob: staging `a[12].txt` must leave `a1.txt` alone.
+#[test]
+fn stage_path_takes_the_path_literally() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("Add a1", "a1.txt");
+    test_repo.commit("Add a[12]", "a[12].txt");
+    test_repo.write_file("a1.txt", "changed");
+    test_repo.write_file("a[12].txt", "changed");
+
+    git::stage_path(test_repo.workdir().as_path(), "a[12].txt").unwrap();
+
+    assert_eq!(test_repo.status_porcelain(), " M a1.txt\nM  a[12].txt\n");
+}
+
+/// Restoring `a[12].txt` must not discard the changes in `a1.txt`.
+#[test]
+fn restore_files_to_head_takes_the_path_literally() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("Add a1", "a1.txt");
+    test_repo.commit("Add a[12]", "a[12].txt");
+    test_repo.write_file("a1.txt", "changed");
+    test_repo.write_file("a[12].txt", "changed");
+
+    git::restore_files_to_head(test_repo.workdir().as_path(), &["a[12].txt"]).unwrap();
+
+    assert_eq!(test_repo.status_porcelain(), " M a1.txt\n");
+}
+
 /// `--porcelain` and its siblings make `git commit` print the status and exit
 /// 0 without committing; the callers rewrite history on the amend's word.
 #[test]

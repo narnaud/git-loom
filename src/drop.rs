@@ -105,9 +105,11 @@ fn plan_file(repo: &Repository, path: &str) -> Result<FileOp> {
     let workdir = repo::require_workdir(repo, "drop")?;
     if workdir.join(path).is_dir() {
         let mut opts = git2::StatusOptions::new();
-        opts.include_untracked(false).recurse_untracked_dirs(false);
-        // libgit2 pathspecs are patterns: `.` matches nothing, so the root
-        // takes the whole status.
+        opts.include_untracked(false)
+            .recurse_untracked_dirs(false)
+            .disable_pathspec_match(true);
+        // `.` matches nothing as a pathspec, so the root takes the whole
+        // status.
         if path != "." {
             opts.pathspec(path);
         }
@@ -189,18 +191,20 @@ fn drop_files(repo: &Repository, paths: &[String], skip_confirm: bool) -> Result
     confirm_or_bail(skip_confirm, &files_prompt(&plans))?;
 
     for (path, op) in &plans {
+        let spec = git::literal_pathspec(path);
+        let spec = spec.as_str();
         match op {
             FileOp::RestoreDir => {
-                git::run_git(workdir, &["restore", "--staged", "--worktree", "--", path])?;
-                git::run_git(workdir, &["clean", "-fd", "--", path])?;
+                git::run_git(workdir, &["restore", "--staged", "--worktree", "--", spec])?;
+                git::run_git(workdir, &["clean", "-fd", "--", spec])?;
             }
-            FileOp::CleanDir => git::run_git(workdir, &["clean", "-fd", "--", path])?,
+            FileOp::CleanDir => git::run_git(workdir, &["clean", "-fd", "--", spec])?,
             FileOp::Restore => {
-                git::run_git(workdir, &["restore", "--staged", "--worktree", "--", path])?
+                git::run_git(workdir, &["restore", "--staged", "--worktree", "--", spec])?
             }
             FileOp::Remove => std::fs::remove_file(workdir.join(path))
                 .with_context(|| format!("Failed to delete '{}'", path))?,
-            FileOp::RmStaged => git::run_git(workdir, &["rm", "--force", "--", path])?,
+            FileOp::RmStaged => git::run_git(workdir, &["rm", "--force", "--", spec])?,
         }
         // A directory with tracked changes also loses its untracked entries.
         msg::success(&match op {

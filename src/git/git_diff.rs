@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use super::run_git_stdout;
+use super::{literal_pathspec, literal_pathspecs, run_git_stdout};
 
 /// Flags forced on every diff loom reads back, for display or otherwise.
 ///
@@ -65,11 +65,7 @@ pub fn diff_commit(workdir: &Path, oid: &str) -> Result<String> {
 pub fn diff_commit_file(workdir: &Path, oid: &str, path: &str) -> Result<String> {
     diff_stdout(
         workdir,
-        &[
-            &format!("{}^..{}", oid, oid),
-            "--",
-            &format!(":(literal){path}"),
-        ],
+        &[&format!("{}^..{}", oid, oid), "--", &literal_pathspec(path)],
     )
 }
 
@@ -92,8 +88,9 @@ pub fn diff_cached(workdir: &Path) -> Result<String> {
 /// later, so it carries binary files like [`diff_head`] does — inline, which a
 /// caller that parks it in `LoomState` pays for on disk.
 pub fn diff_cached_files(workdir: &Path, files: &[&str]) -> Result<String> {
+    let literal = literal_pathspecs(files);
     let mut args = vec!["--cached", "--"];
-    args.extend(files);
+    args.extend(literal.iter().map(String::as_str));
     restore_stdout(workdir, &args)
 }
 
@@ -106,7 +103,7 @@ pub fn diff_head_name_only(workdir: &Path) -> Result<String> {
 /// Get the unified diff for a single file against HEAD
 /// (`git diff HEAD -- <path>`).
 pub fn diff_head_file(workdir: &Path, path: &str) -> Result<String> {
-    diff_stdout(workdir, &["HEAD", "--", path])
+    diff_stdout(workdir, &["HEAD", "--", &literal_pathspec(path)])
 }
 
 /// Whether a file's working-tree changes against HEAD are binary.
@@ -114,32 +111,38 @@ pub fn diff_head_file(workdir: &Path, path: &str) -> Result<String> {
 /// Uses `git diff --numstat HEAD -- <path>`: binary files report dashes instead
 /// of counts, which is locale-independent unlike the "Binary files" string.
 pub fn diff_head_file_is_binary(workdir: &Path, path: &str) -> Result<bool> {
-    let out = diff_stdout(workdir, &["--numstat", "HEAD", "--", path])?;
+    let out = diff_stdout(
+        workdir,
+        &["--numstat", "HEAD", "--", &literal_pathspec(path)],
+    )?;
     Ok(out.starts_with("-\t"))
 }
 
 /// Get the unified diff for a single file, unstaged only: index → worktree
 /// (`git diff -- <path>`).
 pub fn diff_file(workdir: &Path, path: &str) -> Result<String> {
-    diff_stdout(workdir, &["--", path])
+    diff_stdout(workdir, &["--", &literal_pathspec(path)])
 }
 
 /// Get the staged diff for a single file, HEAD → index
 /// (`git diff --cached -- <path>`).
 pub fn diff_cached_file(workdir: &Path, path: &str) -> Result<String> {
-    diff_stdout(workdir, &["--cached", "--", path])
+    diff_stdout(workdir, &["--cached", "--", &literal_pathspec(path)])
 }
 
 /// Whether a file's unstaged changes are binary (`git diff --numstat -- <path>`).
 pub fn diff_file_is_binary(workdir: &Path, path: &str) -> Result<bool> {
-    let out = diff_stdout(workdir, &["--numstat", "--", path])?;
+    let out = diff_stdout(workdir, &["--numstat", "--", &literal_pathspec(path)])?;
     Ok(out.starts_with("-\t"))
 }
 
 /// Whether a file's staged changes are binary
 /// (`git diff --cached --numstat -- <path>`).
 pub fn diff_cached_file_is_binary(workdir: &Path, path: &str) -> Result<bool> {
-    let out = diff_stdout(workdir, &["--cached", "--numstat", "--", path])?;
+    let out = diff_stdout(
+        workdir,
+        &["--cached", "--numstat", "--", &literal_pathspec(path)],
+    )?;
     Ok(out.starts_with("-\t"))
 }
 
@@ -148,7 +151,12 @@ pub fn diff_cached_file_is_binary(workdir: &Path, path: &str) -> Result<bool> {
 pub fn diff_commit_file_is_binary(workdir: &Path, oid: &str, path: &str) -> Result<bool> {
     let out = diff_stdout(
         workdir,
-        &["--numstat", &format!("{}^..{}", oid, oid), "--", path],
+        &[
+            "--numstat",
+            &format!("{}^..{}", oid, oid),
+            "--",
+            &literal_pathspec(path),
+        ],
     )?;
     Ok(out.starts_with("-\t"))
 }
@@ -193,8 +201,9 @@ pub fn diff_head(workdir: &Path) -> Result<String> {
 /// (`git diff --binary HEAD -- <files>`); saved to be restored, like
 /// [`diff_head`].
 pub fn diff_head_files(workdir: &Path, files: &[&str]) -> Result<String> {
+    let literal = literal_pathspecs(files);
     let mut args = vec!["HEAD", "--"];
-    args.extend(files);
+    args.extend(literal.iter().map(String::as_str));
     restore_stdout(workdir, &args)
 }
 
@@ -224,8 +233,9 @@ pub fn diff_head_files_display(workdir: &Path, paths: &[&str]) -> Result<String>
     if paths.is_empty() {
         return Ok(String::new());
     }
+    let literal = literal_pathspecs(paths);
     let mut args = vec!["HEAD", "--"];
-    args.extend(paths);
+    args.extend(literal.iter().map(String::as_str));
     patch_stdout(workdir, "diff", DISPLAY, &args)
 }
 
@@ -243,7 +253,12 @@ pub fn show_commit_patch(workdir: &Path, oid: &str) -> Result<String> {
 /// Get the patch a commit applied to one file, without the commit header, for
 /// display (`git show --format= <oid> -- <path>`).
 pub fn show_commit_file(workdir: &Path, oid: &str, path: &str) -> Result<String> {
-    patch_stdout(workdir, "show", DISPLAY, &["--format=", oid, "--", path])
+    patch_stdout(
+        workdir,
+        "show",
+        DISPLAY,
+        &["--format=", oid, "--", &literal_pathspec(path)],
+    )
 }
 
 #[cfg(test)]
