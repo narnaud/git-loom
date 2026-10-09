@@ -140,7 +140,6 @@ complete -c git-loom -n '__git_loom_is commit' -s p -l patch -d 'Interactively s
 complete -c git-loom -n '__git_loom_is commit' -l hunks -x -d 'Hunk id to pick, once per id (needs --hunks-from)'
 complete -c git-loom -n '__git_loom_is commit' -l hunks-from -x -d 'Fingerprint of the listing --hunks came from'
 
-complete -c git-loom -n '__git_loom_is fold' -s c -l create -d 'Create a new branch from the source commit(s)'
 complete -c git-loom -n '__git_loom_is fold' -s p -l patch -d 'Interactively select hunks to fold'
 complete -c git-loom -n '__git_loom_is fold' -l above -x -d 'Move the source commit(s) above this commit'
 complete -c git-loom -n '__git_loom_is fold' -l below -x -d 'Move the source commit(s) below this commit'

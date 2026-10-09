@@ -8,7 +8,6 @@
 git-loom fold <target>
 git-loom fold <source>... <target>
 git-loom fold <source>... <target> -- <git args>...
-git-loom fold --create <commit>... <new-branch>
 git-loom fold <commit>... --above <commit>
 git-loom fold <commit>... --below <commit>
 git-loom fold -p [<files>...] <commit>
@@ -18,9 +17,8 @@ git-loom fold -p <commit> zz
 
 With one argument, fold the current index into that target. With two or more, the final argument is the target and all preceding arguments are sources. With `--above`/`--below`, the option value is the target and every positional is a source.
 
-- `-c, --create`: create a new branch at the resolved Weave base and move one or more source commits into it. The target name MUST NOT exist. Sources may be loose or already branch-owned. Order commits oldest-first (ancestors before descendants; unrelated lines by committer date), independent of input order.
-- `--above <commit>` / `--below <commit>`: move one or more source commits directly above or below the target commit, per [Commit move next to a commit](#commit-move-next-to-a-commit). The two are mutually exclusive and exclude `-c` and `-p`.
-- `-p, --patch`: select hunks according to [Patch mode](#patch-mode--p), interactively or with `--hunks`. Excludes `-c`, which moves whole commits.
+- `--above <commit>` / `--below <commit>`: move one or more source commits directly above or below the target commit, per [Commit move next to a commit](#commit-move-next-to-a-commit). The two are mutually exclusive and exclude `-p`.
+- `-p, --patch`: select hunks according to [Patch mode](#patch-mode--p), interactively or with `--hunks`.
 - `--hunks <id>` (repeated) with `--hunks-from <fingerprint>`: supply the `-p` selection by id instead of picking it, in every form. Requires `-p`, and each flag requires the other.
 - `zz`: reserved `Unstaged` target/source representing the working directory/all its changes.
 - `commit_sid:index` (for example `fa:0`): `CommitFile` shown by `git loom status -f`.
@@ -40,7 +38,6 @@ Arguments use shared resolution (Spec 002) and `resolve_arg()` with accepted kin
 | Commit | `zz` | remove commit to working tree | no |
 | CommitFile | `zz` | remove one file's commit changes to working tree | no |
 | CommitFile | Commit | move one file's changes between commits | no |
-| Commit | new branch with `-c` | create branch and move commits | yes |
 | Commit | Commit via `--above`/`--below` | move commits next to target commit | yes |
 
 ### Required diagnostics
@@ -58,7 +55,6 @@ Errors are verbatim; `⏎` marks a line break within a message.
 | `zz` source with clean tree | `No changes to fold — working tree is clean` |
 | Mixed source types | `Cannot mix different source types (files, commits, commit files)` |
 | Source commit at/below integration base | ``Commit `<hash>` is not in the integration scope⏎Only commits above the integration base can be moved`` (regardless of source count) |
-| `-c` target name exists | ``Branch `<name>` already exists⏎Use `loom fold <commit>... <name>` to move commits onto it`` |
 | Multiple commits into Commit or `zz` | `Only one commit source is allowed` |
 | Multiple commit-file sources | `Only one commit file source is allowed` |
 | CommitFile into Branch | ``Cannot fold a commit file into a branch⏎Target a specific commit or use `zz` to uncommit`` |
@@ -90,11 +86,11 @@ Errors are verbatim; `⏎` marks a line break within a message.
 
 `fold <source-commit> <target-commit>` absorbs the source changes into the target, retains the target message, removes the source, and rewrites later affected hashes while preserving topology and unrelated branches. Source MUST be a newer descendant of target; otherwise error exactly `Source commit must be newer than target commit`. Preserve uncommitted changes.
 
-## Commit move and branch creation
+## Commit move
 
-`fold <commit>... <branch>` removes each source from its old position and appends it to the target branch in one rebase. `--create` first creates its non-existing target at the Weave base. Update source/target refs and affected hashes; preserve uncommitted changes.
+`fold <commit>... <branch>` removes each source from its old position and appends it to the target branch in one rebase. Update source/target refs and affected hashes; preserve uncommitted changes.
 
-Order multiple sources oldest-first regardless of input: ancestors precede descendants, unrelated lines sort by committer date. A single ordinary move is resumable on conflict. Multiple-source moves and every `--create` move hard-fail and roll back the entire operation; abort rebase, delete a branch created by `-c`, and restore staged changes as staged.
+Order multiple sources oldest-first regardless of input: ancestors precede descendants, unrelated lines sort by committer date. A single ordinary move is resumable on conflict. Multiple-source moves hard-fail and roll back the entire operation; abort rebase and restore staged changes as staged.
 
 Topology rules:
 
@@ -222,7 +218,7 @@ Staged files set aside so they cannot join the fold MUST come back on every
 failure path, including the ones reached before `state.json` exists, where no
 rollback can return them.
 
-Multiple moves (to a branch or next to a commit), all `-c` moves, all `-p` forms, and CommitFile move failures save no resumable state and auto-rollback as specified in their sections.
+Multiple moves (to a branch or next to a commit), all `-p` forms, and CommitFile move failures save no resumable state and auto-rollback as specified in their sections.
 
 ## General invariants and prerequisites
 
@@ -239,7 +235,6 @@ git-loom fold ab                         # staged changes -> commit
 git-loom fold src/main.rs HEAD           # file changes -> commit
 git-loom fold fix target                 # commit fixup
 git-loom fold c1 c2 feature-b            # ordered multi-move
-git-loom fold --create c1 c2 feature-new # create at base and move
 git-loom fold c1 --below c2                # reorder: c1 right under c2
 git-loom fold ab:0 zz                    # one committed file -> worktree
 git-loom fold -p source target           # selected commit hunks -> commit

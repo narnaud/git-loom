@@ -10,7 +10,6 @@ git loom fold <source>... <target>
 git loom fold -p [<files>...] <target>
 git loom fold -p <commit1> <commit2>
 git loom fold -p <commit> zz
-git loom fold --create <commit>... <new-branch>
 git loom fold <commit>... --above <commit>
 git loom fold <commit>... --below <commit>
 ```
@@ -21,10 +20,9 @@ When only a target is given, currently staged files are folded into the target c
 
 | Option | Description |
 |--------|-------------|
-| `-p, --patch` | Interactively select hunks before folding. Three forms depending on argument types (see below). Cannot be combined with `-c`, which moves whole commits. |
+| `-p, --patch` | Interactively select hunks before folding. Three forms depending on argument types (see below). |
 | `--hunks <id>` | Select that hunk instead of opening the picker, in any `-p` form; repeat it per hunk. Needs `-p` and `--hunks-from`; see [agent mode](agent.md). |
 | `--hunks-from <fingerprint>` | Fingerprint of the listing `--hunks` came from. Loom refuses a selection taken from a diff that has since changed. |
-| `-c, --create` | Create a new branch and move the source commit(s) into it. |
 | `--above <commit>` | Move the source commit(s) directly above (newer than) this commit. |
 | `--below <commit>` | Move the source commit(s) directly below (older than) this commit. |
 
@@ -41,7 +39,7 @@ git loom fold -p ab -- --no-verify
 They reach the amend, or the `fixup!` commit loom makes for a non-HEAD target —
 the two places your commit hooks run. The rebase that rewrites the rest runs no
 hooks, so a fold that moves whole commits around (fixup, move, uncommit a
-commit, `--create`, `--above`/`--below`) takes no arguments after `--` and says
+commit, `--above`/`--below`) takes no arguments after `--` and says
 so.
 
 Loom's own arguments go last, so a boolean git resolves last-wins keeps the
@@ -243,30 +241,13 @@ git loom fold tqn --above mqt
 
 A single commit can be resumed with `git loom continue` if it conflicts. A move of several rolls back instead.
 
-### Create a new branch and move a commit into it
+### Move commits into a new branch
 
-Use `--create` (`-c`) to create a new branch and move the commit in one step. Works whether the commit is a loose commit on the integration line or already on an existing branch.
-
-```bash
-git loom fold -c mqt new-feature
-# Creates new-feature and moves commit mqt into it
-```
-
-You can list several commits to move them all into the new branch. They are ordered oldest-first so the new branch preserves their history order.
+Create the branch with [`branch`](branch.md), then move the commits onto it:
 
 ```bash
-git loom fold -c mqt tqn rsv new-feature
-# Creates new-feature and moves mqt, tqn, rsv into it
-```
-
-Like any move of several commits, `-c` is not resumable: a conflict rolls it back rather than pausing for `git loom continue`.
-
-`-c` creates, so a name that is already taken is refused. Moving onto a branch that exists is a plain fold, and accepting the name here would let a typo drop your commits into another branch.
-
-```bash
-git loom fold -c mqt existing-branch
-# ✗ Branch `existing-branch` already exists
-#   Use `loom fold <commit>... existing-branch` to move commits onto it
+git loom branch new-feature
+git loom fold mqt tqn new-feature
 ```
 
 ### Uncommit to the working directory
@@ -394,7 +375,6 @@ The following fold operations **do not** support pause/resume and abort immediat
 - All `-p` (patch mode) forms — any conflict causes an automatic abort and restores the original state
 - Uncommit a single file (`CommitFile → zz`)
 - Move a file between commits (`CommitFile → Commit`)
-- Create a new branch and move a commit (`--create`)
 - Any move of several commits, to a branch or with `--above`/`--below`
 
 See [`continue`](continue.md) and [`abort`](abort.md) for details.

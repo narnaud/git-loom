@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Integration tests for: gl fold (staged / amend / amend-all / fixup / move / uncommit / move-file / create)
+# Integration tests for: gl fold (staged / amend / amend-all / fixup / move / uncommit / move-file)
 set -euo pipefail
 source "$(dirname "$0")/helpers.sh"
 
@@ -709,7 +709,7 @@ gl_capture fold "$landed" q-other
 assert_exit_ok "$CODE" "move_landed_ok"
 assert_eq "$(git -C "$WORK" log -1 --format=%s q-other)" "Landed one" "move_landed_on_target"
 
-describe "create: a branch that landed upstream leaves -c working"
+describe "move: onto a new branch after a branch landed upstream"
 setup_repo_with_remote
 create_feature_branch "r-landed"
 switch_to r-landed
@@ -721,22 +721,18 @@ switch_to r-other
 commit_file "Other one" "r-other.txt"
 switch_to integration
 weave_branch "r-other"
-# The merge-base becomes r-landed's own tip, a commit still inside the weave.
-# Creating there would root the new branch on the landed commit and dissolve
-# r-landed's merge along with it, so `-c` creates at the weave's base instead —
-# the same base the scope check uses.
-weave_base=$(git -C "$WORK" rev-parse "origin/$BASE_BRANCH")
+# The merge-base becomes r-landed's own tip, on the side of its merge rather
+# than on the weave base, and `branch` creates there by default.
 git -C "$WORK" push -q origin r-landed:"$BASE_BRANCH"
 git -C "$WORK" fetch -q origin
+landed=$(git -C "$WORK" rev-parse r-landed)
+gl_capture branch r-created
+assert_exit_ok "$CODE" "move_landed_new_branch_created"
 other_tip=$(git -C "$WORK" rev-parse r-other)
-gl_capture fold -c "$other_tip" r-created
-assert_exit_ok "$CODE" "create_landed_ok"
-assert_branch_exists "r-created" "create_landed_branch"
-assert_eq "$(git -C "$WORK" log -1 --format=%s r-created)" "Other one" "create_landed_commit"
-# Its own section at the weave base: the commit that landed is not its parent,
-# and r-landed keeps the merge it was woven in by.
-assert_eq "$(git -C "$WORK" rev-parse r-created^)" "$weave_base" "create_landed_parent"
-assert_log_contains "Merge r-landed" "create_landed_keeps_merge"
+gl_capture fold "$other_tip" r-created
+assert_exit_ok "$CODE" "move_landed_new_branch_ok"
+assert_eq "$(git -C "$WORK" log -1 --format=%s r-created)" "Other one" "move_landed_new_branch_commit"
+assert_eq "$(git -C "$WORK" rev-parse r-created^)" "$landed" "move_landed_new_branch_parent"
 
 describe "move: the same commit named twice stays resumable"
 setup_repo_with_remote
@@ -950,37 +946,6 @@ target_sid=$(commit_sid_from_status "Move file preserve src")
 out=$(gl fold "$cf_ref" "$target_sid")
 assert_exit_ok $? "move_file_preserve_wt_ok"
 assert_file_content "mfp-src.txt" "dirty during move file" "move_file_preserve_wt_content"
-
-# ── --CREATE FLAG (NEW BRANCH FROM COMMIT) ────────────────────────────────────
-
-describe "create: move commit to a new branch"
-setup_repo_with_remote
-commit_file "Loose commit" "loose.txt"
-loose_sid=$(commit_sid_from_status "Loose commit")
-out=$(gl fold --create "$loose_sid" g-new-branch)
-assert_exit_ok $? "create_ok"
-assert_branch_exists "g-new-branch" "create_branch_exists"
-assert_contains "$(git -C "$WORK" log g-new-branch --oneline)" "Loose commit" "create_commit_on_branch"
-
-describe "create: target branch already exists — refused"
-setup_repo_with_remote
-commit_file "Existing branch commit" "existing.txt"
-loose_sid=$(commit_sid_from_status "Existing branch commit")
-create_feature_branch "g-already-exists"
-gl_capture fold --create "$loose_sid" g-already-exists
-assert_exit_fail "$CODE" "create_branch_exists_refused"
-assert_contains "$OUT" "already exists" "create_branch_exists_msg"
-assert_contains "$OUT" "loom fold" "create_branch_exists_hint"
-assert_not_contains "$(git -C "$WORK" log g-already-exists --oneline)" "Existing branch commit" "create_branch_exists_untouched"
-
-describe "create: using full hash as source"
-setup_repo_with_remote
-commit_file "Create from hash" "hash-create.txt"
-loose_hash="$(head_hash)"
-out=$(gl fold --create "$loose_hash" h-from-hash)
-assert_exit_ok $? "create_full_hash_ok"
-assert_branch_exists "h-from-hash" "create_full_hash_branch_exists"
-assert_contains "$(git -C "$WORK" log h-from-hash --oneline)" "Create from hash" "create_full_hash_on_branch"
 
 # ── EMPTIED BRANCHES ──────────────────────────────────────────────────────────
 

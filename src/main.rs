@@ -243,17 +243,14 @@ enum Command {
     /// Fold source(s) into a target (amend files, fixup commits, move commits, move files between commits)
     #[command(visible_aliases = ["amend", "am", "fixup", "mv", "rub"])]
     Fold {
-        /// Create a new branch from the source commit(s) and move them there
-        #[arg(short = 'c', long = "create")]
-        create: bool,
         /// Select hunks to fold: a picker, or `--hunks` from its listing
-        #[arg(short = 'p', long = "patch", conflicts_with = "create")]
+        #[arg(short = 'p', long = "patch")]
         patch: bool,
         /// Move the source commit(s) directly above this commit
-        #[arg(long, value_name = "COMMIT", conflicts_with_all = ["below", "create", "patch"])]
+        #[arg(long, value_name = "COMMIT", conflicts_with_all = ["below", "patch"])]
         above: Option<String>,
         /// Move the source commit(s) directly below this commit
-        #[arg(long, value_name = "COMMIT", conflicts_with_all = ["create", "patch"])]
+        #[arg(long, value_name = "COMMIT", conflicts_with = "patch")]
         below: Option<String>,
         /// Hunk ids from a `-p` listing, instead of picking them interactively
         // No `value_delimiter`: a path may contain a comma, so the commas are
@@ -755,7 +752,6 @@ fn main() {
         }) => push::run(branch, no_pr, force, title),
         Some(Command::Update { yes }) => update::run(yes),
         Some(Command::Fold {
-            create,
             patch,
             above,
             below,
@@ -768,7 +764,6 @@ fn main() {
                 .map(fold::Anchor::Above)
                 .or(below.map(fold::Anchor::Below));
             fold::run(
-                create,
                 patch,
                 anchor,
                 HunkArgs::new(hunks, hunks_from),

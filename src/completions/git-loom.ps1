@@ -144,8 +144,6 @@ $_gitLoomCompleter = {
         }
         'fold' {
             $subFlags = @(
-                @{ Name = '-c'; Description = 'Create a new branch from the source commit(s)' },
-                @{ Name = '--create'; Description = 'Create a new branch from the source commit(s)' },
                 @{ Name = '-p'; Description = 'Interactively select hunks to fold' },
                 @{ Name = '--patch'; Description = 'Interactively select hunks to fold' },
                 @{ Name = '--above'; Description = 'Move the source commit(s) above this commit' },

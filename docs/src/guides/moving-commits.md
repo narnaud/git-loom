@@ -36,10 +36,11 @@ Commit `tqn` is removed from `feature-auth` and appended to `feature-dashboard`:
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit
 ```
 
-You can also move a commit into a **new** branch in one step with `--create`:
+To move a commit into a **new** branch, create the branch first:
 
 ```bash
-$ git loom fold -c tqn feature-logging
+$ git loom branch feature-logging
+$ git loom fold tqn feature-logging
 ```
 
 See also: [fold reference](../commands/fold.md)

@@ -78,7 +78,7 @@ __git_loom_candidates() {
         push) flags="--no-pr -f --force --title" ;;
         add) flags="-p --patch --hunks --hunks-from" ;;
         commit) flags="-b --branch -i --integration -m --message -p --patch --hunks --hunks-from" ;;
-        fold) flags="-c --create -p --patch --above --below --hunks --hunks-from" ;;
+        fold) flags="-p --patch --above --below --hunks --hunks-from" ;;
         absorb) flags="-n --dry-run" ;;
         split) flags="-m --message -p --patch --hunks --hunks-from" ;;
         reword) flags="-m --message" ;;

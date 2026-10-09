@@ -144,8 +144,6 @@ _git-loom() {
             ) ;;
         fold)
             flags=(
-                '-c:Create a new branch from the source commit(s)'
-                '--create:Create a new branch from the source commit(s)'
                 '-p:Interactively select hunks to fold'
                 '--patch:Interactively select hunks to fold'
                 '--above:Move the source commit(s) above this commit'

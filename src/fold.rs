@@ -67,11 +67,7 @@ pub enum Anchor {
 /// - Commit + Commit  → fixup source into target (source disappears)
 /// - Commit(s) + Branch → move the commit(s) to the branch, oldest-first
 /// - Commit(s) + `--above`/`--below <commit>` → move next to that commit
-///
-/// With `--create` (`-c`): create a new branch and move the source commit(s)
-/// into it. The name must not be taken.
 pub fn run(
-    create: bool,
     patch: bool,
     anchor: Option<Anchor>,
     hunks: HunkArgs,
@@ -93,11 +89,6 @@ pub fn run(
     if let Some(anchor) = anchor {
         no_git_args(&git_opts, "moving commits next to another")?;
         return run_relative(&repo, &args, anchor);
-    }
-
-    if create {
-        no_git_args(&git_opts, "moving commits to a new branch")?;
-        return run_create(&repo, &args);
     }
 
     if patch {
@@ -169,7 +160,7 @@ pub fn run(
                 fold_commit_to_branch(&repo, &commits[0], &branch)
             } else {
                 let workdir = repo::require_workdir(&repo, COMMAND)?;
-                move_commits_and_report(workdir, &repo, &commits, &branch, None)
+                move_commits_and_report(workdir, &repo, &commits, &branch)
             }
         }
         FoldOp::CommitToUnstaged { commit } => {
@@ -194,75 +185,6 @@ fn no_git_args(git_opts: &[&str], what: &str) -> Result<()> {
         return Ok(());
     }
     bail!("{what} runs no `git commit`, so it takes no arguments after `--`");
-}
-
-/// Create a new branch and move the source commit(s) into it.
-///
-/// `args` must be `[<commit>..., <new-branch-name>]` — one or more commits
-/// followed by the new branch name. The branch is created at the weave base,
-/// then the commits are moved to it using the same Weave machinery as the
-/// normal commit-to-branch fold. The name must be free: moving onto a branch
-/// that already exists is `loom fold <commit>... <branch>`.
-fn run_create(repo: &Repository, args: &[String]) -> Result<()> {
-    if args.len() < 2 {
-        bail!(
-            "fold --create requires at least one commit and one new branch name\n\
-             Usage: loom fold -c <commit>... <new-branch>"
-        );
-    }
-
-    let (source_args, branch_name) = args.split_at(args.len() - 1);
-    let branch_name = &branch_name[0];
-    let workdir = repo::require_workdir(repo, COMMAND)?;
-
-    let mut commit_hashes = Vec::new();
-    for source_arg in source_args {
-        let source = repo::resolve_arg(repo, source_arg, &[TargetKind::Commit])?;
-        match source {
-            Target::Commit(hash) => commit_hashes.push(hash),
-            _ => unreachable!(),
-        }
-    }
-
-    git::branch_validate_name(workdir, branch_name)?;
-
-    // `-c` creates: moving onto a branch that is already there is what a
-    // plain fold does, and silently accepting it here turns a mistyped name
-    // into commits landing in somebody else's branch.
-    if repo
-        .find_branch(branch_name, git2::BranchType::Local)
-        .is_ok()
-    {
-        bail!(
-            "Branch `{}` already exists\n\
-             Use `loom fold <commit>... {}` to move commits onto it",
-            branch_name,
-            branch_name
-        );
-    }
-
-    // The branch is created at the weave base so it has no commits of its own;
-    // move_commits_to_branch adds a section for it. Deliberately without a
-    // context: loom prints only the outermost message, which would hide whether
-    // the failure was a detached HEAD or no upstream.
-    let info = repo::gather_commit_graph(repo)?;
-    // The weave base, which the merge-base only sometimes is. Both the branch
-    // and the move scope have to use it: plan_move measures a section-less
-    // branch against the weave base, and refuses the one it was just handed if
-    // it was created anywhere else.
-    let base_oid = weave::base_oid(repo, &info)?;
-
-    // Ordering walks the graph, so it comes after the checks a ref lookup
-    // settles. Oldest-first, so the commits land in history order.
-    let commit_hashes = commits_to_move(repo, commit_hashes, base_oid)?;
-
-    move_commits_and_report(
-        workdir,
-        repo,
-        &commit_hashes,
-        branch_name,
-        Some(&base_oid.to_string()),
-    )
 }
 
 /// The commits a move should relocate: de-duplicated, refused if they sit at
@@ -341,21 +263,13 @@ fn ordered_topologically(
 
 /// Move `commit_hashes` to `branch_name` and report the result.
 ///
-/// When `base_hash` is `Some`, the branch is created at that base first (and
-/// deleted again on failure). On conflict the rebase is aborted — this path is
-/// not resumable.
+/// On conflict the rebase is aborted — this path is not resumable.
 fn move_commits_and_report(
     workdir: &Path,
     repo: &Repository,
     commit_hashes: &[String],
     branch_name: &str,
-    base_hash: Option<&str>,
 ) -> Result<()> {
-    let created = base_hash.is_some();
-    if let Some(base) = base_hash {
-        git::branch_create(workdir, branch_name, base)?;
-    }
-
     // Restored whichever way the rebase ends (Spec 014).
     let saved_staged = git::diff_cached(workdir)?;
 
@@ -365,44 +279,24 @@ fn move_commits_and_report(
             parked
         }
         Ok((RebaseOutcome::Stopped | RebaseOutcome::Paused, _)) => {
-            let err = abort_and_restage(workdir, &saved_staged);
-            // The branch may be the checked-out ref while a failed abort
-            // leaves the rebase on disk.
-            if created && !git::rebase_is_in_progress(repo.path()) {
-                let _ = git::branch_delete(workdir, branch_name);
-            }
-            return Err(err);
+            return Err(abort_and_restage(workdir, &saved_staged));
         }
         Err(e) => {
             // The refusal aborts a rebase that has already autostashed, and
             // that replay comes back unstaged — same as the branch above. The
             // helper leaves a pre-flight refusal's index alone on its own.
             git::restore_or_park_after_abort(workdir, &saved_staged, &e);
-            // Same guard as the branch above: the branch may be the checked-out
-            // ref while a failed abort leaves the rebase on disk.
-            if created && !git::rebase_is_in_progress(repo.path()) {
-                let _ = git::branch_delete(workdir, branch_name);
-            }
             return Err(e);
         }
     };
 
     let new_hash = git::rev_parse(workdir, branch_name)?;
-    let mut message = if created {
-        format!(
-            "Created branch `{}` and moved {} commit(s) to it (tip: {})",
-            branch_name,
-            commit_hashes.len(),
-            repo::describe_commit(workdir, &new_hash)
-        )
-    } else {
-        format!(
-            "Moved {} commit(s) to branch `{}` (tip: {})",
-            commit_hashes.len(),
-            branch_name,
-            repo::describe_commit(workdir, &new_hash)
-        )
-    };
+    let mut message = format!(
+        "Moved {} commit(s) to branch `{}` (tip: {})",
+        commit_hashes.len(),
+        branch_name,
+        repo::describe_commit(workdir, &new_hash)
+    );
     if !parked.is_empty() {
         message.push_str(&format!(
             "\n{} now empty, at the base",

@@ -390,10 +390,9 @@ git-loom fold -p <commit> zz --hunks <id> [--hunks <id>...] --hunks-from <finger
 `--hunks` repeats, once per id, and MUST NOT take a separated list: an id
 contains a path, and every separator is a character some path is allowed to
 hold. A value that is not an id errors as one, naming the repeated form when it
-holds a comma. `--hunks` requires `-p` and `--hunks-from`, excludes `fold -c`,
-and is accepted with or without agent mode. The selected hunks
-then follow the interactive path exactly, including its hard-fail and rollback
-rules.
+holds a comma. `--hunks` requires `-p` and `--hunks-from`, and is accepted
+with or without agent mode. The selected hunks then follow the interactive
+path exactly, including its hard-fail and rollback rules.
 
 `hint` MUST repeat every argument that shapes the operation, shell-quoted:
 `split`'s `-m` message and `<files>` filter, and the revisions naming the

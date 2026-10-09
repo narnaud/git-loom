@@ -768,7 +768,7 @@ fn execute_action(
             args.push(target);
             let patch = hunks.is_some();
             let hunks = hunks.unwrap_or_default();
-            fold::run(false, patch, None, hunks, args, vec![], theme)
+            fold::run(patch, None, hunks, args, vec![], theme)
         }
         Action::FoldHunks {
             picked,
@@ -784,15 +784,7 @@ fn execute_action(
                 MoveSlot::Stay => anyhow::bail!("Nothing to move"),
             };
             args.insert(0, commit.to_string());
-            fold::run(
-                false,
-                false,
-                anchor,
-                HunkArgs::default(),
-                args,
-                vec![],
-                theme,
-            )
+            fold::run(false, anchor, HunkArgs::default(), args, vec![], theme)
         }
         Action::Split {
             commit,

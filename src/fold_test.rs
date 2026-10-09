@@ -561,7 +561,6 @@ fn fold_commit_to_branch_via_short_ids() {
     let result = test_repo.in_dir(|| {
         super::run(
             false,
-            false,
             None,
             HunkArgs::default(),
             vec![commit_sid.clone(), branch_sid.clone()],
@@ -1228,7 +1227,6 @@ fn fold_unstaged_into_commit() {
     let result = test_repo.in_dir(|| {
         super::run(
             false,
-            false,
             None,
             HunkArgs::default(),
             vec!["zz".into(), "HEAD".into()],
@@ -1250,7 +1248,6 @@ fn fold_unstaged_clean_tree_fails() {
 
     let result = test_repo.in_dir(|| {
         super::run(
-            false,
             false,
             None,
             HunkArgs::default(),
@@ -2700,85 +2697,6 @@ fn resolve_fold_arg_head() {
     assert!(matches!(result.unwrap(), repo::Target::Commit(_)));
 }
 
-// ── fold --create ─────────────────────────────────────────────────────────
-
-#[test]
-fn fold_create_moves_commit_on_branch_to_new_branch() {
-    // Set up an integration branch with a woven feature branch.
-    // Move a commit from the feature branch into a brand new branch.
-    //
-    // Before:
-    //   ╭─ [feature-a]
-    //   ●  A1  ← move this to new-branch
-    //   ╯
-    let test_repo = TestRepo::new_with_remote();
-    let base_oid = test_repo.find_remote_branch_target("origin/main");
-
-    test_repo.create_branch_at("feature-a", &base_oid.to_string());
-    test_repo.switch_branch("feature-a");
-    let a1_oid = test_repo.commit("A1", "a1.txt");
-    test_repo.switch_branch("integration");
-    test_repo.merge_no_ff("feature-a");
-
-    let result = super::run_create(
-        &test_repo.repo,
-        &[a1_oid.to_string(), "new-branch".to_string()],
-    );
-    assert!(result.is_ok(), "fold --create failed: {:?}", result);
-
-    assert_eq!(
-        test_repo.branch_commit_summary("new-branch"),
-        "A1",
-        "new-branch should have A1 at its tip"
-    );
-}
-
-#[test]
-fn fold_create_moves_multiple_commits_to_new_branch() {
-    // Move two loose integration commits into a brand new branch.
-    //
-    // Before:
-    //   ●  L2  ← move both to new-branch
-    //   ●  L1  ←
-    //   ╯
-    let test_repo = TestRepo::new_with_remote();
-    let base_oid = test_repo.find_remote_branch_target("origin/main");
-
-    let l1_oid = test_repo.commit("L1", "l1.txt");
-    let l2_oid = test_repo.commit("L2", "l2.txt");
-
-    // Pass them newest-first to verify they are reordered oldest-first.
-    let result = super::run_create(
-        &test_repo.repo,
-        &[
-            l2_oid.to_string(),
-            l1_oid.to_string(),
-            "new-branch".to_string(),
-        ],
-    );
-    assert!(result.is_ok(), "fold --create failed: {:?}", result);
-
-    // new-branch should contain L1 then L2 (oldest-first), with L2 at the tip.
-    let tip = test_repo.get_branch_target("new-branch");
-    let tip_commit = test_repo.find_commit(tip);
-    assert_eq!(
-        tip_commit.summary().unwrap().unwrap(),
-        "L2",
-        "L2 should be at tip"
-    );
-    let parent = tip_commit.parent(0).unwrap();
-    assert_eq!(
-        parent.summary().unwrap().unwrap(),
-        "L1",
-        "L1 should be below L2"
-    );
-    assert_eq!(
-        parent.parent(0).unwrap().id(),
-        base_oid,
-        "L1 should sit on the merge-base"
-    );
-}
-
 /// Install a `commit-msg` hook that fails on any message carrying a diff.
 fn write_hook_rejecting_diffs(test_repo: &TestRepo) {
     let hook = test_repo.workdir().join(".git/hooks/commit-msg");
@@ -2795,22 +2713,35 @@ fn write_hook_rejecting_diffs(test_repo: &TestRepo) {
     }
 }
 
-/// The merge commit `fold --create` weaves in is made with no editor to strip
-/// a `commit.verbose` diff back out of the message.
+/// Fold the commit `oid` onto `branch` through the CLI entry point.
+fn fold_commit_onto(test_repo: &TestRepo, oid: git2::Oid, branch: &str) -> anyhow::Result<()> {
+    test_repo.in_dir(|| {
+        super::run(
+            false,
+            None,
+            HunkArgs::default(),
+            vec![oid.to_string(), branch.to_string()],
+            vec![],
+            &crate::core::graph::Theme::dark(),
+        )
+    })
+}
+
+/// The merge commit a fold onto an empty branch weaves in is made with no
+/// editor to strip a `commit.verbose` diff back out of the message.
 #[test]
-fn fold_create_keeps_the_diff_out_of_the_merge_message() {
+fn fold_onto_an_empty_branch_keeps_the_diff_out_of_the_merge_message() {
     let test_repo = TestRepo::new_with_remote();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+    test_repo.create_branch_at("new-branch", &base_oid.to_string());
 
     test_repo.set_config("commit.verbose", "true");
     write_hook_rejecting_diffs(&test_repo);
 
     let l1_oid = test_repo.commit("L1", "l1.txt");
 
-    let result = super::run_create(
-        &test_repo.repo,
-        &[l1_oid.to_string(), "new-branch".to_string()],
-    );
-    assert!(result.is_ok(), "fold --create failed: {:?}", result);
+    let result = fold_commit_onto(&test_repo, l1_oid, "new-branch");
+    assert!(result.is_ok(), "fold failed: {:?}", result);
 
     // The hook only proves nothing was rejected; check the message itself, so a
     // merge that stops being created cannot pass this test by default.
@@ -2818,7 +2749,7 @@ fn fold_create_keeps_the_diff_out_of_the_merge_message() {
     assert_eq!(
         head.parent_count(),
         2,
-        "fold --create should have woven the branch in with a merge commit"
+        "the fold should have woven the branch in with a merge commit"
     );
     let message = head.message().unwrap();
     assert!(
@@ -2829,11 +2760,11 @@ fn fold_create_keeps_the_diff_out_of_the_merge_message() {
 }
 
 /// Once a woven branch lands upstream as a fast-forward, the merge-base is
-/// that branch's own tip — still inside the weave — and the weave base is
-/// somewhere else entirely. `-c` has to create the branch at the weave base:
-/// anywhere else and `plan_move` refuses the branch `-c` just handed it.
+/// that branch's own tip, on the side of its merge rather than on the weave
+/// base. `loom branch` creates a new branch there by default, and a fold onto
+/// it must still go through.
 #[test]
-fn fold_create_uses_the_weave_base_when_a_branch_landed_upstream() {
+fn fold_onto_a_branch_at_the_merge_base_after_a_branch_landed_upstream() {
     let test_repo = TestRepo::new_with_remote();
 
     let weave_base = test_repo.head_oid();
@@ -2850,34 +2781,21 @@ fn fold_create_uses_the_weave_base_when_a_branch_landed_upstream() {
     test_repo.commit_staged("L1");
     let l1_oid = test_repo.head_oid();
 
-    // feature-a lands upstream as a fast-forward: origin/main is now its tip,
-    // so the merge-base sits on the branch side of the merge.
     test_repo.push_branch_to_remote_main("feature-a");
     let info = repo::gather_commit_graph(&test_repo.repo).unwrap();
+    let merge_base = info.upstream.merge_base_oid;
     assert_ne!(
-        info.upstream.merge_base_oid, weave_base,
+        merge_base, weave_base,
         "setup should have left the merge-base off the weave base"
     );
+    test_repo.create_branch_at_commit("new-branch", merge_base);
 
-    let result = super::run_create(
-        &test_repo.repo,
-        &[l1_oid.to_string(), "new-branch".to_string()],
-    );
-    assert!(result.is_ok(), "fold --create failed: {:?}", result);
+    let result = fold_commit_onto(&test_repo, l1_oid, "new-branch");
+    assert!(result.is_ok(), "fold failed: {:?}", result);
 
-    let tip = test_repo
-        .repo
-        .find_branch("new-branch", git2::BranchType::Local)
-        .unwrap()
-        .get()
-        .peel_to_commit()
-        .unwrap();
+    let tip = test_repo.find_commit(test_repo.get_branch_target("new-branch"));
     assert_eq!(repo::commit_subject(&tip), "L1");
-    assert_eq!(
-        tip.parent(0).unwrap().id(),
-        weave_base,
-        "the new branch should be built on the weave base"
-    );
+    assert_eq!(tip.parent(0).unwrap().id(), merge_base);
 }
 
 /// A rebase that refuses to start — a branch it would move is checked out in
@@ -3004,38 +2922,6 @@ fn fold_into_an_out_of_scope_commit_leaves_the_repo_alone() {
         staged.contains(&"other.txt".to_string()),
         "the user's own staged file must still be staged, got: {:?}",
         staged
-    );
-}
-
-/// `-c` creates. A name that is taken is refused, and the existing branch is
-/// left exactly where it was.
-#[test]
-fn fold_create_rejects_an_existing_branch() {
-    let test_repo = TestRepo::new_with_remote();
-    let base_oid = test_repo.find_remote_branch_target("origin/main");
-
-    test_repo.create_branch_at("feature-a", &base_oid.to_string());
-    let loose_oid = test_repo.commit("Loose", "loose.txt");
-
-    let result = super::run_create(
-        &test_repo.repo,
-        &[loose_oid.to_string(), "feature-a".to_string()],
-    );
-
-    // Line by line: the hint carries no leading whitespace of its own, which
-    // is what a dropped `\n\` continuation would bake into the literal.
-    let err = result.unwrap_err().to_string();
-    let mut lines = err.lines();
-    assert_eq!(lines.next(), Some("Branch `feature-a` already exists"));
-    assert_eq!(
-        lines.next(),
-        Some("Use `loom fold <commit>... feature-a` to move commits onto it")
-    );
-    assert_eq!(lines.next(), None, "no extra lines: {err}");
-    assert_eq!(
-        test_repo.get_branch_target("feature-a"),
-        base_oid,
-        "feature-a must be untouched"
     );
 }
 
@@ -3249,7 +3135,6 @@ fn fold_moves_several_commits_to_a_branch() {
     let result = test_repo.in_dir(|| {
         super::run(
             false,
-            false,
             None,
             HunkArgs::default(),
             vec![m2.to_string(), m1.to_string(), "feature-a".to_string()],
@@ -3273,23 +3158,6 @@ fn fold_moves_several_commits_to_a_branch() {
             .unwrap()
             .unwrap(),
         "A1"
-    );
-}
-
-#[test]
-fn fold_create_rejects_non_commit_source() {
-    let test_repo = TestRepo::new_with_remote();
-    test_repo.create_branch("feature-a");
-
-    let result = super::run_create(
-        &test_repo.repo,
-        &["feature-a".to_string(), "new-branch".to_string()],
-    );
-    assert!(result.is_err());
-    let err = result.unwrap_err().to_string();
-    assert!(
-        err.contains("commit"),
-        "should error when source is a branch, got: {err}"
     );
 }
 
@@ -3879,7 +3747,6 @@ fn fold_several_commits_to_a_branch_refuses_when_one_replays_empty() {
         &t.repo,
         &[redundant.to_string(), keeper.to_string()],
         "beta",
-        None,
     )
     .unwrap_err()
     .to_string();
@@ -3943,7 +3810,6 @@ fn fold_several_commits_to_a_branch_refusal_leaves_the_index_as_it_was() {
         &t.repo,
         &[redundant.to_string(), keeper.to_string()],
         "beta",
-        None,
     )
     .unwrap_err()
     .to_string();
@@ -4643,7 +4509,6 @@ fn move_commits_to_branch_keeps_staging_on_success() {
         &t.repo,
         &[c1.to_string(), c2.to_string()],
         "feature-a",
-        None,
     )
     .unwrap();
 
@@ -5046,43 +4911,32 @@ fn every_whole_commit_form_rejects_the_separator() {
     let second = t.head_oid().to_string();
     t.create_branch_at("other", &first);
 
-    let cases: [(bool, Option<super::Anchor>, Vec<String>, &str); 5] = [
+    let cases: [(Option<super::Anchor>, Vec<String>, &str); 4] = [
         (
-            false,
             Some(super::Anchor::Above(first.clone())),
             vec![second.clone()],
             "moving commits next to another",
         ),
         (
-            true,
-            None,
-            vec![second.clone(), "brand-new".into()],
-            "moving commits to a new branch",
-        ),
-        (
-            false,
             None,
             vec![second.clone(), first.clone()],
             "folding a commit into another",
         ),
         (
-            false,
             None,
             vec![second.clone(), "other".into()],
             "moving commits to a branch",
         ),
         (
-            false,
             None,
             vec![second.clone(), "zz".into()],
             "uncommitting a commit",
         ),
     ];
 
-    for (create, anchor, args, what) in cases {
+    for (anchor, args, what) in cases {
         let result = t.in_dir(|| {
             super::run(
-                create,
                 false,
                 anchor.clone(),
                 HunkArgs::default(),
@@ -5168,7 +5022,6 @@ fn fold_patch_refuses_an_upstream_target_before_staging() {
 
     let result = t.in_dir(|| {
         super::run(
-            false,
             true,
             None,
             HunkArgs::new(vec!["b.txt:1".into()], Some(fp)),
