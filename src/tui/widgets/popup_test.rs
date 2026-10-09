@@ -294,3 +294,19 @@ fn plain_message_lines_are_shown_as_is() {
     let text: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
     assert_eq!(text, ["From origin", " + a...b `x`"]);
 }
+
+#[test]
+fn help_is_sized_to_its_content() {
+    const SECTIONS: &[HelpSection] = &[("Misc", &[("?", "this help")])];
+    let text = render_text(|frame, area| {
+        render_help(frame, area, SECTIONS, &mut DiffPane::new(), &theme())
+    });
+    let rows: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    assert_eq!(rows.len(), 4, "got: {rows:?}");
+    let width = rows.iter().map(|r| r.trim().chars().count()).max().unwrap();
+    assert_eq!(
+        width,
+        " Help — ? or Esc to close ".chars().count() + 4,
+        "got: {rows:?}"
+    );
+}
