@@ -59,7 +59,9 @@ prefix of it also works); hex prefix such as `3ac` = commit without one
 (changes on every rewrite); `mqt:0` = the first file of commit `mqt`
 (with `status -f`, ids count from 0). Short IDs work wherever that entity is
 accepted; names, paths, and hashes also work. `status -a` includes hidden
-branches.
+branches (`loom.hideBranchPattern`, default `local-`) and their commits. Never
+commit, fold, or move into a hidden branch unless the user names it: the result
+vanishes from their status.
 
 The `graph` fields:
 
@@ -96,7 +98,7 @@ The `graph` fields:
 | Edit message | `git loom reword <commit> -m "<msg>"`. |
 | Rename branch | `git loom reword <branch> -m <new-name>`. |
 | Reorder | `git loom swap <a> <b>`. |
-| Delete/discard/reset | `git loom drop <target> -y`; explicitly name commits, branches, or files; never `zz`. |
+| Delete/discard/reset | `git loom drop <target> -y`; explicitly name commits, branches, or files; never `zz`. Dropping a branch also deletes its commits: check with `status --agent -a -f` that each one is meant to go. |
 | Create branch | Usually commit with `-b <new-name>`; empty branch: `git loom branch new <name>`. |
 | Merge/unmerge | `git loom branch merge <branch>` / `git loom branch unmerge <branch>`. A branch woven into another worktree's integration branch is refused: unmerge it there first. |
 | Pull-rebase | `git loom update -y`. |
