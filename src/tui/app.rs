@@ -808,7 +808,7 @@ const HELP: &[popup::HelpSection] = &[
         "Other",
         &[
             ("L", "action log"),
-            ("t", "latest trace: the git commands an action ran"),
+            ("T", "latest trace: the git commands an action ran"),
             ("R / F5", "reload"),
             ("?", "this help"),
             ("q / Ctrl-C", "quit"),
@@ -1577,7 +1577,7 @@ impl<'a> App<'a> {
                 lines,
                 mut scroll,
             } => match code {
-                KeyCode::Esc | KeyCode::Char('q' | 't') => {}
+                KeyCode::Esc | KeyCode::Char('q' | 'T') => {}
                 _ => {
                     scroll_popup(&mut scroll, code);
                     self.popup = Some(Popup::Trace {
@@ -1612,7 +1612,7 @@ impl<'a> App<'a> {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
         self.popup = Some(Popup::Trace {
-            title: format!(" Trace {} — t or Esc to close ", name),
+            title: format!(" Trace {} — T or Esc to close ", name),
             lines: trace_lines(&content, self.theme),
             scroll: DiffPane::new(),
         });
@@ -1715,7 +1715,7 @@ impl<'a> App<'a> {
                 self.open_help();
                 None
             }
-            KeyCode::Char('t') => {
+            KeyCode::Char('T') => {
                 self.open_trace();
                 None
             }
@@ -1842,7 +1842,7 @@ impl<'a> App<'a> {
                 self.open_help();
                 None
             }
-            KeyCode::Char('t') => {
+            KeyCode::Char('T') => {
                 self.open_trace();
                 None
             }
@@ -3517,7 +3517,7 @@ impl ShellApp for App<'_> {
             match code {
                 KeyCode::Char('L') => self.open_log(),
                 KeyCode::Char('?') => self.open_help(),
-                KeyCode::Char('t') => self.open_trace(),
+                KeyCode::Char('T') => self.open_trace(),
                 _ => self.notice = Some("an action is running…".to_string()),
             }
         } else if self.pick.is_some() {
@@ -3529,7 +3529,7 @@ impl ShellApp for App<'_> {
             match code {
                 KeyCode::Char('L') => self.open_log(),
                 KeyCode::Char('?') => self.open_help(),
-                KeyCode::Char('t') => self.open_trace(),
+                KeyCode::Char('T') => self.open_trace(),
                 // Marked, not dropped: the worker reads with `git`, so
                 // letting it outlive the pick would put it beside whatever
                 // action the freed keyboard starts next, over the same index.
@@ -3854,7 +3854,7 @@ impl ShellApp for App<'_> {
                 "Continue: c".into(),
                 "Abort: a".into(),
                 "Stage: Space".into(),
-                "Trace: t".into(),
+                "Trace: T".into(),
                 "Help: ?".into(),
                 "Quit: q".into(),
             ];

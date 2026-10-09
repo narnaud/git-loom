@@ -41,7 +41,7 @@ Short IDs are displayed like in `git loom status`, so the tree doubles as a chea
 | Mouse click / wheel | Focus, move, scroll |
 | `?` | Show the help popup listing every key |
 | `L` | Show the action log |
-| `t` | Show the latest [trace](trace.md): the git commands the last finished action ran |
+| `T` | Show the latest [trace](trace.md): the git commands the last finished action ran |
 | `R` / `F5` | Reload from the repo |
 | `+` (or `=`) / `-` | Show one more / one fewer context commit before the base (starts at [`loom.statusContext`](../configuration.md#loomstatuscontext), never goes below 1) |
 | `Esc` | Cancel fold, commit, move, rename, or new-branch mode → clear selection (first that applies); it never quits |
@@ -100,7 +100,7 @@ If an action pauses on conflicts, the tree gives way to the paused view; `git lo
 │  M  src/lib.rs                       ││ new line                      │
 │                                      ││ >>>>>>> 1a2b3c4 Add parser    │
 └──────────────────────────────────────┘└───────────────────────────────┘
- Continue: c | Abort: a | Stage: Space | Trace: t | Help: ? | Quit: q
+ Continue: c | Abort: a | Stage: Space | Trace: T | Help: ? | Quit: q
 ```
 
 Resolve the files in your editor, then:
@@ -110,7 +110,7 @@ Resolve the files in your editor, then:
 | `Space` | Stage the file under the cursor (`git add`) and move to the next |
 | `c` | [`continue`](continue.md); another conflict keeps the paused view, otherwise the tree comes back |
 | `a` | [`abort`](abort.md), once a menu confirms it, restoring the state from before the command |
-| `t` | Show the trace, for an operation that stopped for another reason than a conflict |
+| `T` | Show the trace, for an operation that stopped for another reason than a conflict |
 | `R` / `F5` | Reload, after resolving outside the TUI |
 
 ## Prerequisites

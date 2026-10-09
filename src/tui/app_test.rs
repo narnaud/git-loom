@@ -4546,7 +4546,7 @@ fn continue_refuses_once_the_paused_operation_changed() {
 }
 
 #[test]
-fn t_opens_the_latest_trace() {
+fn capital_t_opens_the_latest_trace() {
     let dir = tempfile::tempdir().unwrap();
     let theme = make_theme();
     let mut app = make_app(
@@ -4557,7 +4557,7 @@ fn t_opens_the_latest_trace() {
         &theme,
     );
 
-    press(&mut app, KeyCode::Char('t'));
+    press(&mut app, KeyCode::Char('T'));
     assert!(app.popup.is_none());
     assert_eq!(
         app.notice.as_deref(),
@@ -4567,7 +4567,7 @@ fn t_opens_the_latest_trace() {
     crate::trace::init(dir.path(), "loom tui: loom drop a1");
     crate::trace::log_command("git", "rebase --continue", 12, false, "boom");
     crate::trace::finalize().unwrap();
-    press(&mut app, KeyCode::Char('t'));
+    press(&mut app, KeyCode::Char('T'));
     let Some(Popup::Trace { lines, .. }) = &app.popup else {
         panic!("no trace popup");
     };
@@ -4578,6 +4578,6 @@ fn t_opens_the_latest_trace() {
         "{text:#?}"
     );
 
-    press(&mut app, KeyCode::Char('t'));
-    assert!(app.popup.is_none(), "t closes it too");
+    press(&mut app, KeyCode::Char('T'));
+    assert!(app.popup.is_none(), "T closes it too");
 }
