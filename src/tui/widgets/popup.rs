@@ -594,10 +594,24 @@ pub(crate) fn render_help(
             ]));
         }
     }
-    let rect = centered(area, area.width * 4 / 5, area.height * 4 / 5);
+    let title = " Help — ? or Esc to close ";
+    // Sized to the content (plus borders and a right margin matching the indent), at most 4/5 of `area`.
+    let content_width = lines
+        .iter()
+        .map(Line::width)
+        .chain([title.chars().count()])
+        .max()
+        .unwrap_or(0);
+    let width = u16::try_from(content_width + 4).unwrap_or(u16::MAX);
+    let height = u16::try_from(lines.len() + 2).unwrap_or(u16::MAX);
+    let rect = centered(
+        area,
+        width.min(area.width * 4 / 5),
+        height.min(area.height * 4 / 5),
+    );
     frame.render_widget(Clear, rect);
     let block = Block::default()
-        .title(" Help — ? or Esc to close ")
+        .title(title)
         .borders(Borders::ALL)
         .border_style(theme.border_active);
     scroll.render(frame, rect, lines, block);
