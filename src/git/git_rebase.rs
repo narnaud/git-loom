@@ -177,10 +177,9 @@ fn has_local_changes(workdir: &Path) -> bool {
 
 /// Whether two commit SHAs name the same commit, either one abbreviated.
 ///
-/// The abbreviated side is always a todo's own hash, which `Weave::to_todo`
-/// and `build_and_run_linear_edit` both take from `short_id()` — the shortest
-/// prefix unambiguous in the repository — so a shared prefix is the same
-/// commit. (`git::short_hash`'s fixed 7 is for display and never reaches here.)
+/// An abbreviated side is a todo's own hash, which git requires to be
+/// unambiguous, so a shared prefix is the same commit. (`git::short_hash`'s
+/// fixed 7 is for display and never reaches here.)
 /// Sliced as bytes, which cannot land mid-character.
 fn shas_match(a: &str, b: &str) -> bool {
     let shortest = a.len().min(b.len());

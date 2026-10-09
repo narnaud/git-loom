@@ -13,7 +13,6 @@ fn oid(hex: &str) -> Oid {
 fn make_commit(hex: &str, message: &str) -> CommitEntry {
     CommitEntry {
         oid: oid(hex),
-        short_hash: hex[..7.min(hex.len())].to_string(),
         message: message.to_string(),
         command: Command::Pick,
         update_refs: Vec::new(),
@@ -23,7 +22,6 @@ fn make_commit(hex: &str, message: &str) -> CommitEntry {
 fn make_commit_with_refs(hex: &str, message: &str, refs: Vec<&str>) -> CommitEntry {
     CommitEntry {
         oid: oid(hex),
-        short_hash: hex[..7.min(hex.len())].to_string(),
         message: message.to_string(),
         command: Command::Pick,
         update_refs: refs.into_iter().map(String::from).collect(),
@@ -71,14 +69,14 @@ fn serialize_single_branch_section() {
     assert_eq!(lines[0], "label onto");
     assert_eq!(lines[1], "");
     assert_eq!(lines[2], "reset onto");
-    assert_eq!(lines[3], &format!("pick {} # A1", OID_A1));
-    assert_eq!(lines[4], &format!("pick {} # A2", OID_A2));
+    assert_eq!(lines[3], &format!("pick {} # A1", oid(OID_A1)));
+    assert_eq!(lines[4], &format!("pick {} # A2", oid(OID_A2)));
     assert_eq!(lines[5], "label feature-a");
     assert_eq!(lines[6], "update-ref refs/heads/feature-a");
     assert_eq!(lines[7], "");
     assert_eq!(lines[8], "reset onto");
-    assert_eq!(lines[9], &format!("pick {} # Int", OID_INT));
-    assert!(lines[10].starts_with(&format!("merge -C {} feature-a", OID_MERGE1)));
+    assert_eq!(lines[9], &format!("pick {} # Int", oid(OID_INT)));
+    assert!(lines[10].starts_with(&format!("merge -C {} feature-a", oid(OID_MERGE1))));
 }
 
 #[test]
@@ -117,8 +115,8 @@ fn serialize_two_branch_sections() {
     let todo = graph.to_todo();
     assert!(todo.contains("label feature-a\n"));
     assert!(todo.contains("label feature-b\n"));
-    assert!(todo.contains(&format!("merge -C {} feature-a", OID_MERGE1)));
-    assert!(todo.contains(&format!("merge -C {} feature-b", OID_MERGE2)));
+    assert!(todo.contains(&format!("merge -C {} feature-a", oid(OID_MERGE1))));
+    assert!(todo.contains(&format!("merge -C {} feature-b", oid(OID_MERGE2))));
 }
 
 #[test]
@@ -181,7 +179,7 @@ fn serialize_update_refs_on_integration_line() {
     };
 
     let todo = graph.to_todo();
-    assert!(todo.contains(&format!("pick {} # C1\n", OID_C1)));
+    assert!(todo.contains(&format!("pick {} # C1\n", oid(OID_C1))));
     assert!(todo.contains("update-ref refs/heads/non-woven\n"));
 }
 
@@ -2223,7 +2221,7 @@ fn ensure_todo_edits_wants_an_edit_line_for_the_target() {
     let oid = git2::Oid::from_str("4783c1b06566c35e8d1cbc020936813639cd0ea4").unwrap();
     let other = git2::Oid::from_str("cd46c622e4881bed2ae786285fab0b14a7271f13").unwrap();
 
-    // The todo carries short hashes; a full one works too.
+    // Loom writes full hashes; an abbreviated one works too.
     assert!(check("reset onto\nedit 4783c1b # msg\n", oid).is_ok());
     assert!(check(&format!("edit {oid} # msg\n"), oid).is_ok());
 

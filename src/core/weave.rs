@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use git2::{Oid, Repository};
 
 use crate::core::msg;
@@ -28,7 +28,6 @@ impl Command {
 #[derive(Debug, Clone)]
 pub struct CommitEntry {
     pub oid: Oid,
-    pub short_hash: String,
     pub message: String,
     pub command: Command,
     /// Non-woven branch names at this commit, serialized as `update-ref` lines.
@@ -108,6 +107,8 @@ pub enum EmptiedRefs {
 }
 
 impl Weave {
+    /// Commits are named in full: a fixed-length prefix can be ambiguous in a
+    /// large repository, and git rejects an ambiguous todo line.
     pub fn to_todo(&self) -> String {
         let mut out = String::new();
 
@@ -138,7 +139,7 @@ impl Weave {
                     out.push_str(&format!(
                         "{} {} # {}\n",
                         commit.command.as_str(),
-                        commit.short_hash,
+                        commit.oid,
                         commit.message
                     ));
                     pending_refs.extend(commit.update_refs.iter().cloned());
@@ -152,9 +153,7 @@ impl Weave {
                     if let Some(oid) = original_oid {
                         out.push_str(&format!(
                             "merge -C {} {} # Merge branch '{}'\n",
-                            git::short_hash(&oid.to_string()),
-                            label,
-                            label
+                            oid, label, label
                         ));
                     } else {
                         out.push_str(&format!("merge {} # Merge branch '{}'\n", label, label));
@@ -234,7 +233,6 @@ impl Weave {
                                 }
                                 CommitEntry {
                                     oid: c.oid,
-                                    short_hash: c.short_hash,
                                     message: c.message,
                                     command: Command::Pick,
                                     update_refs,
@@ -274,7 +272,6 @@ impl Weave {
 
                 integration_line.push(IntegrationEntry::Pick(CommitEntry {
                     oid: entry.oid,
-                    short_hash: entry.short_hash.clone(),
                     message: entry.message.clone(),
                     command: Command::Pick,
                     update_refs,
@@ -1230,7 +1227,7 @@ fn emit_commits_with_refs(out: &mut String, commits: &[CommitEntry]) -> Vec<Stri
         out.push_str(&format!(
             "{} {} # {}\n",
             commit.command.as_str(),
-            commit.short_hash,
+            commit.oid,
             commit.message
         ));
         pending_refs.extend(commit.update_refs.iter().cloned());
@@ -1262,7 +1259,6 @@ pub fn describe_branches(names: &[String]) -> String {
 #[derive(Debug)]
 struct FirstParentEntry {
     oid: Oid,
-    short_hash: String,
     message: String,
     is_merge: bool,
     /// For merge commits: the second parent (branch being merged).
@@ -1324,12 +1320,6 @@ fn walk_first_parent_line(
         }
         let commit = repo.find_commit(current)?;
 
-        let short_hash = commit
-            .as_object()
-            .short_id()?
-            .as_str()
-            .context("short_id is not valid UTF-8")?
-            .to_string();
         let message = repo::commit_subject(&commit);
 
         let is_merge = commit.parent_count() > 1;
@@ -1359,7 +1349,6 @@ fn walk_first_parent_line(
 
             entries.push(FirstParentEntry {
                 oid: current,
-                short_hash,
                 message,
                 is_merge,
                 merge_parent: Some(branch_parent),
@@ -1369,7 +1358,6 @@ fn walk_first_parent_line(
         } else {
             entries.push(FirstParentEntry {
                 oid: current,
-                short_hash,
                 message,
                 is_merge,
                 merge_parent: None,
@@ -1413,17 +1401,10 @@ fn walk_branch_commits(repo: &Repository, tip: Oid, stop: Oid) -> Result<Vec<Bra
         let commit = repo.find_commit(current)?;
 
         if commit.parent_count() <= 1 {
-            let short_hash = commit
-                .as_object()
-                .short_id()?
-                .as_str()
-                .context("short_id is not valid UTF-8")?
-                .to_string();
             let message = repo::commit_subject(&commit);
 
             entries.push(BranchCommitEntry {
                 oid: current,
-                short_hash,
                 message,
             });
         }
@@ -1440,7 +1421,6 @@ fn walk_branch_commits(repo: &Repository, tip: Oid, stop: Oid) -> Result<Vec<Bra
 #[derive(Debug)]
 struct BranchCommitEntry {
     oid: Oid,
-    short_hash: String,
     message: String,
 }
 
@@ -1492,19 +1472,13 @@ fn build_and_run_linear_edit(repo: &Repository, workdir: &Path, commit_oid: Oid)
         }
 
         let c = repo.find_commit(current)?;
-        let short = c
-            .as_object()
-            .short_id()?
-            .as_str()
-            .context("Short ID is not valid UTF-8")?
-            .to_string();
         let msg = repo::commit_subject(&c);
         let cmd = if current == commit_oid {
             "edit"
         } else {
             "pick"
         };
-        entries.push(format!("{} {} # {}", cmd, short, msg));
+        entries.push(format!("{} {} # {}", cmd, current, msg));
 
         if c.parent_count() == 0 {
             break;
@@ -1589,7 +1563,7 @@ pub fn run_rebase_expecting_edit(
 
     // Protect every commit this todo rewrites — a second `edit` in the same
     // rebase is as much the caller's as the one it stops at first. These are
-    // the todo's own hashes, abbreviated, which `shas_match` handles.
+    // the todo's own hashes, possibly abbreviated, which `shas_match` handles.
     let protected = git::Protected::named(&edited).targeting(&targets);
     let outcome = halt_on_empty(workdir, upstream, todo_content, protected)?;
 
