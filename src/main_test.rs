@@ -161,6 +161,16 @@ fn commit_rejects_integration_with_branch() {
     assert!(parse(&["commit", "-i", "-b", "feature-a", "-m", "m"]).is_err());
 }
 
+/// Issue #375: these were accepted only before the subcommand.
+#[test]
+fn color_flags_are_accepted_after_the_subcommand() {
+    let cli = Cli::try_parse_from(["git-loom", "status", "--no-color", "--theme", "light"])
+        .expect("global flags after the subcommand");
+    assert!(cli.no_color);
+    assert!(matches!(cli.theme, ThemeArg::Light));
+    assert!(Cli::try_parse_from(["git-loom", "worktree", "list", "--theme=dark"]).is_ok());
+}
+
 #[test]
 fn cli_help_renders() {
     // Catches template/marker mistakes that only clap's renderer would reject.

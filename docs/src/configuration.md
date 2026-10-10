@@ -103,6 +103,8 @@ signature. Set the config, or pass `-m`.
 
 ## CLI Flags
 
+These flags are global: they go before or after the command.
+
 | Flag | Description |
 |------|-------------|
 | `--no-color` | Disable colored output |
@@ -121,4 +123,5 @@ Controls the color palette used for graph output.
 ```bash
 git loom --theme light
 git loom --theme dark status
+git loom status --theme dark
 ```

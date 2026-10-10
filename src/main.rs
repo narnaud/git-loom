@@ -130,7 +130,7 @@ fn apply_styles(template: &str, styles: &Styles) -> String {
 #[command(name = "git-loom", version)]
 struct Cli {
     /// Disable colored output
-    #[arg(long)]
+    #[arg(long, global = true)]
     no_color: bool,
 
     /// Machine-readable JSON status output for AI agents (see also LOOM_AGENT)
@@ -138,7 +138,7 @@ struct Cli {
     agent: bool,
 
     /// Color theme for graph output
-    #[arg(long, default_value = "auto")]
+    #[arg(long, global = true, default_value = "auto")]
     theme: ThemeArg,
 
     /// Show files changed in each commit (optionally filtered to specific commits)
