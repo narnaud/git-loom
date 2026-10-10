@@ -344,6 +344,12 @@ for args in "status 2" "2"; do
     assert_exit_fail "$CODE" "context_positional_rejected_${args// /_}"
 done
 
+describe "top-level status shortcuts refuse another command"
+for args in "-n 2 absorb" "-a status"; do
+    gl_capture $args
+    assert_exit_fail "$CODE" "shortcut_with_command_${args// /_}"
+done
+
 describe "loom.statusContext sets the depth, -n still overrides it"
 git -C "$WORK" config loom.statusContext 2
 out=$(gl status)
