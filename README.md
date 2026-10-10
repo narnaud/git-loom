@@ -38,8 +38,10 @@ Commits:
   drop, rm          Drop a change, commit, or branch
 
 Branches:
-  branch, br        Manage feature branches (create, merge, unmerge)
-  switch, sw        Switch to any branch for testing (without weaving)
+  branch, br        Create a feature branch
+  merge             Merge an existing branch into integration
+  unmerge           Remove a branch from integration (keeps the ref)
+  switch, sw        Switch to any branch for testing (without merging)
   worktree, wt      Manage worktrees, each with its own integration branch (new, list, drop)
 
 Inspection:

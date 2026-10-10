@@ -7,7 +7,7 @@ use crate::core::msg;
 use crate::core::repo;
 use crate::git;
 
-/// Switch to any branch (local or remote) for testing without weaving it into
+/// Switch to any branch (local or remote) for testing without merging it into
 /// the integration branch. Remote-only branches detach HEAD at the remote ref.
 /// Fails if the working tree has staged or unstaged changes to tracked files.
 pub fn run(branch: Option<String>) -> Result<()> {

@@ -99,8 +99,8 @@ The `graph` fields:
 | Rename branch | `git loom reword <branch> -m <new-name>`. |
 | Reorder | `git loom swap <a> <b>`. |
 | Delete/discard/reset | `git loom drop <target> -y`; explicitly name commits, branches, or files; never `zz`. Dropping a branch also deletes its commits: check with `status --agent -a -f` that each one is meant to go. |
-| Create branch | Usually commit with `-b <new-name>`; empty branch: `git loom branch new <name>`. |
-| Merge/unmerge | `git loom branch merge <branch>` / `git loom branch unmerge <branch>`. A branch woven into another worktree's integration branch is refused: unmerge it there first. |
+| Create branch | Usually commit with `-b <new-name>`; empty branch: `git loom branch <name>`. |
+| Merge/unmerge | `git loom merge <branch>` / `git loom unmerge <branch>`. A branch woven into another worktree's integration branch is refused: unmerge it there first. |
 | Pull-rebase | `git loom update -y`. |
 | Push / PR | `git loom push <branch> [--title "<title>"]` pushes and opens or updates its PR (see Pull requests); `--no-pr` skips PR/review creation. |
 | Diff/show | `git loom diff` / `git loom show`; short IDs work; Git options follow `--`. |

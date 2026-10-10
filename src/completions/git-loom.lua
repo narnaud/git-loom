@@ -55,23 +55,11 @@ local show_matcher = plain_matcher
 local diff_matcher = clink.argmatcher()
     :addflags("--staged", "--cached", "-a", "--all", "--help", "-h")
 
-local branch_new_matcher = clink.argmatcher()
-    :addflags("-t", "--target", "--help", "-h")
-
-local branch_merge_matcher = clink.argmatcher()
-    :addflags("-a", "--all", "--help", "-h")
-
-local branch_unmerge_matcher = clink.argmatcher()
-    :addflags("--help", "-h")
-
 local branch_matcher = clink.argmatcher()
-    :addarg(
-        "new"      .. branch_new_matcher,
-        "create"   .. branch_new_matcher,
-        "merge"    .. branch_merge_matcher,
-        "unmerge"  .. branch_unmerge_matcher
-    )
     :addflags("-t", "--target", "--help", "-h")
+
+local merge_matcher = clink.argmatcher()
+    :addflags("-a", "--all", "--help", "-h")
 
 local worktree_matcher = clink.argmatcher()
     :addarg(
@@ -122,6 +110,8 @@ clink.argmatcher("git-loom", table.unpack(loom_names))
         "rm"        .. drop_matcher,
         -- Branches
         "branch"    .. branch_matcher,
+        "merge"     .. merge_matcher,
+        "unmerge"   .. plain_matcher,
         "switch"    .. plain_matcher,
         "worktree"  .. worktree_matcher,
         "wt"        .. worktree_matcher,

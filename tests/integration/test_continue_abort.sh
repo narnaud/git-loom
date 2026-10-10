@@ -289,7 +289,7 @@ assert_no_rebase_in_progress "failed_abort_retry_rebase_gone"
 assert_eq "$OLD_HEAD" "$(head_hash)" "failed_abort_retry_head_restored"
 assert_branch_not_exists "feat" "failed_abort_retry_branch_removed"
 
-# A conflicted `branch merge` is the merge-side twin of the case above: the
+# A conflicted `merge` is the merge-side twin of the case above: the
 # state file describes a merge, so `loom abort` runs `git merge --abort`.
 describe "abort: a failing git merge --abort keeps the state too"
 setup_repo_with_remote
@@ -304,7 +304,7 @@ git -C "$WORK" add shared.txt
 git -C "$WORK" commit -q -m "Integration change"
 OLD_HEAD="$(head_hash)"
 
-gl_capture branch merge g-failed-abort
+gl_capture merge g-failed-abort
 assert_state_file "failed_merge_abort_state"
 assert_merge_in_progress "failed_merge_abort_merge_running"
 

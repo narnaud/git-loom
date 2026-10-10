@@ -70,7 +70,7 @@ Replay the complete base-to-HEAD range with `--rebase-merges`. Preserve/create m
 
 Conflict policy belongs to the caller, except for a stop `rerere` resolved in full under `rerere.autoUpdate`: every weave rebase carries past that one itself (Spec 014), so no caller ever sees it.
 
-- Resumable owners (`update`, `commit`, `absorb`, `drop commit`, `swap`, `branch merge`, supported `reword` replay, and simple supported `fold` paths) return `Stopped`, save `.git/loom/state.json`, and allow `loom continue` or `loom abort`.
+- Resumable owners (`update`, `commit`, `absorb`, `drop commit`, `swap`, `merge`, supported `reword` replay, and simple supported `fold` paths) return `Stopped`, save `.git/loom/state.json`, and allow `loom continue` or `loom abort`.
 - Out-of-scope paths (including `split`, excluded `fold` paths, and non-pausing reword failures) explicitly abort and restore the original repository. Reword's supported replay conflict is governed by Spec 003.
 
 A rebase carrying `edit` steps MUST halt on a commit that replays empty (`--empty=stop`, spelled `ask` before Git 2.45). Under `--empty=drop` Git discards a commit whose changes the new base already has while still honoring its `edit` line, stopping on the commit below, and the caller rewrites that one and loses the target. A rebase whose result the caller reports MUST halt the same way, for every commit it reads back through a ref following it (`update-ref`, `_loom-track`) or counts: dropping that commit slides its ref onto the commit below, which the caller then reports as the one the user moved.

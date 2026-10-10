@@ -180,6 +180,8 @@ or `loom abort`.
 - `drop`
 - `fold`
 - `branch`
+- `merge`
+- `unmerge`
 - `push`
 - `init`
 - `reword`

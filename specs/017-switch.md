@@ -5,7 +5,7 @@ This specification is normative.
 ## Overview
 
 `git loom switch` lets you check out any branch — local or remote — for
-quick inspection or testing, without weaving it into the integration branch.
+quick inspection or testing, without merging it into the integration branch.
 Remote-only branches (those that exist on the remote but have no local
 counterpart) detach HEAD at the remote ref rather than creating a tracking
 branch. The command refuses to run when the working tree has staged or

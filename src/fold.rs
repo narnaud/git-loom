@@ -1417,7 +1417,7 @@ enum FoldOp {
 fn classify(sources: &[Target], target: &Target) -> Result<FoldOp> {
     for source in sources {
         if matches!(source, Target::Branch(_)) {
-            bail!("Cannot fold a branch\nUse `git loom branch` for branch operations");
+            bail!("Cannot fold a branch\nFold its commits instead");
         }
     }
 
@@ -2005,7 +2005,7 @@ fn plan_move(
             if branch_oid != graph.base_oid {
                 bail!(
                     "Branch '{}' exists but is not part of the current integration scope.\n\
-                     Use `loom branch merge {}` to weave it first.",
+                     Use `loom merge {}` to merge it first.",
                     branch_name,
                     branch_name
                 );

@@ -239,7 +239,7 @@ fn branch_inside_existing_branch_no_weave() {
     );
 }
 
-/// `branch new` weaves through `run_rebase_or_abort`, which autostashes.
+/// `branch` weaves through `run_rebase_or_abort`, which autostashes.
 #[test]
 fn branch_new_weaving_keeps_staging() {
     let test_repo = TestRepo::new_with_remote();

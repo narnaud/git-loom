@@ -53,7 +53,7 @@ pub fn run(branch: Option<String>) -> Result<()> {
 
     // Do NOT delete the branch ref — that's the key difference from `drop`
     msg::success(&format!(
-        "Unwoven `{}` from integration branch",
+        "Unmerged `{}` from integration branch",
         branch_name
     ));
 
@@ -82,6 +82,6 @@ fn pick_woven_branch(info: &repo::RepoInfo) -> Result<String> {
     msg::select(
         "Select branch to unmerge",
         items,
-        "re-run with: loom branch unmerge <branch>",
+        "re-run with: loom unmerge <branch>",
     )
 }

@@ -304,7 +304,7 @@ fn merge_refuses_branch_woven_in_other_worktree() {
     assert!(err.contains("integration-foo"), "got: {err}");
     assert!(err.contains("work-foo"), "got: {err}");
     assert!(
-        err.contains("`\nUnweave it there first: `loom branch unmerge feature-a`"),
+        err.contains("`\nUnmerge it there first: `loom unmerge feature-a`"),
         "got: {err}"
     );
     assert_eq!(test_repo.head_oid(), head);

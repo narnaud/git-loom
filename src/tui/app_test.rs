@@ -2318,17 +2318,14 @@ fn command_line_uses_the_short_ids_the_tree_shows() {
             name: "feature-b".to_string(),
             target: Some("feature-a".to_string()),
         }),
-        format!(
-            "loom branch new feature-b -t {}",
-            ids.get_branch("feature-a")
-        )
+        format!("loom branch feature-b -t {}", ids.get_branch("feature-a"))
     );
     assert_eq!(
         app.command_line(&Action::NewBranch {
             name: "feature-b".to_string(),
             target: None,
         }),
-        "loom branch new feature-b"
+        "loom branch feature-b"
     );
     assert_eq!(
         app.command_line(&Action::Drop {
