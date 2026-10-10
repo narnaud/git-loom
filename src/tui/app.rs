@@ -402,7 +402,7 @@ enum Action {
         files: Vec<String>,
         hunks: Option<HunkArgs>,
     },
-    /// `loom branch new <name> [-t target]`.
+    /// `loom branch <name> [-t target]`.
     NewBranch {
         name: String,
         target: Option<String>,
@@ -1335,7 +1335,7 @@ impl<'a> App<'a> {
                 }
             }
             Action::NewBranch { name, target } => {
-                words.extend(["branch".into(), "new".into(), name.clone()]);
+                words.extend(["branch".into(), name.clone()]);
                 if let Some(target) = target {
                     words.extend(["-t".into(), sid(target)]);
                 }

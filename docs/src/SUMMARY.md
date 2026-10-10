@@ -37,6 +37,8 @@
 - [reword](commands/reword.md)
 - [drop](commands/drop.md)
 - [branch](commands/branch.md)
+- [merge](commands/merge.md)
+- [unmerge](commands/unmerge.md)
 - [switch](commands/switch.md)
 - [worktree](commands/worktree.md)
 - [status](commands/status.md)

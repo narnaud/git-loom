@@ -182,7 +182,7 @@ fn apply_to_worktree_leaves_the_tree_alone_when_nothing_was_written() {
 }
 
 /// The restore runs after the caller's own work has landed, so a failure must
-/// not reach the caller: `branch new` deletes the branch it just wove on `Err`.
+/// not reach the caller: `branch` deletes the branch it just wove on `Err`.
 /// It also must not cost staging that was already there — the whole point.
 #[test]
 fn restore_staged_after_rebase_keeps_what_the_autostash_left() {

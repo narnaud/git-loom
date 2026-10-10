@@ -293,8 +293,8 @@ mentions the skipped action in `messages`).
 | `push` Gerrit `wip/` prefix choice (`--no-pr`) | pre-flight | `needs_input` (select) with the three choices; no flag exists to answer it — ask the user, then rename with `loom reword` or re-run interactively |
 | `push` PR title (GitHub/Azure, multi-commit layer, no `--title` for it) | post-mutation | branch is already pushed → that PR is not created, report `ok`; its `push.prs` entry is `not_created` with the `hint` `Re-run with `loom push <branch> --title <title>`` (Spec 011). Every other PR is created as in a terminal; no browser is ever opened |
 | `update` gone-branch prune confirmation | post-mutation | the pull-rebase already succeeded → skip pruning, report `ok`; `messages` notes the skipped branches and `loom update -y` |
-| `branch new` name prompt (no name) | pre-flight | `needs_input` (text); hint: `loom branch new <name>` |
-| `branch merge` / `branch unmerge` / `switch` pickers | pre-flight | `needs_input` (select) listing candidates; hint: `loom branch merge <branch>` etc. |
+| `branch` name prompt (no name) | pre-flight | `needs_input` (text); hint: `loom branch <name>` |
+| `merge` / `unmerge` / `switch` pickers | pre-flight | `needs_input` (select) listing candidates; hint: `loom merge <branch>` etc. |
 | `init` upstream picker (several candidates) | pre-flight | `needs_input` (select) listing the remote branches |
 
 ### Hunk selection

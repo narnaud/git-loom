@@ -8,7 +8,7 @@ Each worktree holds its own integration branch, tracking the same upstream as
 the others. Loom needs nothing else to work in a linked worktree: every command
 acts on the worktree's checked-out branch, and a paused operation is private to
 its worktree (its state lives in the worktree's own git dir, Spec 014). A
-feature branch is woven into one integration branch at a time; `branch merge`
+feature branch is woven into one integration branch at a time; `merge`
 refuses one woven elsewhere (Spec 005).
 
 `worktree` has alias `wt`. Its commands only create, list and remove worktrees;

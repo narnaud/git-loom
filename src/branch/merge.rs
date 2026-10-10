@@ -14,7 +14,7 @@ struct MergeContext {
     branch_name: String,
 }
 
-/// Weave an existing branch into the integration branch.
+/// Merge an existing branch into the integration branch.
 ///
 /// If no branch is specified, shows an interactive picker with local branches
 /// not currently woven. With `--all`, also shows remote branches without a
@@ -46,11 +46,11 @@ pub fn run(branch: Option<String>, all: bool) -> Result<()> {
     // Merge the branch into integration (--no-ff) so it appears in the topology
     match crate::git::merge_no_ff(workdir, &git_dir, &local_name)? {
         MergeOutcome::Completed => {
-            msg::success(&format!("Woven `{}` into integration branch", local_name));
+            msg::success(&format!("Merged `{}` into integration branch", local_name));
         }
         MergeOutcome::Stopped => {
             let state = LoomState {
-                command: "branch merge".to_string(),
+                command: "merge".to_string(),
                 rollback: Rollback::default(),
                 context: serde_json::to_value(MergeContext {
                     branch_name: local_name,
@@ -59,19 +59,19 @@ pub fn run(branch: Option<String>, all: bool) -> Result<()> {
                 targets: Vec::new(),
             };
             transaction::save(&git_dir, &state)?;
-            transaction::warn_paused(workdir, "branch merge");
+            transaction::warn_paused(workdir, "merge");
         }
     }
 
     Ok(())
 }
 
-/// Resume a `loom branch merge` after conflicts have been resolved.
+/// Resume a `loom merge` after conflicts have been resolved.
 pub fn after_continue(context: &serde_json::Value) -> anyhow::Result<()> {
     let ctx: MergeContext =
         serde_json::from_value(context.clone()).context("Failed to parse merge resume context")?;
     msg::success(&format!(
-        "Woven `{}` into integration branch",
+        "Merged `{}` into integration branch",
         ctx.branch_name
     ));
     Ok(())
@@ -170,7 +170,7 @@ fn resolve_non_woven_branch(
     if let Some(other) = woven_elsewhere(repo, others, branch_arg)? {
         bail!(
             "Branch `{}` is already woven into `{}` at `{}`\n\
-             Unweave it there first: `loom branch unmerge {}`",
+             Unmerge it there first: `loom unmerge {}`",
             branch_arg,
             other.branch,
             other.path.display(),
@@ -250,8 +250,8 @@ fn pick_branch(
     }
 
     msg::select(
-        "Select branch to weave",
+        "Select branch to merge",
         items,
-        "re-run with: loom branch merge <branch>",
+        "re-run with: loom merge <branch>",
     )
 }

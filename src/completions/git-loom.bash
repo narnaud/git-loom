@@ -8,7 +8,7 @@
 __git_loom_commands="init update push pr agent
 add
 commit fold amend fixup mv rub absorb split swap reword drop rm
-branch switch worktree
+branch merge unmerge switch worktree
 status tui show diff trace
 continue abort"
 
@@ -62,11 +62,8 @@ __git_loom_candidates() {
     esac
 
     # The nested subcommand is the first non-flag word after the subcommand.
-    # Clap reads any word after `branch -t` as the name of a branch to create,
-    # never as a nested subcommand.
     for (( i = subi + 1; i < n; i++ )); do
         case ${args[i]} in
-            -t | --target) [[ $sub == branch ]] && { nested=--target; break; } ;;
             -*) ;;
             *) nested=${args[i]}; break ;;
         esac
@@ -95,18 +92,8 @@ __git_loom_candidates() {
                 flags="--project"
             fi
             ;;
-        branch)
-            if [[ -z $nested && $cur != -* ]]; then
-                echo "new create merge unmerge"
-                return
-            fi
-            case $nested in
-                merge) flags="-a --all" ;;
-                unmerge) ;;
-                # `branch`, `branch new` and `branch create` all take a target.
-                *) flags="-t --target" ;;
-            esac
-            ;;
+        branch) flags="-t --target" ;;
+        merge) flags="-a --all" ;;
         worktree)
             if [[ -z $nested && $cur != -* ]]; then
                 echo "new list ls drop rm path"

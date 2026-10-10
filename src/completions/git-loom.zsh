@@ -32,8 +32,10 @@ _git-loom() {
         'drop:Drop a change, a commit, or a branch from history'
         'rm:Alias of drop'
         # Branches
-        'branch:Manage feature branches (create, merge, unmerge)'
-        'switch:Switch to any branch for testing (without weaving)'
+        'branch:Create a feature branch'
+        'merge:Merge an existing branch into integration'
+        'unmerge:Remove a branch from integration'
+        'switch:Switch to any branch for testing (without merging)'
         'worktree:Manage worktrees, each with its own integration branch'
         # Inspection
         'status:Show the branch-aware status'
@@ -98,11 +100,8 @@ _git-loom() {
     esac
 
     # The nested subcommand is the first non-flag word after the subcommand.
-    # Clap reads any word after `branch -t` as the name of a branch to create,
-    # never as a nested subcommand.
     for (( i = subi + 1; i < CURRENT; i++ )); do
         case ${words[i]} in
-            -t | --target) [[ $sub == branch ]] && { nested=--target; break; } ;;
             -*) ;;
             *) nested=${words[i]}; break ;;
         esac
@@ -200,28 +199,15 @@ _git-loom() {
                 flags=('--project:Install into the repository instead of the home directory')
             fi ;;
         branch)
-            if [[ -z $nested ]]; then
-                subs=(
-                    'new:Create a new feature branch'
-                    'create:Alias of new'
-                    'merge:Weave an existing branch into integration'
-                    'unmerge:Remove a branch from integration'
-                )
-            fi
-            case $nested in
-                merge)
-                    flags=(
-                        '-a:Also show remote branches'
-                        '--all:Also show remote branches'
-                    ) ;;
-                unmerge) ;;
-                # `branch`, `branch new` and `branch create` all take a target.
-                *)
-                    flags=(
-                        '-t:Target commit, branch, or shortID'
-                        '--target:Target commit, branch, or shortID'
-                    ) ;;
-            esac ;;
+            flags=(
+                '-t:Target commit, branch, or shortID'
+                '--target:Target commit, branch, or shortID'
+            ) ;;
+        merge)
+            flags=(
+                '-a:Also show remote branches'
+                '--all:Also show remote branches'
+            ) ;;
         worktree)
             if [[ -z $nested ]]; then
                 subs=(

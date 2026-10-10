@@ -4,17 +4,15 @@
 
 ## CLI
 
-`branch` has alias `br`. Subcommand names `new`, `create`, `merge`, and `unmerge` are reserved and cannot be branch names because clap resolves them first.
+`branch` has alias `br` and no subcommands, so it reserves no branch names. Weaving and unweaving are the top-level `merge` and `unmerge`.
 
-### New
+### Branch
 
 ```bash
 git-loom branch [name] [-t <target>]
-git-loom branch new [name] [-t <target>]
-git-loom branch create [name] [-t <target>]
 ```
 
-The first form implicitly means `new`; `create` aliases `new`. If `[name]` is absent, prompt interactively. `-t, --target` accepts a commit hash/revision, commit or branch short ID, or branch name; without it, use the upstream merge-base.
+If `[name]` is absent, prompt interactively. `-t, --target` accepts a commit hash/revision, commit or branch short ID, or branch name; without it, use the upstream merge-base.
 
 Creation MUST trim and reject empty/whitespace names, validate Git branch-name rules (including no spaces, control characters, or `..`), and reject existing local names before calling `git branch`.
 
@@ -23,22 +21,22 @@ Target resolution uses Spec 002 in this order: exact local branch name (its tip)
 ### Merge
 
 ```bash
-git-loom branch merge [branch] [-a|--all]
+git-loom merge [branch] [-a|--all]
 ```
 
-Weave an existing non-woven branch with `git merge --no-ff`. Without `[branch]`, show an interactive picker. `--all` adds remote branches lacking local counterparts; selecting one first creates its local tracking branch. Error if the branch does not exist, is already woven here or into another worktree's integration branch (the branch checked out there, when it has an upstream, whose history holds the branch's tip while its upstream does not), or is that integration branch itself. A branch woven into two integration branches goes stale in one of them on any rewrite from the other; the picker leaves such branches out.
+Merge an existing non-woven branch with `git merge --no-ff`. Without `[branch]`, show an interactive picker. `--all` adds remote branches lacking local counterparts; selecting one first creates its local tracking branch. Error if the branch does not exist, is already woven here or into another worktree's integration branch (the branch checked out there, when it has an upstream, whose history holds the branch's tip while its upstream does not), or is that integration branch itself. A branch woven into two integration branches goes stale in one of them on any rewrite from the other; the picker leaves such branches out.
 
 ### Unmerge
 
 ```bash
-git-loom branch unmerge [branch]
+git-loom unmerge [branch]
 ```
 
 Accept a branch name/short ID or show a picker. Rebase the branch's commits out of integration while preserving its ref at its original commits. Error unless it is currently woven.
 
 ## Creation and ownership
 
-For `new`:
+For `branch`:
 
 1. obtain and validate the name;
 2. resolve `-t`, or find the upstream merge-base;
@@ -60,19 +58,19 @@ Automatically stash and restore uncommitted changes. Branch refs created by loom
 
 ## Hidden-name warning
 
-After `branch new` succeeds, if the name starts with configured `loom.hideBranchPattern` (default `local-`), print exactly:
+After `branch` succeeds, if the name starts with configured `loom.hideBranchPattern` (default `local-`), print exactly:
 
 ```text
 ⚠ Branch `local-secrets` is hidden from status by default. Use `--all` to show it.
 ```
 
-The setting is a prefix, not glob/regex; an empty setting disables hiding. Only `new` warns, not merge/unmerge (Spec 001).
+The setting is a prefix, not glob/regex; an empty setting disables hiding. Only `branch` warns, not `merge`/`unmerge` (Spec 001).
 
 ## Conflicts and state
 
-`branch new` automatic weaving is hard-fail: abort its rebase, restore the repository, save no state, and require retry.
+`branch` automatic weaving is hard-fail: abort its rebase, restore the repository, save no state, and require retry.
 
-`branch merge` is resumable. On conflict, save `.git/loom/state.json` with `branch_name`, report the pause, and permit:
+`merge` is resumable. On conflict, save `.git/loom/state.json` with `branch_name`, report the pause, and permit:
 
 - `loom continue`: complete the merge and print success;
 - `loom abort`: run `git merge --abort` and restore original state.
@@ -90,6 +88,6 @@ Minimal examples:
 ```bash
 git-loom branch feature-auth                 # at base
 git-loom branch feature-b -t feature-a       # at feature-a tip
-git-loom branch merge --all                  # picker includes remote-only refs
-git-loom branch unmerge feature-auth         # ref survives
+git-loom merge --all                         # picker includes remote-only refs
+git-loom unmerge feature-auth                # ref survives
 ```

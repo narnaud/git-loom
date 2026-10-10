@@ -31,8 +31,10 @@ $_gitLoomCompleter = {
         @{ Name = 'drop'; Description = 'Drop a change, a commit, or a branch from history' },
         @{ Name = 'rm'; Description = 'Alias of drop' },
         # Branches
-        @{ Name = 'branch'; Description = 'Manage feature branches (create, merge, unmerge)' },
-        @{ Name = 'switch'; Description = 'Switch to any branch for testing (without weaving)' },
+        @{ Name = 'branch'; Description = 'Create a feature branch' },
+        @{ Name = 'merge'; Description = 'Merge an existing branch into integration' },
+        @{ Name = 'unmerge'; Description = 'Remove a branch from integration' },
+        @{ Name = 'switch'; Description = 'Switch to any branch for testing (without merging)' },
         @{ Name = 'worktree'; Description = 'Manage worktrees, each with its own integration branch' },
         # Inspection
         @{ Name = 'status'; Description = 'Show the branch-aware status' },
@@ -229,42 +231,16 @@ $_gitLoomCompleter = {
             }
         }
         'branch' {
-            # The sub-subcommand is the first non-flag token after `branch`.
-            $branchSubcommand = $null
-            for ($i = $subIndex + 1; $i -lt $tokens.Count; $i++) {
-                if ($tokens[$i] -match '^-') { continue }
-                $branchSubcommand = $tokens[$i]
-                break
-            }
-
-            if ($null -eq $branchSubcommand -and -not ($wordToComplete -match '^-')) {
-                $branchSubs = @(
-                    @{ Name = 'new'; Description = 'Create a new feature branch' },
-                    @{ Name = 'create'; Description = 'Alias of new' },
-                    @{ Name = 'merge'; Description = 'Weave an existing branch into integration' },
-                    @{ Name = 'unmerge'; Description = 'Remove a branch from integration' }
-                )
-                return $branchSubs | Where-Object { $_.Name -like "$wordToComplete*" } | ForEach-Object {
-                    [System.Management.Automation.CompletionResult]::new($_.Name, $_.Name, 'ParameterValue', $_.Description)
-                }
-            }
-
-            switch ($branchSubcommand) {
-                'merge' {
-                    $subFlags = @(
-                        @{ Name = '-a'; Description = 'Also show remote branches' },
-                        @{ Name = '--all'; Description = 'Also show remote branches' }
-                    )
-                }
-                'unmerge' { $subFlags = @() }
-                default {
-                    # `branch`, `branch new` and `branch create` all take a target.
-                    $subFlags = @(
-                        @{ Name = '-t'; Description = 'Target commit, branch, or shortID' },
-                        @{ Name = '--target'; Description = 'Target commit, branch, or shortID' }
-                    )
-                }
-            }
+            $subFlags = @(
+                @{ Name = '-t'; Description = 'Target commit, branch, or shortID' },
+                @{ Name = '--target'; Description = 'Target commit, branch, or shortID' }
+            )
+        }
+        'merge' {
+            $subFlags = @(
+                @{ Name = '-a'; Description = 'Also show remote branches' },
+                @{ Name = '--all'; Description = 'Also show remote branches' }
+            )
         }
         'worktree' {
             $worktreeSubcommand = $null

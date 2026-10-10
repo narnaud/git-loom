@@ -1,6 +1,6 @@
 # switch
 
-Check out any branch for testing without weaving it into the integration branch.
+Check out any branch for testing without merging it into the integration branch.
 
 ## Usage
 

@@ -29,11 +29,11 @@ A worktree made with plain git works too: run [`git loom init`](init.md) inside 
 
 ## One integration branch per feature branch
 
-A feature branch is woven into one integration branch at a time. Rewriting it in one worktree (a `fold`, a `reword`...) would leave the other with its old commits, so [`branch merge`](branch.md#branch-merge) refuses a branch already woven into another worktree's integration branch. To move a branch across, unweave it where it is, then weave it where you want it:
+A feature branch is woven into one integration branch at a time. Rewriting it in one worktree (a `fold`, a `reword`...) would leave the other with its old commits, so [`merge`](merge.md) refuses a branch already woven into another worktree's integration branch. To move a branch across, unmerge it where it is, then merge it where you want it:
 
 ```bash
-cd ../repo-hotfix && git loom branch unmerge feature-x
-cd ../repo     && git loom branch merge feature-x
+cd ../repo-hotfix && git loom unmerge feature-x
+cd ../repo     && git loom merge feature-x
 ```
 
 ## worktree new

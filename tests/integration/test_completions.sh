@@ -24,10 +24,9 @@ complete_bash() {
 }
 assert_eq "$(complete_bash loom tr)" "trace" "bash_command"
 assert_eq "$(complete_bash loom wt '')" "new list ls drop rm path" "bash_worktree_subs"
-assert_eq "$(complete_bash loom branch '')" "new create merge unmerge" "bash_branch_subs"
-# Clap takes `branch -t HEAD merge` as creating a branch named merge.
-assert_eq "$(complete_bash loom branch -t HEAD '')" "" "bash_no_subs_after_target"
-assert_eq "$(complete_bash loom branch -t '')" "" "bash_no_subs_as_target"
+assert_eq "$(complete_bash loom unm)" "unmerge" "bash_unmerge_command"
+assert_eq "$(complete_bash loom branch '')" "" "bash_branch_no_subs"
+assert_eq "$(complete_bash loom merge -)" "-a --all -h --help" "bash_merge_flags"
 assert_eq "$(complete_bash loom --theme '')" "auto dark light" "bash_theme"
 # Bash splits `--theme=dark` into three words.
 assert_eq "$(complete_bash loom --theme =)" "auto dark light" "bash_theme_eq"
@@ -53,8 +52,7 @@ if command -v zsh >/dev/null; then
             _files() { print -r -- _files }
             words=("$@"); CURRENT=$#; _git-loom' _ "$SCRIPTS/c.zsh" "$@"
     }
-    assert_eq "$(complete_zsh loom branch '')" "new create merge unmerge" "zsh_branch_subs"
-    assert_eq "$(complete_zsh loom branch -t HEAD '')" "_files" "zsh_no_subs_after_target"
+    assert_eq "$(complete_zsh loom branch '')" "_files" "zsh_branch_no_subs"
     assert_eq "$(complete_zsh loom absorb -)" "-n --dry-run -h --help" "zsh_flags"
     # Git's zsh wrapper passes the whole line, 0-based indexes, ksh options.
     complete_git_zsh() {
@@ -76,11 +74,11 @@ if command -v fish >/dev/null; then
             "$SCRIPTS/c.fish" "$1"
     }
     assert_eq "$(complete_fish 'git-loom tr')" "trace" "fish_command"
-    assert_eq "$(complete_fish 'git-loom branch merge --')" "--all --help" "fish_nested_flags"
+    assert_eq "$(complete_fish 'git-loom merge --')" "--all --help" "fish_merge_flags"
     EMPTY="$TMPROOT/empty"
     mkdir -p "$EMPTY"
     for b in branch br; do
-        assert_eq "$(cd "$EMPTY" && complete_fish "git-loom $b -t HEAD ")" "" "fish_${b}_no_subs_after_target"
+        assert_eq "$(cd "$EMPTY" && complete_fish "git-loom $b ")" "" "fish_${b}_no_subs"
     done
 else
     skipped "fish not installed"

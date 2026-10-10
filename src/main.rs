@@ -83,8 +83,10 @@ const GROUPED_COMMANDS: &str = "\
   {l}drop{r}, {l}rm{r}          Drop a change, commit, or branch
 
 {h}Branches:{r}
-  {l}branch{r}, {l}br{r}        Manage feature branches (create, merge, unmerge)
-  {l}switch{r}, {l}sw{r}        Switch to any branch for testing (without weaving)
+  {l}branch{r}, {l}br{r}        Create a feature branch
+  {l}merge{r}             Merge an existing branch into integration
+  {l}unmerge{r}           Remove a branch from integration (keeps the ref)
+  {l}switch{r}, {l}sw{r}        Switch to any branch for testing (without merging)
   {l}worktree{r}, {l}wt{r}      Manage worktrees, each with its own integration branch (list by default, new, drop, path)
 
 {h}Inspection:{r}
@@ -335,11 +337,34 @@ enum Command {
     },
 
     // -- Branches --
-    /// Manage feature branches (create, merge, unmerge)
+    /// Create a feature branch
     #[command(visible_alias = "br")]
-    Branch(BranchCmd),
+    Branch {
+        /// Branch name (if not provided, will prompt interactively)
+        name: Option<String>,
 
-    /// Switch to any branch for testing without weaving it into the integration branch
+        /// Target commit, branch, or shortID (defaults to upstream base)
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+    },
+
+    /// Merge an existing branch into the integration branch
+    Merge {
+        /// Branch name (if not provided, shows interactive picker)
+        branch: Option<String>,
+
+        /// Also show remote branches without a local counterpart
+        #[arg(short = 'a', long = "all")]
+        all: bool,
+    },
+
+    /// Remove a branch from the integration branch (keeps the branch ref)
+    Unmerge {
+        /// Branch name or short ID (if not provided, shows interactive picker)
+        branch: Option<String>,
+    },
+
+    /// Switch to any branch for testing without merging it into the integration branch
     #[command(visible_alias = "sw")]
     Switch {
         /// Branch name or short ID (if not provided, shows interactive picker)
@@ -449,39 +474,6 @@ enum AgentAction {
     },
 }
 
-#[derive(Args)]
-#[command(args_conflicts_with_subcommands = true)]
-struct BranchCmd {
-    #[command(subcommand)]
-    action: Option<BranchAction>,
-
-    #[command(flatten)]
-    new_args: BranchNewArgs,
-}
-
-#[derive(Subcommand)]
-enum BranchAction {
-    /// Create a new feature branch
-    #[command(visible_alias = "create")]
-    New(BranchNewArgs),
-
-    /// Weave an existing branch into the integration branch
-    Merge {
-        /// Branch name (if not provided, shows interactive picker)
-        branch: Option<String>,
-
-        /// Also show remote branches without a local counterpart
-        #[arg(short = 'a', long = "all")]
-        all: bool,
-    },
-
-    /// Remove a branch from the integration branch (keeps the branch ref)
-    Unmerge {
-        /// Branch name or short ID (if not provided, shows interactive picker)
-        branch: Option<String>,
-    },
-}
-
 #[derive(Subcommand)]
 enum WorktreeAction {
     /// Create the worktree <dir>-<name> beside the main one, on integration-<name>
@@ -507,16 +499,6 @@ enum WorktreeAction {
         /// worktree from a linked one, else a picker)
         worktree: Option<String>,
     },
-}
-
-#[derive(Args, Clone)]
-struct BranchNewArgs {
-    /// Branch name (if not provided, will prompt interactively)
-    name: Option<String>,
-
-    /// Target commit, branch, or shortID (defaults to upstream base)
-    #[arg(short = 't', long = "target")]
-    target: Option<String>,
 }
 
 /// Message shown when a command is blocked by a paused loom operation.
@@ -691,12 +673,9 @@ fn main() {
             Some(WorktreeAction::Drop { worktree }) => worktree::drop::run(worktree),
             Some(WorktreeAction::Path { worktree }) => worktree::path::run(worktree),
         },
-        Some(Command::Branch(cmd)) => match cmd.action {
-            Some(BranchAction::New(args)) => branch::new::run(args.name, args.target),
-            Some(BranchAction::Merge { branch, all }) => branch::merge::run(branch, all),
-            Some(BranchAction::Unmerge { branch }) => branch::unmerge::run(branch),
-            None => branch::new::run(cmd.new_args.name, cmd.new_args.target),
-        },
+        Some(Command::Branch { name, target }) => branch::new::run(name, target),
+        Some(Command::Merge { branch, all }) => branch::merge::run(branch, all),
+        Some(Command::Unmerge { branch }) => branch::unmerge::run(branch),
         Some(Command::Reword {
             target,
             message,

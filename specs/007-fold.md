@@ -52,7 +52,7 @@ Errors are verbatim; `⏎` marks a line break within a message.
 | Single argument, empty index | `Nothing to commit` |
 | Single argument, non-commit target | ``'<arg>' did not resolve to a commit`` |
 | File into branch | `Cannot fold files into a branch⏎Target a specific commit` |
-| Branch as source | ``Cannot fold a branch⏎Use `git loom branch` for branch operations`` |
+| Branch as source | `Cannot fold a branch⏎Fold its commits instead` |
 | `zz` into `zz` | `Cannot fold files into unstaged — files are already in the working directory` |
 | `zz` into branch | `Cannot fold files into a branch⏎Target a specific commit` |
 | `zz` source with clean tree | `No changes to fold — working tree is clean` |

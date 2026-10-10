@@ -5,8 +5,8 @@
 
 # Succeeds when the words typed so far form the given subcommand path:
 # `__git_loom_is ''` before any subcommand, `__git_loom_is fold` for fold and
-# its aliases, `__git_loom_is branch ''` for branch with no nested subcommand
-# yet, `__git_loom_is branch merge` once it is merge.
+# its aliases, `__git_loom_is agent ''` for agent with no nested subcommand
+# yet, `__git_loom_is agent install` once it is install.
 function __git_loom_is
     set -l tokens (commandline -opc)
     set -e tokens[1]
@@ -57,13 +57,6 @@ function __git_loom_is
         else
             # The nested subcommand is the first non-flag word after it.
             switch $t
-                # Clap reads any word after `branch -t` as the name of a
-                # branch to create, never as a nested subcommand.
-                case -t --target
-                    if test "$sub" = branch
-                        set nested --target
-                        break
-                    end
                 case '-*'
                 case '*'
                     set nested $t
@@ -109,8 +102,10 @@ complete -c git-loom -n $top -f -a reword -d 'Reword a commit message or rename 
 complete -c git-loom -n $top -f -a drop -d 'Drop a change, a commit, or a branch from history'
 complete -c git-loom -n $top -f -a rm -d 'Alias of drop'
 # Branches
-complete -c git-loom -n $top -f -a branch -d 'Manage feature branches (create, merge, unmerge)'
-complete -c git-loom -n $top -f -a switch -d 'Switch to any branch for testing (without weaving)'
+complete -c git-loom -n $top -f -a branch -d 'Create a feature branch'
+complete -c git-loom -n $top -f -a merge -d 'Merge an existing branch into integration'
+complete -c git-loom -n $top -f -a unmerge -d 'Remove a branch from integration'
+complete -c git-loom -n $top -f -a switch -d 'Switch to any branch for testing (without merging)'
 complete -c git-loom -n $top -f -a worktree -d 'Manage worktrees, each with its own integration branch'
 # Inspection
 complete -c git-loom -n $top -f -a status -d 'Show the branch-aware status'
@@ -170,13 +165,8 @@ complete -c git-loom -n "__git_loom_is agent ''" -f -a install -d 'Install the l
 complete -c git-loom -n '__git_loom_is agent install' -f -a claude -d 'Claude Code'
 complete -c git-loom -n '__git_loom_is agent install' -l project -d 'Install into the repository instead of the home directory'
 
-complete -c git-loom -n "__git_loom_is branch ''" -f -a new -d 'Create a new feature branch'
-complete -c git-loom -n "__git_loom_is branch ''" -f -a create -d 'Alias of new'
-complete -c git-loom -n "__git_loom_is branch ''" -f -a merge -d 'Weave an existing branch into integration'
-complete -c git-loom -n "__git_loom_is branch ''" -f -a unmerge -d 'Remove a branch from integration'
-# `branch`, `branch new` and `branch create` all take a target.
-complete -c git-loom -n '__git_loom_is branch; and not __git_loom_is branch merge; and not __git_loom_is branch unmerge' -s t -l target -x -d 'Target commit, branch, or shortID'
-complete -c git-loom -n '__git_loom_is branch merge' -s a -l all -d 'Also show remote branches'
+complete -c git-loom -n '__git_loom_is branch' -s t -l target -x -d 'Target commit, branch, or shortID'
+complete -c git-loom -n '__git_loom_is merge' -s a -l all -d 'Also show remote branches'
 
 complete -c git-loom -n "__git_loom_is worktree ''" -f -a new -d 'Create a worktree with its own integration branch'
 complete -c git-loom -n "__git_loom_is worktree ''" -f -a list -d 'List the worktrees with their short IDs'

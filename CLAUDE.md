@@ -37,7 +37,7 @@ keep it terse and normative, and do not duplicate rules, docs, or examples.
 | `specs/014-continue-abort.md` | Continue or abort a paused loom operation |
 | `specs/015-swap.md` | Swap two commits or two branch sections |
 | `specs/016-diff.md` | Diff: short-ID–aware wrapper around git diff |
-| `specs/017-switch.md` | Switch to any branch for testing without weaving |
+| `specs/017-switch.md` | Switch to any branch for testing without merging |
 | `specs/018-add.md` | Stage files using short IDs, paths, or `zz`; hunk-level staging with `-p` |
 | `specs/019-agent.md` | Agent integration: `agent install` skill install and `--agent` machine-readable mode |
 | `specs/020-tui.md` | Interactive status TUI: tree + diff panes, with actions |

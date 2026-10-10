@@ -33,7 +33,7 @@ gl_capture_in "$FOO" status
 assert_contains "$OUT" "[feature-wt]" "status_shows_worktree_branch"
 
 describe "merge refuses a branch woven into another worktree"
-gl_capture branch merge feature-wt
+gl_capture merge feature-wt
 assert_exit_fail "$CODE" "merge_guard"
 assert_contains "$OUT" "integration-foo" "merge_guard_msg"
 
@@ -52,7 +52,7 @@ assert_exit_ok "$CODE" "list_default_ok"
 assert_contains "$OUT" "[integration-foo]" "list_default"
 
 describe "drop keeps a branch holding commits no other ref has"
-gl_capture_in "$FOO" branch unmerge feature-wt
+gl_capture_in "$FOO" unmerge feature-wt
 commit_file_in "$FOO" "Loose" "loose.txt"
 gl_capture wt drop "$FOO_ID"
 assert_exit_ok "$CODE" "drop_ok"
