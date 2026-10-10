@@ -3,9 +3,9 @@ use super::{
     selected_paths,
 };
 use crate::core::diff::DiffHunk;
+use crate::core::hunks::{FileEntry, HunkEntry, HunkOrigin};
 use crate::core::repo;
 use crate::core::test_helpers::TestRepo;
-use crate::tui::hunk_selector::{FileEntry, HunkEntry, HunkOrigin};
 
 /// A repo with changes to `a.rs` and `dir/b.rs`. It needs an upstream because
 /// an argument that is not a path falls through to short-ID resolution.

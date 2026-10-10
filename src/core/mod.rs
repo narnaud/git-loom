@@ -3,6 +3,7 @@ pub mod changeid;
 pub mod diff;
 pub mod graph;
 pub mod hunk_select;
+pub mod hunks;
 pub mod msg;
 pub mod push_json;
 pub mod repo;
