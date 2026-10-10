@@ -34,8 +34,7 @@ impl LoomState {
 
 /// Rollback information captured before the rebase step starts.
 ///
-/// Only fields that are actually consumed by a command's `after_abort` handler
-/// belong here. `git rebase --abort` already restores HEAD, all branch refs
+/// Only fields [`Rollback::apply_abort`] consumes belong here. `git rebase --abort` already restores HEAD, all branch refs
 /// (via `--update-refs`), and autostashed working-tree changes — so those do
 /// not need to be saved.
 #[derive(Debug, Serialize, Deserialize, Default)]

@@ -200,7 +200,7 @@ enum Command {
         #[arg(short = 'p', long = "patch")]
         patch: bool,
         /// Hunk ids from a `-p` listing, instead of picking them interactively
-        // Comma-splitting happens in `hunk_select`; see `fold`.
+        // One `--hunks` per id; see `fold`.
         #[arg(long = "hunks", requires = "patch", requires = "hunks_from")]
         hunks: Vec<String>,
         /// Fingerprint of the listing `--hunks` was taken from
@@ -228,7 +228,7 @@ enum Command {
         #[arg(short = 'p', long = "patch")]
         patch: bool,
         /// Hunk ids from a `-p` listing, instead of picking them interactively
-        // Comma-splitting happens in `hunk_select`; see `fold`.
+        // One `--hunks` per id; see `fold`.
         #[arg(long = "hunks", requires = "patch", requires = "hunks_from")]
         hunks: Vec<String>,
         /// Fingerprint of the listing `--hunks` was taken from
@@ -256,8 +256,8 @@ enum Command {
         #[arg(long, value_name = "COMMIT", conflicts_with_all = ["create", "patch"])]
         below: Option<String>,
         /// Hunk ids from a `-p` listing, instead of picking them interactively
-        // No `value_delimiter`: a path may contain a comma, so the commas are
-        // split off in `hunk_select`, where the real ids are known.
+        // No `value_delimiter`: a path may contain a comma, so it is one
+        // `--hunks` per id, and `hunk_select` refuses a comma list.
         #[arg(long = "hunks", requires = "patch", requires = "hunks_from")]
         hunks: Vec<String>,
         /// Fingerprint of the listing `--hunks` was taken from
@@ -292,7 +292,7 @@ enum Command {
         #[arg(short = 'p', long = "patch")]
         patch: bool,
         /// Hunk ids from a `-p` listing, instead of picking them interactively
-        // Comma-splitting happens in `hunk_select`; see `fold`.
+        // One `--hunks` per id; see `fold`.
         #[arg(long = "hunks", requires = "patch", requires = "hunks_from")]
         hunks: Vec<String>,
         /// Fingerprint of the listing `--hunks` was taken from
