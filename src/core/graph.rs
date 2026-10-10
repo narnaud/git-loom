@@ -355,24 +355,29 @@ pub fn downstack(info: &RepoInfo, branch: &str) -> Vec<String> {
 /// A stack is linear: the weave replays the feature branches one after
 /// another, so a branch built on another branch's tip either continues that
 /// stack or is rebased off it. Nothing ever sits beside a layer.
-fn stack_child(info: &RepoInfo, branch: &str) -> Option<String> {
+fn stack_child<'a>(
+    info: &'a RepoInfo,
+    parents: &HashMap<String, String>,
+    branch: &str,
+) -> Option<&'a str> {
     let canonical = canonical_name(info, branch);
     info.branches
         .iter()
-        .find(|b| stack_parent(info, &b.name).as_deref() == Some(canonical))
-        .map(|b| canonical_branch_name(info, b.tip_oid).to_string())
+        .find(|b| parents.get(&b.name).map(String::as_str) == Some(canonical))
+        .map(|b| canonical_branch_name(info, b.tip_oid))
 }
 
 /// The branches stacked on top of `branch`, nearest first. Co-located names
 /// are represented once, by their canonical name.
 pub fn upstack(info: &RepoInfo, branch: &str) -> Vec<String> {
+    let parents = stack_parents(info);
     let mut above: Vec<String> = Vec::new();
-    let mut current = branch.to_string();
-    while let Some(child) = stack_child(info, &current) {
-        if above.contains(&child) {
+    let mut current = branch;
+    while let Some(child) = stack_child(info, &parents, current) {
+        if above.iter().any(|a| a == child) {
             break;
         }
-        above.push(child.clone());
+        above.push(child.to_string());
         current = child;
     }
     above
