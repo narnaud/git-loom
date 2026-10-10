@@ -29,6 +29,27 @@ assert_exit_fail "$CODE" "blocked_while_paused"
 assert_contains "$OUT" "loom continue" "blocked_while_paused_hint"
 assert_contains "$OUT" "no rebase is in progress" "blocked_while_stale_hint"
 
+describe "blocked: a corrupted state file is not overwritten by the next command"
+setup_repo_with_remote
+commit_file "Keep me" "keep.txt"
+commit_file "Drop me" "drop.txt"
+old_head=$(git -C "$WORK" rev-parse HEAD)
+mkdir -p "$WORK/.git/loom"
+printf '{"command":' > "$WORK/.git/loom/state.json"
+gl_capture drop HEAD --yes
+assert_exit_fail "$CODE" "corrupt_state_blocks"
+assert_contains "$OUT" "corrupted or invalid" "corrupt_state_msg"
+assert_eq "$(git -C "$WORK" rev-parse HEAD)" "$old_head" "corrupt_state_head_kept"
+assert_eq "$(cat "$WORK/.git/loom/state.json")" '{"command":' "corrupt_state_file_kept"
+
+describe "blocked: tui refuses to open on a corrupted state file"
+setup_repo_with_remote
+mkdir -p "$WORK/.git/loom"
+printf '{"command":' > "$WORK/.git/loom/state.json"
+gl_capture tui
+assert_exit_fail "$CODE" "corrupt_state_blocks_tui"
+assert_contains "$OUT" "corrupted or invalid" "corrupt_state_tui_msg"
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Helper: produce a conflict scenario
 # Sets WORK (with remote) and leaves the rebase paused.

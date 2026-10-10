@@ -164,12 +164,19 @@ When `.git/loom/state.json` exists, most commands are blocked with an error
 naming the interrupted command and instructing the user to run `loom continue`
 or `loom abort`.
 
+A state file that cannot be read or parsed blocks the same commands and `tui`,
+with the error from "Missing or Corrupted State". The TUI applies the same
+check before each action (Spec 020).
+
 **Allowed while paused:**
 
 - `show`
+- `diff`
 - `trace`
 - `continue`
 - `abort`
+- `tui` (opens on the paused operation)
+- `worktree list` / `worktree path`
 
 **Blocked while paused:**
 
@@ -358,11 +365,14 @@ many times as needed until the rebase completes.
 - **`loom continue` / `loom abort` with no state file**: See "Stateless Continue
   and Abort" — they act on an in-progress rebase or merge, and error with
   `"No loom operation is in progress"` when there is none.
-- **Corrupted state file**: Both commands error with a parse failure message
-  that names the file and tells the user to move it aside — never to delete it
-  — and run `loom abort`. The state file is written to a temp file and renamed,
-  so a killed process leaves either the old state or the new one, never a
-  truncated file.
+- **Corrupted state file**: Both commands error with a message that names the
+  file and the parse failure, and tells the user to move it aside — never to
+  delete it — then run `loom abort` when git has a rebase or merge in progress.
+  The state file is written to a temp file and renamed, so a killed process
+  leaves either the old state or the new one, never a truncated file.
+- **Unreadable state file**: The error names the I/O failure and says to fix it
+  and retry. It never suggests moving the file: it may be valid, only held by
+  another process.
 
 ## Command-Specific Resume Context
 

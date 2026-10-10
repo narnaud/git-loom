@@ -148,10 +148,12 @@ If loom blocks you with a "paused operation" error but you know no operation
 is actually in progress (e.g., after a crash or force-reset), run
 `loom continue` to finish up, or `loom abort` to discard the operation.
 
-As a last resort you can delete the state file by hand:
+As a last resort you can move the state file aside by hand. Keep the copy: it
+is the only record of what `loom abort` would undo, such as staged changes
+loom set aside.
 
 ```bash
-rm .git/loom/state.json
+mv .git/loom/state.json .git/loom/state.json.bak
 ```
 
 In a linked worktree it lives under that worktree's git directory instead:

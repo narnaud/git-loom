@@ -4545,6 +4545,33 @@ fn continue_refuses_once_the_paused_operation_changed() {
     );
 }
 
+/// `tui` is exempt from the `main.rs` guard (#382): an action must not save
+/// its own state over one it cannot read.
+#[test]
+fn an_action_keeps_a_corrupt_state_file() {
+    let repo = crate::core::test_helpers::TestRepo::new_with_remote();
+    repo.commit("one", "one.txt");
+    let two = repo.commit("two", "two.txt");
+    let path = crate::core::transaction::state_path(repo.repo.path());
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, b"{\"command\":").unwrap();
+
+    let err = repo.in_dir(|| {
+        execute_action(
+            Action::Drop {
+                targets: vec![two.to_string()],
+            },
+            "drop",
+            repo.repo.path(),
+            &graph::Theme::dark(),
+        )
+        .unwrap_err()
+    });
+    assert!(err.to_string().contains("corrupted or invalid"), "{err}");
+    assert_eq!(repo.head_oid(), two);
+    assert_eq!(std::fs::read(&path).unwrap(), b"{\"command\":");
+}
+
 #[test]
 fn capital_t_opens_the_latest_trace() {
     let dir = tempfile::tempdir().unwrap();
