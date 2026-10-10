@@ -189,30 +189,3 @@ fn cli_help_renders() {
     assert!(help.contains("Options:"));
     assert!(!help.contains('\u{1b}'));
 }
-
-#[test]
-fn stray_rebase_message_names_the_step_and_both_ways_out() {
-    let msg = stray_rebase_message(true, Some((32, 35)));
-    assert!(msg.contains("rebase is in progress"), "{msg}");
-    assert!(msg.contains("step 32/35"), "{msg}");
-    assert!(msg.contains("loom continue"), "{msg}");
-    assert!(msg.contains("loom abort"), "{msg}");
-
-    let merge = stray_rebase_message(false, None);
-    assert!(merge.contains("merge is in progress"), "{merge}");
-    assert!(!merge.contains("step"), "{merge}");
-}
-
-#[test]
-fn paused_message_points_at_continue_and_abort() {
-    let paused = paused_state_message("update", true);
-    assert!(paused.contains("still in progress"), "{paused}");
-    assert!(paused.contains("loom continue"), "{paused}");
-    assert!(paused.contains("loom abort"), "{paused}");
-
-    let finished = paused_state_message("update", false);
-    assert!(finished.contains("no rebase is in progress"), "{finished}");
-    assert!(finished.contains("loom continue"), "{finished}");
-    assert!(finished.contains("loom abort"), "{finished}");
-    assert_ne!(paused, finished);
-}

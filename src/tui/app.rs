@@ -842,6 +842,9 @@ pub fn run(theme: graph::Theme) -> Result<()> {
     let context = crate::status::resolve_context(&repo, None);
     let workdir = repo::require_workdir(&repo, "display status")?.to_path_buf();
     let git_dir = repo.path().to_path_buf();
+    // `Paused::load` reads an unreadable state as none: say so before the
+    // terminal is taken over, as the `main.rs` guard does.
+    transaction::load(&git_dir)?;
     let paused = Paused::load(&workdir, &git_dir);
     let snapshot = match paused {
         Some(_) => Snapshot::placeholder(workdir, git_dir.clone()),
@@ -932,10 +935,18 @@ fn execute_action(
 ) -> Result<()> {
     let trace_name = format!("loom tui: {}", command);
     // As on the CLI, resuming adds to the trace of the command that paused.
-    if matches!(action, Action::Continue { .. } | Action::Abort { .. }) {
+    let resuming = matches!(action, Action::Continue { .. } | Action::Abort { .. });
+    if resuming {
         crate::trace::init_appending(git_dir, &trace_name);
     } else {
         crate::trace::init(git_dir, &trace_name);
+    }
+    // The `main.rs` guard, which `tui` is exempt from: an operation paused
+    // since the tree was shown, or a state file gone unreadable, would
+    // otherwise be saved over.
+    if !resuming && let Err(e) = transaction::refuse_if_paused(git_dir) {
+        crate::trace::finalize();
+        return Err(e);
     }
     let result = match action {
         Action::Commit { source, dest } => {

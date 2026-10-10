@@ -77,10 +77,17 @@ git add shared.rs && git loom continue
 
 While a loom operation is paused, most commands are blocked. The following are still available:
 
-- `show` — inspect commits
+- `show` / `diff` — inspect commits
 - `trace` — check recent command output
 - `continue` — resume the paused operation
 - `abort` — cancel the paused operation
+- `tui` — opens on the paused operation
+- `worktree list` / `worktree path`
+
+A corrupted state file blocks the same commands, and `tui`, `continue` and
+`abort` refuse it too. Move it aside
+(do not delete it: it is the only record of what `loom abort` would undo), then
+run `loom abort` if git still has a rebase or merge in progress.
 
 ## Without a Saved State File
 
