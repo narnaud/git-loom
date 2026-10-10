@@ -146,7 +146,7 @@ struct Cli {
     files: Option<Vec<String>>,
 
     /// Number of commits to show at and before the base (default: loom.statusContext, else 1)
-    #[arg(hide = true)]
+    #[arg(short = 'n', long = "context", value_name = "N", hide = true)]
     context: Option<usize>,
 
     /// Show all branches including hidden ones (those matching loom.hideBranchPattern)
@@ -362,6 +362,7 @@ enum Command {
         #[arg(short = 'f', long = "files", num_args = 0.., value_name = "COMMIT")]
         files: Option<Vec<String>>,
         /// Number of commits to show at and before the base (default: loom.statusContext, else 1)
+        #[arg(short = 'n', long = "context", value_name = "N")]
         context: Option<usize>,
         /// Show all branches including hidden ones (those matching loom.hideBranchPattern)
         #[arg(short = 'a', long = "all")]
