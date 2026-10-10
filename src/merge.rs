@@ -255,3 +255,7 @@ fn pick_branch(
         "re-run with: loom merge <branch>",
     )
 }
+
+#[cfg(test)]
+#[path = "merge_test.rs"]
+mod tests;

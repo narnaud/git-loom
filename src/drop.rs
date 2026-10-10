@@ -3,7 +3,6 @@ use git2::Repository;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use crate::branch::is_on_first_parent_line;
 use crate::core::msg;
 use crate::core::repo::{self, Target, TargetKind};
 use crate::core::transaction::{self, LoomState, Rollback};
@@ -406,7 +405,7 @@ fn drop_branch(repo: &Repository, branch_name: &str, skip_confirm: bool) -> Resu
 
     // Determine if the branch is woven (tip NOT on first-parent line)
     let is_woven = branch_info.tip_oid != head_oid
-        && !is_on_first_parent_line(repo, head_oid, merge_base_oid, branch_info.tip_oid)?;
+        && !repo::is_on_first_parent_line(repo, head_oid, merge_base_oid, branch_info.tip_oid)?;
 
     let mut graph = Weave::from_repo_with_info(repo, info)?;
 

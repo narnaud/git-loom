@@ -2061,7 +2061,7 @@ fn new_branch_on_a_tip_commit_is_drawn_co_located_with_its_branch() {
     for c in "qb".chars() {
         press(&mut app, KeyCode::Char(c));
     }
-    let Some(Action::NewBranch { name, target }) =
+    let Some(Action::Branch { name, target }) =
         app.handle_name_key(KeyCode::Enter, KeyModifiers::NONE)
     else {
         panic!("expected a branch action");
@@ -2314,14 +2314,14 @@ fn command_line_uses_the_short_ids_the_tree_shows() {
         format!("loom commit -b {} {}", ids.get_branch("feature-a"), file)
     );
     assert_eq!(
-        app.command_line(&Action::NewBranch {
+        app.command_line(&Action::Branch {
             name: "feature-b".to_string(),
             target: Some("feature-a".to_string()),
         }),
         format!("loom branch feature-b -t {}", ids.get_branch("feature-a"))
     );
     assert_eq!(
-        app.command_line(&Action::NewBranch {
+        app.command_line(&Action::Branch {
             name: "feature-b".to_string(),
             target: None,
         }),

@@ -20,7 +20,7 @@ fn merge_weaves_existing_branch() {
 
     // Merge feature-a into integration
     test_repo
-        .in_dir(|| super::merge::run(Some("feature-a".to_string()), false))
+        .in_dir(|| super::run(Some("feature-a".to_string()), false))
         .unwrap();
 
     // HEAD should be a merge commit
@@ -56,7 +56,7 @@ fn merge_local_branch_with_slash_keeps_full_name() {
     test_repo.switch_branch("integration");
 
     test_repo
-        .in_dir(|| super::merge::run(Some("wip/dfaure/feature-a".to_string()), false))
+        .in_dir(|| super::run(Some("wip/dfaure/feature-a".to_string()), false))
         .unwrap();
 
     let info = repo::gather_repo_info(&test_repo.repo, false, 1).unwrap();
@@ -82,11 +82,11 @@ fn merge_already_woven_errors() {
 
     // Create and weave feature-a via branch::new
     test_repo
-        .in_dir(|| crate::branch::new::run(Some("feature-a".to_string()), Some(a2_oid.to_string())))
+        .in_dir(|| crate::branch::run(Some("feature-a".to_string()), Some(a2_oid.to_string())))
         .unwrap();
 
     // Try to merge it again — should error
-    let result = test_repo.in_dir(|| super::merge::run(Some("feature-a".to_string()), false));
+    let result = test_repo.in_dir(|| super::run(Some("feature-a".to_string()), false));
     assert!(result.is_err(), "merging already-woven branch should error");
 }
 
@@ -105,7 +105,7 @@ fn merge_then_unmerge_round_trip() {
 
     // Merge (weave)
     test_repo
-        .in_dir(|| super::merge::run(Some("feature-rt".to_string()), false))
+        .in_dir(|| super::run(Some("feature-rt".to_string()), false))
         .unwrap();
 
     let info = repo::gather_repo_info(&test_repo.repo, false, 1).unwrap();
@@ -117,7 +117,7 @@ fn merge_then_unmerge_round_trip() {
 
     // Unmerge
     test_repo
-        .in_dir(|| super::unmerge::run(Some("feature-rt".to_string())))
+        .in_dir(|| crate::unmerge::run(Some("feature-rt".to_string())))
         .unwrap();
 
     let info = repo::gather_repo_info(&test_repo.repo, false, 1).unwrap();
@@ -142,8 +142,7 @@ fn merge_nonexistent_branch_errors() {
     let test_repo = TestRepo::new_with_remote();
     test_repo.commit("A1", "a1.txt");
 
-    let result =
-        test_repo.in_dir(|| super::merge::run(Some("nonexistent-branch".to_string()), false));
+    let result = test_repo.in_dir(|| super::run(Some("nonexistent-branch".to_string()), false));
     assert!(result.is_err(), "merging nonexistent branch should error");
 }
 
@@ -170,8 +169,7 @@ fn merge_conflict_continue_weaves_branch() {
     let pre_merge_head = test_repo.head_oid();
 
     // Merge pauses — must not return Err.
-    let result =
-        test_repo.in_dir(|| super::merge::run(Some("feature-conflict".to_string()), false));
+    let result = test_repo.in_dir(|| super::run(Some("feature-conflict".to_string()), false));
     assert!(
         result.is_ok(),
         "merge should return Ok on conflict: {:?}",
@@ -234,7 +232,7 @@ fn merge_conflict_abort_restores_state() {
 
     let pre_merge_head = test_repo.head_oid();
 
-    let result = test_repo.in_dir(|| super::merge::run(Some("feature-abort".to_string()), false));
+    let result = test_repo.in_dir(|| super::run(Some("feature-abort".to_string()), false));
     assert!(
         result.is_ok(),
         "merge should return Ok on conflict: {:?}",
@@ -286,9 +284,7 @@ fn woven_in_other_worktree() -> (TestRepo, std::path::PathBuf) {
     let path = test_repo.add_worktree("work-foo", &["-b", "integration-foo", "origin/main"]);
     crate::git::run_git(&path, &["branch", "-q", "-u", "origin/main"]).unwrap();
     test_repo
-        .in_dir_path(&path, || {
-            super::merge::run(Some("feature-a".to_string()), false)
-        })
+        .in_dir_path(&path, || super::run(Some("feature-a".to_string()), false))
         .unwrap();
     (test_repo, path)
 }
@@ -298,7 +294,7 @@ fn merge_refuses_branch_woven_in_other_worktree() {
     let (test_repo, _path) = woven_in_other_worktree();
     let head = test_repo.head_oid();
 
-    let result = test_repo.in_dir(|| super::merge::run(Some("feature-a".to_string()), false));
+    let result = test_repo.in_dir(|| super::run(Some("feature-a".to_string()), false));
 
     let err = result.unwrap_err().to_string();
     assert!(err.contains("integration-foo"), "got: {err}");
@@ -315,7 +311,7 @@ fn merge_refuses_other_worktree_integration_branch() {
     let (test_repo, _path) = woven_in_other_worktree();
     let head = test_repo.head_oid();
 
-    let result = test_repo.in_dir(|| super::merge::run(Some("integration-foo".to_string()), false));
+    let result = test_repo.in_dir(|| super::run(Some("integration-foo".to_string()), false));
 
     let err = result.unwrap_err().to_string();
     assert!(err.contains("checked out in the worktree"), "got: {err}");
@@ -328,6 +324,6 @@ fn merge_accepts_branch_already_upstream_in_other_worktree() {
     let (test_repo, _path) = woven_in_other_worktree();
     test_repo.push_branch_to_remote_main("feature-a");
 
-    let result = test_repo.in_dir(|| super::merge::run(Some("feature-a".to_string()), false));
+    let result = test_repo.in_dir(|| super::run(Some("feature-a".to_string()), false));
     assert!(result.is_ok(), "merge failed: {:?}", result.err());
 }

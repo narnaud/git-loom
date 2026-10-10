@@ -11,7 +11,7 @@ fn unmerge_removes_branch_from_integration() {
 
     // Create and weave feature-a
     test_repo
-        .in_dir(|| crate::branch::new::run(Some("feature-a".to_string()), Some(a2_oid.to_string())))
+        .in_dir(|| crate::branch::run(Some("feature-a".to_string()), Some(a2_oid.to_string())))
         .unwrap();
 
     // Verify it's woven (HEAD is a merge commit)
@@ -19,7 +19,7 @@ fn unmerge_removes_branch_from_integration() {
 
     // Unmerge it
     test_repo
-        .in_dir(|| super::unmerge::run(Some("feature-a".to_string())))
+        .in_dir(|| super::run(Some("feature-a".to_string())))
         .unwrap();
 
     // Branch ref should still exist
@@ -49,7 +49,7 @@ fn unmerge_conflict_aborts() {
     // feature-a creates shared.txt
     let a_oid = test_repo.commit("from-a", "shared.txt");
     test_repo
-        .in_dir(|| crate::branch::new::run(Some("feature-a".to_string()), Some(a_oid.to_string())))
+        .in_dir(|| crate::branch::run(Some("feature-a".to_string()), Some(a_oid.to_string())))
         .unwrap();
 
     // Integration commit B modifies shared.txt — its diff expects "from-a" as
@@ -58,7 +58,7 @@ fn unmerge_conflict_aborts() {
     test_repo.stage_files(&["shared.txt"]);
     test_repo.commit_staged("Commit B");
 
-    let result = test_repo.in_dir(|| super::unmerge::run(Some("feature-a".to_string())));
+    let result = test_repo.in_dir(|| super::run(Some("feature-a".to_string())));
 
     assert!(
         result.is_err(),
@@ -92,7 +92,7 @@ fn unmerge_non_woven_branch_errors() {
     let base_oid = test_repo.find_remote_branch_target("origin/main");
     test_repo.create_branch_at("feature-a", &base_oid.to_string());
 
-    let result = test_repo.in_dir(|| super::unmerge::run(Some("feature-a".to_string())));
+    let result = test_repo.in_dir(|| super::run(Some("feature-a".to_string())));
 
     assert!(result.is_err());
 }
