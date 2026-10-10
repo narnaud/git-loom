@@ -20,10 +20,11 @@ git-loom diff [args...] [--staged] [--all] [-- <git args>...]
 **Arguments:**
 
 - `[args...]`: Zero or more space-separated tokens. Each token is one of:
-  - A **file** short ID (e.g. `ma`) or a repository-relative file path
+  - A **file** short ID (e.g. `ma`) or a file path (cwd-relative or absolute)
   - A **commit** short ID (e.g. `ab`), partial hash, or full hash
   - A **commit range** of the form `<left>..<right>`, where each side is a
     commit short ID, hash, branch name, `HEAD`, or any other git reference
+    (a token with a `..` path component, like `../file`, is a path)
 
   Tokens can be mixed freely (e.g. a commit and a file in the same invocation).
 

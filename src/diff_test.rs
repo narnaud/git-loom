@@ -57,6 +57,25 @@ fn diff_commit_range() {
     assert!(result.is_ok(), "diff with commit range should succeed");
 }
 
+// Issue #361: `../file` was split as the range `""..'/file'`.
+#[test]
+fn diff_parent_relative_path_from_a_subdirectory() {
+    no_pager();
+    let test_repo = TestRepo::new();
+    test_repo.commit("Initial commit", "file.txt");
+    test_repo.write_file("file.txt", "changed");
+    let sub = test_repo.workdir().join("sub");
+    std::fs::create_dir(&sub).unwrap();
+
+    let result = test_repo.in_dir_path(&sub, || {
+        super::run(vec!["../file.txt".to_string()], false, false, vec![])
+    });
+    assert!(
+        result.is_ok(),
+        "diff ../file.txt from sub/ should succeed: {result:?}"
+    );
+}
+
 #[test]
 fn diff_invalid_target_fails() {
     let test_repo = TestRepo::new();
