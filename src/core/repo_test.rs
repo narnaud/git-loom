@@ -809,8 +809,14 @@ fn resolve_arg_twins_are_ambiguous_by_change_id_but_not_by_hash_id() {
             "{arg}: {err}"
         );
     }
-    let hash_id = &first.to_string()[..2];
-    let target = resolve(&test_repo, hash_id, &[TargetKind::Commit]).unwrap();
+    // The twin's hash can share the first two hex digits, lengthening this ID.
+    let hash_id = test_repo.in_dir(|| {
+        let info = repo::gather_repo_info(&test_repo.repo, false, 1).unwrap();
+        let alloc = crate::core::shortid::IdAllocator::new(info.collect_entities());
+        alloc.get_commit(first).to_string()
+    });
+    assert!(first.to_string().starts_with(&hash_id), "{hash_id}");
+    let target = resolve(&test_repo, &hash_id, &[TargetKind::Commit]).unwrap();
     assert_eq!(target, Target::Commit(first.to_string()));
 }
 
