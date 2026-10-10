@@ -24,7 +24,7 @@ pub fn run(args: Vec<String>, staged: bool, all: bool, git_args: Vec<String>) ->
     let mut has_commits = false;
 
     for arg in &args {
-        if let Some((left, right)) = arg.split_once("..") {
+        if let Some((left, right)) = split_range(arg) {
             // Commit range: resolve each side leniently (short IDs or raw refs like HEAD)
             let resolved_left = resolve_ref_leniently(&repo, left);
             let resolved_right = resolve_ref_leniently(&repo, right);
@@ -59,6 +59,15 @@ pub fn run(args: Vec<String>, staged: bool, all: bool, git_args: Vec<String>) ->
 
     let refs: Vec<&str> = cmd.iter().map(|s| s.as_str()).collect();
     git::run_git_paged(workdir, &refs)
+}
+
+/// Split `left..right`, unless `..` is a path component (`../file`), which
+/// makes the token a path.
+fn split_range(arg: &str) -> Option<(&str, &str)> {
+    let is_path = std::path::Path::new(arg)
+        .components()
+        .any(|c| c == std::path::Component::ParentDir);
+    if is_path { None } else { arg.split_once("..") }
 }
 
 /// Resolve a commit reference leniently: tries short ID and direct ref resolution.
