@@ -49,7 +49,7 @@ $_gitLoomCompleter = {
     # are not offered above, so typing one still completes its flags.
     $aliases = @{
         'up' = 'update'; 'pr' = 'push'; 'ci' = 'commit'
-        'amend' = 'fold'; 'am' = 'fold'; 'fixup' = 'fold'; 'mv' = 'fold'; 'rub' = 'fold'
+        'amend' = 'fold'; 'fixup' = 'fold'; 'mv' = 'fold'; 'rub' = 'fold'
         'rw' = 'reword'; 'rm' = 'drop'; 'br' = 'branch'; 'sw' = 'switch'; 'wt' = 'worktree'
         'sh' = 'show'; 'di' = 'diff'; 'c' = 'continue'; 'a' = 'abort'
     }
