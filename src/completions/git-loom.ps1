@@ -108,8 +108,8 @@ $_gitLoomCompleter = {
     switch ($subcommand) {
         'update' {
             $subFlags = @(
-                @{ Name = '-y'; Description = 'Remove local branches whose upstream was deleted' },
-                @{ Name = '--yes'; Description = 'Remove local branches whose upstream was deleted' }
+                @{ Name = '-y'; Description = 'Skip confirmation prompt' },
+                @{ Name = '--yes'; Description = 'Skip confirmation prompt' }
             )
         }
         'push' {

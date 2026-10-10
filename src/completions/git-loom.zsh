@@ -112,8 +112,8 @@ _git-loom() {
     case $sub in
         update)
             flags=(
-                '-y:Remove local branches whose upstream was deleted'
-                '--yes:Remove local branches whose upstream was deleted'
+                '-y:Skip confirmation prompt'
+                '--yes:Skip confirmation prompt'
             ) ;;
         push)
             flags=(
