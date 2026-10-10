@@ -137,7 +137,7 @@ pub fn run(
         // it names the branch only when this one did: inventing `-i` would send
         // the replay to the integration branch instead of the branch prompt.
         let target = match (&branch, integration) {
-            (Some(name), _) => format!(" -b {}", hunk_select::quoted(name)),
+            (Some(name), _) => format!(" -b {}", git::shell_quote(name)),
             (None, true) => " -i".to_string(),
             (None, false) => String::new(),
         };
@@ -421,7 +421,7 @@ fn check_explicit_branch(
 /// The `-m <message>` a replay hint repeats. Only agent mode reads one, and it
 /// guarantees `-m`, so the placeholder fills a string nothing prints.
 fn message_arg(message: &Option<String>) -> String {
-    hunk_select::quoted(message.as_deref().unwrap_or("<message>"))
+    git::shell_quote(message.as_deref().unwrap_or("<message>"))
 }
 
 /// Ask for the target branch: pick a woven one, or type a new name.

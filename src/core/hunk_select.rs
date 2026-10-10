@@ -12,6 +12,7 @@ use git2::{ObjectType, Oid};
 
 use crate::core::agent_mode::{self, HunkItem};
 use crate::core::diff::{BINARY_ENTRY, DiffHunk};
+use crate::git;
 use crate::tui::hunk_selector::{FileEntry, HunkOrigin};
 
 /// The `--hunks` / `--hunks-from` pair. The CLI requires each flag with the
@@ -38,7 +39,7 @@ pub fn patch_command(command: &str, files: &[String]) -> String {
     let mut out = format!("{command} -p");
     for file in files {
         out.push(' ');
-        out.push_str(&quoted(file));
+        out.push_str(&git::shell_quote(file));
     }
     out
 }
@@ -52,7 +53,7 @@ pub fn git_args_suffix(git_args: &[&str]) -> String {
     let mut out = " --".to_string();
     for arg in git_args {
         out.push(' ');
-        out.push_str(&quoted(arg));
+        out.push_str(&git::shell_quote(arg));
     }
     out
 }
@@ -96,16 +97,6 @@ pub struct Picker {
     /// The `git_args_suffix` the replay ends with, after the selection flags:
     /// following `--`, they would reach git instead.
     pub git_args: String,
-}
-
-/// An argument as it must come back on the replay command line (Spec 019).
-///
-/// POSIX quoting everywhere, like the sequence editor `weave` builds: an agent
-/// replays this through a bash-like shell on Windows too. `shell_escape`'s
-/// windows form targets cmd.exe and quotes only around `"`, tab, newline and
-/// space, so a `;` or `&` in a path would reach the shell bare.
-pub fn quoted(arg: &str) -> String {
-    shell_escape::unix::escape(arg.into()).into_owned()
 }
 
 /// `<path>:<n>`, `n` counting from 1 within the file, in listing order.

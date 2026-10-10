@@ -24,20 +24,20 @@ fn invocation(
     // The placeholder belongs only to the prompt asking for the message; every
     // other hint repeats the one the caller already gave, or replaying it
     // commits a subject of `<message>`.
-    let message = message.map_or_else(|| "<message>".to_string(), hunk_select::quoted);
-    let mut out = format!("loom split {} -m {message}", hunk_select::quoted(target));
+    let message = message.map_or_else(|| "<message>".to_string(), git::shell_quote);
+    let mut out = format!("loom split {} -m {message}", git::shell_quote(target));
     if patch {
         out.push_str(" -p");
     }
     for file in files {
         out.push(' ');
-        out.push_str(&hunk_select::quoted(file));
+        out.push_str(&git::shell_quote(file));
     }
     if let Some(from) = hunks.from.as_deref().filter(|_| !hunks.is_empty()) {
         for id in &hunks.ids {
-            out.push_str(&format!(" --hunks {}", hunk_select::quoted(id)));
+            out.push_str(&format!(" --hunks {}", git::shell_quote(id)));
         }
-        out.push_str(&format!(" --hunks-from {}", hunk_select::quoted(from)));
+        out.push_str(&format!(" --hunks-from {}", git::shell_quote(from)));
     }
     out
 }

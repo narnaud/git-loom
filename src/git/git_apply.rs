@@ -5,7 +5,6 @@ use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 
-use crate::core::hunk_select;
 use crate::core::msg;
 use crate::trace as loom_trace;
 
@@ -382,7 +381,7 @@ fn reset_hint_for(specs: &[String]) -> Option<String> {
                 .to_string(),
         );
     }
-    let quoted: Vec<String> = specs.iter().map(|s| hunk_select::quoted(s)).collect();
+    let quoted: Vec<String> = specs.iter().map(|s| super::shell_quote(s)).collect();
     Some(format!(
         "it left unmerged entries in the index — `git reset -- {}` clears them",
         quoted.join(" ")
