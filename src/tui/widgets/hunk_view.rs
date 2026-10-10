@@ -9,7 +9,7 @@ use ratatui::{
     widgets::Block,
 };
 
-use crate::tui::hunk_selector::{FileEntry, HunkEntry, HunkOrigin};
+use crate::core::hunks::{FileEntry, HunkEntry, HunkOrigin};
 use crate::tui::theme::TuiTheme;
 use crate::tui::widgets::common::hunk_line_style;
 use crate::tui::widgets::diff_pane::DiffPane;

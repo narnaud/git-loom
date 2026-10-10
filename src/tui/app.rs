@@ -27,6 +27,7 @@ use ratatui::{
 
 use crate::core::graph::{self, Section};
 use crate::core::hunk_select::{self, HunkArgs};
+use crate::core::hunks::FileEntry;
 use crate::core::msg;
 use crate::core::repo::{self, BranchInfo, CommitInfo, FileChange, RemoteStatus, RepoInfo};
 use crate::core::shortid::IdAllocator;
@@ -34,7 +35,7 @@ use crate::core::staging;
 use crate::core::transaction;
 use crate::core::ui::{self, Answer, Cancelled, Level, Request};
 use crate::git;
-use crate::tui::hunk_selector::{FileEntry, run_hunk_selector_nested};
+use crate::tui::hunk_selector::run_hunk_selector_nested;
 use crate::tui::shell::{KeyResult, PaneId, Shell, ShellApp, ShellConfig, Tick};
 use crate::tui::status_tree::{
     self, LOCAL_CHANGES_KEY, PENDING_COMMIT_OID, Row, RowKind, RowMark, SelectionClass, branch_key,

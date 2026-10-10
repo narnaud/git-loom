@@ -1,6 +1,6 @@
 use super::*;
 use crate::core::diff::{BINARY_ENTRY, DELETED_ENTRY, DiffHunk, SUBMODULE_ENTRY};
-use crate::tui::hunk_selector::{HunkEntry, HunkOrigin};
+use crate::core::hunks::{HunkEntry, HunkOrigin};
 
 fn entry(text: &str) -> HunkEntry {
     HunkEntry {

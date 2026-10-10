@@ -1,8 +1,8 @@
 use crate::core::hunk_select::HunkArgs;
+use crate::core::hunks::{FileEntry, HunkEntry, HunkOrigin};
 use crate::core::repo;
 use crate::core::test_helpers::TestRepo;
 use crate::core::weave::{Position, Weave};
-use crate::tui::hunk_selector::{FileEntry, HunkEntry, HunkOrigin};
 
 // ── Case 1: File(s) + Commit (Amend) ────────────────────────────────────
 
