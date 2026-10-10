@@ -46,7 +46,7 @@ local drop_matcher = clink.argmatcher()
     :addflags("-y", "--yes", "--help", "-h")
 
 local status_matcher = clink.argmatcher()
-    :addflags("-f", "--files", "-a", "--all", "--help", "-h")
+    :addflags("-f", "--files", "-n", "--context", "-a", "--all", "--help", "-h")
 
 -- `show` has no flags of its own and `diff` only these: every other option is
 -- forwarded to git, which clink cannot enumerate.

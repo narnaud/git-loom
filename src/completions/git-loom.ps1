@@ -188,6 +188,8 @@ $_gitLoomCompleter = {
             $subFlags = @(
                 @{ Name = '-f'; Description = 'Show files changed in each commit' },
                 @{ Name = '--files'; Description = 'Show files changed in each commit' },
+                @{ Name = '-n'; Description = 'Number of commits to show at and before the base' },
+                @{ Name = '--context'; Description = 'Number of commits to show at and before the base' },
                 @{ Name = '-a'; Description = 'Show all branches including hidden ones' },
                 @{ Name = '--all'; Description = 'Show all branches including hidden ones' }
             )

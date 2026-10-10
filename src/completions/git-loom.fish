@@ -154,6 +154,7 @@ complete -c git-loom -n '__git_loom_is reword' -s m -l message -x -d 'New messag
 complete -c git-loom -n '__git_loom_is drop' -s y -l yes -d 'Skip confirmation prompt'
 
 complete -c git-loom -n '__git_loom_is status' -s f -l files -d 'Show files changed in each commit'
+complete -c git-loom -n '__git_loom_is status' -s n -l context -x -d 'Number of commits to show at and before the base'
 complete -c git-loom -n '__git_loom_is status' -s a -l all -d 'Show all branches including hidden ones'
 
 # Git's own options go after a `--`, so only loom's are listed.

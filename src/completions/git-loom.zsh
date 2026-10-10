@@ -180,6 +180,8 @@ _git-loom() {
             flags=(
                 '-f:Show files changed in each commit'
                 '--files:Show files changed in each commit'
+                '-n:Number of commits to show at and before the base'
+                '--context:Number of commits to show at and before the base'
                 '-a:Show all branches including hidden ones'
                 '--all:Show all branches including hidden ones'
             ) ;;

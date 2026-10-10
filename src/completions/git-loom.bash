@@ -80,7 +80,7 @@ __git_loom_candidates() {
         split) flags="-m --message -p --patch --hunks --hunks-from" ;;
         reword) flags="-m --message" ;;
         drop) flags="-y --yes" ;;
-        status) flags="-f --files -a --all" ;;
+        status) flags="-f --files -n --context -a --all" ;;
         # Git's own options go after a `--`, so only loom's are listed.
         diff) flags="--staged --cached -a --all" ;;
         agent)

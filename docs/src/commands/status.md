@@ -5,20 +5,15 @@ Show the branch-aware commit graph. This is the default command when running `gi
 ## Usage
 
 ```
-git loom [status] [-f [COMMIT...]] [N]
+git loom [status] [-f [COMMIT...]] [-n <N>]
 ```
-
-### Arguments
-
-| Argument | Description |
-|----------|-------------|
-| `N` | Number of commits to show at and before the base (default: [`loom.statusContext`](../configuration.md#loomstatuscontext), else 1) |
 
 ### Options
 
 | Option | Description |
 |--------|-------------|
 | `-f, --files [COMMIT...]` | Show files changed in each commit, optionally filtered to specific commits |
+| `-n, --context <N>` | Number of commits to show at and before the base (default: [`loom.statusContext`](../configuration.md#loomstatuscontext), else 1) |
 | `-a, --all` | Show all branches including hidden ones |
 
 ## Output
@@ -166,7 +161,7 @@ When upstream has new commits beyond the common base:
 
 ### Context commits
 
-Show history before the base with a positional argument (`git loom 3` or `git loom status 3`):
+Show history before the base with `-n` (`git loom status -n 3`):
 
 ```
 ● ff1b247 (upstream) [origin/main] Initial commit
@@ -251,7 +246,7 @@ sections, same order, same short IDs:
 | `commits[]` | Newest first. Each branch lists only the commits it owns. |
 | `files[]` | Populated by `-f`; ids are `<commit id>:<n>` counting from 0. |
 
-`-f`, `--all` and the context count work exactly as they do on the tree.
+`-f`, `--all` and `-n` work exactly as they do on the tree.
 
 ## Prerequisites
 

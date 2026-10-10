@@ -1037,7 +1037,7 @@ struct App<'a> {
     /// Class every selected row belongs to; `None` when nothing is selected.
     selected_class: Option<SelectionClass>,
     expanded: HashSet<String>,
-    /// Context depth the tree is loaded with, as `loom status <N>` takes it.
+    /// Context depth the tree is loaded with, as `loom status -n <N>` takes it.
     context: usize,
     mode: Mode,
     /// Right-pane scroll state.

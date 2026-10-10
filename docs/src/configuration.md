@@ -69,7 +69,7 @@ How much history to show at and before the base: `1` (the default) shows the bas
 git config loom.statusContext 5
 ```
 
-The positional argument overrides it for one run (`git loom status 1`), and in `loom tui` the `+` and `-` keys change the depth live.
+`-n` overrides it for one run (`git loom status -n 1`), and in `loom tui` the `+` and `-` keys change the depth live.
 
 ### `loom.changeId`
 

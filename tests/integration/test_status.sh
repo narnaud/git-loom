@@ -316,9 +316,9 @@ assert_contains "$out" "⏫"          "upstream_ahead_indicator"
 assert_contains "$out" "new commit"  "upstream_ahead_count_text"
 assert_contains "$out" "common base" "upstream_common_base_label"
 
-# ── CONTEXT COMMITS (gl status N) ─────────────────────────────────────────────
+# ── CONTEXT COMMITS (gl status -n N) ──────────────────────────────────────────
 
-describe "gl status 2 shows 1 context commit (·) before the merge-base"
+describe "gl status -n 2 shows 1 context commit (·) before the merge-base"
 setup_repo_with_remote
 OTHER="$TMPROOT/other"
 git clone -q "$TMPROOT/remote.git" "$OTHER"
@@ -332,18 +332,26 @@ remote_branch=$(git -C "$WORK" rev-parse --abbrev-ref integration@{upstream})
 git -C "$WORK" fetch -q origin
 git -C "$WORK" rebase -q "$remote_branch"
 # "Initial" is now a context commit before the new merge-base
-out=$(gl status 2)
+out=$(gl status -n 2)
 assert_contains "$out" "·"       "context_dot_marker"
 assert_contains "$out" "Initial" "context_shows_history"
+out=$(gl -n 2)
+assert_contains "$out" "Initial" "context_top_level_flag"
 
-describe "loom.statusContext sets the depth, the argument still overrides it"
+describe "the context depth is no longer positional"
+for args in "status 2" "2"; do
+    gl_capture $args
+    assert_exit_fail "$CODE" "context_positional_rejected_${args// /_}"
+done
+
+describe "loom.statusContext sets the depth, -n still overrides it"
 git -C "$WORK" config loom.statusContext 2
 out=$(gl status)
 assert_contains "$out" "·"       "config_context_dot_marker"
 assert_contains "$out" "Initial" "config_context_shows_history"
-out=$(gl status 1)
-assert_not_contains "$out" "·"       "argument_overrides_config"
-assert_not_contains "$out" "Initial" "argument_overrides_config_history"
+out=$(gl status --context 1)
+assert_not_contains "$out" "·"       "flag_overrides_config"
+assert_not_contains "$out" "Initial" "flag_overrides_config_history"
 
 describe "unusable loom.statusContext values keep the default depth"
 for value in 0 -2 many; do
