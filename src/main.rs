@@ -826,11 +826,31 @@ fn parse_cli(args: &[OsString]) -> Cli {
     if !color {
         command = command.color(clap::ColorChoice::Never);
     }
-    let matches = command.get_matches_from(args);
-    match Cli::from_arg_matches(&matches) {
-        Ok(cli) => cli,
-        Err(err) => err.exit(),
+    let matches = command
+        .try_get_matches_from_mut(args)
+        .unwrap_or_else(|err| err.exit());
+    let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|err| err.exit());
+    // The hidden top-level -f/-n/-a are `status` shortcuts that any other
+    // command would silently drop. Not `args_conflicts_with_subcommands`: it
+    // also rejects the global flags (`loom --no-color status`).
+    if let Some(name) = matches.subcommand_name() {
+        let shortcut = [
+            ("--files", cli.files.is_some()),
+            ("--context", cli.context.is_some()),
+            ("--all", cli.all),
+        ]
+        .into_iter()
+        .find_map(|(flag, set)| set.then_some(flag));
+        if let Some(flag) = shortcut {
+            command
+                .error(
+                    clap::error::ErrorKind::ArgumentConflict,
+                    format!("the subcommand '{name}' cannot be used with '{flag}'"),
+                )
+                .exit();
+        }
     }
+    cli
 }
 
 /// Whether colored output should be emitted at all. `is_terminal` is the
