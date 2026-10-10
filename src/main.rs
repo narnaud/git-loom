@@ -168,7 +168,7 @@ enum Command {
     /// Pull-rebase the integration branch and update submodules
     #[command(visible_alias = "up")]
     Update {
-        /// Remove local branches whose upstream tracking branch was deleted on remote
+        /// Skip confirmation prompt
         #[arg(short, long)]
         yes: bool,
     },

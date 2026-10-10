@@ -123,7 +123,7 @@ complete -c git-loom -n $top -f -a continue -d 'Resume a paused operation after 
 complete -c git-loom -n $top -f -a abort -d 'Cancel a paused operation and restore original state'
 
 # Flags are offered beside files: commit, add, fold, ... take paths.
-complete -c git-loom -n '__git_loom_is update' -s y -l yes -d 'Remove local branches whose upstream was deleted'
+complete -c git-loom -n '__git_loom_is update' -s y -l yes -d 'Skip confirmation prompt'
 
 complete -c git-loom -n '__git_loom_is push' -l no-pr -d 'Push without creating a PR or Gerrit review'
 complete -c git-loom -n '__git_loom_is push' -s f -l force -d 'Push with --force instead of --force-with-lease'
