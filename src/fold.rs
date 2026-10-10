@@ -669,7 +669,7 @@ fn run_patch_fold(
             if target_arg == "zz" {
                 let picker = fold_picker(
                     hunks,
-                    &format!("loom fold -p {} zz", hunk_select::quoted(source_arg)),
+                    &format!("loom fold -p {} zz", git::shell_quote(source_arg)),
                     None,
                     git_opts,
                 );
@@ -689,8 +689,8 @@ fn run_patch_fold(
                     hunks,
                     &format!(
                         "loom fold -p {} {}",
-                        hunk_select::quoted(source_arg),
-                        hunk_select::quoted(target_arg)
+                        git::shell_quote(source_arg),
+                        git::shell_quote(target_arg)
                     ),
                     Some(&target_hash),
                     git_opts,
@@ -749,7 +749,7 @@ fn run_patch_fold(
         format!(
             "{} {}",
             hunk_select::patch_command("loom fold", source_args),
-            hunk_select::quoted(target_arg)
+            git::shell_quote(target_arg)
         ),
         Some(&commit_hash),
         git_opts,

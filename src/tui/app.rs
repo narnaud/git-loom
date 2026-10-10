@@ -1291,7 +1291,7 @@ impl<'a> App<'a> {
                 words.push(sid(target));
                 if let Some(hunks) = hunks {
                     for id in &hunks.ids {
-                        words.extend(["--hunks".into(), hunk_select::quoted(id)]);
+                        words.extend(["--hunks".into(), git::shell_quote(id)]);
                     }
                     if let Some(from) = &hunks.from {
                         words.extend(["--hunks-from".into(), from.clone()]);
@@ -1324,10 +1324,10 @@ impl<'a> App<'a> {
                     words.push("-p".into());
                 }
                 words.push(sid(commit));
-                words.extend(files.iter().map(|f| hunk_select::quoted(f)));
+                words.extend(files.iter().map(|f| git::shell_quote(f)));
                 if let Some(hunks) = hunks {
                     for id in &hunks.ids {
-                        words.extend(["--hunks".into(), hunk_select::quoted(id)]);
+                        words.extend(["--hunks".into(), git::shell_quote(id)]);
                     }
                     if let Some(from) = &hunks.from {
                         words.extend(["--hunks-from".into(), from.clone()]);

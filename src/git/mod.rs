@@ -100,6 +100,16 @@ pub const ABORT_FAILED_CAUSE: &str =
 /// whether a commit replays empty, was added in 2.40; `--update-refs` in 2.38).
 const MIN_GIT_VERSION: (u32, u32) = (2, 40);
 
+/// An argument as it must come back on the replay command line (Spec 019).
+///
+/// POSIX quoting everywhere, like the sequence editor `weave` builds: an agent
+/// replays this through a bash-like shell on Windows too. `shell_escape`'s
+/// windows form targets cmd.exe and quotes only around `"`, tab, newline and
+/// space, so a `;` or `&` in a path would reach the shell bare.
+pub fn shell_quote(arg: &str) -> String {
+    shell_escape::unix::escape(arg.into()).into_owned()
+}
+
 /// Absolute path of the git dir for `workdir`.
 ///
 /// Always asks git: a linked worktree has a `.git` file pointing into the main
