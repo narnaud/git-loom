@@ -1,5 +1,80 @@
 # Changelog
 
+## [0.27.0](https://github.com/narnaud/git-loom/compare/v0.26.0...v0.27.0) (2026-10-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* **status:** `loom status <N>` and `loom <N>` are now `loom status -n <N>` and `loom -n <N>` (long form `--context`).
+* **branch:** `loom branch new|create <name>` is now `loom branch <name>`, `loom branch merge` is `loom merge`, and `loom branch unmerge` is `loom unmerge`. No alias keeps the old spellings, since it would reserve those names again.
+* **fold:** `am` is no longer an alias of `fold`; use `amend`.
+* **agent:** `loom agent init` is now `loom agent install`; the old spelling still works as a hidden alias.
+
+### Features ✨
+
+* **absorb:** forward `git commit` options after `--` ([33bc64c](https://github.com/narnaud/git-loom/commit/33bc64c0fb4e389eb52c51ce20bd8c5d63d69c86)), closes [#291](https://github.com/narnaud/git-loom/issues/291)
+* **agent:** rename `agent init` to `agent install` ([c2bb6af](https://github.com/narnaud/git-loom/commit/c2bb6afc21e474a0b4dc450583da64584d7040dd)), closes [#377](https://github.com/narnaud/git-loom/issues/377)
+* **branch:** flatten `branch`, make `merge` and `unmerge` top-level ([1623e9f](https://github.com/narnaud/git-loom/commit/1623e9f27fa5e939fd93096bf7d8875e2f7db40e)), closes [#370](https://github.com/narnaud/git-loom/issues/370)
+* **fold:** drop the alias `am` ([2871bf0](https://github.com/narnaud/git-loom/commit/2871bf0c3481a20ef77c8aa4c9a53501e88f7c0f)), closes [#379](https://github.com/narnaud/git-loom/issues/379)
+* **push:** create a lone GitHub PR directly, then open it ([b04ea26](https://github.com/narnaud/git-loom/commit/b04ea2650937c5ce8ec92dd0ce13026ca327e783))
+* **push:** create PRs in agent mode, report them as JSON, add --title ([814ece3](https://github.com/narnaud/git-loom/commit/814ece3d7596a5decb04838adfe80d00eb60de99))
+* **push:** print the PR URL instead of opening a browser ([b227fbd](https://github.com/narnaud/git-loom/commit/b227fbd4700e7448531465a12c29a689e084df23))
+* **push:** report every forge's push the same way ([ac222fe](https://github.com/narnaud/git-loom/commit/ac222fe55f5eb948458e21ce4ada1b160a860865))
+* **push:** settle the remote type once, asking when it is not detected ([34d2e71](https://github.com/narnaud/git-loom/commit/34d2e71278bb4164e9ce12b187030ac2633cde00))
+* **reword:** forward `git commit` options after `--` ([307d32e](https://github.com/narnaud/git-loom/commit/307d32e4f9183a9970e2138ac5f084611e650471)), closes [#291](https://github.com/narnaud/git-loom/issues/291)
+* **split:** forward `git commit` options after `--` ([655fbbe](https://github.com/narnaud/git-loom/commit/655fbbecd079ea052d9fbdc05ab79463b11190de)), closes [#291](https://github.com/narnaud/git-loom/issues/291)
+* **status:** take the context depth as -n/--context ([a22b212](https://github.com/narnaud/git-loom/commit/a22b21227dc5417ddaeaf3c1af75aa022f0e050c)), closes [#378](https://github.com/narnaud/git-loom/issues/378)
+* **tui:** continue or abort a paused operation without leaving ([a09ecb3](https://github.com/narnaud/git-loom/commit/a09ecb3693d93396c843579379978fcda6a79cdc))
+* **tui:** open the trace with T, like the log's L ([bc21a7c](https://github.com/narnaud/git-loom/commit/bc21a7cb1be14d9533ddd1d1c5a92b0478de3eb5))
+* **tui:** push a branch with p, force-push it with P ([4e3aed8](https://github.com/narnaud/git-loom/commit/4e3aed84a0ad0d909f13509943f0024efe18472a))
+* **tui:** show the latest trace with t ([b42eede](https://github.com/narnaud/git-loom/commit/b42eede684527c96ca5b16e99ce0d459eb5fb6f7))
+* **tui:** size the help popup to its content ([229a3de](https://github.com/narnaud/git-loom/commit/229a3de2ea3d98d913af6c87c9896fc552face75))
+* **weave:** keep mtimes of unchanged files across a rebase ([7ffe9a3](https://github.com/narnaud/git-loom/commit/7ffe9a35a4c989a85b6c3ba8b3de9bc89b2d013a))
+
+
+### Bug Fixes 🐞
+
+* **branch:** report a paused merge as `loom branch merge` ([9ffc5be](https://github.com/narnaud/git-loom/commit/9ffc5be0312812b7ecbf7e82cb77d6af55b72b09)), closes [#396](https://github.com/narnaud/git-loom/issues/396)
+* **changeid:** read trailers past a `---` line in the message ([7037004](https://github.com/narnaud/git-loom/commit/70370043633f1f90986809cbb49f5f9a70296453))
+* **cli:** accept --no-color and --theme after the subcommand ([053943c](https://github.com/narnaud/git-loom/commit/053943c420827f4835cdf02f7727bedb174bcec2)), closes [#375](https://github.com/narnaud/git-loom/issues/375)
+* **diff:** treat ../path as a file, not a commit range ([c9efda5](https://github.com/narnaud/git-loom/commit/c9efda52ee14cddc5eeaa74c7e7d8343de38bbdc)), closes [#361](https://github.com/narnaud/git-loom/issues/361)
+* **git:** pass loom's own paths to git as literal pathspecs ([4250142](https://github.com/narnaud/git-loom/commit/42501427c1f652e54ac8da1a21e3a2515b6caa3a))
+* name rewritten commits by their persistent ID in success messages ([1b54f6b](https://github.com/narnaud/git-loom/commit/1b54f6b2208df7b2cd3926443ce32fd30c205fa7))
+* **push:** run gh as the fork owner's account ([903274a](https://github.com/narnaud/git-loom/commit/903274ab8472edfc0beff46fc9db26256b4e277f))
+* **show,diff:** don't report a failure when the pager quits early ([01fce17](https://github.com/narnaud/git-loom/commit/01fce178dc9782e4b49cb523bb5c5e6cf58bae62))
+* **weave:** name commits in full in the rebase todo ([cee760b](https://github.com/narnaud/git-loom/commit/cee760b19de85bd8d8c9b1dcd9efabe5da67bbd5)), closes [#359](https://github.com/narnaud/git-loom/issues/359)
+
+
+### Performance Improvements ⚡
+
+* **graph:** build one stack index per upstack traversal ([9179399](https://github.com/narnaud/git-loom/commit/9179399745f679c8b7aab9f515971ba796be6e0a)), closes [#385](https://github.com/narnaud/git-loom/issues/385)
+
+
+### Documentation
+
+* **comments:** drop two comments naming code that does not exist ([e89bad3](https://github.com/narnaud/git-loom/commit/e89bad334bd83410345a406bcab098372eb75018)), closes [#389](https://github.com/narnaud/git-loom/issues/389)
+* **skill:** warn about hidden branches and what dropping a branch deletes ([bd009d4](https://github.com/narnaud/git-loom/commit/bd009d455546bee51827feec4b3dc9c11f44ab09))
+* Update screenshots ([ede37e9](https://github.com/narnaud/git-loom/commit/ede37e9a727966c915ceb2b84b6878c078798bba))
+* **update:** describe -y as skipping the confirmation prompt ([3ef8c2a](https://github.com/narnaud/git-loom/commit/3ef8c2ab5f080145fbccf6a2e7c6b9befa898701)), closes [#376](https://github.com/narnaud/git-loom/issues/376)
+
+
+### Changes
+
+* **git:** move the shell-quoting helper out of hunk_select ([d00dc8f](https://github.com/narnaud/git-loom/commit/d00dc8f76b1b2a0924b13492c2f8b52f35e8b59f)), closes [#395](https://github.com/narnaud/git-loom/issues/395)
+* **push:** drop legacy visualstudio.com Azure remotes ([e9611e2](https://github.com/narnaud/git-loom/commit/e9611e239eb32239237b85afc624bfd9c8b1e2fa))
+
+
+### Tests
+
+* **ci:** make the hostile gitconfig reach libgit2 too ([93d69f4](https://github.com/narnaud/git-loom/commit/93d69f470a44820776f8cdeccfb02f759aa96134))
+* **repo:** read the twin's hash ID from the allocator ([8b51c73](https://github.com/narnaud/git-loom/commit/8b51c73c96fb2a43a02be97b200dde8aafdfeead))
+* retry writes Windows refuses on a mapped file ([ec337bd](https://github.com/narnaud/git-loom/commit/ec337bd0508ae3cbe26117d8dc9ee133f6d06afb))
+
+
+### Other
+
+* **claude:** add a refactorer agent and make code-reviewer git-loom specific ([7f4ef4e](https://github.com/narnaud/git-loom/commit/7f4ef4ee12fc2073514b11e6dcac73a95a392027))
+
 ## [0.26.0](https://github.com/narnaud/git-loom/compare/v0.25.0...v0.26.0) (2026-10-04)
 
 
