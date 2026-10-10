@@ -50,7 +50,7 @@ pub fn run(branch: Option<String>, all: bool) -> Result<()> {
         }
         MergeOutcome::Stopped => {
             let state = LoomState {
-                command: "merge".to_string(),
+                command: "branch merge".to_string(),
                 rollback: Rollback::default(),
                 context: serde_json::to_value(MergeContext {
                     branch_name: local_name,
@@ -59,7 +59,7 @@ pub fn run(branch: Option<String>, all: bool) -> Result<()> {
                 targets: Vec::new(),
             };
             transaction::save(&git_dir, &state)?;
-            transaction::warn_paused(workdir, "merge");
+            transaction::warn_paused(workdir, "branch merge");
         }
     }
 
