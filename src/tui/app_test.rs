@@ -3843,12 +3843,12 @@ fn fold_with_hunks_refuses_a_pick_the_working_tree_moved_away_from() {
         repo.write_file("base.txt", "base\n");
         repo.stage_files(&["base.txt"]);
         if let Some(committed) = &committed {
-            std::fs::write(&path, committed).unwrap();
+            crate::core::test_helpers::write_retrying(&path, committed);
             repo.stage_files(&[name]);
         }
         repo.commit_staged("Add f");
         let head = repo.head_oid();
-        std::fs::write(&path, &picked).unwrap();
+        crate::core::test_helpers::write_retrying(&path, &picked);
         let theme = make_theme();
 
         let result = repo.in_dir(|| {
@@ -3857,7 +3857,7 @@ fn fold_with_hunks_refuses_a_pick_the_working_tree_moved_away_from() {
             press(&mut app, KeyCode::Char('F'));
             let edit = || {
                 if let Some(edited) = &edited {
-                    std::fs::write(&path, edited).unwrap();
+                    crate::core::test_helpers::write_retrying(&path, edited);
                 }
             };
             if in_selector {
