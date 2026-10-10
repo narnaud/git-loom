@@ -152,26 +152,99 @@ pub fn save(git_dir: &Path, state: &LoomState) -> Result<()> {
 }
 
 /// Load the state file. Returns `None` if the file does not exist.
+///
+/// Errors carry their cause in the outermost message, the only one `main.rs`
+/// prints. No `exists()` check first: a file removed in between, by a
+/// `loom continue` finishing elsewhere, would read as unreadable.
 pub fn load(git_dir: &Path) -> Result<Option<LoomState>> {
     let path = state_path(git_dir);
-    if !path.exists() {
-        return Ok(None);
-    }
-    let json = std::fs::read_to_string(&path)
-        .with_context(|| format!("Failed to read state file '{}'", path.display()))?;
-    let state: LoomState = serde_json::from_str(&json).with_context(|| {
-        // Never suggest deleting it: the file is the only record of what to
-        // undo, and without it `loom abort` runs `git rebase --abort` and
-        // nothing else — a temp branch, a pre-rebase commit and a saved staged
-        // patch would all be stranded with no way back.
-        format!(
-            "State file '{}' is corrupted or invalid\n\
-             Move it aside (keep it — it is the only record of what `loom abort` would undo),\n\
-             then run `loom abort` to cancel whatever git still has in progress",
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        // Possibly a valid file held by another process: moving it aside
+        // would strand its rollback, so only a parse failure suggests that.
+        Err(e) => bail!(
+            "State file '{}' cannot be read: {e}\n\
+             Fix what keeps loom from reading it, then retry",
             path.display()
-        )
-    })?;
+        ),
+    };
+    let state = serde_json::from_slice(&bytes)
+        .map_err(|e| anyhow::anyhow!(corrupt_state_message(git_dir, &path, &e)))?;
     Ok(Some(state))
+}
+
+/// Error for a state file that does not parse. Never suggests deleting it:
+/// without it `loom abort` runs `git rebase --abort` and nothing else,
+/// stranding a temp branch, a pre-rebase commit and a saved staged patch.
+fn corrupt_state_message(git_dir: &Path, path: &Path, cause: &serde_json::Error) -> String {
+    let next = if git::rebase_is_in_progress(git_dir) || git::merge_is_in_progress(git_dir) {
+        "Then run `loom abort` to cancel what git still has in progress"
+    } else {
+        "Git has nothing in progress, so there is nothing for `loom abort` to cancel"
+    };
+    format!(
+        "State file '{}' is corrupted or invalid ({cause})\n\
+         Move it aside and keep the copy: it is the only record of what `loom abort` would undo\n\
+         What loom set aside for the operation, such as staged changes, comes back only by hand from it\n\
+         {next}",
+        path.display()
+    )
+}
+
+/// Refuse a command while a loom operation is paused or its state file is
+/// unreadable, which the command would save over, or while git has a rebase
+/// or merge in progress, which it would run into (Spec 014).
+pub fn refuse_if_paused(git_dir: &Path) -> Result<()> {
+    let rebasing = git::rebase_is_in_progress(git_dir);
+    let interrupted = rebasing || git::merge_is_in_progress(git_dir);
+    if let Some(state) = load(git_dir)? {
+        bail!(paused_state_message(&state.command, interrupted));
+    }
+    if interrupted {
+        let step = if rebasing {
+            git::rebase_progress(git_dir)
+        } else {
+            None
+        };
+        bail!(stray_rebase_message(rebasing, step));
+    }
+    Ok(())
+}
+
+/// Message shown when a command is blocked by a paused loom operation.
+///
+/// `interrupted` tells whether git still has a rebase or merge going: if not,
+/// the user likely finished it by hand, and `loom continue` only has the
+/// post-rebase bookkeeping left to do.
+fn paused_state_message(command: &str, interrupted: bool) -> String {
+    if interrupted {
+        format!(
+            "A `loom {command}` is paused, with a rebase or merge still in progress.\n\
+             Resolve what stopped it, then run `loom continue` to resume, or `loom abort` to cancel."
+        )
+    } else {
+        format!(
+            "A `loom {command}` is paused, but no rebase is in progress.\n\
+             If you finished it yourself, run `loom continue` to wrap up and clear the state.\n\
+             Run `loom abort` to discard it instead."
+        )
+    }
+}
+
+/// Message shown when git has a rebase or merge in progress that no loom state
+/// file describes — an operation that failed before it could save state, or one
+/// the user started with raw git.
+fn stray_rebase_message(rebasing: bool, step: Option<(usize, usize)>) -> String {
+    let what = if rebasing { "rebase" } else { "merge" };
+    let progress = match step {
+        Some((current, total)) => format!(" (stopped at step {current}/{total})"),
+        None => String::new(),
+    };
+    format!(
+        "A git {what} is in progress{progress}, but no loom operation is recorded.\n\
+         Resolve any conflicts and run `loom continue` to finish it, or `loom abort` to cancel it."
+    )
 }
 
 /// Delete the state file.
@@ -1136,10 +1209,67 @@ mod tests {
         let path = state_path(dir.path());
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, b"not valid json").unwrap();
-        let result = load(dir.path());
-        let err = format!("{:#}", result.unwrap_err());
-        assert!(err.contains("state.json"), "{err}");
-        assert!(err.contains("loom abort"), "{err}");
+        let idle = load(dir.path()).unwrap_err().to_string();
+        assert!(idle.contains("state.json"), "{idle}");
+        assert!(idle.contains("line 1 column"), "{idle}");
+        assert!(idle.contains("nothing in progress"), "{idle}");
+
+        std::fs::create_dir(dir.path().join("rebase-merge")).unwrap();
+        let rebasing = load(dir.path()).unwrap_err().to_string();
+        assert!(rebasing.contains("Then run `loom abort`"), "{rebasing}");
+
+        std::fs::write(&path, b"{\"command\":\"\xff\"}").unwrap();
+        let not_utf8 = load(dir.path()).unwrap_err().to_string();
+        assert!(not_utf8.contains("corrupted or invalid"), "{not_utf8}");
+    }
+
+    /// A file that cannot be read may be valid and only held elsewhere:
+    /// moving it aside would strand its rollback.
+    #[test]
+    fn unreadable_state_names_the_cause_without_moving_it_aside() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(state_path(dir.path())).unwrap();
+        let err = load(dir.path()).unwrap_err().to_string();
+        assert!(err.contains("cannot be read: "), "{err}");
+        assert!(!err.contains("Move it aside"), "{err}");
+    }
+
+    #[test]
+    fn refuse_if_paused_keeps_a_corrupt_state_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = state_path(dir.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"{\"command\":").unwrap();
+        let err = refuse_if_paused(dir.path()).unwrap_err().to_string();
+        assert!(err.contains("corrupted or invalid"), "{err}");
+        assert_eq!(std::fs::read(&path).unwrap(), b"{\"command\":");
+    }
+
+    #[test]
+    fn stray_rebase_message_names_the_step_and_both_ways_out() {
+        let msg = stray_rebase_message(true, Some((32, 35)));
+        assert!(msg.contains("rebase is in progress"), "{msg}");
+        assert!(msg.contains("step 32/35"), "{msg}");
+        assert!(msg.contains("loom continue"), "{msg}");
+        assert!(msg.contains("loom abort"), "{msg}");
+
+        let merge = stray_rebase_message(false, None);
+        assert!(merge.contains("merge is in progress"), "{merge}");
+        assert!(!merge.contains("step"), "{merge}");
+    }
+
+    #[test]
+    fn paused_message_points_at_continue_and_abort() {
+        let paused = paused_state_message("update", true);
+        assert!(paused.contains("still in progress"), "{paused}");
+        assert!(paused.contains("loom continue"), "{paused}");
+        assert!(paused.contains("loom abort"), "{paused}");
+
+        let finished = paused_state_message("update", false);
+        assert!(finished.contains("no rebase is in progress"), "{finished}");
+        assert!(finished.contains("loom continue"), "{finished}");
+        assert!(finished.contains("loom abort"), "{finished}");
+        assert_ne!(paused, finished);
     }
 
     /// The directory a save leaves behind must hold the state file and nothing
