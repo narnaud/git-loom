@@ -382,8 +382,7 @@ impl TestRepo {
 
     /// Write content to a file in the working directory (without committing).
     pub fn write_file(&self, filename: &str, content: &str) {
-        let path = self.workdir().join(filename);
-        fs::write(path, content).unwrap();
+        write_retrying(self.workdir().join(filename), content);
     }
 
     /// Read content from a file in the working directory.
@@ -1065,6 +1064,24 @@ pub fn stack_edges(info: &RepoInfo) -> HashMap<String, status_json::StackEdge> {
             (b, edge)
         })
         .collect()
+}
+
+/// `fs::write`, retried while Windows refuses to truncate a file another
+/// process (an antivirus scan of a file just written) has mapped: os error 1224.
+pub fn write_retrying(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) {
+    const ERROR_USER_MAPPED_FILE: i32 = 1224;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match fs::write(path.as_ref(), contents.as_ref()) {
+            Err(e)
+                if e.raw_os_error() == Some(ERROR_USER_MAPPED_FILE)
+                    && std::time::Instant::now() < deadline =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            result => return result.unwrap(),
+        }
+    }
 }
 
 #[cfg(test)]
