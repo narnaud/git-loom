@@ -84,13 +84,13 @@ local worktree_matcher = clink.argmatcher()
     )
     :addflags("--help", "-h")
 
-local agent_init_matcher = clink.argmatcher()
+local agent_install_matcher = clink.argmatcher()
     :addarg("claude")
     :addflags("--project", "--help", "-h")
 
 local agent_matcher = clink.argmatcher()
     :addarg(
-        "init" .. agent_init_matcher
+        "install" .. agent_install_matcher
     )
     :addflags("--help", "-h")
 

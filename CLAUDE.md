@@ -10,7 +10,7 @@ integration branch and rewrites/manages them without leaving that branch.
   mode (`ui.rs`: `msg` prompts/messages redirected to `loom tui`), weave.
 - `src/git/`: low-level Git operations; `src/branch/`: new/merge/unmerge.
 - `src/tui/`: status tree, shell, hunk selector, widgets, theme.
-- `src/agent/`: `agent init`; embedded source is `skills/git-loom/SKILL.md`.
+- `src/agent/`: `agent install`; embedded source is `skills/git-loom/SKILL.md`.
 - Tests are sibling `*_test.rs` files; shared fixtures are in
   `src/core/test_helpers.rs`; integration tests are in `tests/integration/`.
 
@@ -39,7 +39,7 @@ keep it terse and normative, and do not duplicate rules, docs, or examples.
 | `specs/016-diff.md` | Diff: short-ID–aware wrapper around git diff |
 | `specs/017-switch.md` | Switch to any branch for testing without weaving |
 | `specs/018-add.md` | Stage files using short IDs, paths, or `zz`; hunk-level staging with `-p` |
-| `specs/019-agent.md` | Agent integration: `agent init` skill install and `--agent` machine-readable mode |
+| `specs/019-agent.md` | Agent integration: `agent install` skill install and `--agent` machine-readable mode |
 | `specs/020-tui.md` | Interactive status TUI: tree + diff panes, with actions |
 | `specs/021-git-args.md` | Forwarding arguments to git after a `--` separator |
 | `specs/022-worktree.md` | Worktrees, each holding its own integration branch |

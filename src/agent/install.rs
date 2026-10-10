@@ -41,7 +41,7 @@ fn install_base(agent: AgentKind, project: bool, dir: Option<PathBuf>) -> Result
     }
     if project {
         let repo = repo::open_repo()?;
-        let workdir = repo::require_workdir(&repo, "agent init --project")?;
+        let workdir = repo::require_workdir(&repo, "agent install --project")?;
         return Ok(workdir.join(agent.config_dir()));
     }
     // Requires Rust >= 1.85, where home_dir was fixed on Windows; the
@@ -113,9 +113,9 @@ pub fn report_outdated_skills() {
                 continue;
             }
             let command = if project {
-                "git-loom agent init --project"
+                "git-loom agent install --project"
             } else {
-                "git-loom agent init"
+                "git-loom agent install"
             };
             agent_mode::record_message(&format!(
                 "The {} git-loom skill at `{}` differs from the one this loom ships. \
@@ -148,11 +148,11 @@ fn installed_targets(agent: AgentKind) -> Vec<(PathBuf, bool)> {
 /// the same byte comparison `install_skill` uses to decide whether to rewrite.
 ///
 /// A file that is absent or unreadable is not outdated: nothing is installed
-/// there, and a user who never ran `agent init` is not nagged.
+/// there, and a user who never ran `agent install` is not nagged.
 fn is_outdated(agent: AgentKind, target: &Path) -> bool {
     std::fs::read_to_string(target).is_ok_and(|installed| installed != skill_content(agent))
 }
 
 #[cfg(test)]
-#[path = "init_test.rs"]
+#[path = "install_test.rs"]
 mod tests;

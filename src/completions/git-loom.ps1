@@ -210,14 +210,14 @@ $_gitLoomCompleter = {
 
             if ($null -eq $agentSubcommand -and -not ($wordToComplete -match '^-')) {
                 $agentSubs = @(
-                    @{ Name = 'init'; Description = 'Install the loom skill for an AI agent' }
+                    @{ Name = 'install'; Description = 'Install the loom skill for an AI agent' }
                 )
                 return $agentSubs | Where-Object { $_.Name -like "$wordToComplete*" } | ForEach-Object {
                     [System.Management.Automation.CompletionResult]::new($_.Name, $_.Name, 'ParameterValue', $_.Description)
                 }
             }
 
-            if ($agentSubcommand -eq 'init') {
+            if ($agentSubcommand -eq 'install') {
                 if (-not ($wordToComplete -match '^-')) {
                     return @('claude') | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
                         [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', 'Claude Code')

@@ -194,8 +194,8 @@ _git-loom() {
             ) ;;
         agent)
             if [[ -z $nested ]]; then
-                subs=('init:Install the loom skill for an AI agent')
-            elif [[ $nested == init ]]; then
+                subs=('install:Install the loom skill for an AI agent')
+            elif [[ $nested == install ]]; then
                 [[ $cur != -* ]] && subs=('claude:Claude Code')
                 flags=('--project:Install into the repository instead of the home directory')
             fi ;;

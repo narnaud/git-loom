@@ -38,7 +38,7 @@ Rules:
    `add`, `commit`, or `drop`; it includes unrelated local edits.
 5. Never pipe answers into prompts. In agent mode, re-invoke with explicit args.
 6. If a message says this skill differs from loom's shipped skill, run the named
-   `git-loom agent init` command and tell the user to restart the session.
+   `git-loom agent install` command and tell the user to restart the session.
 
 ## Agent status
 

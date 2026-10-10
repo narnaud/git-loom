@@ -81,7 +81,7 @@ fn outdated_when_content_differs() {
     assert!(is_outdated(AgentKind::Claude, &target));
 
     // A local edit reads the same way: the file is loom-owned, so any
-    // divergence is reported and `agent init` overwrites it.
+    // divergence is reported and `agent install` overwrites it.
     std::fs::write(&target, format!("{}\nlocal note\n", CLAUDE_SKILL)).unwrap();
     assert!(is_outdated(AgentKind::Claude, &target));
 }
