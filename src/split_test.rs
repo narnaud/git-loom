@@ -452,7 +452,7 @@ fn split_head_by_hunks_of_a_rename_keeps_the_tree() {
 /// the *pre-image*, so staging by path would drop the bump from history.
 #[test]
 fn split_by_hunks_takes_a_submodule_from_the_commit() {
-    use crate::tui::hunk_selector::{FileEntry, HunkEntry, HunkOrigin};
+    use crate::core::hunks::{FileEntry, HunkEntry, HunkOrigin};
 
     let test_repo = TestRepo::new();
     let (first, second) = test_repo.add_submodule("Data");

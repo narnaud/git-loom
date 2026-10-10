@@ -2,11 +2,11 @@ use anyhow::{Result, bail};
 use git2::{Oid, Repository};
 
 use crate::core::hunk_select::{self, HunkArgs, Picker};
+use crate::core::hunks::FileEntry;
 use crate::core::repo::{self, Target, TargetKind};
 use crate::core::weave;
 use crate::core::{agent_mode, changeid, diff, graph, msg, staging};
 use crate::git;
-use crate::tui::hunk_selector::FileEntry;
 
 const COMMAND: &str = "split";
 

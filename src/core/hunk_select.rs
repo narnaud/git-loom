@@ -12,8 +12,8 @@ use git2::{ObjectType, Oid};
 
 use crate::core::agent_mode::{self, HunkItem};
 use crate::core::diff::{BINARY_ENTRY, DiffHunk};
+use crate::core::hunks::{FileEntry, HunkOrigin};
 use crate::git;
-use crate::tui::hunk_selector::{FileEntry, HunkOrigin};
 
 /// The `--hunks` / `--hunks-from` pair. The CLI requires each flag with the
 /// other, so an empty `ids` means neither was given.

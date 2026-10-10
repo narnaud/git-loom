@@ -6,13 +6,13 @@ use std::path::Path;
 use crate::core::diff;
 use crate::core::graph;
 use crate::core::hunk_select::{self, HunkArgs, Picker};
+use crate::core::hunks::FileEntry;
 use crate::core::msg;
 use crate::core::repo::{self, Target, TargetKind};
 use crate::core::staging;
 use crate::core::transaction::{self, LoomState, Rollback};
 use crate::core::weave::{self, EmptiedRefs, Position, RebaseOutcome, Weave};
 use crate::git;
-use crate::tui::hunk_selector::FileEntry;
 
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "op")]

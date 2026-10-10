@@ -1,7 +1,7 @@
 use crate::core::diff;
+use crate::core::hunks::{FileEntry, HunkEntry, HunkOrigin};
 use crate::core::test_helpers::TestRepo;
 use crate::git;
-use crate::tui::hunk_selector::{FileEntry, HunkEntry, HunkOrigin};
 
 // ---------------------------------------------------------------------------
 // Helpers

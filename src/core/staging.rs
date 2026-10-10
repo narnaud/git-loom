@@ -6,10 +6,10 @@ use std::path::Path;
 
 use crate::core::diff::{self, parse_hunk_start};
 use crate::core::hunk_select::{self, Picker};
+use crate::core::hunks::{FileEntry, HunkEntry, HunkOrigin};
 use crate::core::repo;
 use crate::core::{agent_mode, graph, msg};
 use crate::git;
-use crate::tui::hunk_selector::{FileEntry, HunkEntry, HunkOrigin};
 use crate::tui::theme::TuiTheme;
 
 /// What becomes of staged work a pick leaves out (Spec 019).
