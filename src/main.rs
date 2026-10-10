@@ -187,7 +187,7 @@ enum Command {
         #[arg(long, conflicts_with = "no_pr")]
         title: Option<String>,
     },
-    /// Set up AI agent integration (unrelated to `init`)
+    /// Set up AI agent integration
     Agent(AgentCmd),
 
     // -- Staging --
@@ -430,7 +430,9 @@ struct AgentCmd {
 #[derive(Subcommand)]
 enum AgentAction {
     /// Install the loom skill for an AI agent
-    Init {
+    // `init` is its former name, hidden so old scripts keep working.
+    #[command(alias = "init")]
+    Install {
         /// AI agent to install the skill for
         // Named `kind`, not `agent`: the global `--agent` flag already owns
         // that clap id and the two would collide inside this subcommand.
@@ -582,7 +584,7 @@ fn main() {
     // an operation is paused, and is never trace-logged.
     if let Some(Command::Agent(cmd)) = cli.command {
         let result = match cmd.action {
-            AgentAction::Init { kind, project, dir } => agent::init::run(kind, project, dir),
+            AgentAction::Install { kind, project, dir } => agent::install::run(kind, project, dir),
         };
         finish_and_exit(result);
     }
@@ -803,7 +805,7 @@ fn finish_and_exit(result: anyhow::Result<()>) -> ! {
         // Advisory only, and before `finish` so the notice reaches the JSON
         // `messages`: an agent that loaded a stale skill cannot notice a newer
         // one by itself (spec 019).
-        agent::init::report_outdated_skills();
+        agent::install::report_outdated_skills();
         if let Err(e) = &result
             && e.downcast_ref::<agent_mode::NeedsInput>().is_none()
         {

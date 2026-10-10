@@ -1,11 +1,11 @@
-# Spec 019: Agent Integration (`agent init` and `--agent` mode)
+# Spec 019: Agent Integration (`agent install` and `--agent` mode)
 
 ## Overview
 
 Agent integration makes loom usable by AI coding agents (Claude Code first).
 It has two parts:
 
-- **`git-loom agent init`** installs a skill file that teaches the agent to use
+- **`git-loom agent install`** installs a skill file that teaches the agent to use
   loom instead of raw git for history-mutating work.
 - **Agent mode** (the global `--agent` flag, or the `LOOM_AGENT` environment
   variable) makes every loom invocation end with a single machine-readable JSON
@@ -23,15 +23,15 @@ itself. Without packaged guidance, agents also fall back to raw
 `git rebase`/`git commit --amend`, which desynchronizes the weave.
 
 Agent mode turns every prompt into data: the list of choices, and the exact
-command to re-run with the choice filled in. `agent init` ships the playbook so
+command to re-run with the choice filled in. `agent install` ships the playbook so
 the agent knows to prefer loom in the first place.
 
 ## CLI
 
-### `agent init`
+### `agent install`
 
 ```bash
-git-loom agent init [<agent>] [--project]
+git-loom agent install [<agent>] [--project]
 ```
 
 **Arguments:**
@@ -48,9 +48,9 @@ git-loom agent init [<agent>] [--project]
   `skills/git-loom/SKILL.md` suffix is still appended. Used by tests.
   Conflicts with `--project`.
 
-`agent init` is unrelated to `git-loom init` (integration-branch setup); the
-help text says so. It needs no repository (unless `--project` is given), works
-while a loom operation is paused, and is never trace-logged.
+`init`, its former name, is a hidden alias. It needs no repository (unless
+`--project` is given), works while a loom operation is paused, and is never
+trace-logged.
 
 ### Agent mode
 
@@ -434,7 +434,7 @@ cancelled picker, a refused `--hunks` — leaves the index it was handed.
 - Conflict pauses still exit 0 (see Spec 014); agent mode only adds the
   `paused` JSON status.
 
-### `agent init` install behavior
+### `agent install` install behavior
 
 **What changes:**
 
@@ -445,12 +445,12 @@ cancelled picker, a refused `--hunks` — leaves the index it was handed.
 
 **What stays the same:**
 
-- The repository: `agent init` never reads or writes git history or state.
+- The repository: `agent install` never reads or writes git history or state.
 - Any other files in the skills directory.
 
 There is no `--force`: the file is loom-owned and regenerated from the binary,
 so refreshing it after a loom upgrade is the desired behavior (re-run
-`agent init`).
+`agent install`).
 
 Default target: `<home>/.claude/skills/git-loom/SKILL.md`. With `--project`:
 `<worktree>/.claude/skills/git-loom/SKILL.md`.
@@ -460,7 +460,7 @@ Default target: `<home>/.claude/skills/git-loom/SKILL.md`. With `--project`:
 The skill is embedded in the binary, so loom can always tell whether what a
 user has installed is what it ships: the installed file either matches the
 embedded one byte for byte or it does not. That is the same comparison
-`agent init` uses to decide whether to rewrite — no version number is
+`agent install` uses to decide whether to rewrite — no version number is
 involved.
 
 In agent mode — and only there — every invocation ends by checking the
@@ -468,18 +468,18 @@ installed skills, just before the JSON status is emitted:
 
 - The locations checked are the home install and, when run inside a work tree,
   the in-repo one. A location where no skill file exists is skipped silently:
-  a user who never ran `agent init` is not nagged.
+  a user who never ran `agent install` is not nagged.
 - A file whose content differs from the embedded skill adds one entry to the
   JSON `messages` array:
 
 ```
 The Claude git-loom skill at `<path>` differs from the one this loom ships.
-Run `git-loom agent init` to refresh it (local edits are overwritten).
+Run `git-loom agent install` to refresh it (local edits are overwritten).
 Restart Claude Code to pick up the new skill.
 ```
 
   (one line in the JSON; wrapped here for reading). The command named is
-  `git-loom agent init --project` for an in-repo install.
+  `git-loom agent install --project` for an in-repo install.
 - Unlike every other message, the notice is **not** also printed as a human
   `!` line. Its only reader is the agent, which parses the JSON, and agent
   mode is the only mode that emits it — printing it too would just make the
@@ -490,13 +490,13 @@ Restart Claude Code to pick up the new skill.
   command that succeeds.
 
 The consequence of byte comparison is that the installed skill cannot be
-edited locally: any change reads as stale and is reported until `agent init`
+edited locally: any change reads as stale and is reported until `agent install`
 overwrites it. This follows from the file already being loom-owned — the same
-edit was being silently discarded by `agent init` before this check existed.
+edit was being silently discarded by `agent install` before this check existed.
 
 The check is advisory and never rewrites anything: loom does not touch files
 outside the repository as a side effect of an unrelated command. The agent
-relays the warning, and either runs `agent init` itself (it touches no git
+relays the warning, and either runs `agent install` itself (it touches no git
 state) or lets the user decide.
 
 The check cannot fail the command it rides along with: an unresolvable home
@@ -506,12 +506,12 @@ mode disabled outright.
 
 ## Target Resolution
 
-Not applicable — `agent init` takes no repository identifiers, and agent mode
+Not applicable — `agent install` takes no repository identifiers, and agent mode
 changes no argument resolution (short IDs resolve exactly as in Spec 002).
 
 ## Conflict Recovery
 
-`agent init` never runs a rebase. Agent mode does not change conflict recovery
+`agent install` never runs a rebase. Agent mode does not change conflict recovery
 (Spec 014); it only reports the pause as `{"status":"paused"}`. `loom
 continue --agent` and `loom abort --agent` follow the same JSON contract:
 another conflict during `continue` reports `paused` again; completion reports
@@ -519,8 +519,8 @@ another conflict during `continue` reports `paused` again; completion reports
 
 ## Prerequisites
 
-- `agent init` without `--project`: a resolvable home directory.
-- `agent init --project`: run inside a git repository with a work tree.
+- `agent install` without `--project`: a resolvable home directory.
+- `agent install --project`: run inside a git repository with a work tree.
 - Agent mode: none beyond the command's own prerequisites.
 
 ## Examples
@@ -589,11 +589,11 @@ $ git-loom continue --agent
 ### Installing the skill
 
 ```
-$ git-loom agent init
+$ git-loom agent install
 ✓ Installed Claude skill at `C:\Users\me\.claude\skills\git-loom\SKILL.md`
   › Restart Claude Code to pick up the new skill
 
-$ git-loom agent init
+$ git-loom agent install
 ✓ Claude skill already up to date
 ```
 
@@ -605,7 +605,7 @@ A version marker in the skill would let the warning name what is installed and
 what is available, and would leave a locally edited skill alone. It would also
 have to be bumped by hand on every skill edit — a step that, when forgotten,
 silently defeats the whole check, and that no test can truly enforce. Byte
-comparison cannot be forgotten and reuses the comparison `agent init` already
+comparison cannot be forgotten and reuses the comparison `agent install` already
 makes. The cost, a skill that must not be edited in place, is one the file's
 loom-owned lifecycle already imposed.
 
@@ -614,7 +614,7 @@ loom-owned lifecycle already imposed.
 Rewriting the skill automatically would be defensible (the file is loom-owned)
 but it would make `loom commit --agent` write to the user's home directory as
 a side effect of committing. A warning in `messages` reaches the agent, which
-can run `agent init` itself or ask the user — the same outcome, with the write
+can run `agent install` itself or ask the user — the same outcome, with the write
 staying an explicit act.
 
 ### JSON on stdout, human output on stderr

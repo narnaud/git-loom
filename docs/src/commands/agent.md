@@ -5,7 +5,7 @@ Set up AI agent integration: install the loom skill for an AI coding agent, and 
 ## Usage
 
 ```
-git loom agent init [<agent>] [--project]
+git loom agent install [<agent>] [--project]
 ```
 
 ### Arguments
@@ -20,11 +20,9 @@ git loom agent init [<agent>] [--project]
 |--------|-------------|
 | `--project` | Install into the repository (`.claude/skills/git-loom/SKILL.md`) instead of the home directory |
 
-`agent init` is unrelated to [`init`](init.md), which sets up an integration branch.
-
 ## What It Does
 
-### agent init
+### agent install
 
 Installs a skill file at `~/.claude/skills/git-loom/SKILL.md` (or under the work tree root with `--project`) that teaches the agent to use loom instead of raw git — including the `--agent` invocation rules below. Re-run it after upgrading loom to refresh the skill:
 
@@ -37,12 +35,12 @@ Installs a skill file at `~/.claude/skills/git-loom/SKILL.md` (or under the work
 The skill is compiled into the loom binary, so loom can see when an installed copy no longer matches what it ships. In agent mode every invocation checks the installed skills — the home one, plus the in-repo one when inside a work tree — and warns on any that differ:
 
 ```json
-{"status":"ok","messages":["The Claude git-loom skill at `~/.claude/skills/git-loom/SKILL.md` differs from the one this loom ships. Run `git-loom agent init` to refresh it (local edits are overwritten). Restart Claude Code to pick up the new skill."]}
+{"status":"ok","messages":["The Claude git-loom skill at `~/.claude/skills/git-loom/SKILL.md` differs from the one this loom ships. Run `git-loom agent install` to refresh it (local edits are overwritten). Restart Claude Code to pick up the new skill."]}
 ```
 
 The notice exists only in the JSON — it is not printed as a `!` line, since the agent parses the JSON and would otherwise read it twice. It rides on `ok` and `paused` responses; an `error` response carries no `messages`, and the check simply reports again on the next command that succeeds. Nothing is rewritten automatically, and a location with no skill installed is never mentioned.
 
-Because the comparison is byte-for-byte, the installed skill is not a file to edit: any local change is reported as stale, and `agent init` overwrites it.
+Because the comparison is byte-for-byte, the installed skill is not a file to edit: any local change is reported as stale, and `agent install` overwrites it.
 
 ### Agent mode (`--agent`)
 
@@ -78,7 +76,7 @@ Agent mode is never inferred from a missing terminal — it must be requested ex
 ### Install the Claude skill
 
 ```bash
-git loom agent init
+git loom agent install
 # ✓ Installed Claude skill at `C:\Users\me\.claude\skills\git-loom\SKILL.md`
 #   › Restart Claude Code to pick up the new skill
 ```
@@ -86,7 +84,7 @@ git loom agent init
 ### Install into the current repository
 
 ```bash
-git loom agent init claude --project
+git loom agent install claude --project
 # ✓ Installed Claude skill at `D:\myrepo\.claude\skills\git-loom\SKILL.md`
 ```
 
@@ -153,5 +151,5 @@ git loom continue --agent
 
 ## Prerequisites
 
-- `agent init`: a resolvable home directory (or a git repository with `--project`)
+- `agent install`: a resolvable home directory (or a git repository with `--project`)
 - Agent mode: none beyond each command's own prerequisites

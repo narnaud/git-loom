@@ -1,4 +1,4 @@
-pub mod init;
+pub mod install;
 
 use clap::ValueEnum;
 

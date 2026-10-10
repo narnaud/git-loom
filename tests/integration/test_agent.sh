@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Integration tests for: agent mode (--agent / LOOM_AGENT) and loom agent init
+# Integration tests for: agent mode (--agent / LOOM_AGENT) and loom agent install
 set -euo pipefail
 source "$(dirname "$0")/helpers.sh"
 
@@ -7,34 +7,39 @@ source "$(dirname "$0")/helpers.sh"
 # its assertions grep for JSON fragments; gl_capture_json keeps them apart for
 # the ones about which stream a line lands on.
 
-# ── agent init ────────────────────────────────────────────────────────────────
+# ── agent install ─────────────────────────────────────────────────────────────
 
-describe "agent init: installs, is idempotent, refreshes stale content"
+describe "agent install: installs, is idempotent, refreshes stale content"
 setup_repo_with_remote
 SKILLS_BASE="$TMPROOT/agent-base"
 SKILL_FILE="$SKILLS_BASE/skills/git-loom/SKILL.md"
 
-gl_capture agent init --dir "$SKILLS_BASE"
-assert_exit_ok "$CODE" "agent_init_ok"
-assert_contains "$OUT" "Installed Claude skill" "agent_init_installed"
-[[ -f "$SKILL_FILE" ]] || fail "agent_init_file_missing"
-grep -q "name: git-loom" "$SKILL_FILE" || fail "agent_init_frontmatter"
+gl_capture agent install --dir "$SKILLS_BASE"
+assert_exit_ok "$CODE" "agent_install_ok"
+assert_contains "$OUT" "Installed Claude skill" "agent_install_installed"
+[[ -f "$SKILL_FILE" ]] || fail "agent_install_file_missing"
+grep -q "name: git-loom" "$SKILL_FILE" || fail "agent_install_frontmatter"
 
-gl_capture agent init --dir "$SKILLS_BASE"
-assert_exit_ok "$CODE" "agent_init_idempotent"
-assert_contains "$OUT" "already up to date" "agent_init_up_to_date"
+gl_capture agent install --dir "$SKILLS_BASE"
+assert_exit_ok "$CODE" "agent_install_idempotent"
+assert_contains "$OUT" "already up to date" "agent_install_up_to_date"
+
+echo "stale" > "$SKILL_FILE"
+gl_capture agent install --dir "$SKILLS_BASE"
+assert_exit_ok "$CODE" "agent_install_refresh"
+assert_contains "$OUT" "Updated Claude skill" "agent_install_updated"
+grep -q "name: git-loom" "$SKILL_FILE" || fail "agent_install_refreshed_content"
 
 echo "stale" > "$SKILL_FILE"
 gl_capture agent init --dir "$SKILLS_BASE"
-assert_exit_ok "$CODE" "agent_init_refresh"
-assert_contains "$OUT" "Updated Claude skill" "agent_init_updated"
-grep -q "name: git-loom" "$SKILL_FILE" || fail "agent_init_refreshed_content"
+assert_exit_ok "$CODE" "agent_init_alias_ok"
+assert_contains "$OUT" "Updated Claude skill" "agent_init_alias_updated"
 
-describe "agent init: works while an operation is paused"
+describe "agent install: works while an operation is paused"
 mkdir -p "$WORK/.git/loom"
 echo '{"command":"update","rollback":{},"context":null}' > "$WORK/.git/loom/state.json"
-gl_capture agent init --dir "$SKILLS_BASE"
-assert_exit_ok "$CODE" "agent_init_while_paused"
+gl_capture agent install --dir "$SKILLS_BASE"
+assert_exit_ok "$CODE" "agent_install_while_paused"
 rm -f "$WORK/.git/loom/state.json"
 
 describe "agent mode: warns when an installed skill is out of date"
@@ -53,11 +58,11 @@ assert_exit_ok "$CODE" "skill_outdated_exit"
 assert_contains "$OUT" '"status":"ok"' "skill_outdated_still_ok"
 assert_contains "$OUT" "differs from the one this loom ships" "skill_outdated_warned"
 assert_not_contains "$OUT" "! The Claude git-loom skill" "skill_outdated_not_printed"
-assert_contains "$OUT" "git-loom agent init --project" "skill_outdated_hint"
+assert_contains "$OUT" "git-loom agent install --project" "skill_outdated_hint"
 # Advisory only: the stale file is never rewritten behind the user's back.
 grep -q "skill from an older loom" "$PROJECT_SKILL" || fail "skill_outdated_rewritten"
 
-gl agent init --project > /dev/null 2>&1
+gl agent install --project > /dev/null 2>&1
 gl_capture status --agent
 assert_exit_ok "$CODE" "skill_current_exit"
 assert_not_contains "$OUT" "differs from the one this loom ships" "skill_current_no_warning"

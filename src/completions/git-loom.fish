@@ -166,9 +166,9 @@ complete -c git-loom -n '__git_loom_is diff' -l staged -d 'Show staged changes (
 complete -c git-loom -n '__git_loom_is diff' -l cached -d 'Alias of --staged'
 complete -c git-loom -n '__git_loom_is diff' -s a -l all -d 'Show all changes, staged and unstaged'
 
-complete -c git-loom -n "__git_loom_is agent ''" -f -a init -d 'Install the loom skill for an AI agent'
-complete -c git-loom -n '__git_loom_is agent init' -f -a claude -d 'Claude Code'
-complete -c git-loom -n '__git_loom_is agent init' -l project -d 'Install into the repository instead of the home directory'
+complete -c git-loom -n "__git_loom_is agent ''" -f -a install -d 'Install the loom skill for an AI agent'
+complete -c git-loom -n '__git_loom_is agent install' -f -a claude -d 'Claude Code'
+complete -c git-loom -n '__git_loom_is agent install' -l project -d 'Install into the repository instead of the home directory'
 
 complete -c git-loom -n "__git_loom_is branch ''" -f -a new -d 'Create a new feature branch'
 complete -c git-loom -n "__git_loom_is branch ''" -f -a create -d 'Alias of new'

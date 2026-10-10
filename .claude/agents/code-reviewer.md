@@ -119,7 +119,7 @@ change. Map the diff to:
 | Command behavior, errors, prompts | `specs/NNN-<command>.md` |
 | User-visible behavior, flags, config keys | `docs/src/commands/<command>.md`; `docs/src/configuration.md` for config |
 | New/renamed command or flag | `docs/src/commands/README.md`, `docs/src/SUMMARY.md`, the five scripts in `src/completions/` (`completion_scripts_cover_the_cli` checks flags exist, not that they are right) |
-| Anything an agent would do differently | `skills/git-loom/SKILL.md` (embedded by `agent init`); Spec 019 for `--agent` JSON |
+| Anything an agent would do differently | `skills/git-loom/SKILL.md` (embedded by `agent install`); Spec 019 for `--agent` JSON |
 | TUI action or key | Spec 020, `docs/src/commands/tui.md` |
 | New spec | Specs table in `CLAUDE.md` |
 | New `Rollback` field or user, new resumable caller | the Data Safety table in `CLAUDE.md`, Spec 014 |

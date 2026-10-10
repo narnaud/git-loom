@@ -88,9 +88,9 @@ __git_loom_candidates() {
         diff) flags="--staged --cached -a --all" ;;
         agent)
             if [[ -z $nested && $cur != -* ]]; then
-                echo "init"
+                echo "install"
                 return
-            elif [[ $nested == init ]]; then
+            elif [[ $nested == install ]]; then
                 [[ $cur != -* ]] && echo "claude"
                 flags="--project"
             fi
