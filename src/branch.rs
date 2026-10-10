@@ -6,8 +6,6 @@ use crate::core::repo;
 use crate::core::weave::{self, Weave};
 use crate::git;
 
-use super::{should_weave, warn_if_hidden};
-
 /// Create a new branch at a target commit, weaving it into the integration branch
 /// if the target is between the merge-base and HEAD.
 ///
@@ -50,7 +48,7 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
 
     git::branch_create(workdir, &name, &commit_hash)?;
 
-    warn_if_hidden(&repo, &name);
+    repo::warn_if_hidden(&repo, &name);
     msg::success(&format!(
         "Created branch `{}` at `{}`",
         name,
@@ -78,6 +76,38 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Determine if weaving is needed after branch creation.
+///
+/// Weaving is needed when the branch target is on the first-parent line
+/// from HEAD to the merge-base (i.e., it's a loose commit on the integration
+/// line, not already on a side branch). Commits at the merge-base are excluded
+/// since no topology change is needed. Branching at HEAD weaves all first-parent
+/// commits into the new branch section with a merge commit.
+fn should_weave(info: &repo::RepoInfo, repo: &Repository, commit_hash: &str) -> Result<bool> {
+    let head_oid = repo::head_oid(repo)?;
+    let branch_oid = git2::Oid::from_str(commit_hash)?;
+
+    let merge_base_oid = info.upstream.merge_base_oid;
+
+    if branch_oid == merge_base_oid {
+        return Ok(false);
+    }
+
+    // HEAD is on the first-parent line by definition
+    if branch_oid == head_oid {
+        return Ok(true);
+    }
+
+    // Only weave if the target commit is on the first-parent line.
+    // Commits on side branches (reachable only through merge second-parents)
+    // already have the merge topology in place.
+    if !repo::is_on_first_parent_line(repo, head_oid, merge_base_oid, branch_oid)? {
+        return Ok(false);
+    }
+
+    Ok(true)
 }
 
 /// Resolve an optional target to a full commit hash.
@@ -117,3 +147,7 @@ fn resolve_commit(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "branch_test.rs"]
+mod tests;

@@ -45,7 +45,7 @@ fn drop_deletes_branch_whose_commits_live_on_feature_branches() {
     test_repo.switch_branch("integration");
     test_repo
         .in_dir_path(&path, || {
-            crate::branch::merge::run(Some("feature-a".to_string()), false)
+            crate::merge::run(Some("feature-a".to_string()), false)
         })
         .unwrap();
 
@@ -113,7 +113,7 @@ fn drop_keeps_a_checked_out_branch_it_did_not_create() {
     test_repo.commit("A1", "a1.txt");
     let oid = test_repo.head_oid();
     test_repo
-        .in_dir(|| crate::branch::new::run(Some("feature-a".to_string()), Some(oid.to_string())))
+        .in_dir(|| crate::branch::run(Some("feature-a".to_string()), Some(oid.to_string())))
         .unwrap();
     let path = test_repo.add_worktree("work-foo", &["feature-a"]);
 

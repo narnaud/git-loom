@@ -59,8 +59,8 @@ fn run_with_name_and_target() {
     let a1_oid = test_repo.commit("A1", "a1.txt");
     test_repo.commit("A2", "a2.txt");
 
-    let result = test_repo
-        .in_dir(|| super::new::run(Some("feature-a".to_string()), Some(a1_oid.to_string())));
+    let result =
+        test_repo.in_dir(|| super::run(Some("feature-a".to_string()), Some(a1_oid.to_string())));
 
     assert!(result.is_ok(), "branch::run failed: {:?}", result.err());
     assert!(test_repo.branch_exists("feature-a"));
@@ -72,8 +72,8 @@ fn run_duplicate_name_rejected_early() {
     let a1_oid = test_repo.commit_empty("A1");
     test_repo.create_branch_at_commit("feature-a", a1_oid);
 
-    let result = test_repo
-        .in_dir(|| super::new::run(Some("feature-a".to_string()), Some(a1_oid.to_string())));
+    let result =
+        test_repo.in_dir(|| super::run(Some("feature-a".to_string()), Some(a1_oid.to_string())));
 
     assert!(result.is_err());
     assert!(
@@ -89,7 +89,7 @@ fn run_default_target_is_merge_base() {
 
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
-    let result = test_repo.in_dir(|| super::new::run(Some("feature-a".to_string()), None));
+    let result = test_repo.in_dir(|| super::run(Some("feature-a".to_string()), None));
 
     assert!(result.is_ok(), "branch::run failed: {:?}", result.err());
     assert_eq!(test_repo.get_branch_target("feature-a"), base_oid);
@@ -110,8 +110,8 @@ fn branch_weave_creates_merge_topology() {
     let a2_oid = test_repo.head_oid();
     test_repo.commit("A3", "a3.txt");
 
-    let result = test_repo
-        .in_dir(|| super::new::run(Some("feature-a".to_string()), Some(a2_oid.to_string())));
+    let result =
+        test_repo.in_dir(|| super::run(Some("feature-a".to_string()), Some(a2_oid.to_string())));
 
     assert!(result.is_ok(), "branch::run failed: {:?}", result.err());
     assert!(test_repo.branch_exists("feature-a"));
@@ -148,7 +148,7 @@ fn branch_at_head_weaves() {
     let head_before = test_repo.head_oid();
 
     let result = test_repo
-        .in_dir(|| super::new::run(Some("feature-a".to_string()), Some(head_before.to_string())));
+        .in_dir(|| super::run(Some("feature-a".to_string()), Some(head_before.to_string())));
 
     assert!(result.is_ok(), "branch::run failed: {:?}", result.err());
     assert!(test_repo.branch_exists("feature-a"));
@@ -180,8 +180,8 @@ fn branch_at_merge_base_no_weave() {
     let head_before = test_repo.head_oid();
     let base_oid = test_repo.find_remote_branch_target("origin/main");
 
-    let result = test_repo
-        .in_dir(|| super::new::run(Some("feature-a".to_string()), Some(base_oid.to_string())));
+    let result =
+        test_repo.in_dir(|| super::run(Some("feature-a".to_string()), Some(base_oid.to_string())));
 
     assert!(result.is_ok(), "branch::run failed: {:?}", result.err());
 
@@ -226,8 +226,8 @@ fn branch_inside_existing_branch_no_weave() {
     let head_before = test_repo.head_oid();
 
     // Now create feature-b at A1, which is inside the feature-a side branch
-    let result = test_repo
-        .in_dir(|| super::new::run(Some("feature-b".to_string()), Some(a1_oid.to_string())));
+    let result =
+        test_repo.in_dir(|| super::run(Some("feature-b".to_string()), Some(a1_oid.to_string())));
 
     assert!(result.is_ok(), "branch::run failed: {:?}", result.err());
     assert!(test_repo.branch_exists("feature-b"));
@@ -254,7 +254,7 @@ fn branch_new_weaving_keeps_staging() {
     let before = test_repo.status_porcelain();
 
     test_repo
-        .in_dir(|| super::new::run(Some("feature-a".to_string()), Some(a2_oid.to_string())))
+        .in_dir(|| super::run(Some("feature-a".to_string()), Some(a2_oid.to_string())))
         .unwrap();
 
     assert_eq!(test_repo.status_porcelain(), before);
@@ -276,7 +276,7 @@ fn branch_from_loose_commits_below_a_merge_merges_on_top() {
     test_repo.merge_no_ff("ra");
 
     test_repo
-        .in_dir(|| super::new::run(Some("tn".to_string()), Some(l1.to_string())))
+        .in_dir(|| super::run(Some("tn".to_string()), Some(l1.to_string())))
         .unwrap();
 
     let merge_tn = test_repo.head_commit();

@@ -650,7 +650,7 @@ fn dispatch_after_continue(workdir: &Path, state: &LoomState) -> Result<()> {
         "fold" => crate::fold::after_continue(workdir, &state.rollback, &state.context),
         "reword" => crate::reword::after_continue(workdir, &state.rollback, &state.context),
         "swap" => crate::swap::after_continue(workdir, &state.rollback, &state.context),
-        "merge" => crate::branch::merge::after_continue(&state.context),
+        "merge" => crate::merge::after_continue(&state.context),
         other => bail!("Unknown command '{}' in loom state file", other),
     }
 }

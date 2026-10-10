@@ -403,7 +403,7 @@ enum Action {
         hunks: Option<HunkArgs>,
     },
     /// `loom branch <name> [-t target]`.
-    NewBranch {
+    Branch {
         name: String,
         target: Option<String>,
     },
@@ -993,7 +993,7 @@ fn execute_action(
             let hunks = hunks.unwrap_or_default();
             split::run(commit, None, patch, hunks, files, vec![], theme)
         }
-        Action::NewBranch { name, target } => branch::new::run(Some(name), target),
+        Action::Branch { name, target } => branch::run(Some(name), target),
         Action::Drop { targets } => drop::run(targets, false),
         Action::Absorb { files } => absorb::run(false, files, vec![]),
         Action::Reword { target, name } => reword::run(target, name, vec![]),
@@ -1334,7 +1334,7 @@ impl<'a> App<'a> {
                     }
                 }
             }
-            Action::NewBranch { name, target } => {
+            Action::Branch { name, target } => {
                 words.extend(["branch".into(), name.clone()]);
                 if let Some(target) = target {
                     words.extend(["-t".into(), sid(target)]);
@@ -3025,7 +3025,7 @@ impl<'a> App<'a> {
             *shown = name.clone();
         }
         self.next_cursor = Some(branch_key(&name));
-        Some(Action::NewBranch { name, target })
+        Some(Action::Branch { name, target })
     }
 
     /// The one commit `s` or `S` splits: the commit the rows are, or the one

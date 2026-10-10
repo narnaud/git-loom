@@ -1,6 +1,5 @@
 use anyhow::{Result, bail};
 
-use crate::branch::is_on_first_parent_line;
 use crate::core::msg;
 use crate::core::repo;
 use crate::core::weave::{self, Weave};
@@ -30,7 +29,7 @@ pub fn run(branch: Option<String>) -> Result<()> {
     let merge_base_oid = info.upstream.merge_base_oid;
 
     let is_woven = branch_info.tip_oid != head_oid
-        && !is_on_first_parent_line(&repo, head_oid, merge_base_oid, branch_info.tip_oid)?;
+        && !repo::is_on_first_parent_line(&repo, head_oid, merge_base_oid, branch_info.tip_oid)?;
 
     if !is_woven {
         bail!(
@@ -85,3 +84,7 @@ fn pick_woven_branch(info: &repo::RepoInfo) -> Result<String> {
         "re-run with: loom unmerge <branch>",
     )
 }
+
+#[cfg(test)]
+#[path = "unmerge_test.rs"]
+mod tests;

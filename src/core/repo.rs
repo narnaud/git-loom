@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
@@ -31,6 +31,38 @@ pub fn head_oid(repo: &Repository) -> Result<git2::Oid> {
 /// `graph_descendant_of` alone is strict: a commit is not its own descendant.
 pub fn contains(repo: &Repository, tip: git2::Oid, oid: git2::Oid) -> Result<bool> {
     Ok(tip == oid || repo.graph_descendant_of(tip, oid)?)
+}
+
+/// Check if `target` is on the first-parent path from `from` down to `stop`.
+///
+/// Walks the first-parent chain (skipping merge second-parents) and returns
+/// true if `target` is found before reaching `stop`.
+pub fn is_on_first_parent_line(
+    repo: &Repository,
+    from: git2::Oid,
+    stop: git2::Oid,
+    target: git2::Oid,
+) -> Result<bool> {
+    let mut current = from;
+    let mut visited: HashSet<git2::Oid> = HashSet::new();
+    loop {
+        if current == stop {
+            return Ok(false);
+        }
+        if !visited.insert(current) {
+            bail!("cycle detected in commit graph at {}", current);
+        }
+        let commit = repo.find_commit(current)?;
+        // Follow only the first parent
+        let first_parent = match commit.parent_id(0) {
+            Ok(oid) => oid,
+            Err(_) => return Ok(false), // reached root
+        };
+        if first_parent == target {
+            return Ok(true);
+        }
+        current = first_parent;
+    }
 }
 
 /// Return the subject line (first line) of a commit message.
@@ -118,6 +150,19 @@ pub fn hide_branch_pattern(repo: &Repository) -> Option<String> {
         .ok()?
         .get_string("loom.hideBranchPattern")
         .ok()
+}
+
+/// Emit a warning if `name` starts with the configured hidden branch prefix.
+/// Despite the config key name `loom.hideBranchPattern`, this performs
+/// prefix matching, not glob matching.
+pub fn warn_if_hidden(repo: &Repository, name: &str) {
+    let pattern = hide_branch_pattern(repo).unwrap_or_else(|| DEFAULT_HIDE_PATTERN.to_string());
+    if !pattern.is_empty() && name.starts_with(&pattern) {
+        msg::warn(&format!(
+            "Branch `{}` is hidden from status by default. Use `--all` to show it.",
+            name
+        ));
+    }
 }
 
 /// Read the default status context depth from git config `loom.statusContext`

@@ -10,6 +10,7 @@ mod drop;
 mod fold;
 mod git;
 mod init;
+mod merge;
 mod push;
 mod reword;
 mod show;
@@ -19,6 +20,7 @@ mod swap;
 mod switch;
 mod trace;
 mod tui;
+mod unmerge;
 mod update;
 mod worktree;
 
@@ -674,9 +676,9 @@ fn main() {
             Some(WorktreeAction::Drop { worktree }) => worktree::drop::run(worktree),
             Some(WorktreeAction::Path { worktree }) => worktree::path::run(worktree),
         },
-        Some(Command::Branch { name, target }) => branch::new::run(name, target),
-        Some(Command::Merge { branch, all }) => branch::merge::run(branch, all),
-        Some(Command::Unmerge { branch }) => branch::unmerge::run(branch),
+        Some(Command::Branch { name, target }) => branch::run(name, target),
+        Some(Command::Merge { branch, all }) => merge::run(branch, all),
+        Some(Command::Unmerge { branch }) => unmerge::run(branch),
         Some(Command::Reword {
             target,
             message,
