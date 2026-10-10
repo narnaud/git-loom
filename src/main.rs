@@ -75,7 +75,7 @@ const GROUPED_COMMANDS: &str = "\
 
 {h}Commits:{r}
   {l}commit{r}, {l}ci{r}        Create a commit on a feature branch [{l}-p{r} for interactive hunks]
-  {l}fold{r}              Amend, fixup, or move commits [{l}-p{r} for interactive hunks] [{l}amend{r}, {l}am{r}, {l}fixup{r}, {l}mv{r}, {l}rub{r}]
+  {l}fold{r}              Amend, fixup, or move commits [{l}-p{r} for interactive hunks] [{l}amend{r}, {l}fixup{r}, {l}mv{r}, {l}rub{r}]
   {l}absorb{r}            Auto-distribute changes into originating commits
   {l}split{r}             Split a commit into two [{l}-p{r} for interactive hunks]
   {l}swap{r}              Swap two commits
@@ -241,7 +241,7 @@ enum Command {
         git_args: Vec<String>,
     },
     /// Fold source(s) into a target (amend files, fixup commits, move commits, move files between commits)
-    #[command(visible_aliases = ["amend", "am", "fixup", "mv", "rub"])]
+    #[command(visible_aliases = ["amend", "fixup", "mv", "rub"])]
     Fold {
         /// Create a new branch from the source commit(s) and move them there
         #[arg(short = 'c', long = "create")]

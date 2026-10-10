@@ -30,7 +30,7 @@ Staging:
 
 Commits:
   commit, ci        Create a commit on a feature branch [-p for interactive hunks]
-  fold              Amend, fixup, or move commits [-p for interactive hunks] [amend, am, fixup, mv, rub]
+  fold              Amend, fixup, or move commits [-p for interactive hunks] [amend, fixup, mv, rub]
   absorb            Auto-distribute changes into originating commits
   split             Split a commit into two [-p for interactive hunks]
   swap              Swap two commits

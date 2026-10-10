@@ -32,7 +32,7 @@ function __git_loom_is
                             set sub push
                         case ci
                             set sub commit
-                        case amend am fixup mv rub
+                        case amend fixup mv rub
                             set sub fold
                         case rw
                             set sub reword

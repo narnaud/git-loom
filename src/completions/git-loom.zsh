@@ -85,7 +85,7 @@ _git-loom() {
         up) sub=update ;;
         pr) sub=push ;;
         ci) sub=commit ;;
-        amend | am | fixup | mv | rub) sub=fold ;;
+        amend | fixup | mv | rub) sub=fold ;;
         rw) sub=reword ;;
         rm) sub=drop ;;
         br) sub=branch ;;
