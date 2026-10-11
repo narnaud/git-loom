@@ -134,8 +134,8 @@ $_gitLoomCompleter = {
             $subFlags = @(
                 @{ Name = '-b'; Description = 'Target feature branch' },
                 @{ Name = '--branch'; Description = 'Target feature branch' },
-                @{ Name = '-i'; Description = 'Commit to the integration branch (loose commit)' },
-                @{ Name = '--integration'; Description = 'Commit to the integration branch (loose commit)' },
+                @{ Name = '-l'; Description = 'Loose commit on the integration branch' },
+                @{ Name = '--loose'; Description = 'Loose commit on the integration branch' },
                 @{ Name = '-m'; Description = 'Commit message' },
                 @{ Name = '--message'; Description = 'Commit message' },
                 @{ Name = '-p'; Description = 'Interactively select hunks to stage' },

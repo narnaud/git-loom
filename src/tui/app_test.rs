@@ -836,7 +836,7 @@ fn a_staged_commit_counts_the_files_the_index_holds() {
             dest: CommitDest::Integration,
         }
     );
-    assert_eq!(app.command_line(&action), "loom commit -i");
+    assert_eq!(app.command_line(&action), "loom commit -l");
 }
 
 /// The half of `C` that writes the index. The selector needs a terminal and
@@ -2304,7 +2304,7 @@ fn command_line_uses_the_short_ids_the_tree_shows() {
             source: CommitSource::Files(vec![ids.get_unstaged().to_string()]),
             dest: CommitDest::Integration,
         }),
-        format!("loom commit -i {}", ids.get_unstaged())
+        format!("loom commit -l {}", ids.get_unstaged())
     );
     assert_eq!(
         app.command_line(&Action::Commit {

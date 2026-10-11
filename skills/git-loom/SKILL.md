@@ -32,7 +32,7 @@ Rules:
    opening the picker (see Hunk selection). Reach for it whenever two logical
    changes share one file.
 3. Always pass `-m <message>` to `commit`, `split`, and commit `reword`. For
-   `commit`, explicitly choose `-b <branch>` or integration branch `-i`.
+   `commit`, explicitly choose `-b <branch>` or a loose commit on the integration branch `-l`.
 4. Name files explicitly. Never use `zz`, except as the destination in
    `git loom fold <commit> zz` (uncommit). In particular, never pass it to
    `add`, `commit`, or `drop`; it includes unrelated local edits.
@@ -89,7 +89,7 @@ The `graph` fields:
 | Intent | Command / rule |
 |---|---|
 | Stage | `git loom add <files>`; list files, never `zz`. |
-| Commit | `git loom commit -b <branch> -m "<msg>" <files...>`; a new branch name creates it. Use `-i` for integration. Name files, or omit them to commit exactly the staged set; never `zz`. |
+| Commit | `git loom commit -b <branch> -m "<msg>" <files...>`; a new branch name creates it. Use `-l` for a loose commit on integration. Name files, or omit them to commit exactly the staged set; never `zz`. |
 | Amend/fixup | `git loom fold <files...> <commit>`; for staged changes, `git loom fold <commit>`. Git options for the amend follow `--` (`-- --no-verify`). |
 | Auto-fixup | `git loom absorb`; `-n` dry-runs. |
 | Move commits | `git loom fold <commit>... <branch>`; `-c` creates a new branch and rejects an existing name. `--above <commit>` / `--below <commit>` moves next to a commit, in any branch or the same one. |

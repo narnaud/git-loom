@@ -5,7 +5,7 @@ Create a commit on a feature branch without leaving the integration branch.
 ## Usage
 
 ```
-git loom commit [-b <branch> | -i] [-m <message>] [-p] [files...] [-- <git args>...]
+git loom commit [-b <branch> | -l] [-m <message>] [-p] [files...] [-- <git args>...]
 ```
 
 Alias: `ci`
@@ -15,7 +15,7 @@ Alias: `ci`
 | Option | Description |
 |--------|-------------|
 | `-b, --branch <branch>` | Target feature branch (name or short ID). Prompts if omitted. |
-| `-i, --integration` | Commit to the integration branch itself (loose commit), skipping the branch prompt. Mutually exclusive with `-b`. |
+| `-l, --loose` | Make a loose commit on the integration branch itself, skipping the branch prompt. Mutually exclusive with `-b`. |
 | `-m, --message <message>` | Commit message. Opens editor if omitted. |
 | `--hunks <id>` | Stage that hunk instead of opening the picker; repeat it per hunk, with `--hunks-from`. The ids are the whole selection — see [agent mode](agent.md). |
 | `--hunks-from <fingerprint>` | Fingerprint of the listing `--hunks` came from. Loom refuses a selection taken from a diff that has since changed. |
@@ -61,9 +61,9 @@ If specific files are given alongside `-p`, any other staged files are saved asi
 
 When `-b` is omitted and the integration branch name matches the upstream's local counterpart (e.g. `main` tracking `origin/main`), the commit is created directly on the integration branch as a **loose commit**. No branch targeting or rebase is needed. This works regardless of whether local commits or woven branches already exist.
 
-Branches with names that differ from their upstream (e.g. `integration` tracking `origin/main`) need `-b` or `-i`.
+Branches with names that differ from their upstream (e.g. `integration` tracking `origin/main`) need `-b` or `-l`.
 
-`-i` forces a loose commit on any integration branch, whatever its name and whatever branches are woven into it — for the occasional change that belongs to the integration branch itself. Unlike `git commit -i`, it selects the *target* of the commit, not extra paths to include.
+`-l` forces a loose commit on any integration branch, whatever its name and whatever branches are woven into it — for the occasional change that belongs to the integration branch itself.
 
 ### Branch Resolution
 
@@ -73,7 +73,7 @@ When the integration branch has diverged (woven branches exist):
 - If `-b` matches an unwoven branch: error
 - If `-b` doesn't match any branch: creates a new branch at the merge-base and weaves it
 - If `-b` is omitted: interactive picker with all woven branches + option to create a new one
-- If `-i` is given: no branch resolution at all — the commit lands on the integration tip
+- If `-l` is given: no branch resolution at all — the commit lands on the integration tip
 
 ### Changes the branch already has
 
@@ -135,7 +135,7 @@ git loom commit -m "initial scaffold" zz
 ### Loose commit on a custom-named integration branch
 
 ```bash
-git loom commit -i -m "bump integration config" zz
+git loom commit -l -m "bump integration config" zz
 # Commits on the integration tip, no branch picker
 ```
 

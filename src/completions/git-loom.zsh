@@ -131,8 +131,8 @@ _git-loom() {
             flags=(
                 '-b:Target feature branch'
                 '--branch:Target feature branch'
-                '-i:Commit to the integration branch (loose commit)'
-                '--integration:Commit to the integration branch (loose commit)'
+                '-l:Loose commit on the integration branch'
+                '--loose:Loose commit on the integration branch'
                 '-m:Commit message'
                 '--message:Commit message'
                 '-p:Interactively select hunks to stage'

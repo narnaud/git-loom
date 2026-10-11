@@ -90,8 +90,8 @@ assert_contains "$JSON" "feature-a" "commit_needs_input_option_a"
 assert_contains "$JSON" "feature-b" "commit_needs_input_option_b"
 assert_contains "$JSON" '"allow_other":true' "commit_needs_input_allow_other"
 assert_contains "$JSON" '"hint":' "commit_needs_input_hint"
-assert_contains "$JSON" "or -i for the integration branch itself" \
-    "commit_needs_input_hint_mentions_integration"
+assert_contains "$JSON" "or -l for a loose commit on the integration branch" \
+    "commit_needs_input_hint_mentions_loose"
 assert_log_not_contains "C1" "commit_needs_input_no_commit"
 
 describe "agent mode: answering the hint commits and reports ok"
@@ -981,9 +981,9 @@ git -C "$WORK" add f.txt
 perl -pi -e 's/^INDEXONLY$/WORKTREE/' "$WORK/f.txt"
 echo gg > "$WORK/g.txt"
 
-gl_capture commit -i -m msg -p --agent
+gl_capture commit -l -m msg -p --agent
 FP="$(json_fingerprint)"
-gl_capture commit -i -m msg -p --hunks g.txt:1 --hunks-from "$FP" --agent
+gl_capture commit -l -m msg -p --hunks g.txt:1 --hunks-from "$FP" --agent
 assert_exit_ok "$CODE" "commit_index_only_exit"
 assert_contains "$(show_patch HEAD)" "+gg" "commit_index_only_committed_pick"
 assert_not_contains "$(show_patch HEAD)" "INDEXONLY" "commit_index_only_not_committed"
@@ -997,9 +997,9 @@ seq 1 10 > "$WORK/n.txt"
 git -C "$WORK" add n.txt
 perl -pi -e 's/^5$/FIVE/' "$WORK/n.txt"
 
-gl_capture commit -i -m msg -p n.txt --agent
+gl_capture commit -l -m msg -p n.txt --agent
 FP="$(json_fingerprint)"
-gl_capture commit -i -m msg -p n.txt --hunks n.txt:2 --hunks-from "$FP" --agent
+gl_capture commit -l -m msg -p n.txt --hunks n.txt:2 --hunks-from "$FP" --agent
 assert_eq "1" "$CODE" "unstaged_whole_exit"
 assert_contains "$OUT" "no longer apply" "unstaged_whole_msg"
 assert_contains "$(git -C "$WORK" diff --cached --name-status)" "A	n.txt" "unstaged_whole_kept_index"
@@ -1057,7 +1057,7 @@ assert_not_contains "$(show_patch feat)" "THIRTYSEVEN" "commit_patch_left_the_re
 assert_not_contains "$(git -C "$WORK" show feat --name-only --pretty=)" "other.txt" "commit_patch_no_leak"
 assert_contains "$(diff_patch --cached)" "index only" "commit_patch_kept_index"
 
-# With neither -b nor -i the branch prompt comes first, keeping -p in its hint:
+# With neither -b nor -l the branch prompt comes first, keeping -p in its hint:
 # answered without it, the re-run stages whole files and undoes the picking.
 describe "agent mode: commit -p asks for the branch before it stages"
 gl_capture commit -m msg -p f.txt --agent
@@ -1066,14 +1066,14 @@ assert_contains "$OUT" '"prompt":"Select target branch"' "commit_patch_branch_fi
 assert_contains "$OUT" 'loom commit -b <branch> -m msg -p f.txt' "commit_patch_branch_first_hint"
 assert_not_contains "$(git -C "$WORK" diff --cached --name-only)" "f.txt" "commit_patch_branch_first_staged_nothing"
 
-gl_capture commit -i -m msg -p f.txt --agent
+gl_capture commit -l -m msg -p f.txt --agent
 assert_eq "10" "$CODE" "commit_patch_integration_exit"
 assert_contains "$OUT" '"prompt":"Select hunks"' "commit_patch_integration_lists"
 
 # The fingerprint does not cover the branch, so a replay can carry a bad one.
 describe "agent mode: commit -p refuses a bad -b before it stages"
 git -C "$WORK" branch lone "$(git -C "$WORK" commit-tree 'HEAD^{tree}' -m lone)"
-gl_capture commit -i -m msg -p f.txt --agent
+gl_capture commit -l -m msg -p f.txt --agent
 FP="$(json_fingerprint)"
 gl_capture commit -b lone -m msg -p f.txt --hunks f.txt:1 --hunks-from "$FP" --agent
 assert_eq "1" "$CODE" "commit_patch_bad_branch_exit"
@@ -1083,14 +1083,14 @@ assert_not_contains "$(git -C "$WORK" diff --cached --name-only)" "f.txt" "commi
 describe "agent mode: commit -p hints keep -p and the forwarded git args"
 gl_capture commit -p f.txt --agent -- --no-verify
 assert_eq "10" "$CODE" "commit_patch_message_exit"
-assert_contains "$OUT" "-m <message> [-b <branch> | -i] -p f.txt -- --no-verify" "commit_patch_message_hint"
+assert_contains "$OUT" "-m <message> [-b <branch> | -l] -p f.txt -- --no-verify" "commit_patch_message_hint"
 
 gl_capture commit -m msg -p f.txt --agent -- --no-verify
 assert_contains "$OUT" "-m msg -p f.txt -- --no-verify (a new name" "commit_patch_branch_hint_git_args"
 
-gl_capture commit -i -m msg -p f.txt --agent -- --no-verify
+gl_capture commit -l -m msg -p f.txt --agent -- --no-verify
 assert_contains "$OUT" "--hunks-from $(json_fingerprint) -- --no-verify" "commit_patch_listing_hint_git_args"
-assert_contains "$OUT" "loom commit -i -m msg -p f.txt --hunks" "commit_patch_listing_hint_raw_message"
+assert_contains "$OUT" "loom commit -l -m msg -p f.txt --hunks" "commit_patch_listing_hint_raw_message"
 
 # For commit and fold, a staged id left out means "not in this one", not
 # "unstage it": it stays staged, as every other staged file does.
@@ -1106,11 +1106,11 @@ setup_left_out_repo() {
     git -C "$WORK" add f.txt new.txt
 }
 
-describe "agent mode: commit -i -p keeps a staged hunk it left out staged"
+describe "agent mode: commit -l -p keeps a staged hunk it left out staged"
 setup_left_out_repo
-gl_capture commit -i -m msg -p --agent
+gl_capture commit -l -m msg -p --agent
 FP="$(json_fingerprint)"
-gl_capture commit -i -m msg -p --hunks f.txt:1 --hunks-from "$FP" --agent
+gl_capture commit -l -m msg -p --hunks f.txt:1 --hunks-from "$FP" --agent
 assert_exit_ok "$CODE" "loose_left_out_exit"
 assert_contains "$(show_patch HEAD)" "+THREE" "loose_left_out_committed_pick"
 assert_not_contains "$(show_patch HEAD)" "THIRTYSEVEN" "loose_left_out_not_committed"
@@ -1265,11 +1265,11 @@ git -C "$WORK" commit -q -m base
 git -C "$WORK" update-index --chmod=+x m.sh
 perl -pi -e 's/^3$/THREE/' "$WORK/f.txt"
 
-gl_capture commit -i -m msg -p --agent
+gl_capture commit -l -m msg -p --agent
 assert_not_contains "$OUT" "m.sh" "commit_modeonly_not_listed"
 FP="$(json_fingerprint)"
 
-gl_capture commit -i -m msg -p --hunks f.txt:1 --hunks-from "$FP" --agent
+gl_capture commit -l -m msg -p --hunks f.txt:1 --hunks-from "$FP" --agent
 assert_exit_ok "$CODE" "commit_modeonly_exit"
 assert_contains "$(show_patch HEAD)" "+THREE" "commit_modeonly_took_the_hunk"
 assert_eq "100644" "$(git -C "$WORK" ls-tree HEAD m.sh | awk '{print $1}')" "commit_modeonly_not_committed"
@@ -1284,11 +1284,11 @@ git -C "$WORK" commit -q -m base
 git -C "$WORK" add empty.py
 perl -pi -e 's/^3$/THREE/' "$WORK/f.txt"
 
-gl_capture commit -i -m msg -p --agent
+gl_capture commit -l -m msg -p --agent
 assert_contains "$OUT" '"id":"empty.py:1"' "commit_empty_listed"
 FP="$(json_fingerprint)"
 
-gl_capture commit -i -m msg -p --hunks empty.py:1 --hunks f.txt:1 --hunks-from "$FP" --agent
+gl_capture commit -l -m msg -p --hunks empty.py:1 --hunks f.txt:1 --hunks-from "$FP" --agent
 assert_exit_ok "$CODE" "commit_empty_exit"
 assert_contains "$(git -C "$WORK" show HEAD --name-only --pretty=)" "empty.py" "commit_empty_committed"
 

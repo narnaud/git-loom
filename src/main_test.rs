@@ -129,9 +129,9 @@ fn completion_scripts_cover_the_cli() {
     ];
     let mut missing = Vec::new();
     for (shell, script) in scripts {
-        // fish spells `-t --target` as `-s t -l target`.
+        // fish spells `-t --target` as `-s t -l target`; longs first, for `-s l`.
         let script = if shell == "fish" {
-            script.replace(" -s ", " -").replace(" -l ", " --")
+            script.replace(" -l ", " --").replace(" -s ", " -")
         } else {
             script.to_string()
         };
@@ -151,14 +151,27 @@ fn completion_scripts_cover_the_cli() {
     );
 }
 
-/// `commit -i` targets the integration branch and `-b` a feature branch;
+/// `commit -l` targets the integration branch and `-b` a feature branch;
 /// accepting both would silently drop one of them.
 #[test]
-fn commit_rejects_integration_with_branch() {
+fn commit_rejects_loose_with_branch() {
     let parse = |args: &[&str]| Cli::try_parse_from(["git-loom"].iter().chain(args).copied());
-    assert!(parse(&["commit", "-i", "-m", "m"]).is_ok());
+    assert!(parse(&["commit", "-l", "-m", "m"]).is_ok());
     assert!(parse(&["commit", "-b", "feature-a", "-m", "m"]).is_ok());
+    assert!(parse(&["commit", "-l", "-b", "feature-a", "-m", "m"]).is_err());
     assert!(parse(&["commit", "-i", "-b", "feature-a", "-m", "m"]).is_err());
+}
+
+/// `-i`/`--integration` predate `-l`/`--loose` (#373) and stay as hidden aliases.
+#[test]
+fn commit_accepts_hidden_integration_alias() {
+    let parse = |args: &[&str]| Cli::try_parse_from(["git-loom"].iter().chain(args).copied());
+    for flag in ["-i", "--integration", "--loose"] {
+        match parse(&["commit", flag, "-m", "m"]).unwrap().command {
+            Some(Command::Commit { loose, .. }) => assert!(loose, "{flag}"),
+            _ => panic!("{flag}: not a commit"),
+        }
+    }
 }
 
 /// Issue #380: one letter was easy to hit by mistake, and the TUI tree binds

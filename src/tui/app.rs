@@ -66,7 +66,7 @@ struct Snapshot {
 /// non-empty keeps it distinct from "no branch here" sentinels in `graph`.
 const NEW_BRANCH_NAME: &str = ".new";
 
-/// Where `c` puts its commit: loose on the integration line (`-i`) or at the
+/// Where `c` puts its commit: loose on the integration line (`-l`) or at the
 /// tip of a woven branch (`-b`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum CommitDest {
@@ -368,7 +368,7 @@ struct FoldTarget {
 /// A loom command to run on the worker thread.
 #[derive(Debug, PartialEq, Eq)]
 enum Action {
-    /// `loom commit -i|-b <branch> [files...]`. `c` always names files, so
+    /// `loom commit -l|-b <branch> [files...]`. `c` always names files, so
     /// the index decides nothing; only `C`, which just staged what it picked,
     /// commits the index (no file arguments).
     Commit {
@@ -1282,7 +1282,7 @@ impl<'a> App<'a> {
             Action::Commit { source, dest } => {
                 words.push("commit".into());
                 match dest {
-                    CommitDest::Integration => words.push("-i".into()),
+                    CommitDest::Integration => words.push("-l".into()),
                     CommitDest::Branch(name) => words.extend(["-b".into(), sid(name)]),
                 }
                 // `C` staged what it picked, so this half names no files.
@@ -2267,7 +2267,7 @@ impl<'a> App<'a> {
         // A row of these kinds always carries a target; refuse rather than
         // fall through to an argument-less `loom commit`, which would commit
         // the index — the one thing `c` must never do. An unnamed row is the
-        // same refusal: `loom commit -i ""` is not an improvement.
+        // same refusal: `loom commit -l ""` is not an improvement.
         let Some(files) = rows
             .iter()
             .map(|r| r.target.clone().filter(|t| !t.is_empty()))

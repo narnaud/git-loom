@@ -222,9 +222,16 @@ enum Command {
         /// Target feature branch (name or short ID)
         #[arg(short = 'b', long = "branch")]
         branch: Option<String>,
-        /// Commit to the integration branch (loose commit), skipping the branch prompt
-        #[arg(short = 'i', long = "integration", conflicts_with = "branch")]
-        integration: bool,
+        /// Make a loose commit on the integration branch, skipping the branch prompt
+        // `-i`/`--integration` are the pre-#373 spelling, kept hidden.
+        #[arg(
+            short = 'l',
+            long = "loose",
+            short_alias = 'i',
+            alias = "integration",
+            conflicts_with = "branch"
+        )]
+        loose: bool,
         /// Commit message (if not provided, opens editor)
         #[arg(short, long)]
         message: Option<String>,
@@ -638,7 +645,7 @@ fn main() {
         }) => reword::run(target, message, git_args),
         Some(Command::Commit {
             branch,
-            integration,
+            loose,
             message,
             patch,
             hunks,
@@ -647,7 +654,7 @@ fn main() {
             git_args,
         }) => commit::run(
             branch,
-            integration,
+            loose,
             message,
             patch.then_some(HunkArgs::new(hunks, hunks_from)),
             files,

@@ -14,7 +14,7 @@ fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) -> a
     )
 }
 
-/// Wrapper for `-i`: commit to the integration branch.
+/// Wrapper for `-l`: loose commit to the integration branch.
 fn run_integration(message: &str, files: Vec<String>) -> anyhow::Result<()> {
     super::run(
         None,

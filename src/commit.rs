@@ -32,7 +32,7 @@ struct CommitContext {
 /// Create a commit without leaving the integration branch.
 ///
 /// Stages files, then either commits on the integration branch itself (a
-/// loose commit: `-i`, or a branch name matching its upstream), or commits at
+/// loose commit: `-l`, or a branch name matching its upstream), or commits at
 /// HEAD and uses Weave to relocate it to the target feature branch (creating
 /// merge topology if needed).
 ///
@@ -41,7 +41,7 @@ struct CommitContext {
 /// relocates it.
 pub fn run(
     branch: Option<String>,
-    integration: bool,
+    loose: bool,
     message: Option<String>,
     patch: Option<HunkArgs>,
     files: Vec<String>,
@@ -53,9 +53,9 @@ pub fn run(
     // Without -m the commit would open $GIT_EDITOR, which hangs a headless agent.
     if agent_mode::enabled() && message.is_none() {
         let command = if patch.is_some() {
-            hunk_select::patch_command("loom commit -m <message> [-b <branch> | -i]", &files)
+            hunk_select::patch_command("loom commit -m <message> [-b <branch> | -l]", &files)
         } else {
-            "loom commit -m <message> [-b <branch> | -i] [files...]".to_string()
+            "loom commit -m <message> [-b <branch> | -l] [files...]".to_string()
         };
         return Err(agent_mode::respond_needs_input(
             agent_mode::InputKind::Text,
@@ -82,7 +82,7 @@ pub fn run(
 
     // A loose commit lands on the integration branch itself: no rebase, no
     // state file, so nothing below it needs the index snapshot.
-    let loose = integration
+    let loose = loose
         || (branch.is_none()
             && info.branch_name == repo::upstream_local_branch(&info.upstream.label));
 
@@ -92,7 +92,7 @@ pub fn run(
     if agent_mode::enabled() && patch.is_some() && !loose && branch.is_none() {
         let hint = format!(
             "re-run with: {}{} (a new name creates the branch), \
-             or -i for the integration branch itself",
+             or -l for a loose commit on the integration branch",
             hunk_select::patch_command(
                 &format!("loom commit -b <branch> -m {}", message_arg(&message)),
                 &files,
@@ -134,11 +134,11 @@ pub fn run(
     // not take.
     let staged_aside = if let Some(hunks) = patch {
         // The listing tells the agent to repeat this invocation (spec 019), so
-        // it names the branch only when this one did: inventing `-i` would send
+        // it names the branch only when this one did: inventing `-l` would send
         // the replay to the integration branch instead of the branch prompt.
-        let target = match (&branch, integration) {
+        let target = match (&branch, loose) {
             (Some(name), _) => format!(" -b {}", git::shell_quote(name)),
-            (None, true) => " -i".to_string(),
+            (None, true) => " -l".to_string(),
             (None, false) => String::new(),
         };
         let command =
@@ -163,7 +163,7 @@ pub fn run(
     };
 
     // Loose commit: commit on the integration branch itself, targeting no
-    // feature branch. Happens with -i, or with no -b when the local branch name
+    // feature branch. Happens with -l, or with no -b when the local branch name
     // matches the upstream's local counterpart (e.g. "main" tracking
     // "origin/main").
     if loose {
@@ -452,7 +452,7 @@ fn pick_branch(
     workdir: &std::path::Path,
 ) -> Result<(String, bool)> {
     let hint = "re-run with: loom commit -b <branch> -m <message> [files...] \
-                (a new name creates the branch), or -i for the integration branch itself";
+                (a new name creates the branch), or -l for a loose commit on the integration branch";
     let name = ask_branch_name(info, hint)?;
 
     let name = name.trim().to_string();
