@@ -10,6 +10,7 @@ pub mod repo;
 pub mod shortid;
 pub mod staging;
 pub mod status_json;
+pub mod trace_log;
 pub mod transaction;
 pub mod ui;
 pub mod weave;

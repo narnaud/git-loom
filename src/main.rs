@@ -26,7 +26,7 @@ mod worktree;
 
 use crate::agent::AgentKind;
 use crate::core::hunk_select::HunkArgs;
-use crate::core::{agent_mode, graph, msg, repo, transaction};
+use crate::core::{agent_mode, graph, msg, repo, trace_log, transaction};
 
 use std::ffi::OsString;
 use std::io::IsTerminal;
@@ -564,11 +564,8 @@ fn main() {
     if should_log && let Ok(repo) = repo::open_repo() {
         let git_dir = repo.path().to_path_buf();
         let cmd_line = std::env::args().collect::<Vec<_>>().join(" ");
-        if matches!(cli.command, Some(Command::Abort) | Some(Command::Continue)) {
-            trace::init_appending(&git_dir, &cmd_line);
-        } else {
-            trace::init(&git_dir, &cmd_line);
-        }
+        let resuming = matches!(cli.command, Some(Command::Abort) | Some(Command::Continue));
+        trace_log::init(&git_dir, &cmd_line, resuming);
     }
 
     // Check for a paused loom operation and block most commands if one exists.
@@ -731,7 +728,7 @@ fn main() {
         }
     };
 
-    trace::finalize();
+    trace_log::finalize();
 
     finish_and_exit(result);
 }

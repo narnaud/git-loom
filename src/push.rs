@@ -13,9 +13,9 @@ use crate::core::msg;
 use crate::core::push_json::{PrReport, PrState, PushReport};
 use crate::core::repo;
 use crate::core::repo::RemoteStatus;
+use crate::core::trace_log;
 use crate::git;
 use crate::status;
-use crate::trace as loom_trace;
 
 /// Remote type detected for the push operation.
 #[derive(Debug, PartialEq, Eq)]
@@ -925,7 +925,7 @@ fn run_push_capture(workdir: &Path, args: &[&str]) -> Result<String> {
 
     let duration_ms = start.elapsed().as_millis();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-    loom_trace::log_command(
+    trace_log::log_command(
         "git",
         &args.join(" "),
         duration_ms,
@@ -977,7 +977,7 @@ fn cli_available(name: &str, mut cmd: Command) -> bool {
         .arg("--version")
         .output()
         .is_ok_and(|o| o.status.success());
-    loom_trace::log_command(
+    trace_log::log_command(
         name,
         "--version",
         start.elapsed().as_millis(),
@@ -1260,7 +1260,7 @@ fn run_gh(gh: &Gh, args: &[&str], stdin: Option<&str>) -> Option<String> {
     let output = child.wait_with_output().ok()?;
     let duration_ms = start.elapsed().as_millis();
     let stderr = String::from_utf8_lossy(&output.stderr);
-    loom_trace::log_command(
+    trace_log::log_command(
         "gh",
         &args.join(" "),
         duration_ms,
@@ -2014,7 +2014,7 @@ fn create_azure_pr(
     let start = Instant::now();
     let output = az_command().current_dir(workdir).args(&args).output()?;
     let duration_ms = start.elapsed().as_millis();
-    loom_trace::log_command(
+    trace_log::log_command(
         "az",
         &args.join(" "),
         duration_ms,

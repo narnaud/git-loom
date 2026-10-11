@@ -20,7 +20,7 @@ use std::time::SystemTime;
 
 use anyhow::Result;
 
-use crate::trace as loom_trace;
+use crate::core::trace_log;
 
 struct Record {
     workdir: PathBuf,
@@ -53,7 +53,7 @@ pub fn snapshot_mtimes(workdir: &Path, upstream: Option<&str>) {
         }
         Err(e) => format!("not recorded: {e:#}"),
     };
-    loom_trace::annotate("mtimes", &note);
+    trace_log::annotate("mtimes", &note);
 }
 
 /// Put the recorded mtimes back on the files whose bytes are unchanged, and
@@ -62,7 +62,7 @@ pub fn restore_mtimes() {
     let Some(record) = RECORD.with(|r| r.borrow_mut().take()) else {
         return;
     };
-    loom_trace::annotate("mtimes", &restore_record(&record));
+    trace_log::annotate("mtimes", &restore_record(&record));
 }
 
 /// Drop the record without restoring: the tree is being handed to the user.

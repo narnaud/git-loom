@@ -6,7 +6,7 @@ use std::time::Instant;
 use anyhow::{Context, Result, bail};
 
 use crate::core::msg;
-use crate::trace as loom_trace;
+use crate::core::trace_log;
 
 /// Apply a patch passed on stdin (`git apply`).
 pub fn apply_patch(workdir: &Path, patch: &str) -> Result<()> {
@@ -227,7 +227,7 @@ fn run_apply(
     if let Some(note) = &index_note {
         logged.insert(0, note);
     }
-    loom_trace::log_command(
+    trace_log::log_command(
         "git",
         &logged.join(" "),
         duration_ms,

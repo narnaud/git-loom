@@ -1,6 +1,6 @@
 use crate::core::test_helpers::TestRepo;
+use crate::core::trace_log;
 use crate::core::weave;
-use crate::trace;
 
 /// Regression (#159): `continue_rebase` must capture git's output and route it
 /// to the trace, instead of running with inherited stdio and leaking git's
@@ -19,11 +19,11 @@ fn continue_rebase_captures_output_to_trace() {
 
     // The trace logger is thread-local and cargo reuses threads across tests;
     // clear any logger a prior test leaked so our init reliably takes effect.
-    let _ = trace::finalize();
+    let _ = trace_log::finalize();
     let git_dir = test_repo.repo.path().to_path_buf();
-    trace::init(&git_dir, "git loom fold");
+    trace_log::init(&git_dir, "git loom fold", false);
     let outcome = super::continue_rebase(&workdir).unwrap();
-    let log_path = trace::finalize().expect("trace should have recorded an entry");
+    let log_path = trace_log::finalize().expect("trace should have recorded an entry");
 
     assert!(matches!(outcome, super::RebaseOutcome::Completed));
     let content = std::fs::read_to_string(&log_path).unwrap();

@@ -1697,7 +1697,7 @@ fn run_rebase_with_empty(
     use std::process::Command;
     use std::time::Instant;
 
-    use crate::trace as loom_trace;
+    use crate::core::trace_log;
 
     // Everything up to the spawn below is pre-flight, and its failures are
     // tagged so a caller's undo knows nothing was rewritten.
@@ -1768,7 +1768,7 @@ fn run_rebase_with_empty(
     let output = cmd.output()?;
     let duration_ms = start.elapsed().as_millis();
     let stderr = String::from_utf8_lossy(&output.stderr);
-    loom_trace::log_command(
+    trace_log::log_command(
         "git",
         &log_args,
         duration_ms,
@@ -1783,11 +1783,11 @@ fn run_rebase_with_empty(
             .filter(|line| !line.starts_with('#'))
             .collect::<Vec<_>>()
             .join("\n");
-        loom_trace::annotate("original git todo", &filtered);
+        trace_log::annotate("original git todo", &filtered);
         let _ = std::fs::remove_file(&sidecar);
     }
 
-    loom_trace::annotate("generated todo", todo_content);
+    trace_log::annotate("generated todo", todo_content);
 
     // Clean up the temp file. Don't abort the rebase here; callers decide
     // whether to abort (out-of-scope) or pause (resumable).

@@ -4588,9 +4588,9 @@ fn capital_t_opens_the_latest_trace() {
         Some("no trace yet: run an action first")
     );
 
-    crate::trace::init(dir.path(), "loom tui: loom drop a1");
-    crate::trace::log_command("git", "rebase --continue", 12, false, "boom");
-    crate::trace::finalize().unwrap();
+    trace_log::init(dir.path(), "loom tui: loom drop a1", false);
+    trace_log::log_command("git", "rebase --continue", 12, false, "boom");
+    trace_log::finalize().unwrap();
     press(&mut app, KeyCode::Char('T'));
     let Some(Popup::Trace { lines, .. }) = &app.popup else {
         panic!("no trace popup");

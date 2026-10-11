@@ -32,6 +32,7 @@ use crate::core::msg;
 use crate::core::repo::{self, BranchInfo, CommitInfo, FileChange, RemoteStatus, RepoInfo};
 use crate::core::shortid::IdAllocator;
 use crate::core::staging;
+use crate::core::trace_log;
 use crate::core::transaction;
 use crate::core::ui::{self, Answer, Cancelled, Level, Request};
 use crate::git;
@@ -937,16 +938,12 @@ fn execute_action(
     let trace_name = format!("loom tui: {}", command);
     // As on the CLI, resuming adds to the trace of the command that paused.
     let resuming = matches!(action, Action::Continue { .. } | Action::Abort { .. });
-    if resuming {
-        crate::trace::init_appending(git_dir, &trace_name);
-    } else {
-        crate::trace::init(git_dir, &trace_name);
-    }
+    trace_log::init(git_dir, &trace_name, resuming);
     // The `main.rs` guard, which `tui` is exempt from: an operation paused
     // since the tree was shown, or a state file gone unreadable, would
     // otherwise be saved over.
     if !resuming && let Err(e) = transaction::refuse_if_paused(git_dir) {
-        crate::trace::finalize();
+        trace_log::finalize();
         return Err(e);
     }
     let result = match action {
@@ -1030,7 +1027,7 @@ fn execute_action(
             Err(e) => Err(e),
         },
     };
-    crate::trace::finalize();
+    trace_log::finalize();
     result
 }
 
@@ -1605,7 +1602,7 @@ impl<'a> App<'a> {
     /// Open the latest trace, as `loom trace` prints it; a notice when there
     /// is none yet.
     fn open_trace(&mut self) {
-        let Some(path) = crate::trace::latest_log_path(&self.snapshot.git_dir) else {
+        let Some(path) = trace_log::latest_log_path(&self.snapshot.git_dir) else {
             self.notice = Some("no trace yet: run an action first".to_string());
             return;
         };
@@ -2225,9 +2222,9 @@ impl<'a> App<'a> {
             // Without the sink `msg` prints, and this thread would write onto
             // the screen the loop is drawing at the same moment.
             ui::install(tx);
-            crate::trace::init(&git_dir, &format!("loom tui: {command}"));
+            trace_log::init(&git_dir, &format!("loom tui: {command}"), false);
             let result = read(&workdir);
-            crate::trace::finalize();
+            trace_log::finalize();
             ui::uninstall();
             result
         });

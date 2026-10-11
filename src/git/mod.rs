@@ -50,7 +50,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 
-use crate::trace as loom_trace;
+use crate::core::trace_log;
 
 /// Config forced on every git command loom drives itself and reads back or
 /// feeds patches to: [`run_git`] and friends, `git apply`, and the rebases.
@@ -164,7 +164,7 @@ fn run_git_captured(workdir: &Path, args: &[&str]) -> Result<std::process::Outpu
     let duration_ms = start.elapsed().as_millis();
     let stderr = String::from_utf8_lossy(&output.stderr);
     let cmd = args.join(" ");
-    loom_trace::log_command("git", &cmd, duration_ms, output.status.success(), &stderr);
+    trace_log::log_command("git", &cmd, duration_ms, output.status.success(), &stderr);
 
     if !output.status.success() {
         bail!("git {} failed", args[0]);
@@ -312,7 +312,7 @@ fn run_interactive(workdir: &Path, args: &[&str], ok: fn(ExitStatus) -> bool) ->
 
     let duration_ms = start.elapsed().as_millis();
     let cmd = args.join(" ");
-    loom_trace::log_command("git", &cmd, duration_ms, ok(status), "");
+    trace_log::log_command("git", &cmd, duration_ms, ok(status), "");
 
     if !ok(status) {
         bail!("git {} failed", args[0]);
