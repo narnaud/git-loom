@@ -57,8 +57,7 @@ __git_loom_candidates() {
         wt) sub=worktree ;;
         sh) sub=show ;;
         di) sub=diff ;;
-        c) sub=continue ;;
-        a) sub=abort ;;
+        cont) sub=continue ;;
     esac
 
     # The nested subcommand is the first non-flag word after the subcommand.

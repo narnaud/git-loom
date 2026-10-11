@@ -52,8 +52,8 @@ Inspection:
   trace             Show the latest command trace
 
 Recovery:
-  continue, c       Resume a paused operation after resolving conflicts
-  abort, a          Cancel a paused operation and restore original state
+  continue, cont    Resume a paused operation after resolving conflicts
+  abort             Cancel a paused operation and restore original state
 ```
 
 ## Installation

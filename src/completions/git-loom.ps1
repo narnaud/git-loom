@@ -53,7 +53,7 @@ $_gitLoomCompleter = {
         'up' = 'update'; 'pr' = 'push'; 'ci' = 'commit'
         'amend' = 'fold'; 'fixup' = 'fold'; 'mv' = 'fold'; 'rub' = 'fold'
         'rw' = 'reword'; 'rm' = 'drop'; 'br' = 'branch'; 'sw' = 'switch'; 'wt' = 'worktree'
-        'sh' = 'show'; 'di' = 'diff'; 'c' = 'continue'; 'a' = 'abort'
+        'sh' = 'show'; 'di' = 'diff'; 'cont' = 'continue'
     }
 
     $helpFlags = @(

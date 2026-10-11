@@ -425,10 +425,9 @@ enum Command {
 
     // -- Recovery --
     /// Resume a paused loom operation after resolving conflicts
-    #[command(visible_alias = "c")]
+    #[command(visible_alias = "cont")]
     Continue,
     /// Cancel a paused loom operation and restore original state
-    #[command(visible_alias = "a")]
     Abort,
 
     // -- Hidden --

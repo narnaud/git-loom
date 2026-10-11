@@ -48,10 +48,8 @@ function __git_loom_is
                             set sub show
                         case di
                             set sub diff
-                        case c
+                        case cont
                             set sub continue
-                        case a
-                            set sub abort
                     end
             end
         else

@@ -161,6 +161,25 @@ fn commit_rejects_integration_with_branch() {
     assert!(parse(&["commit", "-i", "-b", "feature-a", "-m", "m"]).is_err());
 }
 
+/// Issue #380: one letter was easy to hit by mistake, and the TUI tree binds
+/// `c`/`a` to commit/absorb.
+#[test]
+fn continue_and_abort_have_no_one_letter_alias() {
+    let parse = |args: &[&str]| Cli::try_parse_from(["git-loom"].iter().chain(args).copied());
+    for name in ["continue", "cont"] {
+        assert!(
+            matches!(parse(&[name]).unwrap().command, Some(Command::Continue)),
+            "{name}"
+        );
+    }
+    assert!(matches!(
+        parse(&["abort"]).unwrap().command,
+        Some(Command::Abort)
+    ));
+    assert!(parse(&["c"]).is_err());
+    assert!(parse(&["a"]).is_err());
+}
+
 /// Issue #375: these were accepted only before the subcommand.
 #[test]
 fn color_flags_are_accepted_after_the_subcommand() {
