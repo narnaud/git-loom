@@ -26,7 +26,7 @@ fn remote_status_of(test_repo: &TestRepo, name: &str) -> Option<RemoteStatus> {
         .find_branch(name, git2::BranchType::Local)
         .unwrap();
     let tip = branch.get().target().unwrap();
-    repo::detect_remote_status(&test_repo.repo, &branch, name, tip)
+    repo::detect_remote_status(&test_repo.repo, &branch, tip)
 }
 
 #[test]
@@ -96,6 +96,24 @@ fn remote_status_is_none_when_the_branch_was_never_pushed() {
     test_repo.commit("A1", "a.txt");
     test_repo.create_branch("feat");
     assert!(remote_status_of(&test_repo, "feat").is_none());
+}
+
+#[test]
+fn remote_status_is_none_when_the_upstream_does_not_resolve() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("A1", "a.txt");
+    test_repo.create_branch("feat");
+    test_repo.track_unknown_remote("feat");
+    assert!(remote_status_of(&test_repo, "feat").is_none());
+}
+
+#[test]
+fn remote_status_is_none_when_the_local_upstream_was_deleted() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.create_branch("part1");
+    test_repo.create_branch_tracking("part2", "part1");
+    test_repo.delete_branch("part1");
+    assert!(remote_status_of(&test_repo, "part2").is_none());
 }
 
 #[test]

@@ -76,8 +76,11 @@ git-loom update [--yes]
      integration base (the first commit of its first-parent line that the
      upstream contains): a local `main` sitting in upstream history is not
      loom's to remove.
-   - branches whose configured upstream tracking branch no longer exists
-     (pruned in step 2)
+   - branches whose upstream resolves, through its remote's fetch refspecs,
+     to a ref that no longer exists (pruned in step 2). An upstream Git cannot
+     resolve (unknown remote, no matching refspec) and a local upstream
+     (remote `.`) never count: no fetch prunes them. `status` reports `gone`
+     by the same rule.
 
    The prompt names each branch and its kind itself, so it stands alone as a
    TUI menu (Spec 020); without a prompt (`--yes`, the config below, agent

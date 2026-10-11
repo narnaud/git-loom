@@ -439,44 +439,26 @@ fn find_branches_merged_upstream(
     Ok(merged)
 }
 
-/// Find local branches whose configured upstream tracking ref no longer
-/// exists — `git fetch --prune` removed it, so the branch counts as "gone".
+/// Find local branches whose upstream a fetch pruned (`repo::resolve_upstream`).
 fn find_branches_with_gone_upstream(
     repo: &git2::Repository,
     current_branch: &str,
 ) -> Result<Vec<String>> {
-    let config = repo.config()?;
     let mut gone = Vec::new();
-
     for branch_result in repo.branches(Some(BranchType::Local))? {
         let (branch, _) = branch_result?;
         let Some(name) = branch.name()? else {
             continue;
         };
-        let name = name.to_string();
-        if name == current_branch {
-            continue;
-        }
-
-        let remote_key = format!("branch.{}.remote", name);
-        let Ok(remote) = config.get_string(&remote_key) else {
-            continue;
-        };
-
-        // Check if the merge ref (upstream branch name) is configured
-        let merge_key = format!("branch.{}.merge", name);
-        let Ok(merge) = config.get_string(&merge_key) else {
-            continue;
-        };
-
-        // Construct the remote-tracking ref and check if it still exists
-        let branch_part = merge.strip_prefix("refs/heads/").unwrap_or(&merge);
-        let tracking_ref = format!("refs/remotes/{}/{}", remote, branch_part);
-        if repo.find_reference(&tracking_ref).is_err() {
-            gone.push(name);
+        if name != current_branch
+            && matches!(
+                repo::resolve_upstream(repo, &branch),
+                Some(repo::Upstream::Gone)
+            )
+        {
+            gone.push(name.to_string());
         }
     }
-
     Ok(gone)
 }
 

@@ -428,6 +428,53 @@ fn update_keeps_branches_without_tracking_config() {
     );
 }
 
+/// Guards #383: an upstream on remote `.` was probed as `refs/remotes/./main`,
+/// which never exists, so the branch was deleted as gone.
+#[test]
+fn update_keeps_branches_tracking_a_local_branch() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.create_branch_tracking("precious", "main");
+
+    let result = test_repo.in_dir(|| super::run(true));
+    assert!(result.is_ok(), "update failed: {:?}", result.err());
+
+    assert!(
+        test_repo.branch_exists("precious"),
+        "precious should be preserved (its local upstream `main` exists)"
+    );
+}
+
+#[test]
+fn update_keeps_branches_whose_local_upstream_was_deleted() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.create_branch("part1");
+    test_repo.create_branch_tracking("part2", "part1");
+    test_repo.delete_branch("part1");
+
+    let result = test_repo.in_dir(|| super::run(true));
+    assert!(result.is_ok(), "update failed: {:?}", result.err());
+
+    assert!(
+        test_repo.branch_exists("part2"),
+        "part2 should be preserved (no fetch prunes a local upstream)"
+    );
+}
+
+#[test]
+fn update_keeps_branches_whose_upstream_does_not_resolve() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.create_branch("wip");
+    test_repo.track_unknown_remote("wip");
+
+    let result = test_repo.in_dir(|| super::run(true));
+    assert!(result.is_ok(), "update failed: {:?}", result.err());
+
+    assert!(
+        test_repo.branch_exists("wip"),
+        "wip should be preserved (Git resolves no upstream for it)"
+    );
+}
+
 /// Regression test: upstream commits must NOT end up inside a woven feature
 /// branch after update.  Before the fix, plain `git rebase --rebase-merges`
 /// preserved the merge topology literally, placing new upstream commits on

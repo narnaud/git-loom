@@ -380,6 +380,25 @@ impl TestRepo {
         branch.set_upstream(Some(upstream)).unwrap();
     }
 
+    /// Make branch `name` track remote `fork`, which is not configured, while
+    /// `refs/remotes/fork/<name>` exists: Git resolves no upstream for it.
+    pub fn track_unknown_remote(&self, name: &str) {
+        let tip = self.head_commit().id();
+        self.repo
+            .reference(&format!("refs/remotes/fork/{name}"), tip, true, "test")
+            .unwrap();
+        let mut config = self.repo.config().unwrap();
+        config
+            .set_str(&format!("branch.{name}.remote"), "fork")
+            .unwrap();
+        config
+            .set_str(
+                &format!("branch.{name}.merge"),
+                &format!("refs/heads/{name}"),
+            )
+            .unwrap();
+    }
+
     /// Write content to a file in the working directory (without committing).
     pub fn write_file(&self, filename: &str, content: &str) {
         write_retrying(self.workdir().join(filename), content);

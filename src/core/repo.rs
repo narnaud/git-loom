@@ -1099,7 +1099,7 @@ fn find_branches_in_range(
                 continue;
             }
             if commit_set.contains(&tip_oid) || tip_oid == merge_base_oid {
-                let remote = detect_remote_status(repo, &branch, &name, tip_oid);
+                let remote = detect_remote_status(repo, &branch, tip_oid);
                 branches.push(BranchInfo {
                     name,
                     tip_oid,
@@ -1118,33 +1118,41 @@ fn find_branches_in_range(
 fn detect_remote_status(
     repo: &Repository,
     branch: &git2::Branch,
-    name: &str,
     tip_oid: git2::Oid,
 ) -> Option<RemoteStatus> {
-    if let Ok(upstream) = branch.upstream() {
-        return Some(match upstream.get().target() {
-            Some(upstream_oid) if upstream_oid == tip_oid => RemoteStatus::Synced,
-            _ => RemoteStatus::Different,
-        });
-    }
+    Some(match resolve_upstream(repo, branch)? {
+        Upstream::Present(Some(upstream_oid)) if upstream_oid == tip_oid => RemoteStatus::Synced,
+        Upstream::Present(_) => RemoteStatus::Different,
+        Upstream::Gone => RemoteStatus::Gone,
+    })
+}
 
-    // `branch.upstream()` errs for both "no upstream" and "upstream gone", so
-    // git config settles which.
-    let config = repo.config().ok()?;
-    let remote_key = format!("branch.{}.remote", name);
-    let Ok(remote) = config.get_string(&remote_key) else {
-        return None; // never had an upstream configured
-    };
-    let merge_key = format!("branch.{}.merge", name);
-    let Ok(merge) = config.get_string(&merge_key) else {
-        return None;
-    };
-    let branch_part = merge.strip_prefix("refs/heads/").unwrap_or(&merge);
-    let tracking_ref = format!("refs/remotes/{}/{}", remote, branch_part);
-    if repo.find_reference(&tracking_ref).is_err() {
-        Some(RemoteStatus::Gone)
-    } else {
-        None
+/// Where a branch's configured upstream stands.
+pub(crate) enum Upstream {
+    /// The upstream ref exists; holds its target.
+    Present(Option<git2::Oid>),
+    /// The upstream resolves through its remote's fetch refspecs to a ref
+    /// that no longer exists: a fetch pruned it.
+    Gone,
+}
+
+/// Resolve `branch`'s upstream as Git does; `None` when there is none to track.
+///
+/// An upstream that does not resolve (unknown remote, no matching refspec) is
+/// untracked to Git, not gone. A missing local upstream (remote `.`) is not
+/// gone either: no fetch prunes it, so its absence says nothing about whether
+/// the work landed (Spec 010).
+pub(crate) fn resolve_upstream(repo: &Repository, branch: &git2::Branch) -> Option<Upstream> {
+    let refname = branch.get().name().ok()?;
+    let upstream_name = repo.branch_upstream_name(refname).ok()?;
+    let upstream_name = upstream_name.as_str().ok()?;
+    match repo.find_reference(upstream_name) {
+        Ok(upstream) => Some(Upstream::Present(upstream.target())),
+        Err(e) if e.code() == git2::ErrorCode::NotFound => {
+            let remote = repo.branch_upstream_remote(refname).ok()?;
+            (remote.as_str().ok() != Some(".")).then_some(Upstream::Gone)
+        }
+        Err(_) => None,
     }
 }
 
