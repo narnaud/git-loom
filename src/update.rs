@@ -135,6 +135,10 @@ pub fn run(skip_confirm: bool) -> Result<()> {
                 new_upstream_oid,
             )?;
             merged.extend(filtered_out);
+            // A woven branch started from a local `main` holds its tip, so both
+            // tests can find it; it stays loom's to keep (Spec 010).
+            let upstream_local = repo::upstream_local_branch(&upstream_name);
+            merged.retain(|name| *name != upstream_local);
             merged.sort();
             merged.dedup();
             (Some(graph.to_todo()), merged)

@@ -1330,6 +1330,76 @@ fn update_keeps_branches_below_the_base() {
     }
 }
 
+/// `story` was started from a local `main` (X) newer than the integration
+/// base, so X sits inside the woven section, above the base, and the upstream
+/// contains it: `main` met every "fully merged" test and was deleted.
+///
+/// ```text
+/// integration: Initial ── merge
+///                │          │
+///                X(main) ── S1(story)
+/// ```
+#[test]
+fn update_keeps_main_inside_a_section() {
+    let test_repo = TestRepo::new_with_remote();
+
+    let x_oid = test_repo.add_remote_commits(&["X"]);
+    test_repo.fetch_remote();
+    test_repo
+        .repo
+        .branch("main", &test_repo.find_commit(x_oid), true)
+        .unwrap();
+
+    test_repo.create_branch_at_commit("story", x_oid);
+    test_repo.switch_branch("story");
+    test_repo.commit("S1", "s1.txt");
+    test_repo.switch_branch("integration");
+    test_repo.merge_no_ff("story");
+
+    test_repo.add_remote_commits(&["Y"]);
+
+    let result = test_repo.in_dir(|| super::run(true));
+    assert!(result.is_ok(), "update failed: {:?}", result.err());
+
+    for name in ["main", "story"] {
+        assert!(test_repo.branch_exists(name), "{name} must survive update");
+    }
+}
+
+/// Same shape, but X is a local `main` commit (untracked, so the weave makes
+/// it a section) that the upstream cherry-picks: the filtered-out path, not
+/// ancestry, empties `main`.
+#[test]
+fn update_keeps_main_whose_section_landed_as_a_cherry_pick() {
+    let test_repo = TestRepo::new_with_remote();
+
+    let base_oid = test_repo.head_oid();
+    test_repo.switch_branch("main");
+    test_repo
+        .repo
+        .find_branch("main", BranchType::Local)
+        .unwrap()
+        .set_upstream(None)
+        .unwrap();
+    let x_oid = test_repo.commit("X", "x.txt");
+
+    test_repo.create_branch_at_commit("story", x_oid);
+    test_repo.switch_branch("story");
+    test_repo.commit("S1", "s1.txt");
+    test_repo.switch_branch("integration");
+    assert_eq!(test_repo.head_oid(), base_oid);
+    test_repo.merge_no_ff("story");
+
+    test_repo.cherry_pick_to_remote(x_oid, "X");
+
+    let result = test_repo.in_dir(|| super::run(true));
+    assert!(result.is_ok(), "update failed: {:?}", result.err());
+
+    for name in ["main", "story"] {
+        assert!(test_repo.branch_exists(name), "{name} must survive update");
+    }
+}
+
 /// `update` can fail before its rebase ever starts — here because a woven
 /// branch is checked out in another worktree. The state file it saved just
 /// beforehand must still be removed: left behind, it blocks every later loom

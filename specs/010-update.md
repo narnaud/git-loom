@@ -75,7 +75,8 @@ git-loom update [--yes]
      reachable from the integration branch count, and none at or below the
      integration base (the first commit of its first-parent line that the
      upstream contains): a local `main` sitting in upstream history is not
-     loom's to remove.
+     loom's to remove, and neither is the branch named after the upstream
+     (`main` for `origin/main`) wherever it sits.
    - branches whose upstream resolves, through its remote's fetch refspecs,
      to a ref that no longer exists (pruned in step 2). An upstream Git cannot
      resolve (unknown remote, no matching refspec) and a local upstream
