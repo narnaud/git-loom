@@ -364,6 +364,26 @@ pub fn select(prompt: &str, items: Vec<String>, agent_hint: &str) -> Result<Stri
     Ok(answer)
 }
 
+/// Prompt the user to select one item from labelled groups, empty ones left
+/// out. Only the TUI draws the labels, a lone group's too, as it may say what
+/// its items are: the CLI and agent mode list the items as one, in group
+/// order.
+pub fn select_grouped(
+    prompt: &str,
+    groups: Vec<(String, Vec<String>)>,
+    agent_hint: &str,
+) -> Result<String> {
+    let groups: Vec<_> = groups
+        .into_iter()
+        .filter(|(_, items)| !items.is_empty())
+        .collect();
+    if !agent_mode::enabled() && ui::active() && !groups.is_empty() {
+        return tui_text(PromptKind::GroupedSelect { groups }, prompt, |_| Ok(()));
+    }
+    let items = groups.into_iter().flat_map(|(_, items)| items).collect();
+    select(prompt, items, agent_hint)
+}
+
 /// Prompt the user to select from suggestions or type a new value.
 ///
 /// Shows a text input with autocomplete suggestions. The user can pick

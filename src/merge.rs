@@ -191,7 +191,8 @@ fn resolve_non_woven_branch(
     bail!("Branch '{}' not found", branch_arg)
 }
 
-/// Interactive picker: list non-woven local branches, optionally with remotes.
+/// Interactive picker: non-woven local branches, then, with `include_remote`,
+/// remote ones under their own heading.
 fn pick_branch(
     repo: &Repository,
     info: &repo::RepoInfo,
@@ -201,7 +202,8 @@ fn pick_branch(
     let woven_names: Vec<&str> = info.branches.iter().map(|b| b.name.as_str()).collect();
     let current_branch = &info.branch_name;
 
-    let mut items: Vec<String> = Vec::new();
+    let mut local: Vec<String> = Vec::new();
+    let mut remote: Vec<String> = Vec::new();
 
     // Local branches not woven and not the current branch
     for branch_result in repo.branches(Some(BranchType::Local))? {
@@ -212,7 +214,7 @@ fn pick_branch(
             && !others.iter().any(|o| o.branch == name)
             && woven_elsewhere(repo, others, name)?.is_none()
         {
-            items.push(name.to_string());
+            local.push(name.to_string());
         }
     }
 
@@ -239,19 +241,25 @@ fn pick_branch(
                 }
                 // Skip if a local branch with the same short name exists
                 if !local_names.contains(&repo::upstream_local_branch(name)) {
-                    items.push(name.to_string());
+                    remote.push(name.to_string());
                 }
             }
         }
     }
 
-    if items.is_empty() {
+    if local.is_empty() && remote.is_empty() {
         bail!("No branches available to merge");
     }
 
-    msg::select(
+    msg::select_grouped(
         "Select branch to merge",
-        items,
+        vec![
+            ("Local branches".to_string(), local),
+            (
+                "Remote branches (merged through a new local branch)".to_string(),
+                remote,
+            ),
+        ],
         "re-run with: loom merge <branch>",
     )
 }

@@ -188,9 +188,12 @@ enum PromptState {
     /// The question as the first item, `Cancel` as the second.
     Confirm(Menu),
     Input(TextField),
+    /// `headings` are `(index, label)`: the label is drawn above
+    /// `items[index]`, and the cursor never lands on it.
     Select {
         items: Vec<String>,
         cursor: usize,
+        headings: Vec<(usize, String)>,
     },
     /// `highlight` is `None` while the typed text itself is the answer.
     SelectOrInput {
@@ -240,7 +243,11 @@ impl Prompt {
             PromptKind::Select {
                 items,
                 allow_other: false,
-            } => PromptState::Select { items, cursor: 0 },
+            } => PromptState::Select {
+                items,
+                cursor: 0,
+                headings: Vec::new(),
+            },
             PromptKind::Select {
                 items,
                 allow_other: true,
@@ -249,6 +256,20 @@ impl Prompt {
                 field: TextField::new(""),
                 highlight: None,
             },
+            PromptKind::GroupedSelect { groups } => {
+                let mut items = Vec::new();
+                let mut headings = Vec::new();
+                // An empty group would put two headings over one item.
+                for (label, group) in groups.into_iter().filter(|(_, g)| !g.is_empty()) {
+                    headings.push((items.len(), label));
+                    items.extend(group);
+                }
+                PromptState::Select {
+                    items,
+                    cursor: 0,
+                    headings,
+                }
+            }
             PromptKind::MultiSelect { items } => PromptState::MultiSelect {
                 checked: vec![false; items.len()],
                 items,
@@ -298,7 +319,7 @@ impl Prompt {
                 field.handle_key(code, modifiers);
                 PromptOutcome::Pending
             }
-            PromptState::Select { items, cursor } => {
+            PromptState::Select { items, cursor, .. } => {
                 match code {
                     KeyCode::Up | KeyCode::Char('k') => *cursor = cursor.saturating_sub(1),
                     KeyCode::Down | KeyCode::Char('j') => {
@@ -383,37 +404,42 @@ impl Prompt {
         }
     }
 
-    /// List rows around `cursor`, each `(index, is_cursor)`.
+    /// List rows around `cursor`, a position in `indices`; `headings` as in
+    /// `PromptState::Select`.
     fn list_lines(
         items: &[String],
         indices: &[usize],
         cursor: Option<usize>,
         checked: Option<&[bool]>,
+        headings: &[(usize, String)],
         theme: &TuiTheme,
     ) -> Vec<Line<'static>> {
-        let start = cursor
-            .unwrap_or(0)
+        let mut lines = Vec::new();
+        let mut cursor_line = 0;
+        for (pos, &i) in indices.iter().enumerate() {
+            if let Some((_, label)) = headings.iter().find(|(at, _)| *at == i) {
+                lines.push(Line::from(Span::styled(label.clone(), theme.hint)));
+            }
+            let mark = match checked {
+                Some(checked) if checked[i] => "[x] ",
+                Some(_) => "[ ] ",
+                None => "  ",
+            };
+            let style = if cursor == Some(pos) {
+                cursor_line = lines.len();
+                theme.file_selected
+            } else {
+                Style::default()
+            };
+            lines.push(Line::from(Span::styled(
+                format!("{}{}", mark, items[i]),
+                style,
+            )));
+        }
+        let start = cursor_line
             .saturating_sub(LIST_ROWS / 2)
-            .min(indices.len().saturating_sub(LIST_ROWS));
-        indices
-            .iter()
-            .enumerate()
-            .skip(start)
-            .take(LIST_ROWS)
-            .map(|(pos, &i)| {
-                let mark = match checked {
-                    Some(checked) if checked[i] => "[x] ",
-                    Some(_) => "[ ] ",
-                    None => "  ",
-                };
-                let style = if cursor == Some(pos) {
-                    theme.file_selected
-                } else {
-                    Style::default()
-                };
-                Line::from(Span::styled(format!("{}{}", mark, items[i]), style))
-            })
-            .collect()
+            .min(lines.len().saturating_sub(LIST_ROWS));
+        lines.into_iter().skip(start).take(LIST_ROWS).collect()
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect, theme: &TuiTheme) {
@@ -426,9 +452,20 @@ impl Prompt {
                 lines.push(Line::from(spans));
                 "Enter: confirm · Esc: cancel"
             }
-            PromptState::Select { items, cursor } => {
+            PromptState::Select {
+                items,
+                cursor,
+                headings,
+            } => {
                 let all: Vec<usize> = (0..items.len()).collect();
-                lines.extend(Self::list_lines(items, &all, Some(*cursor), None, theme));
+                lines.extend(Self::list_lines(
+                    items,
+                    &all,
+                    Some(*cursor),
+                    None,
+                    headings,
+                    theme,
+                ));
                 "↑/↓: move · Enter: choose · Esc: cancel"
             }
             PromptState::SelectOrInput {
@@ -440,7 +477,14 @@ impl Prompt {
                 spans.extend(field.spans(theme));
                 lines.push(Line::from(spans));
                 let filtered = Self::filtered(items, field);
-                lines.extend(Self::list_lines(items, &filtered, *highlight, None, theme));
+                lines.extend(Self::list_lines(
+                    items,
+                    &filtered,
+                    *highlight,
+                    None,
+                    &[],
+                    theme,
+                ));
                 "Type a value or ↑/↓ to pick · Tab: complete · Enter: confirm · Esc: cancel"
             }
             PromptState::MultiSelect {
@@ -454,6 +498,7 @@ impl Prompt {
                     &all,
                     Some(*cursor),
                     Some(checked),
+                    &[],
                     theme,
                 ));
                 "Space: toggle · Enter: confirm · Esc: cancel"

@@ -39,6 +39,10 @@ pub enum PromptKind {
     MultiSelect {
         items: Vec<String>,
     },
+    /// `msg::select_grouped`: one choice among items listed under headings.
+    GroupedSelect {
+        groups: Vec<(String, Vec<String>)>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -131,6 +131,39 @@ fn select_prompt_moves_and_chooses() {
 }
 
 #[test]
+fn grouped_select_draws_headings_the_cursor_skips() {
+    let theme = theme();
+    let remote: Vec<String> = (0..20).map(|i| format!("origin/r{i:02}")).collect();
+    let mut prompt = Prompt::new(
+        PromptKind::GroupedSelect {
+            groups: vec![
+                ("Local branches".into(), items(&["feature-a"])),
+                ("Remote branches".into(), remote),
+            ],
+        },
+        "Select branch to merge".into(),
+        None,
+        "",
+    );
+    let text = render_text(|f, area| prompt.render(f, area, &theme));
+    assert!(text.contains("Local branches"));
+    assert!(text.contains("Remote branches"));
+
+    key(&mut prompt, KeyCode::Down);
+    match key(&mut prompt, KeyCode::Enter) {
+        PromptOutcome::Answer(Answer::Text(t)) => assert_eq!(t, "origin/r00"),
+        _ => panic!("expected the first remote branch"),
+    }
+
+    for _ in 0..20 {
+        key(&mut prompt, KeyCode::Down);
+    }
+    let text = render_text(|f, area| prompt.render(f, area, &theme));
+    assert!(text.contains("origin/r19"), "the cursor stays in view");
+    assert!(!text.contains("Local branches"));
+}
+
+#[test]
 fn select_or_input_takes_typed_text_or_a_highlighted_suggestion() {
     let kind = PromptKind::Select {
         items: items(&["feature-a", "feature-b", "other"]),

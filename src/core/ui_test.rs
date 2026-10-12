@@ -106,6 +106,52 @@ fn dismissed_prompt_is_cancelled() {
 }
 
 #[test]
+fn select_grouped_drops_empty_groups() {
+    let (rx, handle) = with_sink(|| {
+        let a = msg::select_grouped(
+            "Branch",
+            vec![
+                ("Local".into(), vec!["a".into()]),
+                ("Remote".into(), vec!["origin/b".into()]),
+            ],
+            "",
+        )?;
+        let b = msg::select_grouped(
+            "Branch",
+            vec![
+                ("Local".into(), vec!["a".into()]),
+                ("Remote".into(), vec![]),
+            ],
+            "",
+        )?;
+        Ok::<_, anyhow::Error>((a, b))
+    });
+    let (kind, _, _, reply) = next_prompt(&rx);
+    assert_eq!(
+        kind,
+        PromptKind::GroupedSelect {
+            groups: vec![
+                ("Local".into(), vec!["a".into()]),
+                ("Remote".into(), vec!["origin/b".into()]),
+            ]
+        }
+    );
+    reply.send(Some(Answer::Text("origin/b".into()))).unwrap();
+
+    let (kind, _, _, reply) = next_prompt(&rx);
+    assert_eq!(
+        kind,
+        PromptKind::GroupedSelect {
+            groups: vec![("Local".into(), vec!["a".into()])]
+        }
+    );
+    reply.send(Some(Answer::Text("a".into()))).unwrap();
+
+    let (a, b) = handle.join().unwrap().unwrap();
+    assert_eq!((a.as_str(), b.as_str()), ("origin/b", "a"));
+}
+
+#[test]
 fn select_or_input_carries_suggestions_and_multi_select_returns_many() {
     let (rx, handle) = with_sink(|| {
         let a = msg::select_or_input("Target", vec!["x".into(), "y".into()], "", |_| Ok(()))?;
