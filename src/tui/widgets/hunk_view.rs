@@ -121,8 +121,9 @@ impl HunkView {
     }
 
     /// Render one file's hunks: a `[✓] Hunk i/n` header per hunk (REVERSED on
-    /// the focused one while the pane has focus), colorized hunk lines, blank
-    /// separators, and two trailing blanks for breathing room.
+    /// the focused one while the pane has focus), or `[✓] Whole file` for a
+    /// placeholder, colorized hunk lines, blank separators, and two trailing
+    /// blanks for breathing room.
     pub fn build_lines(
         &self,
         file: &FileEntry,
@@ -138,7 +139,11 @@ impl HunkView {
                 HunkOrigin::Unstaged => "",
                 HunkOrigin::Commit => "",
             };
-            let header_text = format!("[{}] Hunk {}/{}{}", marker, i + 1, total, origin_label);
+            let header_text = if entry.hunk.is_text() {
+                format!("[{}] Hunk {}/{}{}", marker, i + 1, total, origin_label)
+            } else {
+                format!("[{}] Whole file{}", marker, origin_label)
+            };
             let header_style = if focused && i == self.index {
                 theme.hunk_header.add_modifier(Modifier::REVERSED)
             } else {

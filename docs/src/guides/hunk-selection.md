@@ -15,7 +15,7 @@ Sometimes you want to stage or commit only part of your changes — a few specif
  Toggle: space | Confirm: Enter | Help: ? | Cancel: Esc
 ```
 
-The left pane lists files with `git status`–style codes (`M`, `MM`, `A`, `??`, `D`). The right pane shows diff hunks — check the ones you want, leave the rest unchecked, then confirm.
+The left pane lists files with `git status`–style codes (`M`, `MM`, `A`, `??`, `D`). The right pane shows diff hunks — check the ones you want, leave the rest unchecked, then confirm. A deleted, binary, submodule or empty file has no hunks to choose between: it shows as `Whole file` instead of a numbered hunk.
 
 | Key | Action |
 |-----|--------|

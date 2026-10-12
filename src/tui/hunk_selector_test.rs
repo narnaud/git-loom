@@ -1,7 +1,7 @@
 use crossterm::event::{Event, KeyEvent, MouseEvent};
 
 use super::*;
-use crate::core::diff::DiffHunk;
+use crate::core::diff::{BINARY_ENTRY, DELETED_ENTRY, DiffHunk};
 use crate::core::graph::Theme;
 use crate::core::hunks::{HunkEntry, HunkOrigin};
 use crate::tui::theme::TuiTheme;
@@ -532,4 +532,69 @@ fn the_file_pane_is_titled_with_the_action_the_pick_is_for() {
 
     let cli = title_line(HunkSelectorApp::new(make_files(), make_theme()), 100);
     assert!(cli.contains(" Files "), "{cli}");
+}
+
+/// A deletion that is the file's only entry, then a binary file changed both in
+/// the index and the worktree.
+fn make_files_with_placeholders() -> Vec<FileEntry> {
+    vec![
+        FileEntry {
+            path: "gone.rs".to_string(),
+            hunks: vec![HunkEntry {
+                hunk: make_hunk(DELETED_ENTRY),
+                selected: false,
+                origin: HunkOrigin::Unstaged,
+            }],
+            index_status: ' ',
+            worktree_status: 'D',
+            binary: false,
+        },
+        FileEntry {
+            path: "logo.png".to_string(),
+            hunks: vec![
+                HunkEntry {
+                    hunk: make_hunk(BINARY_ENTRY),
+                    selected: true,
+                    origin: HunkOrigin::Staged,
+                },
+                HunkEntry {
+                    hunk: make_hunk(BINARY_ENTRY),
+                    selected: false,
+                    origin: HunkOrigin::Unstaged,
+                },
+            ],
+            index_status: 'M',
+            worktree_status: 'M',
+            binary: true,
+        },
+    ]
+}
+
+/// Issue #273 asked to block this; toggling from the diff pane was kept.
+#[test]
+fn a_lone_whole_file_entry_toggles_in_the_diff_pane() {
+    let mut app = HunkSelectorApp::new(make_files_with_placeholders(), make_theme());
+    app.toggle(PaneId::Right);
+    assert!(app.files[0].hunks[0].selected);
+}
+
+#[test]
+fn whole_file_entries_are_titled_as_such() {
+    let app = HunkSelectorApp::new(make_files_with_placeholders(), make_theme());
+    let text = |file: &FileEntry| -> Vec<String> {
+        app.hunks
+            .build_lines(file, &app.theme, true)
+            .iter()
+            .map(|l| l.to_string())
+            .collect()
+    };
+
+    let lone = text(&app.files[0]);
+    assert!(lone.contains(&"[ ] Whole file".to_string()), "{lone:?}");
+    let binary = text(&app.files[1]);
+    assert!(
+        binary.contains(&"[✓] Whole file (staged)".to_string()),
+        "{binary:?}"
+    );
+    assert!(binary.contains(&"[ ] Whole file".to_string()), "{binary:?}");
 }
