@@ -1,7 +1,7 @@
 //! Interactive status TUI (`loom tui`): the status tree on the left, the diff
 //! of the item under the cursor on the right.
 //!
-//! Actions (commit, fold, move, split, branch, drop, absorb, reword, update, push) run the regular loom
+//! Actions (commit, fold, move, split, branch, drop, absorb, reword, merge, unmerge, update, push) run the regular loom
 //! command on a worker thread while the TUI stays up: the command's prompts
 //! become popups and its messages a log (`core::ui`), and only an editor takes
 //! the terminal over. Fold, move and commit pick their target in a second step
@@ -46,7 +46,7 @@ use crate::tui::widgets::common::{colorize_diff, pane_block};
 use crate::tui::widgets::diff_pane::DiffPane;
 use crate::tui::widgets::list_pane::ListPane;
 use crate::tui::widgets::popup::{self, LogEntry, Notice, Prompt, PromptOutcome, TextField};
-use crate::{absorb, branch, commit, drop, fold, push, reword, split, update};
+use crate::{absorb, branch, commit, drop, fold, merge, push, reword, split, unmerge, update};
 
 // ── Data model ───────────────────────────────────────────────────────────
 
@@ -418,6 +418,12 @@ enum Action {
         target: String,
         name: Option<String>,
     },
+    /// `loom merge --all`: merge's own picker asks which branch, local ones
+    /// first.
+    Merge,
+    /// `loom unmerge [branch]`; no branch is unmerge's own picker. Unmerge
+    /// confirms a branch passed in under the TUI, not one it picked.
+    Unmerge { branch: Option<String> },
     /// `loom update`: takes no target.
     Update,
     /// `loom push [branch]`; no branch is push's own picker.
@@ -790,6 +796,8 @@ const HELP: &[popup::HelpSection] = &[
             ("d", "drop"),
             ("a", "absorb into the commits that touched the same lines"),
             ("r", "reword a commit, or rename a branch"),
+            ("M", "merge a local or remote branch (pick one)"),
+            ("U", "unmerge a branch, keeping it (else pick one)"),
             ("u", "update: pull-rebase onto upstream"),
             (
                 "p / P",
@@ -1009,6 +1017,8 @@ fn execute_action(
         Action::Drop { targets } => drop::run(targets, false),
         Action::Absorb { files } => absorb::run(false, files, vec![]),
         Action::Reword { target, name } => reword::run(target, name, vec![]),
+        Action::Merge => merge::run(None, true),
+        Action::Unmerge { branch } => unmerge::run(branch),
         Action::Update => update::run(false),
         Action::Push { branch } => push::run(branch, false, false, None),
         // `push` itself confirms a force under the TUI, naming every branch.
@@ -1365,6 +1375,11 @@ impl<'a> App<'a> {
                 if let Some(name) = name {
                     words.extend(["-m".into(), name.clone()]);
                 }
+            }
+            Action::Merge => words.extend(["merge".into(), "--all".into()]),
+            Action::Unmerge { branch } => {
+                words.push("unmerge".into());
+                words.extend(branch.iter().map(|b| sid(b)));
             }
             Action::Update => words.push("update".into()),
             Action::Push { branch } => {
@@ -1735,8 +1750,8 @@ impl<'a> App<'a> {
             // Enter, and Esc apply — action keys must not fire and discard
             // the pending operation.
             KeyCode::Char(
-                ' ' | 'c' | 'C' | 'f' | 'F' | 'm' | 's' | 'S' | 'b' | 'd' | 'a' | 'r' | 'u' | 'p'
-                | 'P' | 'R' | '+' | '=' | '-',
+                ' ' | 'c' | 'C' | 'f' | 'F' | 'm' | 's' | 'S' | 'b' | 'd' | 'a' | 'r' | 'M' | 'U'
+                | 'u' | 'p' | 'P' | 'R' | '+' | '=' | '-',
             )
             | KeyCode::F(5)
                 if self.placing().is_some() =>
@@ -1781,6 +1796,8 @@ impl<'a> App<'a> {
             KeyCode::Char('d') => self.action_drop(),
             KeyCode::Char('a') => self.action_absorb(),
             KeyCode::Char('r') => self.action_reword(),
+            KeyCode::Char('M') => Some(Action::Merge),
+            KeyCode::Char('U') => self.action_unmerge(),
             KeyCode::Char('u') => Some(Action::Update),
             KeyCode::Char('p') => self.action_push(false),
             KeyCode::Char('P') => self.action_push(true),
@@ -3236,19 +3253,31 @@ impl<'a> App<'a> {
         Some(Action::Absorb { files })
     }
 
-    /// `p`/`P`: push the selected branch, else the cursor's; with neither `p`
-    /// lets push pick one, while `P` refuses, a force naming the branch it
-    /// overwrites. Push takes one branch: any other selection is refused.
-    fn action_push(&mut self, force: bool) -> Option<Action> {
+    /// The one branch `command` takes: the selected branch, else the cursor's,
+    /// else `Some(None)`. Any other selection is refused, with a notice, as
+    /// `None`.
+    fn picked_branch(&mut self, command: &str) -> Option<Option<String>> {
         let rows = self.picked_rows();
-        let branch = match rows.as_slice() {
-            [row] if matches!(row.kind, RowKind::BranchName { .. }) => row.target.clone(),
+        match rows.as_slice() {
+            [row] if matches!(row.kind, RowKind::BranchName { .. }) => Some(row.target.clone()),
             _ if !self.selected.is_empty() => {
-                self.notice = Some("push: select one branch".to_string());
-                return None;
+                self.notice = Some(format!("{command}: select one branch"));
+                None
             }
-            _ => None,
-        };
+            _ => Some(None),
+        }
+    }
+
+    /// `U`: unmerge the picked branch, else let unmerge pick one.
+    fn action_unmerge(&mut self) -> Option<Action> {
+        let branch = self.picked_branch("unmerge")?;
+        Some(Action::Unmerge { branch })
+    }
+
+    /// `p`/`P`: push the picked branch; with none `p` lets push pick one,
+    /// while `P` refuses, a force naming the branch it overwrites.
+    fn action_push(&mut self, force: bool) -> Option<Action> {
+        let branch = self.picked_branch("push")?;
         match (branch, force) {
             (branch, false) => Some(Action::Push { branch }),
             (Some(branch), true) => Some(Action::ForcePush { branch }),

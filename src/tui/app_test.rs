@@ -1266,6 +1266,8 @@ fn commit_mode_blocks_action_keys() {
         KeyCode::Char('d'),
         KeyCode::Char('a'),
         KeyCode::Char('r'),
+        KeyCode::Char('M'),
+        KeyCode::Char('U'),
         KeyCode::Char('u'),
         KeyCode::Char('p'),
         KeyCode::Char('P'),
@@ -4252,6 +4254,88 @@ fn update_runs_without_arguments() {
     let theme = make_theme();
     let app = make_app(make_snapshot(), &theme);
     assert_eq!(app.command_line(&Action::Update), "loom update");
+}
+
+#[test]
+fn merge_runs_with_remote_branches() {
+    let theme = make_theme();
+    let app = make_app(make_snapshot(), &theme);
+    assert_eq!(app.command_line(&Action::Merge), "loom merge --all");
+}
+
+#[test]
+fn unmerge_takes_the_cursor_branch_else_lets_unmerge_pick() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, "br:feature-a");
+    let action = app.action_unmerge().unwrap();
+    assert_eq!(
+        action,
+        Action::Unmerge {
+            branch: Some("feature-a".to_string())
+        }
+    );
+    let sid = app.sid_of("feature-a");
+    assert_eq!(app.command_line(&action), format!("loom unmerge {}", sid));
+
+    move_cursor_to(&mut app, &oid('a').to_string());
+    let action = app.action_unmerge().unwrap();
+    assert_eq!(action, Action::Unmerge { branch: None });
+    assert_eq!(app.command_line(&action), "loom unmerge");
+
+    app.selected.insert(oid('a').to_string());
+    assert!(app.action_unmerge().is_none());
+    assert_eq!(app.notice.as_deref(), Some("unmerge: select one branch"));
+}
+
+#[test]
+fn unmerge_from_the_tree_asks_first() {
+    let test_repo = crate::core::test_helpers::TestRepo::new_with_remote();
+    test_repo.commit("A1", "a1.txt");
+    let a2 = test_repo.commit("A2", "a2.txt");
+    test_repo
+        .in_dir(|| crate::branch::run(Some("feature-a".to_string()), Some(a2.to_string())))
+        .unwrap();
+    let woven = test_repo.head_oid();
+    let theme = make_theme();
+
+    test_repo.in_dir(|| {
+        let mut app = make_app(load_snapshot(1).unwrap(), &theme);
+        let wait_for_prompt = |app: &mut App| {
+            let deadline = deadline();
+            while !matches!(app.popup, Some(Popup::Prompt { .. })) {
+                assert!(std::time::Instant::now() < deadline, "never asked");
+                app.poll_background();
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        };
+
+        move_cursor_to(&mut app, "br:feature-a");
+        press(&mut app, KeyCode::Char('U'));
+        wait_for_prompt(&mut app);
+        // A confirmation is titled with the command; a picker with its question.
+        let Some(Popup::Prompt { prompt, .. }) = &app.popup else {
+            unreachable!()
+        };
+        assert!(
+            prompt.title().starts_with("loom unmerge "),
+            "{}",
+            prompt.title()
+        );
+        press(&mut app, KeyCode::Esc);
+        poll_until_idle(&mut app);
+        assert_eq!(test_repo.head_oid(), woven, "cancelled");
+
+        move_cursor_to(&mut app, "br:feature-a");
+        press(&mut app, KeyCode::Char('U'));
+        wait_for_prompt(&mut app);
+        press(&mut app, KeyCode::Enter);
+        poll_until_idle(&mut app);
+    });
+
+    let info = crate::core::repo::gather_repo_info(&test_repo.repo, false, 1).unwrap();
+    assert!(info.branches.is_empty(), "feature-a unmerged");
+    assert!(test_repo.branch_exists("feature-a"));
 }
 
 #[test]

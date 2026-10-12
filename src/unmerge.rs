@@ -2,13 +2,17 @@ use anyhow::{Result, bail};
 
 use crate::core::msg;
 use crate::core::repo;
+use crate::core::ui;
 use crate::core::weave::{self, Weave};
 
 /// Remove a branch from the integration branch without deleting it.
 ///
 /// The branch's commits are removed from the integration topology,
-/// but the branch ref is preserved.
+/// but the branch ref is preserved. Under the TUI a branch passed in, taken
+/// off the tree, is confirmed once every check passed, since `U` is one Shift
+/// away from update; one picked here is not asked again.
 pub fn run(branch: Option<String>) -> Result<()> {
+    let confirm = branch.is_some() && ui::active();
     let repo = repo::open_repo()?;
     let workdir = repo::require_workdir(&repo, "unmerge")?;
     let info = repo::gather_repo_info(&repo, false, 1)?;
@@ -45,6 +49,19 @@ pub fn run(branch: Option<String>) -> Result<()> {
             "Cannot unmerge: branch '{}' not found in weave graph",
             branch_name
         );
+    }
+
+    if confirm
+        && !msg::confirm(
+            &format!(
+                "Unmerge `{}`?\n\
+                 Its commits leave the integration branch; the branch keeps them, so merging it again brings them back",
+                branch_name
+            ),
+            "",
+        )?
+    {
+        return Err(msg::cancelled());
     }
 
     let todo = graph.to_todo();
