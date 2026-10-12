@@ -65,7 +65,7 @@ branches, and autostash), then `Rollback::apply_abort()` applies populated field
 | --- | --- |
 | `reset_mixed_to` | mixed reset; `commit` |
 | `reset_hard_to` | hard reset to pre-fixup HEAD; `absorb` |
-| `delete_branches` | remove temp refs; `commit`, fold files/commit/relative |
+| `delete_branches` | remove temp refs; `commit`, fold files/commit/relative, `merge` (remote pick's tracking branch) |
 | `saved_staged_patch` | restore index; `absorb`, `commit`, `drop`, `fold`, `reword`, `swap`, `update` |
 | `saved_worktree_patch` | restore worktree; `absorb` |
 

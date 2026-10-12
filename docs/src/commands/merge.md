@@ -25,8 +25,8 @@ git loom merge [branch] [--all]
 ## What It Does
 
 1. **Branch selection** — uses the provided name, or shows an interactive picker listing non-woven local branches
-2. **Validation** — checks that the branch exists, is not already woven, into this integration branch or into the integration branch of another [worktree](worktree.md), and is not that integration branch itself: a branch lives in one integration branch at a time, since rewriting it from one would leave the other with its old commits
-3. **Remote handling** — if a remote branch is selected (with `--all`), creates a local tracking branch automatically
+2. **Validation** — checks that nothing is staged (`git merge` refuses it), that the branch exists, that the integration branch does not already contain it (there would be nothing to merge), that it is not already woven, into this integration branch or into the integration branch of another [worktree](worktree.md), and is not that integration branch itself: a branch lives in one integration branch at a time, since rewriting it from one would leave the other with its old commits
+3. **Remote handling** — if a remote branch is selected (with `--all`), creates a local tracking branch automatically; it is deleted again if the merge fails or is aborted
 4. **Merge** — performs a `git merge --no-ff`, so the branch keeps its own section in the integration topology
 
 ## Examples

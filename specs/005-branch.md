@@ -24,7 +24,7 @@ Target resolution uses Spec 002 in this order: exact local branch name (its tip)
 git-loom merge [branch] [-a|--all]
 ```
 
-Merge an existing non-woven branch with `git merge --no-ff`. Without `[branch]`, show an interactive picker. `--all` adds remote branches lacking local counterparts; selecting one first creates its local tracking branch. Error if the branch does not exist, is already woven here or into another worktree's integration branch (the branch checked out there, when it has an upstream, whose history holds the branch's tip while its upstream does not), or is that integration branch itself. A branch woven into two integration branches goes stale in one of them on any rewrite from the other; the picker leaves such branches out.
+Merge an existing non-woven branch with `git merge --no-ff`. Without `[branch]`, show an interactive picker. `--all` adds remote branches lacking local counterparts; selecting one first creates its local tracking branch. Error if the branch does not exist, is already woven here or into another worktree's integration branch (the branch checked out there, when it has an upstream, whose history holds the branch's tip while its upstream does not), or is that integration branch itself, or HEAD already holds its tip (`git merge` would make no commit and report success). A branch woven into two integration branches goes stale in one of them on any rewrite from the other; the picker leaves such branches out, and those HEAD holds. Anything staged is refused before picking, since `git merge` refuses it wherever it is. The tracking branch a remote pick creates is deleted if git refuses the merge, and on abort (`Rollback.delete_branches`).
 
 ### Unmerge
 
@@ -32,7 +32,7 @@ Merge an existing non-woven branch with `git merge --no-ff`. Without `[branch]`,
 git-loom unmerge [branch]
 ```
 
-Accept a branch name/short ID or show a picker. Rebase the branch's commits out of integration while preserving its ref at its original commits. Error unless it is currently woven.
+Accept a branch name/short ID or show a picker. Rebase the branch's commits out of integration while preserving its ref at its original commits. Error unless it is currently woven. A branch at the same commit as other woven branches shares their section, so they leave with it: the success message (and the TUI's confirmation) names them all. Error for a branch stacked inside another's section, whose commits leave only with the outer branch: unmerge that one first. The picker leaves such branches out.
 
 ## Creation and ownership
 

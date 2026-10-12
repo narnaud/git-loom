@@ -319,6 +319,164 @@ fn merge_refuses_other_worktree_integration_branch() {
     assert_eq!(test_repo.head_oid(), head);
 }
 
+/// `origin/<name>` one commit past origin/main writing `file`, with no local
+/// branch of that name.
+fn remote_only_branch(test_repo: &TestRepo, name: &str, file: &str, content: &str) {
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+    test_repo.create_branch_at("scratch", &base_oid.to_string());
+    test_repo.switch_branch("scratch");
+    test_repo.write_file(file, content);
+    test_repo.stage_files(&[file]);
+    test_repo.commit_staged(name);
+    let tip = test_repo.head_oid();
+    test_repo.switch_branch("integration");
+    test_repo
+        .repo
+        .reference(&format!("refs/remotes/origin/{name}"), tip, true, "test")
+        .unwrap();
+    test_repo
+        .repo
+        .find_branch("scratch", git2::BranchType::Local)
+        .unwrap()
+        .delete()
+        .unwrap();
+}
+
+#[test]
+fn merge_of_a_remote_branch_creates_its_local_branch() {
+    let test_repo = TestRepo::new_with_remote();
+    remote_only_branch(&test_repo, "feature-r", "r.txt", "r");
+
+    test_repo
+        .in_dir(|| super::run(Some("origin/feature-r".to_string()), true))
+        .unwrap();
+
+    let info = repo::gather_repo_info(&test_repo.repo, false, 1).unwrap();
+    assert!(info.branches.iter().any(|b| b.name == "feature-r"));
+}
+
+/// The tracking branch a remote pick creates must not outlive a merge git
+/// refused: an untracked file the merge would overwrite stops it here.
+#[test]
+fn a_refused_merge_of_a_remote_branch_deletes_its_local_branch() {
+    let test_repo = TestRepo::new_with_remote();
+    remote_only_branch(&test_repo, "feature-r", "r.txt", "r");
+    test_repo.write_file("r.txt", "untracked");
+    let head = test_repo.head_oid();
+
+    let result = test_repo.in_dir(|| super::run(Some("origin/feature-r".to_string()), true));
+
+    assert!(result.is_err());
+    assert!(!test_repo.branch_exists("feature-r"));
+    assert_eq!(test_repo.head_oid(), head);
+    assert_eq!(test_repo.read_file("r.txt"), "untracked");
+}
+
+#[test]
+fn aborting_a_paused_merge_of_a_remote_branch_deletes_its_local_branch() {
+    let test_repo = TestRepo::new_with_remote();
+    remote_only_branch(&test_repo, "feature-r", "shared.txt", "remote");
+    test_repo.write_file("shared.txt", "integration");
+    test_repo.stage_files(&["shared.txt"]);
+    test_repo.commit_staged("Integration change");
+    let head = test_repo.head_oid();
+
+    test_repo
+        .in_dir(|| super::run(Some("origin/feature-r".to_string()), true))
+        .unwrap();
+    assert!(crate::git::merge_is_in_progress(test_repo.repo.path()));
+
+    crate::core::transaction::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
+
+    assert!(!test_repo.branch_exists("feature-r"));
+    assert_eq!(test_repo.head_oid(), head);
+}
+
+/// `git merge` refuses a staged change wherever it is, with nothing loom
+/// could point at; loom says why before it creates anything.
+#[test]
+fn merge_refuses_staged_changes() {
+    let test_repo = TestRepo::new_with_remote();
+    remote_only_branch(&test_repo, "feature-r", "r.txt", "r");
+    test_repo.write_file("other.txt", "staged");
+    test_repo.stage_files(&["other.txt"]);
+
+    let err = test_repo
+        .in_dir(|| super::run(Some("origin/feature-r".to_string()), true))
+        .unwrap_err();
+
+    assert!(err.to_string().contains("staged changes"), "{err}");
+    assert!(!test_repo.branch_exists("feature-r"));
+}
+
+/// `git merge` of a branch HEAD already holds, merged upstream say, makes no
+/// commit and succeeds, so loom would report a merge that did nothing.
+#[test]
+fn merge_refuses_a_branch_head_already_holds() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("A1", "a1.txt");
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+    test_repo
+        .repo
+        .reference("refs/remotes/origin/old", base_oid, true, "test")
+        .unwrap();
+    let head = test_repo.head_oid();
+
+    let err = test_repo
+        .in_dir(|| super::run(Some("origin/old".to_string()), true))
+        .unwrap_err();
+
+    assert!(err.to_string().contains("already in"), "{err}");
+    assert_eq!(test_repo.head_oid(), head);
+    assert!(!test_repo.branch_exists("old"));
+}
+
+/// The picker reads which branches HEAD holds from one `for-each-ref`, which
+/// must match the full ref names it lists.
+#[test]
+fn the_picker_leaves_out_a_remote_branch_head_already_holds() {
+    use crate::core::ui::{self, Answer, PromptKind, Request};
+
+    let test_repo = TestRepo::new_with_remote();
+    remote_only_branch(&test_repo, "feature-r", "r.txt", "r");
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+    test_repo
+        .repo
+        .reference("refs/remotes/origin/old", base_oid, true, "test")
+        .unwrap();
+
+    let kinds = test_repo.in_dir(|| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            ui::install(tx);
+            let result = super::run(None, true);
+            ui::uninstall();
+            result
+        });
+        let mut kinds = Vec::new();
+        for request in rx {
+            if let Request::Prompt { kind, reply, .. } = request {
+                kinds.push(kind);
+                reply
+                    .send(Some(Answer::Text("origin/feature-r".into())))
+                    .unwrap();
+            }
+        }
+        worker.join().unwrap().unwrap();
+        kinds
+    });
+
+    let [PromptKind::GroupedSelect { groups }] = kinds.as_slice() else {
+        panic!("{kinds:?}");
+    };
+    let items: Vec<&str> = groups
+        .iter()
+        .flat_map(|(_, items)| items.iter().map(String::as_str))
+        .collect();
+    assert_eq!(items, ["origin/feature-r"]);
+    assert!(test_repo.branch_exists("feature-r"));
+}
+
 #[test]
 fn merge_accepts_branch_already_upstream_in_other_worktree() {
     let (test_repo, _path) = woven_in_other_worktree();

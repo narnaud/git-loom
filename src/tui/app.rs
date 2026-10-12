@@ -423,7 +423,8 @@ enum Action {
     /// first.
     Merge,
     /// `loom unmerge [branch]`; no branch is unmerge's own picker. Unmerge
-    /// confirms a branch passed in under the TUI, not one it picked.
+    /// confirms a branch passed in under the TUI, and a pick that takes
+    /// others with it (Spec 020).
     Unmerge { branch: Option<String> },
     /// `loom update`: takes no target.
     Update,

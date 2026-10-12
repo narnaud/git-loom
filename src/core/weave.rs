@@ -465,6 +465,13 @@ impl Weave {
         self.section_index(branch_name).is_some()
     }
 
+    /// Every branch at the tip of `branch_name`'s section: the refs
+    /// [`Self::drop_branch`] takes out with it.
+    pub fn section_branch_names(&self, branch_name: &str) -> &[String] {
+        self.section_index(branch_name)
+            .map_or(&[], |i| &self.branch_sections[i].branch_names)
+    }
+
     /// Whether `branch_name` is an inner (stacked) ref, i.e. a branch whose tip
     /// is a commit inside another branch's section.
     pub fn is_inner_branch(&self, branch_name: &str) -> bool {

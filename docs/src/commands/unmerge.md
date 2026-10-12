@@ -17,7 +17,7 @@ git loom unmerge [branch]
 ## What It Does
 
 1. **Branch selection** — uses the provided name/short ID, or shows an interactive picker listing woven branches
-2. **Validation** — checks that the branch is actually woven into the integration branch
+2. **Validation** — checks that the branch is actually woven into the integration branch. A branch stacked under another is refused, since its commits are the outer branch's as well; unmerge the outer branch first. Branches at the same commit share their commits, so they leave together, and the message names each one
 3. **Unweave** — rebases the integration branch to remove the branch's merge topology
 4. **Preserve** — the branch ref is kept intact, pointing at its original commits
 

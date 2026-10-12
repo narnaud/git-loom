@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use git2::{BranchType, Oid, Repository};
@@ -26,32 +27,60 @@ pub fn run(branch: Option<String>, all: bool) -> Result<()> {
     let info = repo::gather_repo_info(&repo, false, 1)?;
     let others = other_integrations(&repo, workdir, &info.branch_name)?;
 
+    // `git merge` refuses any staged change, whatever it touches.
+    if !repo::get_staged_files(&repo)?.is_empty() {
+        bail!("Cannot merge with staged changes\nCommit or unstage them first");
+    }
+
+    let merged = merged_into_head(workdir)?;
     let branch_name = match branch {
-        Some(name) => resolve_non_woven_branch(&repo, &info, &others, &name)?,
-        None => pick_branch(&repo, &info, &others, all)?,
+        Some(name) => resolve_non_woven_branch(&repo, &info, &others, &merged, &name)?,
+        None => pick_branch(&repo, &info, &others, &merged, all)?,
     };
 
     // Remote branches need a local tracking branch before they can be merged.
-    let local_name = if repo.find_branch(&branch_name, BranchType::Local).is_ok() {
+    let created = repo.find_branch(&branch_name, BranchType::Local).is_err();
+    let local_name = if !created {
         branch_name.clone()
     } else {
         let local = repo::upstream_local_branch(&branch_name);
         git::branch_create(workdir, &local, &branch_name)?;
-        // Set up tracking
-        let mut local_branch = repo.find_branch(&local, BranchType::Local)?;
-        local_branch.set_upstream(Some(&branch_name))?;
+        let tracked = repo
+            .find_branch(&local, BranchType::Local)
+            .and_then(|mut b| b.set_upstream(Some(&branch_name)));
+        if let Err(e) = tracked {
+            discard_created(workdir, &local);
+            return Err(e.into());
+        }
         local
     };
 
     // Merge the branch into integration (--no-ff) so it appears in the topology
-    match crate::git::merge_no_ff(workdir, &git_dir, &local_name)? {
+    let outcome = match crate::git::merge_no_ff(workdir, &git_dir, &local_name) {
+        Ok(outcome) => outcome,
+        Err(e) => {
+            if created {
+                discard_created(workdir, &local_name);
+            }
+            return Err(e);
+        }
+    };
+    match outcome {
         MergeOutcome::Completed => {
             msg::success(&format!("Merged `{}` into integration branch", local_name));
         }
         MergeOutcome::Stopped => {
+            let delete_branches = if created {
+                vec![local_name.clone()]
+            } else {
+                Vec::new()
+            };
             let state = LoomState {
                 command: "merge".to_string(),
-                rollback: Rollback::default(),
+                rollback: Rollback {
+                    delete_branches,
+                    ..Rollback::default()
+                },
                 context: serde_json::to_value(MergeContext {
                     branch_name: local_name,
                 })?,
@@ -64,6 +93,18 @@ pub fn run(branch: Option<String>, all: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Delete the tracking branch a remote pick created, for a merge that did not
+/// happen; one that cannot be deleted is named, so it is not left unnoticed.
+fn discard_created(workdir: &Path, branch: &str) {
+    if git::branch_delete(workdir, branch).is_err() {
+        msg::warn(&format!(
+            "Could not delete `{}`, created for this merge\n\
+             Delete it with `git branch -D {}`",
+            branch, branch
+        ));
+    }
 }
 
 /// Resume a `loom merge` after conflicts have been resolved.
@@ -142,12 +183,35 @@ fn woven_elsewhere<'a>(
     Ok(None)
 }
 
+/// Full names of the local and remote branches HEAD already holds, which
+/// `git merge` would make no commit for: a branch merged upstream that nobody
+/// pruned, say. One walk, where a merge-base per branch would go back as far as
+/// each old remote branch.
+fn merged_into_head(workdir: &Path) -> Result<HashSet<String>> {
+    let refs = git::run_git_stdout(
+        workdir,
+        &[
+            "for-each-ref",
+            "--merged=HEAD",
+            "--format=%(refname)",
+            "refs/heads",
+            "refs/remotes",
+        ],
+    )?;
+    Ok(refs.lines().map(str::to_string).collect())
+}
+
+fn in_head(merged: &HashSet<String>, branch: &git2::Branch) -> bool {
+    branch.get().name().is_ok_and(|name| merged.contains(name))
+}
+
 /// Resolve a branch argument, ensuring it's NOT already woven, here or in
-/// another worktree's integration branch.
+/// another worktree's integration branch, nor in HEAD's history.
 fn resolve_non_woven_branch(
     repo: &Repository,
     info: &repo::RepoInfo,
     others: &[OtherIntegration],
+    merged: &HashSet<String>,
     branch_arg: &str,
 ) -> Result<String> {
     // Check if it's already woven
@@ -178,17 +242,20 @@ fn resolve_non_woven_branch(
         );
     }
 
-    // Check if it's a local branch
-    if repo.find_branch(branch_arg, BranchType::Local).is_ok() {
-        return Ok(branch_arg.to_string());
+    let Ok(branch) = repo
+        .find_branch(branch_arg, BranchType::Local)
+        .or_else(|_| repo.find_branch(branch_arg, BranchType::Remote))
+    else {
+        bail!("Branch '{}' not found", branch_arg)
+    };
+    if in_head(merged, &branch) {
+        bail!(
+            "Branch `{}` is already in the integration branch's history\n\
+             There is nothing to merge",
+            branch_arg
+        );
     }
-
-    // Check if it's a remote branch
-    if repo.find_branch(branch_arg, BranchType::Remote).is_ok() {
-        return Ok(branch_arg.to_string());
-    }
-
-    bail!("Branch '{}' not found", branch_arg)
+    Ok(branch_arg.to_string())
 }
 
 /// Interactive picker: non-woven local branches, then, with `include_remote`,
@@ -197,6 +264,7 @@ fn pick_branch(
     repo: &Repository,
     info: &repo::RepoInfo,
     others: &[OtherIntegration],
+    merged: &HashSet<String>,
     include_remote: bool,
 ) -> Result<String> {
     let woven_names: Vec<&str> = info.branches.iter().map(|b| b.name.as_str()).collect();
@@ -213,6 +281,7 @@ fn pick_branch(
             && !woven_names.contains(&name)
             && !others.iter().any(|o| o.branch == name)
             && woven_elsewhere(repo, others, name)?.is_none()
+            && !in_head(merged, &branch)
         {
             local.push(name.to_string());
         }
@@ -220,7 +289,7 @@ fn pick_branch(
 
     // Remote branches without a local counterpart
     if include_remote {
-        let local_names: std::collections::HashSet<String> = repo
+        let local_names: HashSet<String> = repo
             .branches(Some(BranchType::Local))?
             .filter_map(|b| b.ok())
             .filter_map(|(b, _)| b.name().ok().flatten().map(|n| n.to_string()))
@@ -240,7 +309,9 @@ fn pick_branch(
                     continue;
                 }
                 // Skip if a local branch with the same short name exists
-                if !local_names.contains(&repo::upstream_local_branch(name)) {
+                if !local_names.contains(&repo::upstream_local_branch(name))
+                    && !in_head(merged, &branch)
+                {
                     remote.push(name.to_string());
                 }
             }
