@@ -3,7 +3,7 @@
 set -e
 source "$(dirname "$0")/env.sh"
 MODE=$1
-W="$DEMO/work/$MODE"
+W="$DEMO_WORK/$MODE"
 rm -rf "$W"; mkdir -p "$W"; cd "$W"
 
 upstream() { # name email date message
@@ -138,6 +138,11 @@ git loom commit -b feature-search -m "Add search endpoint" zz >/dev/null
 sed -i 's|^  <ul>$|  <form action="/search"><input name="q" placeholder="Search tasks"></form>\n  <ul>|' templates/index.html
 git loom commit -b feature-search -m "Add search box to task list" zz >/dev/null
 
+if [ "$MODE" = cli ]; then
+  # The CLI video starts with `loom init`, then weaves feature-search in.
+  git switch -q main
+  git branch -q -D integration
+fi
 if [ "$MODE" = tui ]; then
   "$DEMO/scene.sh" darkmode-edit
   git loom commit -b dark-mode -m "Add dark mode toggle" zz >/dev/null

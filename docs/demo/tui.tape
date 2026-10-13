@@ -14,7 +14,7 @@ Hide
 Sleep 1500ms
 Enter
 Sleep 500ms
-Type "source ./env.sh && cd $DEMO/work/tui/taskflow && clear"
+Type "source ./env.sh && cd $DEMO_WORK/tui/taskflow && clear"
 Enter
 Sleep 1s
 Show

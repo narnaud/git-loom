@@ -48,7 +48,7 @@ teammate)
     GIT_AUTHOR_NAME="Marco Bellini" GIT_AUTHOR_EMAIL=marco@taskflow.dev \
     GIT_COMMITTER_NAME="Marco Bellini" GIT_COMMITTER_EMAIL=marco@taskflow.dev \
     GIT_AUTHOR_DATE="2026-10-12T15:20:00+0200" GIT_COMMITTER_DATE="2026-10-12T15:20:00+0200" \
-      git commit -qam "Add due dates to tasks"
+      git commit -qam "Add task due dates"
     git push -q origin HEAD:main )
   rm -rf "$d"
   ;;

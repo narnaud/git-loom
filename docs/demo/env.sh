@@ -11,6 +11,9 @@ export GIT_EDITOR="$DEMO/editor.sh"
 export LESS=-FRX
 # Push goes to the fake ssh + gh stub only; a dummy token keeps any real gh logged out.
 export GH_TOKEN=demo-not-a-real-token
-export FAKE_GH_STATE="$DEMO/work/gh-state"
+# Short and neutral: loom prints worktree paths, and they show in the video.
+export DEMO_WORK=${DEMO_WORK:-/c/demo}
+export FAKE_GH_STATE="$DEMO_WORK/gh-state"
+export PANE_STATE="$DEMO_WORK/pane-state"
 export DEMO_PY="$DEMO/venv/Scripts/python.exe"
-export PS1='\[\e[1;35m\]taskflow\[\e[0m\] \$ '
+export PS1='\[\e[1;35m\]\W\[\e[0m\] \$ '

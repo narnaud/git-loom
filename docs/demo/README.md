@@ -7,13 +7,15 @@ Re-render (Git Bash, from this folder; needs vhs + ttyd + ffmpeg, e.g. `scoop in
 ```sh
 (cd ../.. && cargo build --release) && mkdir -p bin && cp ../../target/release/git-loom.exe bin/
 (cd fake-gh && cargo build --release) && cp fake-gh/target/release/fake-gh.exe bin/gh.exe
-python -m venv venv && venv/Scripts/python -m pip install pywinpty
+python -m venv venv && venv/Scripts/python -m pip install pywinpty pyte
 bash setup.sh cli && vhs cli.tape
 bash setup.sh tui && vhs tui.tape
 ```
 
-- setup.sh rebuilds the fake "taskflow" repo under work/<mode>; dates are pinned so short IDs are stable.
-- The remote looks like git@github.com:acme/taskflow.git but fake-ssh.sh serves it from work/<mode>/origin.git,
-  and bin/gh.exe (fake-gh) answers loom's gh calls offline. GH_TOKEN is a dummy, so a real gh can't act.
-- CLI split screen: pane.sh redraws the right pane after each command with pane.py, which runs
-  `git loom` in a ConPTY (loom only colors a terminal) and draws it from column PANE_X.
+- setup.sh rebuilds the fake "taskflow" repo under `$DEMO_WORK/<mode>` (default `C:/demo`, kept short
+  because loom prints worktree paths); dates are pinned so short IDs are stable.
+- The remote looks like git@github.com:acme/taskflow.git but fake-ssh.sh serves it from
+  `$DEMO_WORK/<mode>/origin.git`, and bin/gh.exe (fake-gh) answers loom's gh calls offline.
+  GH_TOKEN is a dummy, so a real gh can't act.
+- CLI split screen: split.py runs bash in its own pseudo-console, emulated with pyte, beside a
+  `git loom status` pane that redraws at each prompt (split.bashrc). `export LOOM_PANE=on` opens it.
