@@ -6,6 +6,8 @@
 
 ![git-loom status](docs/src/assets/git-loom-status-838.png)
 
+▶ Watch it in action: [command line](https://narnaud.github.io/git-loom/assets/git-loom-cli.mp4) · [TUI](https://narnaud.github.io/git-loom/assets/git-loom-tui.mp4)
+
 > [!IMPORTANT]
 > *git-loom* has been written with the help of AI, especially [Claude](https://claude.ai/)
 

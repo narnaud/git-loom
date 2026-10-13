@@ -6,6 +6,16 @@ Think of it as a loom that weaves multiple threads (feature branches) into a sin
 
 ![git-loom status](assets/git-loom-status-750.png)
 
+## See It in Action
+
+From the command line, with the status pinned on the left:
+
+<video src="assets/git-loom-cli.mp4" controls muted playsinline preload="metadata" width="100%"></video>
+
+The same operations from the interactive [`git loom tui`](commands/tui.md):
+
+<video src="assets/git-loom-tui.mp4" controls muted playsinline preload="metadata" width="100%"></video>
+
 ## Core Concepts
 
 ### Integration Branch
