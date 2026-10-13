@@ -195,20 +195,17 @@ git-loom push b          # b stacked on a, no PRs yet
 
 A stack is a topology, not a flag. The ways to get one:
 
-- `git loom branch part-1 -t <commit inside feature>` — placing a branch on a
+- `git loom branch part-1 --on <commit inside feature>` — placing a branch on a
   commit inside another branch's section splits it in two stacked layers
   (spec 005).
-- `git loom branch b -t a` then `git loom commit -b b` — a branch co-located
+- `git loom branch b --on a` then `git loom commit -b b` — a branch co-located
   with `a` becomes a stacked layer as soon as it receives its own commit
   (spec 004, co-located branch splitting).
 
 Amending any layer works as usual (`fold` files into a commit, `absorb`,
 `reword`): the weave rebase rewrites the layers above it too, and the next push
-of any layer re-publishes them. **Known limitation:** `git loom commit -b a` and
-`git loom fold <commit> a` do not yet accept a branch that is a *lower* layer of
-a stack, because the weave resolves the target by section and lower layers only
-exist as `update-ref`s inside the top section's. Commit to the top layer, or
-fold into an existing commit, instead.
+of any layer re-publishes them. `git loom commit -b a` and
+`git loom fold <commit> a` accept a *lower* layer (spec 004).
 
 After the bottom PR merges, `git loom update` rebases the integration branch
 and the stack shrinks from the bottom; with `loom.pruneGoneBranches` the merged

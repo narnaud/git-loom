@@ -234,8 +234,7 @@ $_gitLoomCompleter = {
         }
         'branch' {
             $subFlags = @(
-                @{ Name = '-t'; Description = 'Target commit, branch, or shortID' },
-                @{ Name = '--target'; Description = 'Target commit, branch, or shortID' }
+                @{ Name = '--on'; Description = 'Where the new branch starts' }
             )
         }
         'merge' {

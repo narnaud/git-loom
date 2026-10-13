@@ -9,7 +9,7 @@ To merge an existing branch into the integration branch, or take one out, see [`
 ## Usage
 
 ```
-git loom branch [name] [-t <target>]
+git loom branch [name] [--on <branch|commit>]
 ```
 
 ## Arguments
@@ -22,7 +22,7 @@ git loom branch [name] [-t <target>]
 
 | Option | Description |
 |--------|-------------|
-| `-t, --target <target>` | Commit hash, short ID, or branch name (defaults to upstream merge-base) |
+| `--on <branch\|commit>` | Where the new branch starts: branch name, commit hash, or short ID (defaults to upstream merge-base) |
 
 ## What It Does
 
@@ -41,7 +41,7 @@ When a branch is created at a commit on the **first-parent line** from HEAD to t
 origin/main → A1 → A2 → A3 → HEAD
 ```
 
-**After** `git loom branch feature-a -t A2`:
+**After** `git loom branch feature-a --on A2`:
 
 ```
               A1 → A2 (feature-a)
@@ -59,20 +59,31 @@ All first-parent commits from the start up to (and including) the target move in
 **Branching at HEAD** weaves all current first-parent commits into the new branch:
 
 ```
-git loom branch feature-a    # target = HEAD (all commits go into feature-a)
+git loom branch feature-a --on HEAD    # all commits go into feature-a
 ```
 
 If the working tree has uncommitted changes, they are automatically stashed and restored after the operation, staged ones as staged.
 
 If a weave rebase encounters conflicts, it aborts automatically and reports an error — no state is saved and no `loom continue` is available. Resolve the situation and retry.
 
+## Where the New Branch Lands
+
+`--on` takes:
+
+- **A woven branch** — the new branch starts at its tip, empty, so the next commit stacks on it.
+- **A commit inside a branch** — the new branch ends at that commit and owns it with the commits below it; the existing branch keeps the commits above it and becomes stacked on the new one.
+- **A loose commit**, or a branch whose tip is one — the loose commits up to it become the new branch's section (see [Automatic Weaving](#automatic-weaving)).
+- **Nothing** — an empty branch at the upstream base.
+
+`git loom branch <name> <start>` is refused with a hint to use `--on <start>`: unlike `git branch`, *git-loom* may weave, split ownership, or rewrite loose history.
+
 ## Target Resolution
 
-The `-t` flag accepts:
+`--on` is resolved in this order:
 
-1. **Branch names** — resolves to the branch's tip commit
-2. **Git hashes** — full or partial commit hashes
-3. **Short IDs** — the compact IDs shown in `git loom status`
+1. **Branch names** — the branch's tip commit
+2. **Git revisions** — full or partial hashes, `HEAD`, `HEAD~2`, …
+3. **Short IDs** — the branch or commit IDs shown in `git loom status`
 4. **Default** — the merge-base between HEAD and upstream
 
 ## Examples
@@ -96,7 +107,7 @@ git loom branch feature-auth
 ### At a specific commit by short ID
 
 ```bash
-git loom branch feature-auth -t osy
+git loom branch feature-auth --on osy
 # ✓ Created branch `feature-auth` at `72f9d3a`
 # ✓ Woven `feature-auth` into integration branch
 ```
@@ -104,15 +115,15 @@ git loom branch feature-auth -t osy
 ### At another branch's tip
 
 ```bash
-git loom branch feature-b -t feature-a
-# ✓ Created branch `feature-b` at feature-a's tip commit
+git loom branch feature-b --on feature-a
+# ✓ Created branch `feature-b` at `5c1d9e2`
 ```
 
 ### Branching at HEAD (weaves all commits)
 
 ```bash
-git loom branch feature-a
-# ✓ Created branch `feature-a` at HEAD
+git loom branch feature-a --on HEAD
+# ✓ Created branch `feature-a` at `3e8b1c0`
 # ✓ Woven `feature-a` into integration branch
 ```
 

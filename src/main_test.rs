@@ -129,7 +129,7 @@ fn completion_scripts_cover_the_cli() {
     ];
     let mut missing = Vec::new();
     for (shell, script) in scripts {
-        // fish spells `-t --target` as `-s t -l target`; longs first, for `-s l`.
+        // fish spells `-a --all` as `-s a -l all`; longs first, for `-s l`.
         let script = if shell == "fish" {
             script.replace(" -l ", " --").replace(" -s ", " -")
         } else {
@@ -160,6 +160,23 @@ fn commit_rejects_loose_with_branch() {
     assert!(parse(&["commit", "-b", "feature-a", "-m", "m"]).is_ok());
     assert!(parse(&["commit", "-l", "-b", "feature-a", "-m", "m"]).is_err());
     assert!(parse(&["commit", "-i", "-b", "feature-a", "-m", "m"]).is_err());
+}
+
+/// `-t`/`--target` predate `--on` (#371) and stay as hidden aliases.
+#[test]
+fn branch_accepts_hidden_target_alias() {
+    let parse = |args: &[&str]| Cli::try_parse_from(["git-loom"].iter().chain(args).copied());
+    for flag in ["-t", "--target", "--on"] {
+        match parse(&["branch", "b", flag, "a"]).unwrap().command {
+            Some(Command::Branch {
+                on, start_point, ..
+            }) => {
+                assert_eq!(on.as_deref(), Some("a"), "{flag}");
+                assert_eq!(start_point, None, "{flag}");
+            }
+            _ => panic!("{flag}: not a branch"),
+        }
+    }
 }
 
 /// `-i`/`--integration` predate `-l`/`--loose` (#373) and stay as hidden aliases.

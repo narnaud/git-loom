@@ -56,7 +56,7 @@ local diff_matcher = clink.argmatcher()
     :addflags("--staged", "--cached", "-a", "--all", "--help", "-h")
 
 local branch_matcher = clink.argmatcher()
-    :addflags("-t", "--target", "--help", "-h")
+    :addflags("--on", "--help", "-h")
 
 local merge_matcher = clink.argmatcher()
     :addflags("-a", "--all", "--help", "-h")

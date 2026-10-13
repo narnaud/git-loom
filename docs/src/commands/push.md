@@ -100,10 +100,10 @@ GitHub does not support stacks across forks: in a fork workflow every layer stil
 
 A stack is just a shape of your branches:
 
-- `git loom branch part-1 -t <commit inside feature>` splits a branch into two stacked layers.
-- `git loom branch b -t a` followed by `git loom commit -b b` puts b's first commit on top of a.
+- `git loom branch part-1 --on <commit inside feature>` splits a branch into two stacked layers.
+- `git loom branch b --on a` followed by `git loom commit -b b` puts b's first commit on top of a.
 
-Amending any layer (`fold`, `absorb`, `reword`) rewrites the layers above it as well; the next `push` of any layer re-publishes them. Adding a commit to a *lower* layer with `commit -b` or `fold <commit> <branch>` is not supported yet — commit to the top layer or fold into an existing commit instead.
+Amending any layer (`fold`, `absorb`, `reword`) rewrites the layers above it as well; the next `push` of any layer re-publishes them. `commit -b` and `fold <commit> <branch>` accept a *lower* layer too: the commit lands at its tip and the layers above are replayed on it.
 
 When the bottom PR merges, `git loom update` rebases your integration branch and the stack shrinks from the bottom.
 

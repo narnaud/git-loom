@@ -91,7 +91,7 @@ __git_loom_candidates() {
                 flags="--project"
             fi
             ;;
-        branch) flags="-t --target" ;;
+        branch) flags="--on" ;;
         merge) flags="-a --all" ;;
         worktree)
             if [[ -z $nested && $cur != -* ]]; then

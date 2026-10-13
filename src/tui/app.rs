@@ -404,7 +404,7 @@ enum Action {
         files: Vec<String>,
         hunks: Option<HunkArgs>,
     },
-    /// `loom branch <name> [-t target]`.
+    /// `loom branch <name> [--on target]`.
     Branch {
         name: String,
         target: Option<String>,
@@ -1357,7 +1357,7 @@ impl<'a> App<'a> {
             Action::Branch { name, target } => {
                 words.extend(["branch".into(), name.clone()]);
                 if let Some(target) = target {
-                    words.extend(["-t".into(), sid(target)]);
+                    words.extend(["--on".into(), sid(target)]);
                 }
             }
             Action::Drop { targets } => {
@@ -2966,7 +2966,7 @@ impl<'a> App<'a> {
     }
 
     /// `b`: start naming a new branch, drawn in the tree as if it already
-    /// existed at the cursor commit or branch tip (its `-t` target), else at
+    /// existed at the cursor commit or branch tip (its `--on` target), else at
     /// the base. Nothing runs until the name is confirmed.
     fn action_new_branch(&mut self) {
         let Some(row) = self.current_row() else {

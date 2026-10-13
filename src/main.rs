@@ -352,9 +352,24 @@ enum Command {
         /// Branch name (if not provided, will prompt interactively)
         name: Option<String>,
 
-        /// Target commit, branch, or shortID (defaults to upstream base)
-        #[arg(short = 't', long = "target")]
-        target: Option<String>,
+        /// Git's start point, only taken to refuse it with a hint naming `--on`
+        #[arg(hide = true)]
+        start_point: Option<String>,
+
+        /// Where the new branch starts (default: the upstream base)
+        ///
+        /// A woven branch: stack on its tip, starting empty. A commit inside a
+        /// branch: the new branch ends at it and takes it and the commits below
+        /// it, and that branch stacks on the new one. A loose commit, or a branch
+        /// whose tip is one: the loose commits up to it become the new branch.
+        // `-t`/`--target` are the pre-#371 spelling, kept hidden.
+        #[arg(
+            long = "on",
+            short_alias = 't',
+            alias = "target",
+            value_name = "BRANCH|COMMIT"
+        )]
+        on: Option<String>,
     },
 
     /// Merge an existing branch into the integration branch
@@ -632,7 +647,21 @@ fn main() {
             Some(WorktreeAction::Drop { worktree }) => worktree::drop::run(worktree),
             Some(WorktreeAction::Path { worktree }) => worktree::path::run(worktree),
         },
-        Some(Command::Branch { name, target }) => branch::run(name, target),
+        Some(Command::Branch {
+            start_point: Some(at),
+            on,
+            ..
+        }) => Err(match on {
+            None => anyhow::anyhow!(
+                "`loom branch` takes no start point\nUse `--on {}`",
+                git::shell_quote(&at)
+            ),
+            Some(_) => anyhow::anyhow!(
+                "`loom branch` takes no start point besides `--on`\nRemove the extra argument `{}`",
+                git::shell_quote(&at)
+            ),
+        }),
+        Some(Command::Branch { name, on, .. }) => branch::run(name, on),
         Some(Command::Merge { branch, all }) => merge::run(branch, all),
         Some(Command::Unmerge { branch }) => unmerge::run(branch),
         Some(Command::Reword {

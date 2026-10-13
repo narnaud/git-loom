@@ -122,7 +122,7 @@ fn resolve_commit(
             // Default: merge-base commit
             let info = info
                 .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("No upstream tracking branch — cannot determine merge-base\nSpecify an explicit target commit"))?;
+                .ok_or_else(|| anyhow::anyhow!("No upstream tracking branch — cannot determine merge-base\nPass `--on <branch|commit>`"))?;
             Ok(info.upstream.merge_base_oid.to_string())
         }
         Some(t) => {

@@ -164,7 +164,7 @@ complete -c git-loom -n "__git_loom_is agent ''" -f -a install -d 'Install the l
 complete -c git-loom -n '__git_loom_is agent install' -f -a claude -d 'Claude Code'
 complete -c git-loom -n '__git_loom_is agent install' -l project -d 'Install into the repository instead of the home directory'
 
-complete -c git-loom -n '__git_loom_is branch' -s t -l target -x -d 'Target commit, branch, or shortID'
+complete -c git-loom -n '__git_loom_is branch' -l on -x -d 'Where the new branch starts'
 complete -c git-loom -n '__git_loom_is merge' -s a -l all -d 'Also show remote branches'
 
 complete -c git-loom -n "__git_loom_is worktree ''" -f -a new -d 'Create a worktree with its own integration branch'

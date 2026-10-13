@@ -27,7 +27,7 @@ gl_capture_in "$FOO" status
 assert_exit_ok "$CODE" "status_in_worktree"
 assert_contains "$OUT" "origin/$BASE_BRANCH" "status_in_worktree_upstream"
 commit_file_in "$FOO" "Wt commit" "wt.txt"
-gl_capture_in "$FOO" branch feature-wt -t HEAD
+gl_capture_in "$FOO" branch feature-wt --on HEAD
 assert_exit_ok "$CODE" "branch_in_worktree"
 gl_capture_in "$FOO" status
 assert_contains "$OUT" "[feature-wt]" "status_shows_worktree_branch"

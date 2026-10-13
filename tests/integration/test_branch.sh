@@ -37,34 +37,48 @@ assert_head_parent_count 1 "new_no_weave_at_base"
 
 # ── BRANCH — EXPLICIT TARGET ──────────────────────────────────────────────────
 
-describe "branch --target by full commit hash"
+describe "branch --on full commit hash"
 setup_repo_with_remote
 commit_file "Target commit" "target.txt"
 target_hash="$(head_hash)"
 commit_file "Later commit" "later.txt"
-out=$(gl branch g-by-hash --target "$target_hash")
+out=$(gl branch g-by-hash --on "$target_hash")
 assert_exit_ok $? "new_hash_ok"
 assert_branch_exists "g-by-hash" "new_hash_exists"
 
-describe "branch --target by short commit ID"
+describe "branch --on short commit ID"
 setup_repo_with_remote
 commit_file "Short ID commit" "sid.txt"
 commit_file "Later on top" "later_sid.txt"
 short_id=$(commit_sid_from_status "Short ID commit")
-out=$(gl branch g-by-shortid --target "$short_id")
+out=$(gl branch g-by-shortid --on "$short_id")
 assert_exit_ok $? "new_shortid_ok"
 assert_branch_exists "g-by-shortid" "new_shortid_exists"
 
-describe "branch --target by branch name (resolves to branch tip)"
+describe "branch --on branch name (resolves to branch tip)"
 setup_repo_with_remote
 create_feature_branch "g-source"
 switch_to g-source
 commit_file "Source tip" "source.txt"
 switch_to integration
-out=$(gl branch g-from-branch --target g-source)
+out=$(gl branch g-from-branch --on g-source)
 assert_exit_ok $? "new_branch_tip_ok"
 assert_branch_exists "g-from-branch" "new_branch_tip_exists"
 assert_eq "$(branch_oid g-source)" "$(branch_oid g-from-branch)" "new_branch_tip_eq"
+
+describe "branch refuses a start point, naming --on"
+setup_repo_with_remote
+gl_capture branch g-start HEAD
+assert_exit_fail "$CODE" "new_start_point_fail"
+assert_contains "$OUT" "--on HEAD" "new_start_point_hint"
+assert_branch_not_exists "g-start" "new_start_point_not_created"
+
+describe "branch refuses a start point beside --on"
+setup_repo_with_remote
+gl_capture branch g-start HEAD --on HEAD
+assert_exit_fail "$CODE" "new_start_point_on_fail"
+assert_contains "$OUT" "Remove the extra argument HEAD" "new_start_point_on_msg"
+assert_branch_not_exists "g-start" "new_start_point_on_not_created"
 
 # ── BRANCH — WEAVING ──────────────────────────────────────────────────────────
 
@@ -73,7 +87,7 @@ setup_repo_with_remote
 commit_file "Weaveable commit" "weave.txt"
 weave_target="$(head_hash)"
 commit_file "Second loose commit" "second.txt"
-gl branch g-woven-auto --target "$weave_target"
+gl branch g-woven-auto --on "$weave_target"
 # Weaving creates a merge commit; loose commits build on top of it, so HEAD
 # is the loose commit (1 parent) and the merge commit is one step below (2 parents).
 assert_head_parent_count 1 "new_weave_head_topo"
@@ -85,7 +99,7 @@ setup_repo_with_remote
 commit_file "Commit A" "a.txt"
 commit_file "Commit B" "b.txt"
 head_before="$(head_hash)"
-gl branch g-at-head --target HEAD
+gl branch g-at-head --on HEAD
 assert_branch_exists "g-at-head" "new_head_branch_exists"
 assert_head_parent_count 2 "new_head_merge_topo"
 

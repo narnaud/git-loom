@@ -2140,7 +2140,7 @@ fn new_branch_on_a_branch_row_targets_that_branch() {
     assert_eq!(app.fallback_cursor, None);
 }
 
-/// `c` is loose on the integration line; `-t` on it weaves it onto the new
+/// `c` is loose on the integration line; branching on it weaves it onto the new
 /// branch (Spec 005), so the preview must already draw it there.
 #[test]
 fn new_branch_on_a_loose_commit_pulls_it_off_the_integration_line() {
@@ -2205,7 +2205,7 @@ fn new_branch_off_a_commit_or_branch_lands_at_the_base() {
     let Mode::NewBranch { target, tip, .. } = &app.mode else {
         panic!("expected new-branch mode");
     };
-    assert_eq!(*target, None, "no -t: the branch is created at the base");
+    assert_eq!(*target, None, "no --on: the branch is created at the base");
     assert_eq!(*tip, oid('9'));
     let at = app.tree.cursor();
     assert_eq!(cursor_key(&app), pending_key());
@@ -2320,7 +2320,7 @@ fn command_line_uses_the_short_ids_the_tree_shows() {
             name: "feature-b".to_string(),
             target: Some("feature-a".to_string()),
         }),
-        format!("loom branch feature-b -t {}", ids.get_branch("feature-a"))
+        format!("loom branch feature-b --on {}", ids.get_branch("feature-a"))
     );
     assert_eq!(
         app.command_line(&Action::Branch {

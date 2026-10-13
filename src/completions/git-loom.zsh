@@ -201,8 +201,7 @@ _git-loom() {
             fi ;;
         branch)
             flags=(
-                '-t:Target commit, branch, or shortID'
-                '--target:Target commit, branch, or shortID'
+                '--on:Where the new branch starts'
             ) ;;
         merge)
             flags=(
