@@ -7,3 +7,6 @@ src/completions/*.zsh text eol=lf
 src/completions/*.fish text eol=lf
 # cmd.exe misparses batch files with LF-only endings.
 *.cmd text eol=crlf
+# Demo scripts run under bash, which chokes on a CR outside Git Bash.
+docs/demo/** text eol=lf
+*.mp4 binary

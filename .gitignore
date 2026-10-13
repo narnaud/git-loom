@@ -1,2 +1,8 @@
 /target
 /docs/book
+# Demo video build outputs (docs/demo/README.md).
+/docs/demo/bin
+/docs/demo/venv
+/docs/demo/work
+/docs/demo/fake-gh/target
+/docs/demo/fake-gh/Cargo.lock

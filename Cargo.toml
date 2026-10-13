@@ -10,7 +10,7 @@ homepage = "https://narnaud.github.io/git-loom"
 readme = "README.md"
 keywords = [ "git", "cli", "branches", "workflow" ]
 categories = [ "command-line-utilities", "development-tools" ]
-exclude = [ ".claude/", ".github/" ]
+exclude = [ ".claude/", ".github/", "docs/demo/", "docs/src/assets/*.mp4" ]
 
 [dependencies]
 anyhow = "1"
