@@ -52,9 +52,13 @@ teammate)
     git push -q origin HEAD:main )
   rm -rf "$d"
   ;;
+theme-log)
+  sed -i 's/^  const dark = document.body.classList.toggle("dark");$/&\n  console.log("theme", dark);/' static/theme.js
+  ;;
 tui-edits)
+  # search.py is amended into its commit; routes.py has two hunks, one picked for a new branch.
   sed -i 's/if query in t.title\]/if query.lower() in t.title.lower()]/' app/search.py
-  sed -i 's/^    done: bool = False$/    done: bool = False\n    priority: int = 0/' app/models.py
-  sed -i 's|^  <h1>Taskflow</h1>$|  <h1>Taskflow <small>{{ tasks\|length }} tasks</small></h1>|' templates/index.html
+  sed -i 's/^    task = Task(id=len(TASKS) + 1, title=request.json\["title"\])$/    title = request.json["title"].strip()\n    if not title:\n        return jsonify(error="title is required"), 400\n    task = Task(id=len(TASKS) + 1, title=title)/' app/routes.py
+  sed -i 's/search(request.args.get("q", ""))/search(request.args.get("q", "").strip())/' app/routes.py
   ;;
 esac

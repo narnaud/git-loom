@@ -5,3 +5,4 @@
 	pager = less -FRX
 [advice]
 	detachedHead = false
+	waitingForEditor = false

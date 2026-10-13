@@ -1,5 +1,5 @@
 #!/bin/bash
-# Usage: setup.sh <cli|tui> — rebuilds $DEMO/work/<mode> with a fake "taskflow" project.
+# Usage: setup.sh <cli|tui> — rebuilds $DEMO_WORK/<mode> with a fake "taskflow" project.
 set -e
 source "$(dirname "$0")/env.sh"
 MODE=$1
@@ -146,6 +146,13 @@ fi
 if [ "$MODE" = tui ]; then
   "$DEMO/scene.sh" darkmode-edit
   git loom commit -b dark-mode -m "Add dark mode toggle" zz >/dev/null
+  "$DEMO/scene.sh" theme-log
+  git loom commit -b dark-mode -m "WIP: log theme changes" zz >/dev/null
+  # On the wrong branch, with a stray TODO.md, on purpose: the TUI moves it to
+  # dark-mode and uncommits the TODO.
+  "$DEMO/scene.sh" toggle-button
+  printf '%s\n' "- [ ] dark mode: follow the system theme" > TODO.md
+  git loom commit -b feature-search -m "Load the theme script" zz >/dev/null
   "$DEMO/scene.sh" tui-edits
 fi
 echo "ready: $W/taskflow"
