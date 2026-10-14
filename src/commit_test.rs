@@ -1189,10 +1189,13 @@ fn commit_editor_path_survives_a_failing_trailer_amend() {
 fn commit_editor_path_keeps_a_configured_signature() {
     let test_repo = TestRepo::new_with_remote();
     test_repo.set_fake_editor("Reworded by editor");
+    // Drain stdin: git fails the signing on EPIPE if gpg exits before reading
+    // the payload, a race the test otherwise loses under load.
     let gpg = write_script(
         &test_repo,
         ".git/fake-gpg",
-        "printf '\\n[GNUPG:] SIG_CREATED D 1 8 00 1 X\\n' >&2\n\
+        "cat >/dev/null\n\
+         printf '\\n[GNUPG:] SIG_CREATED D 1 8 00 1 X\\n' >&2\n\
          printf -- '-----BEGIN PGP SIGNATURE-----\\n\\nfake\\n-----END PGP SIGNATURE-----\\n'",
     );
     test_repo.set_config("gpg.program", &gpg);
