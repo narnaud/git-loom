@@ -127,6 +127,7 @@ complete -c git-loom -n '__git_loom_is add' -l hunks -x -d 'Hunk id to pick, onc
 complete -c git-loom -n '__git_loom_is add' -l hunks-from -x -d 'Fingerprint of the listing --hunks came from'
 
 complete -c git-loom -n '__git_loom_is commit' -s b -l branch -x -d 'Target feature branch'
+complete -c git-loom -n '__git_loom_is commit' -l on -x -d 'Stack the new -b branch on a branch'
 complete -c git-loom -n '__git_loom_is commit' -s l -l loose -d 'Loose commit on the integration branch'
 complete -c git-loom -n '__git_loom_is commit' -s m -l message -x -d 'Commit message'
 complete -c git-loom -n '__git_loom_is commit' -s p -l patch -d 'Interactively select hunks to stage'

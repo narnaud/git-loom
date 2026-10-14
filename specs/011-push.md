@@ -198,9 +198,10 @@ A stack is a topology, not a flag. The ways to get one:
 - `git loom branch part-1 --on <commit inside feature>` — placing a branch on a
   commit inside another branch's section splits it in two stacked layers
   (spec 005).
-- `git loom branch b --on a` then `git loom commit -b b` — a branch co-located
-  with `a` becomes a stacked layer as soon as it receives its own commit
-  (spec 004, co-located branch splitting).
+- `git loom commit -b b --on a` (or `git loom branch b --on a` then
+  `git loom commit -b b`) — a branch co-located with `a` becomes a stacked
+  layer as soon as it receives its own commit (spec 004, co-located branch
+  splitting).
 
 Amending any layer works as usual (`fold` files into a commit, `absorb`,
 `reword`): the weave rebase rewrites the layers above it too, and the next push

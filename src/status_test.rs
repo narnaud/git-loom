@@ -250,6 +250,7 @@ fn commit_id_survives_an_update_rebase() {
         .in_dir(|| {
             crate::commit::run(
                 Some("feature-a".to_string()),
+                None,
                 false,
                 Some("Add a".to_string()),
                 None,

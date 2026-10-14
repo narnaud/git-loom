@@ -179,6 +179,16 @@ fn branch_accepts_hidden_target_alias() {
     }
 }
 
+/// `--on` names where the `-b` branch is created, so it means nothing without
+/// one: not even with `-l`, which would drop it silently.
+#[test]
+fn commit_on_requires_branch() {
+    let parse = |args: &[&str]| Cli::try_parse_from(["git-loom"].iter().chain(args).copied());
+    assert!(parse(&["commit", "-b", "stk", "--on", "fa", "-m", "m"]).is_ok());
+    assert!(parse(&["commit", "--on", "fa", "-m", "m"]).is_err());
+    assert!(parse(&["commit", "-l", "--on", "fa", "-m", "m"]).is_err());
+}
+
 /// `-i`/`--integration` predate `-l`/`--loose` (#373) and stay as hidden aliases.
 #[test]
 fn commit_accepts_hidden_integration_alias() {

@@ -160,6 +160,54 @@ assert_exit_ok $? "second_commit_ok"
 assert_log_contains "Second"  "second_commit_in_log"
 assert_log_contains "First"   "first_commit_preserved"
 
+# ── COMMIT TO NEW STACKED BRANCH (--on) ───────────────────────────────────────
+
+describe "--on creates the new branch stacked on a woven branch's tip"
+setup_repo_with_remote
+create_feature_branch "g-lower"
+switch_to g-lower
+commit_file "Lower work" "lower.txt"
+switch_to integration
+weave_branch "g-lower"
+lower_tip=$(branch_oid g-lower)
+write_file "upper.txt" "upper"
+out=$(gl commit -b g-upper --on g-lower -m "Upper work" upper.txt)
+assert_exit_ok $? "on_stack_ok"
+assert_eq "$lower_tip" "$(git -C "$WORK" rev-parse g-upper~1)" "on_stack_parent"
+assert_eq "$lower_tip" "$(branch_oid g-lower)"                 "on_stack_lower_kept"
+assert_contains "$(gl status)" "g-upper"                       "on_stack_in_status"
+assert_eq "$(branch_oid g-upper)" "$(git -C "$WORK" rev-parse HEAD^2)" "on_stack_merged"
+
+describe "--on refuses a commit with a hint, leaving the index alone"
+setup_repo_with_remote
+create_feature_branch "g-lower"
+switch_to g-lower
+commit_file "Lower work" "lower.txt"
+commit_file "Lower more" "lower2.txt"
+switch_to integration
+weave_branch "g-lower"
+write_file "upper.txt" "upper"
+lower_inner=$(git -C "$WORK" rev-parse g-lower~1)
+gl_capture commit -b g-upper --on "$lower_inner" -m "Upper work" upper.txt
+assert_exit_fail "$CODE" "on_commit_fail"
+assert_contains "$OUT" "loom branch g-upper --on $lower_inner" "on_commit_hint"
+assert_branch_not_exists "g-upper"                           "on_commit_no_branch"
+assert_eq "?? upper.txt" "$(git -C "$WORK" status --porcelain)" "on_commit_index_kept"
+
+describe "--on refuses an existing -b branch"
+setup_repo_with_remote
+create_feature_branch "g-lower"
+write_file "upper.txt" "upper"
+git -C "$WORK" add upper.txt
+gl_capture commit -b g-lower --on g-lower -m "Upper work"
+assert_exit_fail "$CODE" "on_existing_fail"
+assert_contains "$OUT" "already exists" "on_existing_msg"
+
+describe "--on without -b is rejected"
+setup_repo_with_remote
+gl_capture commit --on main -m "x"
+assert_exit_fail "$CODE" "on_without_b_fail"
+
 # ── STAGING — ZZ TOKEN ────────────────────────────────────────────────────────
 
 describe "zz stages all unstaged changes before committing"

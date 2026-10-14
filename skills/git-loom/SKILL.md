@@ -92,7 +92,7 @@ The `graph` fields:
 | Intent | Command / rule |
 |---|---|
 | Stage | `git loom add <files>`; list files, never `zz`. |
-| Commit | `git loom commit -b <branch> -m "<msg>" <files...>`; a new branch name creates it. Use `-l` for a loose commit on integration. Name files, or omit them to commit exactly the staged set; never `zz`. |
+| Commit | `git loom commit -b <branch> -m "<msg>" <files...>`; a new branch name creates it, from the base, or stacked on a woven branch's tip with `--on <branch>`. Use `-l` for a loose commit on integration. Name files, or omit them to commit exactly the staged set; never `zz`. |
 | Amend/fixup | `git loom fold <files...> <commit>`; for staged changes, `git loom fold <commit>`. Git options for the amend follow `--` (`-- --no-verify`). |
 | Auto-fixup | `git loom absorb`; `-n` dry-runs. |
 | Move commits | `git loom fold <commit>... <branch>`; `-c` creates a new branch and rejects an existing name. `--above <commit>` / `--below <commit>` moves next to a commit, in any branch or the same one. |
@@ -118,6 +118,11 @@ review). Push only when the user asked to publish: it is visible to others.
 
 - Same-repo PRs target the branch below, and GitHub links them as a stack;
   GitHub fork PRs target upstream. Azure refuses a stacked branch.
+- Build a stack with `git loom branch <new> --on <branch>` (empty, on top of
+  `<branch>`; its first commit stacks there), or in one step with
+  `git loom commit -b <new> --on <branch> -m "<msg>" <files...>`. Split an
+  existing branch with `git loom branch <new> --on <commit inside it>`.
+  Commits to a lower layer land below the layers above it.
 - A one-commit branch's PR takes the commit's subject and body. Give
   `--title "<title>"` for a branch with several commits; it titles the named
   branch's PR only, the description still comes from the commits.

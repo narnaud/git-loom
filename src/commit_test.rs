@@ -5,6 +5,7 @@ use crate::core::test_helpers::TestRepo;
 fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) -> anyhow::Result<()> {
     super::run(
         branch,
+        None,
         false,
         message,
         None,
@@ -17,6 +18,7 @@ fn run(branch: Option<String>, message: Option<String>, files: Vec<String>) -> a
 /// Wrapper for `-l`: loose commit to the integration branch.
 fn run_integration(message: &str, files: Vec<String>) -> anyhow::Result<()> {
     super::run(
+        None,
         None,
         true,
         Some(message.to_string()),
@@ -438,6 +440,112 @@ fn commit_to_inner_branch_lands_at_its_tip() {
     assert_eq!(outer.parent_id(0).unwrap(), inner.id());
 }
 
+fn run_on(branch: &str, on: &str, message: &str, files: &[&str]) -> anyhow::Result<()> {
+    super::run(
+        Some(branch.to_string()),
+        Some(on.to_string()),
+        false,
+        Some(message.to_string()),
+        None,
+        files.iter().map(|f| f.to_string()).collect(),
+        vec![],
+        &graph::Theme::dark(),
+    )
+}
+
+#[test]
+fn commit_on_branch_stacks_the_new_branch_on_its_tip() {
+    let test_repo = setup_with_two_branches();
+    let a1_oid = test_repo.get_branch_target("feature-a");
+    let b1_oid = test_repo.get_branch_target("feature-b");
+
+    test_repo.write_file("s1.txt", "content");
+    let result = test_repo.in_dir(|| run_on("stk", "feature-a", "S1", &["s1.txt"]));
+    assert!(result.is_ok(), "commit failed: {:?}", result);
+
+    let stk = test_repo.find_commit(test_repo.get_branch_target("stk"));
+    assert_eq!(stk.summary().unwrap().unwrap(), "S1");
+    assert_eq!(stk.parent_id(0).unwrap(), a1_oid);
+    assert_eq!(test_repo.get_branch_target("feature-a"), a1_oid);
+    assert_eq!(test_repo.get_branch_target("feature-b"), b1_oid);
+    assert!(test_repo.status_porcelain().is_empty());
+
+    // Stacked: integration merges `stk`, which carries `feature-a`, and no
+    // longer merges `feature-a` on its own.
+    let mut merged = Vec::new();
+    let mut c = test_repo.head_commit();
+    while c.parent_count() > 0 {
+        if c.parent_count() == 2 {
+            merged.push(c.parent_id(1).unwrap());
+        }
+        c = c.parent(0).unwrap();
+    }
+    assert!(merged.contains(&stk.id()), "{merged:?}");
+    assert!(!merged.contains(&a1_oid), "{merged:?}");
+}
+
+/// `inner` is a lower layer of `outer`; stacking on it goes between the two,
+/// as `loom branch stk --on inner` followed by `commit -b stk` does.
+#[test]
+fn commit_on_inner_branch_stacks_between_the_layers() {
+    let test_repo = TestRepo::new_with_remote();
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+
+    test_repo.create_branch_at("inner", &base_oid.to_string());
+    test_repo.switch_branch("inner");
+    let i1_oid = test_repo.commit("I1", "i1.txt");
+    test_repo.create_branch_at("outer", &i1_oid.to_string());
+    test_repo.switch_branch("outer");
+    test_repo.commit("O1", "o1.txt");
+    test_repo.switch_branch("integration");
+    test_repo.merge_no_ff("outer");
+
+    test_repo.write_file("s1.txt", "content");
+    let result = test_repo.in_dir(|| run_on("stk", "inner", "S1", &["s1.txt"]));
+    assert!(result.is_ok(), "commit failed: {:?}", result);
+
+    let stk = test_repo.find_commit(test_repo.get_branch_target("stk"));
+    assert_eq!(stk.summary().unwrap().unwrap(), "S1");
+    assert_eq!(stk.parent_id(0).unwrap(), i1_oid);
+    assert_eq!(test_repo.get_branch_target("inner"), i1_oid);
+    let outer = test_repo.find_commit(test_repo.get_branch_target("outer"));
+    assert_eq!(outer.parent_id(0).unwrap(), stk.id());
+}
+
+/// Every `--on` refusal comes before staging and creates nothing.
+#[test]
+fn commit_on_refusals_leave_index_and_branches_alone() {
+    let test_repo = setup_with_two_branches();
+    let a1_oid = test_repo.get_branch_target("feature-a");
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+    test_repo.create_branch_at("side", &base_oid.to_string());
+    test_repo.switch_branch("side");
+    test_repo.commit("Side", "side.txt");
+    test_repo.switch_branch("integration");
+    test_repo.create_branch_at("empty", &base_oid.to_string());
+    test_repo.commit("Loose", "loose.txt");
+    test_repo.write_file("s1.txt", "content");
+    let before = test_repo.status_porcelain();
+
+    for (branch, on, expected) in [
+        ("feature-b", "feature-a", "already exists"),
+        ("stk", &a1_oid.to_string()[..], "not a commit"),
+        ("stk", "HEAD", "run `loom branch stk --on HEAD` first"),
+        ("stk", "HEAD~1", "not a commit"),
+        ("stk", "origin/main", "not a commit"),
+        ("stk", "side", "not woven"),
+        ("stk", "empty", "no commits to stack on"),
+        ("stk", "no-such-branch", "did not resolve"),
+    ] {
+        let err = test_repo
+            .in_dir(|| run_on(branch, on, "S1", &["s1.txt"]))
+            .expect_err(on);
+        assert!(err.to_string().contains(expected), "{on}: {err}");
+        assert_eq!(test_repo.status_porcelain(), before, "{on}");
+        assert!(!test_repo.branch_exists("stk"), "{on}");
+    }
+}
+
 /// Bug: committing to a new branch when the file conflicts with an existing
 /// woven branch would lose working-tree changes. Now that conflicts pause the
 /// operation instead of aborting, the operation is kept alive for `loom continue`
@@ -828,6 +936,7 @@ fn commit_forwards_an_option_after_the_separator() {
     let result = test_repo.in_dir(|| {
         super::run(
             None,
+            None,
             true,
             Some("Forwarded commit".to_string()),
             None,
@@ -849,6 +958,7 @@ fn commit_unknown_option_reaches_git() {
 
     let result = test_repo.in_dir(|| {
         super::run(
+            None,
             None,
             true,
             Some("Bogus commit".to_string()),
@@ -1104,6 +1214,7 @@ fn commit_editor_path_gets_a_change_id_after_editing() {
     let result = test_repo.in_dir(|| {
         super::run(
             None,
+            None,
             true,
             None,
             None,
@@ -1136,6 +1247,7 @@ fn commit_editor_path_runs_hooks_once() {
 
     let result = test_repo.in_dir(|| {
         super::run(
+            None,
             None,
             true,
             None,
@@ -1203,6 +1315,7 @@ fn commit_editor_path_keeps_a_configured_signature() {
     let result = test_repo.in_dir(|| {
         super::run(
             None,
+            None,
             true,
             None,
             None,
@@ -1229,6 +1342,7 @@ fn commit_editor_path_amend_keeps_the_stored_message_verbatim() {
 
     let result = test_repo.in_dir(|| {
         super::run(
+            None,
             None,
             true,
             None,
@@ -1272,6 +1386,7 @@ fn commit_no_verify_still_adds_a_change_id() {
 
     let result = test_repo.in_dir(|| {
         super::run(
+            None,
             None,
             true,
             Some("Unverified".to_string()),
@@ -1347,6 +1462,7 @@ fn commit_dry_run_does_not_amend_head() {
 
     let result = test_repo.in_dir(|| {
         super::run(
+            None,
             None,
             true,
             None,

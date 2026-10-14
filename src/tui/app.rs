@@ -965,7 +965,7 @@ fn execute_action(
                 CommitSource::Files(files) => files,
                 CommitSource::Index => vec![],
             };
-            commit::run(branch, integration, None, None, files, vec![], theme)
+            commit::run(branch, None, integration, None, None, files, vec![], theme)
         }
         Action::Fold {
             sources,

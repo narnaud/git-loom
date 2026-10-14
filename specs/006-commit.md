@@ -5,13 +5,14 @@
 ## CLI
 
 ```bash
-git-loom commit [-b <branch> | -l] [-m <message>] [-p] [files...] [-- <git args>...]
-git-loom commit [-b <branch> | -l] -m <message> -p [files...] --hunks <id>... --hunks-from <fingerprint>
+git-loom commit [-b <branch> [--on <branch>] | -l] [-m <message>] [-p] [files...] [-- <git args>...]
+git-loom commit [-b <branch> [--on <branch>] | -l] -m <message> -p [files...] --hunks <id>... --hunks-from <fingerprint>
 ```
 
 | Input | Meaning |
 | --- | --- |
 | `-b, --branch <branch>` | Existing woven branch name/short ID, or new branch name. |
+| `--on <branch>` | Create the new `-b` branch stacked on this woven branch's tip; requires `-b`. |
 | `-l, --loose` | Loose commit directly on integration; mutually exclusive with `-b`. `-i, --integration` are hidden aliases (pre-#373 spelling). |
 | `-m, --message <message>` | Message; without it open the Git editor. |
 | `-p, --patch` | Select hunks to stage (picker defined by Spec 007), interactively or with `--hunks`. |
@@ -65,11 +66,18 @@ Resolve `-b` with `resolve_arg(..., [Branch])` (Spec 002):
 - no existing match: treat as a new name, validate by Spec 005, create it at the weave base, then weave it;
 - commit/file target: reject with `Commit target must be a branch.`.
 
-Every `-b` refusal comes before staging, so it leaves the index untouched; a new branch is created only after staging.
+`--on` creates the new `-b` branch at the tip of a woven branch instead of the base; the commit then splits it off as a stacked section (Spec 004), as `loom branch <new> --on <branch>` followed by `commit -b <new>` would. It resolves like Spec 005's `--on`, and refuses:
+
+- an existing `-b` branch;
+- a non-woven branch, as `-b` does;
+- an empty branch, having nothing to stack on;
+- any commit, with a hint to run `loom branch <new> --on <commit>` first: starting there inserts into the branch holding it.
+
+Every `-b` and `--on` refusal comes before staging, so it leaves the index untouched; a new branch is created only after staging.
 
 Without `-b`/`-l` when loose-mode name matching does not apply, show a picker of woven branches plus “create new branch.” If none exist, prompt directly to create one.
 
-A new empty target MUST fork from the base, even when other sections exist, so branches remain parallel rather than stacking on integration merges.
+Without `--on`, a new empty target MUST fork from the base, even when other sections exist, so branches remain parallel rather than stacking on integration merges.
 
 Create the commit at HEAD, then relocate it to the target via one Weave operation (Spec 004). The checkout remains on integration and all affected refs advance correctly.
 
@@ -93,4 +101,5 @@ git-loom commit zz -m "quick fix"                   # loose on main -> origin/ma
 git-loom commit -l zz -m "integration adjustment"  # explicitly loose
 git-loom commit -b fa auth.rs -m "fix auth"         # existing woven branch
 git-loom commit -b feature-log -m "add logging"     # create at base, weave, relocate
+git-loom commit -b stk --on fa -m "next step"      # create stacked on fa
 ```

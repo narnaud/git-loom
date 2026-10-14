@@ -108,6 +108,14 @@ assert_eq "10" "$CODE" "env_var_exit"
 assert_contains "$OUT" '"status":"needs_input"' "env_var_status"
 gl drop zz -y > /dev/null 2>&1  # clean the leftover staged change
 
+describe "agent mode: commit -p replay hint keeps --on"
+write_file "s.txt" "content s"
+gl_capture_json commit --agent -b stk --on feature-a -m "S1" -p s.txt
+assert_eq "10" "$CODE" "commit_on_patch_exit"
+assert_contains "$JSON" "loom commit -b stk --on feature-a -m S1 -p s.txt --hunks"     "commit_on_patch_hint"
+assert_branch_not_exists "stk" "commit_on_patch_no_branch"
+rm "$WORK/s.txt"
+
 # ── needs_input: missing -m (editor guard) ────────────────────────────────────
 
 describe "agent mode: commit without -m never opens an editor"

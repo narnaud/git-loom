@@ -222,6 +222,15 @@ enum Command {
         /// Target feature branch (name or short ID)
         #[arg(short = 'b', long = "branch")]
         branch: Option<String>,
+        /// Create the `-b` branch stacked on BRANCH's tip
+        // clap waives `requires` once `-l` (which conflicts with `-b`) is given.
+        #[arg(
+            long = "on",
+            value_name = "BRANCH",
+            requires = "branch",
+            conflicts_with = "loose"
+        )]
+        on: Option<String>,
         /// Make a loose commit on the integration branch, skipping the branch prompt
         // `-i`/`--integration` are the pre-#373 spelling, kept hidden.
         #[arg(
@@ -671,6 +680,7 @@ fn main() {
         }) => reword::run(target, message, git_args),
         Some(Command::Commit {
             branch,
+            on,
             loose,
             message,
             patch,
@@ -680,6 +690,7 @@ fn main() {
             git_args,
         }) => commit::run(
             branch,
+            on,
             loose,
             message,
             patch.then_some(HunkArgs::new(hunks, hunks_from)),

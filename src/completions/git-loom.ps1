@@ -134,6 +134,7 @@ $_gitLoomCompleter = {
             $subFlags = @(
                 @{ Name = '-b'; Description = 'Target feature branch' },
                 @{ Name = '--branch'; Description = 'Target feature branch' },
+                @{ Name = '--on'; Description = 'Stack the new -b branch on a branch' },
                 @{ Name = '-l'; Description = 'Loose commit on the integration branch' },
                 @{ Name = '--loose'; Description = 'Loose commit on the integration branch' },
                 @{ Name = '-m'; Description = 'Commit message' },

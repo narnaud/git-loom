@@ -26,7 +26,7 @@ local add_matcher = clink.argmatcher()
     :addflags("-p", "--patch", "--hunks", "--hunks-from", "--help", "-h")
 
 local commit_matcher = clink.argmatcher()
-    :addflags("-b", "--branch", "-l", "--loose", "-m", "--message", "-p", "--patch",
+    :addflags("-b", "--branch", "--on", "-l", "--loose", "-m", "--message", "-p", "--patch",
         "--hunks", "--hunks-from", "--help", "-h")
 
 local fold_matcher = clink.argmatcher()

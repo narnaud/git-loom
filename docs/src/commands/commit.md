@@ -5,7 +5,7 @@ Create a commit on a feature branch without leaving the integration branch.
 ## Usage
 
 ```
-git loom commit [-b <branch> | -l] [-m <message>] [-p] [files...] [-- <git args>...]
+git loom commit [-b <branch> [--on <branch>] | -l] [-m <message>] [-p] [files...] [-- <git args>...]
 ```
 
 Alias: `ci`
@@ -15,6 +15,7 @@ Alias: `ci`
 | Option | Description |
 |--------|-------------|
 | `-b, --branch <branch>` | Target feature branch (name or short ID). Prompts if omitted. |
+| `--on <branch>` | Create the new `-b` branch stacked on this branch's tip (name or short ID). Requires a new `-b` name. |
 | `-l, --loose` | Make a loose commit on the integration branch itself, skipping the branch prompt. Mutually exclusive with `-b`. |
 | `-m, --message <message>` | Commit message. Opens editor if omitted. |
 | `--hunks <id>` | Stage that hunk instead of opening the picker; repeat it per hunk, with `--hunks-from`. The ids are the whole selection — see [agent mode](agent.md). |
@@ -71,7 +72,7 @@ When the integration branch has diverged (woven branches exist):
 
 - If `-b` matches a woven feature branch: uses it
 - If `-b` matches an unwoven branch: error
-- If `-b` doesn't match any branch: creates a new branch at the merge-base and weaves it
+- If `-b` doesn't match any branch: creates a new branch at the merge-base and weaves it — or, with `--on <branch>`, at that branch's tip, stacked on it
 - If `-b` is omitted: interactive picker with all woven branches + option to create a new one
 - If `-l` is given: no branch resolution at all — the commit lands on the integration tip
 
@@ -91,6 +92,8 @@ $ loom commit -b feature-auth -m "Restore the check"
 ### New Branch Creation
 
 When the target branch doesn't exist, *git-loom* validates the name, creates the branch at the merge-base, and weaves it into the integration topology — all automatically.
+
+With `--on <branch>`, the new branch starts at that woven branch's tip instead, so it becomes a stacked layer on top of it: one step for what `git loom branch <new> --on <branch>` followed by `git loom commit -b <new>` does. An empty branch is refused: it has no commits to stack on. `--on` takes a branch only; to start a branch at a commit inside another, run [`git loom branch <new> --on <commit>`](branch.md) first.
 
 ## Examples
 
@@ -123,6 +126,13 @@ git loom commit -b feature-auth ar -m "fix auth check"
 ```bash
 git loom commit -b feature-logging -m "add request logging" zz
 # Creates feature-logging, weaves it, stages all, commits
+```
+
+### To a new branch stacked on another
+
+```bash
+git loom commit -b feature-logging-ui --on feature-logging -m "show request log" zz
+# Creates feature-logging-ui at feature-logging's tip, commits on top of it
 ```
 
 ### Loose commit on a fresh integration branch

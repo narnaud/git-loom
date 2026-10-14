@@ -39,8 +39,10 @@ struct CommitContext {
 /// `git_args` is whatever followed a `--`, passed to `git commit` (see spec
 /// 021). It applies to the commit loom creates, not to the rebase that
 /// relocates it.
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     branch: Option<String>,
+    on: Option<String>,
     loose: bool,
     message: Option<String>,
     patch: Option<HunkArgs>,
@@ -109,6 +111,10 @@ pub fn run(
         Some(b) => Some(check_explicit_branch(&repo, &info, &workdir, b)?),
         None => None,
     };
+    let start = match (&explicit_branch, &on) {
+        (Some((name, is_new)), Some(on)) => Some(check_on(&repo, &info, name, *is_new, on)?),
+        _ => None,
+    };
 
     // The index exactly as the user left it: what `loom abort` and a refused
     // rebase have to put back, since the reset below them undoes the commit
@@ -137,7 +143,13 @@ pub fn run(
         // it names the branch only when this one did: inventing `-l` would send
         // the replay to the integration branch instead of the branch prompt.
         let target = match (&branch, loose) {
-            (Some(name), _) => format!(" -b {}", git::shell_quote(name)),
+            (Some(name), _) => format!(
+                " -b {}{}",
+                git::shell_quote(name),
+                on.as_deref()
+                    .map(|o| format!(" --on {}", git::shell_quote(o)))
+                    .unwrap_or_default()
+            ),
             (None, true) => " -l".to_string(),
             (None, false) => String::new(),
         };
@@ -182,11 +194,8 @@ pub fn run(
 
     let saved_head = repo::head_oid(&repo)?.to_string();
 
-    // Resolve branch target (may create a new branch at merge-base).
-    // Returns whether the branch was newly created — only newly-created
-    // branches are deleted on rollback (not pre-existing empty ones).
     let (branch_name, branch_is_new) =
-        resolve_branch_target(&repo, &info, &workdir, explicit_branch)?;
+        resolve_branch_target(&repo, &info, &workdir, explicit_branch, start)?;
 
     // Empty branches (pointing at merge-base) need a branch section and
     // merge entry created in the Weave before moving the commit there.
@@ -197,7 +206,12 @@ pub fn run(
 
     let head_oid = repo::head_oid(&repo)?;
 
-    let mut graph = Weave::from_repo_with_info(&repo, &info)?;
+    // A branch `--on` just created at another's tip is missing from `info`.
+    let mut graph = if start.is_some() {
+        Weave::from_repo(&repo)?
+    } else {
+        Weave::from_repo_with_info(&repo, &info)?
+    };
 
     if branch_is_empty {
         graph.add_branch_section(
@@ -365,17 +379,22 @@ fn resolve_file_args(repo: &Repository, files: &[String]) -> Result<Vec<String>>
 /// created by this call (only newly-created branches are deleted on rollback).
 ///
 /// `explicit` is `check_explicit_branch`'s answer for `-b`: a new name is
-/// created at the merge-base here.
+/// created here, at `start` (`check_on`'s answer) or else the merge-base.
 fn resolve_branch_target(
     repo: &Repository,
     info: &repo::RepoInfo,
     workdir: &std::path::Path,
     explicit: Option<(String, bool)>,
+    start: Option<git2::Oid>,
 ) -> Result<(String, bool)> {
     match explicit {
         Some((name, is_new)) => {
             if is_new {
-                create_branch_at_merge_base(workdir, &name, info.upstream.merge_base_oid)?;
+                create_branch_at(
+                    workdir,
+                    &name,
+                    start.unwrap_or(info.upstream.merge_base_oid),
+                )?;
             }
             Ok((name, is_new))
         }
@@ -415,6 +434,43 @@ fn check_explicit_branch(
             }
             Ok((name, true))
         }
+    }
+}
+
+/// Every refusal `--on` can get, without creating anything: the tip of the
+/// woven branch the new `-b` branch starts at (Spec 006).
+fn check_on(
+    repo: &Repository,
+    info: &repo::RepoInfo,
+    branch: &str,
+    is_new: bool,
+    on: &str,
+) -> Result<git2::Oid> {
+    if !is_new {
+        bail!(
+            "`--on` creates the `-b` branch, but `{branch}` already exists\nDrop `--on` to commit to it"
+        );
+    }
+    let resolved = repo::resolve_arg(
+        repo,
+        on,
+        &[repo::TargetKind::Branch, repo::TargetKind::Commit],
+    );
+    match resolved {
+        Ok(repo::Target::Branch(name)) => match info.branches.iter().find(|b| b.name == name) {
+            Some(b) if b.tip_oid == info.upstream.merge_base_oid => {
+                bail!("`{name}` has no commits to stack on\nCommit to it first, or drop `--on`")
+            }
+            Some(b) => Ok(b.tip_oid),
+            None => bail!("Branch '{}' is not woven into the integration branch", name),
+        },
+        // A merge commit fails commit resolution, yet is a commit all the same.
+        Err(e) if repo.revparse_single(on).is_err() => Err(e),
+        _ => bail!(
+            "`--on` takes a branch, not a commit\nTo start at a commit, run `loom branch {} --on {}` first",
+            git::shell_quote(branch),
+            git::shell_quote(on)
+        ),
     }
 }
 
@@ -461,7 +517,7 @@ fn pick_branch(
     if !info.branches.iter().any(|b| b.name == name) {
         git::branch_validate_name(workdir, &name)?;
         repo::ensure_branch_not_exists(repo, &name)?;
-        create_branch_at_merge_base(workdir, &name, info.upstream.merge_base_oid)?;
+        create_branch_at(workdir, &name, info.upstream.merge_base_oid)?;
         return Ok((name, true));
     }
 
@@ -479,23 +535,19 @@ fn is_branch_at_merge_base(
     Ok(branch_oid == merge_base_oid)
 }
 
-/// Create a new branch at the merge-base.
+/// Create a new branch at the merge-base or at `--on`'s tip.
 ///
 /// The branch is not yet woven — weaving happens after the commit is created,
 /// in the main `run` flow via Weave.
-fn create_branch_at_merge_base(
-    workdir: &std::path::Path,
-    name: &str,
-    merge_base_oid: git2::Oid,
-) -> Result<()> {
-    let merge_base_hash = merge_base_oid.to_string();
+fn create_branch_at(workdir: &std::path::Path, name: &str, oid: git2::Oid) -> Result<()> {
+    let hash = oid.to_string();
 
-    git::branch_create(workdir, name, &merge_base_hash)?;
+    git::branch_create(workdir, name, &hash)?;
 
     msg::success(&format!(
         "Created branch `{}` at `{}`",
         name,
-        git::short_hash(&merge_base_hash)
+        git::short_hash(&hash)
     ));
 
     Ok(())

@@ -131,6 +131,7 @@ _git-loom() {
             flags=(
                 '-b:Target feature branch'
                 '--branch:Target feature branch'
+                '--on:Stack the new -b branch on a branch'
                 '-l:Loose commit on the integration branch'
                 '--loose:Loose commit on the integration branch'
                 '-m:Commit message'
