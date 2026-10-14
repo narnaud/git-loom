@@ -60,6 +60,9 @@ pub struct TuiTheme {
     /// Marker for the source rows of a fold or commit being placed; distinct
     /// from [`TuiTheme::selection`] so it does not read as a selection.
     pub source: Style,
+    /// Background of the rows the pending command names, so they stay
+    /// visible while the cursor is on the target; the cursor bar wins.
+    pub source_row: Style,
     /// Rotating colors for commit dots on feature branches.
     pub branch_dots: Vec<Style>,
     /// `✓` success lines in the log and popups.
@@ -122,6 +125,7 @@ impl TuiTheme {
             source: Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
+            source_row: Style::default().bg(map_color(theme.source_bg)),
             branch_dots: theme
                 .branch_dots
                 .iter()

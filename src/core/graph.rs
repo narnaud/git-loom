@@ -44,6 +44,10 @@ pub struct Theme {
     /// Replacement for `dim` on the cursor/selected line, with enough
     /// contrast against `selection_bg`.
     pub dim_selected: Color,
+    /// Background of the rows a pending TUI command takes; a hue, not a
+    /// shade, so it cannot be read as the cursor bar. Dim text on it uses
+    /// `dim_selected` too.
+    pub source_bg: Color,
     pub branch_dots: &'static [Color],
 }
 
@@ -66,6 +70,7 @@ impl Theme {
             conflict: Color::Red,
             selection_bg: Color::AnsiColor(239),
             dim_selected: Color::AnsiColor(245),
+            source_bg: Color::AnsiColor(23),
             branch_dots: BRANCH_DOTS,
         }
     }
@@ -87,6 +92,7 @@ impl Theme {
             conflict: Color::Red,
             selection_bg: Color::AnsiColor(251),
             dim_selected: Color::AnsiColor(242),
+            source_bg: Color::AnsiColor(152),
             branch_dots: BRANCH_DOTS,
         }
     }

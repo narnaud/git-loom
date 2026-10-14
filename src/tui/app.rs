@@ -3365,18 +3365,25 @@ impl<'a> App<'a> {
             .iter()
             .enumerate()
             .map(|(i, row)| {
-                ListItem::new(row_line(
+                let mark = self.row_mark(row);
+                let source = mark == RowMark::Source;
+                let item = ListItem::new(row_line(
                     row,
                     self.theme,
                     &self.snapshot.cwd_prefix,
-                    self.row_mark(row),
+                    mark,
                     self.row_tag(row),
-                    i == cursor,
+                    i == cursor || source,
                     editing
                         .as_ref()
                         .filter(|(key, _)| *key == row.key)
                         .map(|(_, f)| *f),
-                ))
+                ));
+                if source {
+                    item.style(self.theme.source_row)
+                } else {
+                    item
+                }
             })
             .collect();
 
@@ -3954,17 +3961,18 @@ fn nearest_target(rows: &[Row], targets: &[FoldTarget], cursor: usize) -> usize 
 
 /// Render one tree row as a styled line; `editing` replaces the branch name
 /// with the field being typed. The first span is the selection/source gutter.
+/// `shaded` is a row drawn on the cursor bar or the source tint.
 fn row_line(
     row: &Row,
     theme: &TuiTheme,
     cwd_prefix: &str,
     mark: RowMark,
     tag: Option<&'static str>,
-    is_cursor: bool,
+    shaded: bool,
     editing: Option<&TextField>,
 ) -> Line<'static> {
-    // On the cursor row the selection background swallows regular dim text.
-    let dim = if is_cursor {
+    // A row background swallows regular dim text.
+    let dim = if shaded {
         theme.dim_selected
     } else {
         theme.dim
