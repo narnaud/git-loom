@@ -280,3 +280,34 @@ pick {c2}
     assert_eq!(mtime(&workdir, "a.txt"), old);
     assert_eq!(mtime(&workdir, "b.txt"), old);
 }
+
+/// `merge` sets dirty files aside and back: one the merge leaves alone keeps
+/// its mtime, whether git refuses the merge or completes it.
+#[test]
+fn merge_keeps_mtimes_of_dirty_files() {
+    let t = TestRepo::new_with_remote();
+    t.commit("C1", "a.txt");
+    let base = t.find_remote_branch_target("origin/main").to_string();
+    for (branch, file) in [("feature", "f.txt"), ("blocked", "in-the-way.txt")] {
+        t.create_branch_at(branch, &base);
+        t.switch_branch(branch);
+        t.commit(branch, file);
+        t.switch_branch("integration");
+    }
+    let workdir = t.workdir();
+    t.write_file("a.txt", "edited");
+    let old = an_hour_ago();
+    set_mtime(&workdir, "a.txt", old);
+
+    t.write_file("in-the-way.txt", "untracked");
+    t.in_dir(|| crate::merge::run(Some("blocked".to_string()), false))
+        .unwrap_err();
+    assert_eq!(mtime(&workdir, "a.txt"), old);
+    std::fs::remove_file(workdir.join("in-the-way.txt")).unwrap();
+
+    t.in_dir(|| crate::merge::run(Some("feature".to_string()), false))
+        .unwrap();
+    assert_eq!(t.head_commit().parent_count(), 2);
+    assert_eq!(t.read_file("a.txt"), "edited");
+    assert_eq!(mtime(&workdir, "a.txt"), old);
+}

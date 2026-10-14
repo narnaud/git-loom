@@ -11,8 +11,8 @@ pub mod raw_text;
 pub use git_apply::{
     Replay, apply_cached_patch, apply_cached_patch_reverse, apply_patch, apply_patch_reverse,
     apply_patch_to_worktree, apply_patch_with_index, apply_patch_with_index_reverse,
-    restore_loom_unstaged, restore_or_park_after_abort, restore_staged_after_rebase,
-    restore_staged_patch, save_or_warn, save_patch_aside,
+    patch_is_applied, replay_patch_three_way, restore_loom_unstaged, restore_or_park_after_abort,
+    restore_staged_after_rebase, restore_staged_patch, save_or_warn, save_patch_aside,
 };
 pub use git_branch::{
     branch_create, branch_delete, branch_force_create, branch_rename, branch_switch,
@@ -25,11 +25,11 @@ pub use git_commit::{
 };
 pub use git_diff::{
     diff_cached, diff_cached_display, diff_cached_file, diff_cached_file_is_binary,
-    diff_cached_files, diff_commit, diff_commit_file, diff_commit_file_is_binary,
-    diff_commit_name_status, diff_file, diff_file_is_binary, diff_head, diff_head_display,
-    diff_head_file, diff_head_file_display, diff_head_file_is_binary, diff_head_files,
-    diff_head_files_display, diff_head_name_only, diff_range, diff_trees, show_commit_file,
-    show_commit_patch,
+    diff_cached_files, diff_cached_without_submodules, diff_commit, diff_commit_file,
+    diff_commit_file_is_binary, diff_commit_name_status, diff_file, diff_file_is_binary, diff_head,
+    diff_head_display, diff_head_file, diff_head_file_display, diff_head_file_is_binary,
+    diff_head_files, diff_head_files_display, diff_head_name_only, diff_head_without_submodules,
+    diff_range, diff_trees, show_commit_file, show_commit_patch,
 };
 pub use git_merge::{MergeOutcome, continue_merge, merge_abort, merge_is_in_progress, merge_no_ff};
 pub use git_mtime::{discard_mtimes, restore_mtimes, snapshot_mtimes};

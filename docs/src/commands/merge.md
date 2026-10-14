@@ -26,7 +26,9 @@ git loom merge [<branch>] [--all]
 
 Merges the branch so it gets its own section in `git loom status`. Merging a remote branch first creates a local branch tracking it.
 
-A branch can be woven into only one integration branch at a time. `merge` refuses a branch already woven here or into another [worktree](worktree.md)'s integration branch, as well as a branch with nothing to merge. Staged changes must be committed or unstaged first.
+A branch can be woven into only one integration branch at a time. `merge` refuses a branch already woven here or into another [worktree](worktree.md)'s integration branch, as well as a branch with nothing to merge. It also refuses while the working tree has unresolved conflicts or a staged submodule change, and when the branch deletes a file you changed or changes one you deleted, since your change could not be put back over it.
+
+The merge is one transaction: your staged and unstaged changes are set aside, the branch is merged, then your changes are put back on top — staged ones staged again where possible.
 
 ## Examples
 
@@ -61,5 +63,9 @@ git loom merge feature-auth
 git add <resolved-files> && git loom continue
 # ✓ Merged `feature-auth` into integration branch
 ```
+
+If your uncommitted changes overlap what the merge brings in, putting them back conflicts and the merge pauses the same way. A binary file cannot show conflict markers: loom leaves your version in it, and `git checkout HEAD -- <file>` takes the merge's instead.
+
+[`loom abort`](abort.md) at any point returns to where the merge started — the merge undone, your changes back as they were — and drops whatever was done in between.
 
 See [`continue`](continue.md) and [`abort`](abort.md).

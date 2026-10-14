@@ -68,10 +68,10 @@ branches, and autostash), then `Rollback::apply_abort()` applies populated field
 | Field | Abort action / users |
 | --- | --- |
 | `reset_mixed_to` | mixed reset; `commit` |
-| `reset_hard_to` | hard reset to pre-fixup HEAD; `absorb` |
+| `reset_hard_to` | hard reset to pre-fixup HEAD, `absorb`; to pre-merge HEAD, `merge` (never through `roll_back_failed_rebase`) |
 | `delete_branches` | remove temp refs; `commit`, fold files/commit/relative, `merge` (remote pick's tracking branch) |
-| `saved_staged_patch` | restore index; `absorb`, `commit`, `drop`, `fold`, `reword`, `swap`, `update` |
-| `saved_worktree_patch` | restore worktree; `absorb` |
+| `saved_staged_patch` | restore index; `absorb`, `commit`, `drop`, `fold`, `merge`, `reword`, `swap`, `update` |
+| `saved_worktree_patch` | restore worktree; `absorb`, `merge` |
 
 The index comes back unstaged otherwise: `git rebase --abort` replays its
 autostash into the working tree only. `commit` saves the whole pre-commit index

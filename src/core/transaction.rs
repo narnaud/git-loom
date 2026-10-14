@@ -5,8 +5,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::git;
 
-/// Persistent state saved when a loom command is paused due to a rebase conflict.
-#[derive(Debug, Serialize, Deserialize)]
+/// Persistent state of a resumable loom command: saved when it pauses, or, for
+/// `merge`, before it starts (Spec 005).
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoomState {
     /// The name of the interrupted command (e.g., "update", "commit").
     pub command: String,
@@ -37,7 +38,7 @@ impl LoomState {
 /// Only fields [`Rollback::apply_abort`] consumes belong here. `git rebase --abort` already restores HEAD, all branch refs
 /// (via `--update-refs`), and autostashed working-tree changes — so those do
 /// not need to be saved.
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Rollback {
     /// HEAD OID to `reset --mixed` to on abort.
     #[serde(default)]
@@ -145,7 +146,12 @@ pub fn save(git_dir: &Path, state: &LoomState) -> Result<()> {
         use std::io::Write;
         let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
         tmp.write_all(json.as_bytes())?;
+        // On disk before the caller acts on it: `merge` resets the tree right
+        // after, leaving this file the only copy of the user's work.
+        tmp.as_file().sync_all()?;
         tmp.persist(&path)?;
+        // Best-effort: Windows cannot open a directory as a file.
+        let _ = std::fs::File::open(parent).and_then(|d| d.sync_all());
         Ok(())
     })()
     .with_context(|| format!("Failed to write state file '{}'", path.display()))
@@ -218,6 +224,14 @@ pub fn refuse_if_paused(git_dir: &Path) -> Result<()> {
 /// the user likely finished it by hand, and `loom continue` only has the
 /// post-rebase bookkeeping left to do.
 fn paused_state_message(command: &str, interrupted: bool) -> String {
+    // Paused with no git operation behind it: on its own conflict with the
+    // set-aside work, or merged by hand (Spec 005).
+    if command == "merge" && !interrupted {
+        return "A `loom merge` is paused.\n\
+                Resolve any conflicts and stage them, then run `loom continue`, or \
+                `loom abort` to return to before the merge."
+            .to_string();
+    }
     if interrupted {
         format!(
             "A `loom {command}` is paused, with a rebase or merge still in progress.\n\
@@ -502,8 +516,9 @@ pub fn continue_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
     // else: no rebase or merge is in progress — the user already ran
     // `git rebase --continue` manually, so move straight to dispatch.
 
-    dispatch_after_continue(workdir, &state)?;
-    delete(git_dir)?;
+    if dispatch_after_continue(workdir, git_dir, &state)? {
+        delete(git_dir)?;
+    }
     Ok(())
 }
 
@@ -600,7 +615,9 @@ pub fn abort_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
     // state file is the only record of what to undo — so keep both and stop.
     if git::rebase_is_in_progress(git_dir) {
         git::rebase_abort(workdir).context(ABORT_FAILED_HINT.as_str())?;
-    } else if git::merge_is_in_progress(git_dir) {
+    } else if git::merge_is_in_progress(git_dir) && state.rollback.reset_hard_to.is_empty() {
+        // With a hard reset to follow, which ends the merge too, skipped:
+        // `git merge --abort` refuses a file staged and then edited again.
         git::merge_abort(workdir).context(ABORT_FAILED_HINT.as_str())?;
     }
 
@@ -714,7 +731,12 @@ fn abort_without_state(workdir: &Path, git_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn dispatch_after_continue(workdir: &Path, state: &LoomState) -> Result<()> {
+/// Run the command's `after_continue`. `Ok(false)`: it paused again, so the
+/// state stays (a merge whose set-aside work conflicts with it, Spec 005).
+fn dispatch_after_continue(workdir: &Path, git_dir: &Path, state: &LoomState) -> Result<bool> {
+    if state.command == "merge" {
+        return crate::merge::after_continue(workdir, git_dir, state);
+    }
     match state.command.as_str() {
         "update" => crate::update::after_continue(workdir, &state.rollback, &state.context),
         "commit" => crate::commit::after_continue(workdir, &state.rollback, &state.context),
@@ -723,9 +745,9 @@ fn dispatch_after_continue(workdir: &Path, state: &LoomState) -> Result<()> {
         "fold" => crate::fold::after_continue(workdir, &state.rollback, &state.context),
         "reword" => crate::reword::after_continue(workdir, &state.rollback, &state.context),
         "swap" => crate::swap::after_continue(workdir, &state.rollback, &state.context),
-        "merge" => crate::merge::after_continue(&state.context),
         other => bail!("Unknown command '{}' in loom state file", other),
     }
+    .map(|()| true)
 }
 
 #[cfg(test)]

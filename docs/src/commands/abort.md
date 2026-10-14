@@ -22,6 +22,8 @@ git loom abort
 
 After aborting a `commit`, the changes you were committing are back as they were: staged ones staged, the rest unstaged.
 
+After aborting a [`merge`](merge.md), the merge is undone and your uncommitted changes are back as they were, staging included. Anything you changed while it was paused is dropped.
+
 If the abort can't complete — another git process is holding the repository, for example — loom says so and keeps the paused operation, so you can run `loom abort` again.
 
 > [!WARNING]

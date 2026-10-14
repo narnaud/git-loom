@@ -132,6 +132,21 @@ assert_contains "$out" "g-merge-target" "merge_name_in_msg"
 assert_head_parent_count 2 "merge_no_ff_topo"
 assert_log_contains "Feature work" "merge_commit_in_log"
 
+describe "merge keeps staged and unstaged changes"
+setup_repo_with_remote
+create_feature_branch "g-merge-dirty"
+switch_to g-merge-dirty
+commit_file "Feature work" "feat.txt"
+switch_to integration
+commit_file "Tracked" "tracked.txt"
+commit_file "Other" "other.txt"
+write_file "tracked.txt" "staged change"
+git -C "$WORK" add tracked.txt
+write_file "other.txt" "unstaged change"
+gl merge g-merge-dirty
+assert_head_parent_count 2 "merge_dirty_topo"
+assert_eq $' M other.txt\nM  tracked.txt' "$(git -C "$WORK" status --porcelain)" "merge_dirty_kept"
+
 describe "merge rejects an already-woven branch"
 setup_repo_with_remote
 create_feature_branch "g-already-woven"

@@ -195,7 +195,12 @@ pub fn reset_soft(workdir: &Path, target: &str) -> Result<()> {
 /// Hard reset to a target ref (`git reset --hard <target>`), discarding all
 /// working directory and index changes.
 pub fn reset_hard(workdir: &Path, target: &str) -> Result<()> {
-    super::run_git(workdir, &["reset", "--hard", target])
+    // Never into submodules, whatever `submodule.recurse` says: no snapshot a
+    // rollback replays holds a submodule's own work, which it would wipe.
+    super::run_git(
+        workdir,
+        &["reset", "--hard", "--no-recurse-submodules", target],
+    )
 }
 
 /// Stage all changes — staged, unstaged, and untracked (`git add -A`).

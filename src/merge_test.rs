@@ -392,20 +392,824 @@ fn aborting_a_paused_merge_of_a_remote_branch_deletes_its_local_branch() {
     assert_eq!(test_repo.head_oid(), head);
 }
 
-/// `git merge` refuses a staged change wherever it is, with nothing loom
-/// could point at; loom says why before it creates anything.
+/// Stages a deletion, a new file and a modification, and leaves another
+/// modification unstaged: the shapes a set-aside-and-replay must all bring back.
+/// Returns the porcelain status to expect back.
+fn dirty_work(test_repo: &TestRepo) -> String {
+    test_repo.write_file("d.txt", "d\n");
+    test_repo.write_file("s.txt", "s\n");
+    test_repo.write_file("w.txt", "w\n");
+    test_repo.stage_files(&["d.txt", "s.txt", "w.txt"]);
+    test_repo.commit_staged("Tracked files");
+    std::fs::remove_file(test_repo.workdir().join("d.txt")).unwrap();
+    test_repo.write_file("n.txt", "n\n");
+    test_repo.write_file("s.txt", "s\nstaged\n");
+    test_repo.stage_files(&["d.txt", "n.txt", "s.txt"]);
+    test_repo.write_file("w.txt", "w\nunstaged\n");
+    let status = test_repo.status_porcelain();
+    assert_eq!(status, "D  d.txt\nA  n.txt\nM  s.txt\n M w.txt\n");
+    status
+}
+
+/// `feature-c` and integration each change `shared.txt`, so merging conflicts.
+fn conflicting_branch(test_repo: &TestRepo) {
+    let base_oid = test_repo.find_remote_branch_target("origin/main");
+    test_repo.create_branch_at("feature-c", &base_oid.to_string());
+    test_repo.write_file("shared.txt", "integration");
+    test_repo.stage_files(&["shared.txt"]);
+    test_repo.commit_staged("Integration change");
+    test_repo.switch_branch("feature-c");
+    test_repo.write_file("shared.txt", "feature");
+    test_repo.stage_files(&["shared.txt"]);
+    test_repo.commit_staged("Feature change");
+    test_repo.switch_branch("integration");
+}
+
+/// `git merge` refuses a staged change wherever it is; the merge sets the work
+/// aside, and the replay over the merge would leave it unstaged (#421).
 #[test]
-fn merge_refuses_staged_changes() {
+fn merge_keeps_staged_and_unstaged_changes() {
     let test_repo = TestRepo::new_with_remote();
     remote_only_branch(&test_repo, "feature-r", "r.txt", "r");
-    test_repo.write_file("other.txt", "staged");
-    test_repo.stage_files(&["other.txt"]);
+    let status = dirty_work(&test_repo);
+
+    test_repo
+        .in_dir(|| super::run(Some("origin/feature-r".to_string()), true))
+        .unwrap();
+
+    assert_eq!(test_repo.head_commit().parent_count(), 2);
+    assert_eq!(test_repo.status_porcelain(), status);
+}
+
+/// An unstaged change to a file the merge also changes, in other lines: git
+/// alone refuses to overwrite it.
+#[test]
+fn merge_keeps_unstaged_change_to_a_merged_file() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.write_file("m.txt", "1\n2\n3\n4\n5\n");
+    test_repo.stage_files(&["m.txt"]);
+    test_repo.commit_staged("Add m");
+    let base = test_repo.head_oid();
+    test_repo.create_branch_at("feature-m", &base.to_string());
+    test_repo.switch_branch("feature-m");
+    test_repo.write_file("m.txt", "1 feature\n2\n3\n4\n5\n");
+    test_repo.stage_files(&["m.txt"]);
+    test_repo.commit_staged("Change m");
+    test_repo.switch_branch("integration");
+    test_repo.write_file("m.txt", "1\n2\n3\n4\n5 local\n");
+
+    test_repo
+        .in_dir(|| super::run(Some("feature-m".to_string()), false))
+        .unwrap();
+
+    assert_eq!(test_repo.head_commit().parent_count(), 2);
+    assert_eq!(
+        test_repo.read_file("m.txt"),
+        "1 feature\n2\n3\n4\n5 local\n"
+    );
+    assert_eq!(test_repo.status_porcelain(), " M m.txt\n");
+}
+
+/// `feature-m` changes the first line of `m.txt`; `also_conflicting` makes it
+/// change `shared.txt` against integration as well, so the merge itself stops.
+fn overlapping_branch(test_repo: &TestRepo, also_conflicting: bool) {
+    test_repo.write_file("m.txt", "1\n");
+    test_repo.stage_files(&["m.txt"]);
+    test_repo.commit_staged("Add m");
+    let base = test_repo.head_oid();
+    test_repo.create_branch_at("feature-m", &base.to_string());
+    test_repo.switch_branch("feature-m");
+    test_repo.write_file("m.txt", "1 feature\n");
+    test_repo.stage_files(&["m.txt"]);
+    test_repo.commit_staged("Change m");
+    if also_conflicting {
+        test_repo.write_file("shared.txt", "feature");
+        test_repo.stage_files(&["shared.txt"]);
+        test_repo.commit_staged("Feature shared");
+        test_repo.switch_branch("integration");
+        test_repo.write_file("shared.txt", "integration");
+        test_repo.stage_files(&["shared.txt"]);
+        test_repo.commit_staged("Integration shared");
+    } else {
+        test_repo.switch_branch("integration");
+    }
+}
+
+/// [`dirty_work`] plus an unstaged change overlapping `feature-m`'s.
+fn dirty_work_overlapping(test_repo: &TestRepo) -> String {
+    dirty_work(test_repo);
+    test_repo.write_file("m.txt", "1 local\n");
+    test_repo.status_porcelain()
+}
+
+fn merge_feature_m(test_repo: &TestRepo) {
+    test_repo
+        .in_dir(|| super::run(Some("feature-m".to_string()), false))
+        .unwrap();
+}
+
+fn continue_merge(test_repo: &TestRepo) {
+    crate::core::transaction::continue_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
+}
+
+fn state_exists(test_repo: &TestRepo) -> bool {
+    test_repo.repo.path().join("loom/state.json").exists()
+}
+
+fn stash_list(test_repo: &TestRepo) -> String {
+    crate::git::run_git_stdout(&test_repo.workdir(), &["stash", "list"]).unwrap()
+}
+
+/// The merge lands, then replaying the set-aside work conflicts with it:
+/// paused, and an abort takes the merge back and returns that work exactly,
+/// staging included.
+#[test]
+fn merge_with_overlapping_change_pauses_and_aborts_to_the_exact_state() {
+    let test_repo = TestRepo::new_with_remote();
+    overlapping_branch(&test_repo, false);
+    let status = dirty_work_overlapping(&test_repo);
+    let head = test_repo.head_oid();
+
+    merge_feature_m(&test_repo);
+
+    assert!(state_exists(&test_repo));
+    assert_eq!(test_repo.head_commit().parent_count(), 2);
+    assert!(crate::git::has_unmerged_paths(&test_repo.workdir()));
+
+    crate::core::transaction::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
+
+    assert!(!state_exists(&test_repo));
+    assert_eq!(test_repo.head_oid(), head);
+    assert_eq!(test_repo.status_porcelain(), status);
+    assert_eq!(test_repo.read_file("m.txt"), "1 local\n");
+}
+
+#[test]
+fn merge_with_overlapping_change_continues_once_resolved() {
+    let test_repo = TestRepo::new_with_remote();
+    overlapping_branch(&test_repo, false);
+    // A stash of the user's own, which the merge must leave alone.
+    test_repo.write_file("m.txt", "mine\n");
+    crate::git::run_git(&test_repo.workdir(), &["stash", "push", "-q"]).unwrap();
+    let status = dirty_work_overlapping(&test_repo);
+    merge_feature_m(&test_repo);
+
+    continue_merge(&test_repo);
+    assert!(state_exists(&test_repo), "nothing resolved yet");
+    assert!(crate::git::has_unmerged_paths(&test_repo.workdir()));
+
+    test_repo.write_file("m.txt", "1 both\n");
+    test_repo.stage_files(&["m.txt"]);
+    continue_merge(&test_repo);
+
+    assert!(!state_exists(&test_repo));
+    assert_eq!(test_repo.head_commit().parent_count(), 2);
+    assert_eq!(test_repo.read_file("m.txt"), "1 both\n");
+    assert_eq!(test_repo.read_file("w.txt"), "w\nunstaged\n");
+    // A conflicted replay stages what it merged cleanly; staging is the
+    // user's again, `m.txt` unstaged as it was.
+    assert_eq!(test_repo.status_porcelain(), status);
+    assert_eq!(
+        stash_list(&test_repo).lines().count(),
+        1,
+        "the user's stash"
+    );
+}
+
+/// A submodule checked out at another commit is not set aside — the reset would
+/// not move it, and replaying its pointer would fail — so it simply stays.
+#[test]
+fn merge_leaves_a_moved_submodule_alone() {
+    let test_repo = TestRepo::new_with_remote();
+    remote_only_branch(&test_repo, "feature-r", "r.txt", "r");
+    let (_, second) = test_repo.add_submodule("sub");
+    test_repo.commit_staged("Add sub");
+    test_repo.checkout_submodule("sub", second);
+    test_repo.write_file("w.txt", "w\n");
+    test_repo.stage_files(&["w.txt"]);
+    let status = test_repo.status_porcelain();
+    assert!(status.contains(" M sub"), "{status}");
+
+    test_repo
+        .in_dir(|| super::run(Some("origin/feature-r".to_string()), true))
+        .unwrap();
+
+    assert_eq!(test_repo.head_commit().parent_count(), 2);
+    assert_eq!(test_repo.status_porcelain(), status);
+}
+
+/// A binary file both sides change cannot carry markers: git leaves the merge's
+/// version in the tree, which history holds. The user's, held nowhere else, is
+/// put there instead, so staging it and continuing keeps it.
+#[test]
+fn merge_keeps_your_version_of_a_conflicted_binary() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.write_file("b.bin", "a\0base\n");
+    test_repo.stage_files(&["b.bin"]);
+    test_repo.commit_staged("Add b");
+    let base = test_repo.head_oid();
+    test_repo.create_branch_at("feature-b", &base.to_string());
+    test_repo.switch_branch("feature-b");
+    test_repo.write_file("b.bin", "a\0theirs\n");
+    test_repo.stage_files(&["b.bin"]);
+    test_repo.commit_staged("Change b");
+    test_repo.switch_branch("integration");
+    test_repo.write_file("b.bin", "a\0mine\n");
+
+    test_repo
+        .in_dir(|| super::run(Some("feature-b".to_string()), false))
+        .unwrap();
+
+    assert!(state_exists(&test_repo));
+    assert!(crate::git::has_unmerged_paths(&test_repo.workdir()));
+    assert_eq!(test_repo.read_file("b.bin"), "a\0mine\n");
+
+    test_repo.stage_files(&["b.bin"]);
+    continue_merge(&test_repo);
+    assert!(!state_exists(&test_repo));
+    assert_eq!(test_repo.read_file("b.bin"), "a\0mine\n");
+    assert_eq!(test_repo.status_porcelain(), " M b.bin\n");
+}
+
+/// `submodule.recurse` must not carry the reset into a submodule, wiping the
+/// work inside it, which the set-aside does not hold.
+#[test]
+fn merge_keeps_work_inside_a_submodule_with_submodule_recurse() {
+    let test_repo = TestRepo::new_with_remote();
+    remote_only_branch(&test_repo, "feature-r", "r.txt", "r");
+    // A real submodule, its git directory under `.git/modules`: the recursion
+    // passes an embedded repository like `add_submodule`'s by.
+    let source = TestRepo::new();
+    source.commit("Sub", "s.txt");
+    crate::git::run_git(
+        &test_repo.workdir(),
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            &source.workdir().to_string_lossy(),
+            "sub",
+        ],
+    )
+    .unwrap();
+    test_repo.commit_staged("Add sub");
+    test_repo.set_config("submodule.recurse", "true");
+    test_repo.write_file("sub/s.txt", "edited inside");
+    test_repo.write_file("w.txt", "w\n");
+    test_repo.stage_files(&["w.txt"]);
+
+    test_repo
+        .in_dir(|| super::run(Some("origin/feature-r".to_string()), true))
+        .unwrap();
+
+    assert_eq!(test_repo.head_commit().parent_count(), 2);
+    assert_eq!(test_repo.read_file("sub/s.txt"), "edited inside");
+}
+
+/// The reset would end the cherry-pick or revert the user is in.
+#[test]
+fn merge_refuses_during_a_cherry_pick() {
+    let test_repo = TestRepo::new_with_remote();
+    remote_only_branch(&test_repo, "feature-r", "r.txt", "r");
+    let pick = test_repo.repo.path().join("CHERRY_PICK_HEAD");
+    std::fs::write(&pick, format!("{}\n", test_repo.head_oid())).unwrap();
+    test_repo.write_file("w.txt", "w\n");
+    test_repo.stage_files(&["w.txt"]);
 
     let err = test_repo
         .in_dir(|| super::run(Some("origin/feature-r".to_string()), true))
         .unwrap_err();
 
-    assert!(err.to_string().contains("staged changes"), "{err}");
+    assert!(err.to_string().contains("cherry-pick"), "{err}");
+    assert!(pick.exists());
+    assert_eq!(test_repo.status_porcelain(), "A  w.txt\n");
+}
+
+/// A clean replay that landed before its state write was lost: the patch is
+/// already in the tree, and redoing it would fail on its staged deletion.
+#[test]
+fn merge_continue_does_not_redo_a_replay_already_in_the_tree() {
+    let test_repo = TestRepo::new_with_remote();
+    conflicting_branch(&test_repo);
+    let status = dirty_work(&test_repo);
+    test_repo
+        .in_dir(|| super::run(Some("feature-c".to_string()), false))
+        .unwrap();
+    test_repo.write_file("shared.txt", "resolved");
+    test_repo.stage_files(&["shared.txt"]);
+    crate::git::continue_merge(&test_repo.workdir(), test_repo.repo.path()).unwrap();
+    let state: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(test_repo.repo.path().join("loom/state.json")).unwrap(),
+    )
+    .unwrap();
+    let patch = state["rollback"]["saved_worktree_patch"].as_str().unwrap();
+    assert!(crate::git::replay_patch_three_way(&test_repo.workdir(), patch).unwrap());
+
+    continue_merge(&test_repo);
+
+    assert!(!state_exists(&test_repo));
+    assert_eq!(test_repo.head_commit().parent_count(), 2);
+    assert_eq!(test_repo.status_porcelain(), status);
+}
+
+/// A staged submodule pointer is the one change the set-aside cannot bring
+/// back, the reset unstaging it: refused up front.
+#[test]
+fn merge_refuses_a_staged_submodule_change() {
+    let test_repo = TestRepo::new_with_remote();
+    remote_only_branch(&test_repo, "feature-r", "r.txt", "r");
+    let (_, second) = test_repo.add_submodule("sub");
+    test_repo.commit_staged("Add sub");
+    test_repo.checkout_submodule("sub", second);
+    test_repo.stage_files(&["sub"]);
+    let status = test_repo.status_porcelain();
+    let head = test_repo.head_oid();
+
+    let err = test_repo
+        .in_dir(|| super::run(Some("origin/feature-r".to_string()), true))
+        .unwrap_err();
+
+    assert!(err.to_string().contains("`sub`"), "{err}");
+    assert_eq!(test_repo.head_oid(), head);
+    assert_eq!(test_repo.status_porcelain(), status);
+    assert!(!state_exists(&test_repo));
+}
+
+/// Resolving, a file staged and then edited again: `git merge --abort` refuses
+/// that, so the abort must not depend on it.
+#[test]
+fn merge_abort_gets_past_a_file_staged_then_edited_while_paused() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("Unrelated", "u.txt");
+    conflicting_branch(&test_repo);
+    let status = dirty_work(&test_repo);
+    let head = test_repo.head_oid();
+    test_repo
+        .in_dir(|| super::run(Some("feature-c".to_string()), false))
+        .unwrap();
+    test_repo.write_file("u.txt", "staged");
+    test_repo.stage_files(&["u.txt"]);
+    test_repo.write_file("u.txt", "edited again");
+
+    crate::core::transaction::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
+
+    assert!(!state_exists(&test_repo));
+    assert!(!crate::git::merge_is_in_progress(test_repo.repo.path()));
+    assert_eq!(test_repo.head_oid(), head);
+    assert_eq!(test_repo.status_porcelain(), status);
+}
+
+/// `loom abort` returns to where the transaction started, whatever was done
+/// meanwhile: here an edit to a file the merge leaves alone.
+#[test]
+fn merge_abort_returns_to_the_start_of_the_transaction() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("Unrelated", "u.txt");
+    conflicting_branch(&test_repo);
+    let status = dirty_work(&test_repo);
+    let head = test_repo.head_oid();
+
+    test_repo
+        .in_dir(|| super::run(Some("feature-c".to_string()), false))
+        .unwrap();
+    test_repo.write_file("u.txt", "edited while paused");
+    crate::core::transaction::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
+
+    assert_eq!(test_repo.head_oid(), head);
+    assert_eq!(test_repo.status_porcelain(), status);
+}
+
+/// An edit during the conflict pause to a file whose own change was set aside:
+/// replaying that change over it on `loom continue` conflicts, and the merge
+/// stays paused until it is resolved.
+#[test]
+fn merge_continue_replays_over_an_edit_made_while_paused() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.write_file("t.txt", "t\n");
+    test_repo.stage_files(&["t.txt"]);
+    test_repo.commit_staged("Tracked");
+    conflicting_branch(&test_repo);
+    test_repo.write_file("t.txt", "local\n");
+
+    test_repo
+        .in_dir(|| super::run(Some("feature-c".to_string()), false))
+        .unwrap();
+    assert_eq!(test_repo.read_file("t.txt"), "t\n", "set aside");
+    test_repo.write_file("shared.txt", "resolved");
+    test_repo.stage_files(&["shared.txt"]);
+    test_repo.write_file("t.txt", "edited while paused\n");
+    continue_merge(&test_repo);
+
+    assert!(state_exists(&test_repo));
+    assert!(crate::git::has_unmerged_paths(&test_repo.workdir()));
+    let content = test_repo.read_file("t.txt");
+    assert!(
+        content.contains("local") && content.contains("edited while paused"),
+        "{content}"
+    );
+
+    test_repo.write_file("t.txt", "both\n");
+    test_repo.stage_files(&["t.txt"]);
+    continue_merge(&test_repo);
+    assert!(!state_exists(&test_repo));
+    assert_eq!(test_repo.head_commit().parent_count(), 2);
+    assert_eq!(test_repo.status_porcelain(), " M t.txt\n");
+}
+
+/// The user finishes the merge's own conflict with raw git instead of
+/// `loom continue`: the set-aside work still comes back on `loom continue`,
+/// and `loom abort` still returns to the start.
+#[test]
+fn merge_finished_with_raw_git_still_replays_or_aborts() {
+    for abort in [false, true] {
+        let test_repo = TestRepo::new_with_remote();
+        conflicting_branch(&test_repo);
+        let status = dirty_work(&test_repo);
+        let head = test_repo.head_oid();
+
+        test_repo
+            .in_dir(|| super::run(Some("feature-c".to_string()), false))
+            .unwrap();
+        test_repo.write_file("shared.txt", "resolved");
+        test_repo.stage_files(&["shared.txt"]);
+        crate::git::continue_merge(&test_repo.workdir(), test_repo.repo.path()).unwrap();
+        assert!(state_exists(&test_repo), "abort: {abort}");
+
+        if abort {
+            crate::core::transaction::abort_cmd(&test_repo.workdir(), test_repo.repo.path())
+                .unwrap();
+            assert_eq!(test_repo.head_oid(), head);
+        } else {
+            continue_merge(&test_repo);
+            assert_eq!(test_repo.head_commit().parent_count(), 2);
+        }
+        assert_eq!(test_repo.status_porcelain(), status, "abort: {abort}");
+        assert!(!state_exists(&test_repo), "abort: {abort}");
+    }
+}
+
+/// The merge stops on its own conflict first; `loom continue` then lands it,
+/// and replaying the set-aside work conflicts: still paused, and either way
+/// out works.
+#[test]
+fn merge_conflict_then_overlapping_change_stays_paused() {
+    for abort in [false, true] {
+        let test_repo = TestRepo::new_with_remote();
+        overlapping_branch(&test_repo, true);
+        let status = dirty_work_overlapping(&test_repo);
+        let head = test_repo.head_oid();
+        merge_feature_m(&test_repo);
+        assert!(crate::git::merge_is_in_progress(test_repo.repo.path()));
+
+        test_repo.write_file("shared.txt", "resolved");
+        test_repo.stage_files(&["shared.txt"]);
+        continue_merge(&test_repo);
+
+        assert!(state_exists(&test_repo), "abort: {abort}");
+        assert!(!crate::git::merge_is_in_progress(test_repo.repo.path()));
+        assert!(crate::git::has_unmerged_paths(&test_repo.workdir()));
+
+        if abort {
+            crate::core::transaction::abort_cmd(&test_repo.workdir(), test_repo.repo.path())
+                .unwrap();
+            assert_eq!(test_repo.head_oid(), head);
+            assert_eq!(test_repo.status_porcelain(), status);
+        } else {
+            test_repo.write_file("m.txt", "1 both\n");
+            test_repo.stage_files(&["m.txt"]);
+            continue_merge(&test_repo);
+            assert_eq!(test_repo.head_commit().parent_count(), 2);
+        }
+        assert!(!state_exists(&test_repo), "abort: {abort}");
+    }
+}
+
+#[test]
+fn merge_conflict_continue_restores_staging() {
+    let test_repo = TestRepo::new_with_remote();
+    conflicting_branch(&test_repo);
+    let status = dirty_work(&test_repo);
+
+    test_repo
+        .in_dir(|| super::run(Some("feature-c".to_string()), false))
+        .unwrap();
+    test_repo.write_file("shared.txt", "resolved");
+    test_repo.stage_files(&["shared.txt"]);
+    crate::core::transaction::continue_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
+
+    assert_eq!(test_repo.head_commit().parent_count(), 2);
+    assert_eq!(test_repo.status_porcelain(), status);
+}
+
+#[test]
+fn merge_conflict_abort_restores_staging() {
+    let test_repo = TestRepo::new_with_remote();
+    conflicting_branch(&test_repo);
+    let status = dirty_work(&test_repo);
+    let head = test_repo.head_oid();
+
+    test_repo
+        .in_dir(|| super::run(Some("feature-c".to_string()), false))
+        .unwrap();
+    crate::core::transaction::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
+
+    assert_eq!(test_repo.head_oid(), head);
+    assert_eq!(test_repo.status_porcelain(), status);
+}
+
+/// git refuses the merge after the work was set aside: an untracked file is in
+/// the way of one the branch adds, and setting aside never takes untracked files.
+#[test]
+fn merge_refused_by_git_restores_staging() {
+    let test_repo = TestRepo::new_with_remote();
+    remote_only_branch(&test_repo, "feature-r", "r.txt", "r");
+    let status = dirty_work(&test_repo);
+    test_repo.write_file("r.txt", "in the way");
+    let head = test_repo.head_oid();
+
+    test_repo
+        .in_dir(|| super::run(Some("origin/feature-r".to_string()), true))
+        .unwrap_err();
+
+    assert_eq!(test_repo.head_oid(), head);
+    assert_eq!(test_repo.status_porcelain(), format!("{status}?? r.txt\n"));
+    assert!(!test_repo.branch_exists("feature-r"));
+}
+
+/// The index lock taken, setting the work aside fails before touching it:
+/// the work stays as it was, and so does nothing to undo.
+#[test]
+fn merge_refused_before_setting_aside_leaves_work_alone() {
+    let test_repo = TestRepo::new_with_remote();
+    remote_only_branch(&test_repo, "feature-r", "r.txt", "r");
+    let status = dirty_work(&test_repo);
+    let lock = test_repo.repo.path().join("index.lock");
+    std::fs::write(&lock, "").unwrap();
+
+    let result = test_repo.in_dir(|| super::run(Some("origin/feature-r".to_string()), true));
+    std::fs::remove_file(&lock).unwrap();
+
+    result.unwrap_err();
+    assert_eq!(test_repo.status_porcelain(), status);
+    let parked = std::fs::read_dir(test_repo.repo.path().join("loom"))
+        .map(|d| d.count())
+        .unwrap_or(0);
+    assert_eq!(parked, 0, "nothing parked");
+}
+
+/// Staged, then undone in the tree: only the index differs from HEAD, which
+/// `git merge` refuses just the same, so it is set aside too.
+#[test]
+fn merge_keeps_a_change_staged_then_undone_in_the_tree() {
+    let test_repo = TestRepo::new_with_remote();
+    remote_only_branch(&test_repo, "feature-r", "r.txt", "r");
+    test_repo.write_file("s.txt", "s\n");
+    test_repo.stage_files(&["s.txt"]);
+    test_repo.commit_staged("Add s");
+    test_repo.write_file("s.txt", "staged\n");
+    test_repo.stage_files(&["s.txt"]);
+    test_repo.write_file("s.txt", "s\n");
+    assert_eq!(test_repo.status_porcelain(), "MM s.txt\n");
+
+    test_repo
+        .in_dir(|| super::run(Some("origin/feature-r".to_string()), true))
+        .unwrap();
+
+    assert_eq!(test_repo.head_commit().parent_count(), 2);
+    assert_eq!(test_repo.status_porcelain(), "MM s.txt\n");
+}
+
+/// The user aborts the merge with raw git: `loom continue` must not report a
+/// merge that is not there, and `loom abort` still returns to the start.
+#[test]
+fn merge_aborted_with_raw_git_is_not_reported_done() {
+    let test_repo = TestRepo::new_with_remote();
+    conflicting_branch(&test_repo);
+    let status = dirty_work(&test_repo);
+    let head = test_repo.head_oid();
+    test_repo
+        .in_dir(|| super::run(Some("feature-c".to_string()), false))
+        .unwrap();
+    crate::git::merge_abort(&test_repo.workdir()).unwrap();
+
+    let err = crate::core::transaction::continue_cmd(&test_repo.workdir(), test_repo.repo.path())
+        .unwrap_err();
+    assert!(err.to_string().contains("no longer at HEAD"), "{err}");
+    assert!(state_exists(&test_repo));
+
+    crate::core::transaction::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
+    assert_eq!(test_repo.head_oid(), head);
+    assert_eq!(test_repo.status_porcelain(), status);
+}
+
+/// A file held open without write sharing makes `git reset --hard` fail
+/// part-way, after resetting others: the state, the only copy of the work,
+/// stays for `loom abort` to put it back.
+#[cfg(windows)]
+#[test]
+fn merge_keeps_the_state_when_setting_aside_fails_part_way() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let test_repo = TestRepo::new_with_remote();
+    remote_only_branch(&test_repo, "feature-r", "r.txt", "r");
+    test_repo.write_file("a.txt", "a\n");
+    test_repo.write_file("z.txt", "z\n");
+    test_repo.stage_files(&["a.txt", "z.txt"]);
+    test_repo.commit_staged("Add a and z");
+    test_repo.write_file("a.txt", "a edited\n");
+    test_repo.write_file("z.txt", "z edited\n");
+    let status = test_repo.status_porcelain();
+
+    const FILE_SHARE_READ: u32 = 1;
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ)
+        .open(test_repo.workdir().join("z.txt"))
+        .unwrap();
+    let result = test_repo.in_dir(|| super::run(Some("origin/feature-r".to_string()), true));
+    drop(lock);
+
+    result.unwrap_err();
+    if test_repo.read_file("a.txt") == "a edited\n" {
+        // Nothing was reset after all: the state went with nothing to undo.
+        assert!(!state_exists(&test_repo));
+    } else {
+        assert!(state_exists(&test_repo));
+        crate::core::transaction::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
+    }
+    assert_eq!(test_repo.status_porcelain(), status);
+    assert_eq!(test_repo.read_file("a.txt"), "a edited\n");
+}
+
+/// The replay's conflicts landed but the state write recording them was lost:
+/// `loom continue` must see them as the replay's, not stage the markers as
+/// resolved and finish.
+#[test]
+fn merge_continue_after_a_lost_replay_write_stays_paused() {
+    let test_repo = TestRepo::new_with_remote();
+    overlapping_branch(&test_repo, false);
+    dirty_work_overlapping(&test_repo);
+    merge_feature_m(&test_repo);
+    set_replayed(&test_repo, false);
+
+    continue_merge(&test_repo);
+
+    assert!(state_exists(&test_repo));
+    assert!(crate::git::has_unmerged_paths(&test_repo.workdir()));
+}
+
+/// Rewrite the saved `replayed` flag, as a lost write leaves it.
+fn set_replayed(test_repo: &TestRepo, replayed: bool) {
+    let path = test_repo.repo.path().join("loom/state.json");
+    let state = std::fs::read_to_string(&path).unwrap();
+    let from = format!("\"replayed\": {}", !replayed);
+    assert!(state.contains(&from), "{state}");
+    std::fs::write(
+        &path,
+        state.replace(&from, &format!("\"replayed\": {replayed}")),
+    )
+    .unwrap();
+}
+
+/// Mark `path` unmerged in the index, the way a conflicted `git stash pop`
+/// or `git checkout -m` leaves it.
+fn make_unmerged(test_repo: &TestRepo, path: &str) {
+    let workdir = test_repo.workdir();
+    let blob = |content: &str| {
+        test_repo.write_file(path, content);
+        crate::git::run_git_stdout(&workdir, &["hash-object", "-w", path])
+            .unwrap()
+            .trim()
+            .to_string()
+    };
+    let (base, ours, theirs) = (blob("base\n"), blob("ours\n"), blob("theirs\n"));
+    test_repo.write_file(
+        path,
+        "<<<<<<< ours\nours\n=======\ntheirs\n>>>>>>> theirs\n",
+    );
+    let entries = format!(
+        "0 0000000000000000000000000000000000000000\t{path}\n\
+         100644 {base} 1\t{path}\n100644 {ours} 2\t{path}\n100644 {theirs} 3\t{path}\n"
+    );
+    let mut child = std::process::Command::new("git")
+        .current_dir(&workdir)
+        .args(["update-index", "--index-info"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    use std::io::Write;
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(entries.as_bytes())
+        .unwrap();
+    assert!(child.wait().unwrap().success());
+    assert!(crate::git::has_unmerged_paths(&workdir));
+}
+
+#[test]
+fn merge_refuses_unresolved_conflicts() {
+    let test_repo = TestRepo::new_with_remote();
+    remote_only_branch(&test_repo, "feature-r", "r.txt", "r");
+    test_repo.commit("Q", "q.txt");
+    make_unmerged(&test_repo, "q.txt");
+
+    let err = test_repo
+        .in_dir(|| super::run(Some("origin/feature-r".to_string()), true))
+        .unwrap_err();
+
+    assert!(err.to_string().contains("unresolved conflicts"), "{err}");
+    assert!(!state_exists(&test_repo));
+    assert!(crate::git::has_unmerged_paths(&test_repo.workdir()));
+}
+
+/// `git apply --3way` cannot replay a change to a file the merge deletes, nor a
+/// deletion of one it changes: refused up front, with nothing touched.
+#[test]
+fn merge_refuses_a_change_to_a_file_the_branch_deletes() {
+    for local_deletes in [false, true] {
+        let test_repo = TestRepo::new_with_remote();
+        test_repo.write_file("d.txt", "d\n");
+        test_repo.stage_files(&["d.txt"]);
+        test_repo.commit_staged("Add d");
+        let base = test_repo.head_oid();
+        test_repo.create_branch_at("feature-d", &base.to_string());
+        test_repo.switch_branch("feature-d");
+        if local_deletes {
+            test_repo.write_file("d.txt", "d changed\n");
+            test_repo.stage_files(&["d.txt"]);
+        } else {
+            crate::git::run_git(&test_repo.workdir(), &["rm", "-q", "d.txt"]).unwrap();
+        }
+        test_repo.commit_staged("Touch d");
+        test_repo.switch_branch("integration");
+        if local_deletes {
+            std::fs::remove_file(test_repo.workdir().join("d.txt")).unwrap();
+        } else {
+            test_repo.write_file("d.txt", "d local\n");
+        }
+        let status = test_repo.status_porcelain();
+        let head = test_repo.head_oid();
+
+        let err = test_repo
+            .in_dir(|| super::run(Some("feature-d".to_string()), false))
+            .unwrap_err();
+
+        assert!(err.to_string().contains("`d.txt`"), "{err}");
+        assert_eq!(test_repo.head_oid(), head);
+        assert_eq!(test_repo.status_porcelain(), status);
+        assert!(!state_exists(&test_repo));
+    }
+}
+
+/// A state written by a loom that left the work to `git merge`: no pre-merge
+/// HEAD to reset to, and nothing set aside to replay.
+#[test]
+fn merge_continue_finishes_a_state_from_an_older_loom() {
+    let test_repo = TestRepo::new_with_remote();
+    conflicting_branch(&test_repo);
+    test_repo
+        .in_dir(|| super::run(Some("feature-c".to_string()), false))
+        .unwrap();
+    let path = test_repo.repo.path().join("loom/state.json");
+    let mut state: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    state["rollback"]["reset_hard_to"] = serde_json::Value::String(String::new());
+    state["context"] = serde_json::json!({ "branch_name": "feature-c" });
+    std::fs::write(&path, serde_json::to_string(&state).unwrap()).unwrap();
+    test_repo.write_file("shared.txt", "resolved");
+    test_repo.stage_files(&["shared.txt"]);
+
+    continue_merge(&test_repo);
+
+    assert!(!state_exists(&test_repo));
+    assert_eq!(test_repo.head_commit().parent_count(), 2);
+}
+
+/// Both sides add `n.txt`: replaying the set-aside new file over the merged one
+/// is an add/add conflict, paused like any other, and `loom abort` returns to
+/// the start, tracking branch included.
+#[test]
+fn merge_with_both_sides_adding_a_file_pauses_and_aborts() {
+    let test_repo = TestRepo::new_with_remote();
+    remote_only_branch(&test_repo, "feature-r", "n.txt", "theirs");
+    test_repo.write_file("n.txt", "mine");
+    test_repo.stage_files(&["n.txt"]);
+    let head = test_repo.head_oid();
+
+    test_repo
+        .in_dir(|| super::run(Some("origin/feature-r".to_string()), true))
+        .unwrap();
+
+    assert!(state_exists(&test_repo));
+    assert!(crate::git::has_unmerged_paths(&test_repo.workdir()));
+    crate::core::transaction::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
+    assert_eq!(test_repo.head_oid(), head);
+    assert_eq!(test_repo.status_porcelain(), "A  n.txt\n");
+    assert_eq!(test_repo.read_file("n.txt"), "mine");
     assert!(!test_repo.branch_exists("feature-r"));
 }
 

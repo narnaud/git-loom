@@ -4,7 +4,7 @@
 
 ## Scope
 
-Every rebase loom runs: each weave rebase (Spec 004) and the plain pull-rebase of `update` (Spec 010). There is no CLI; the behavior is implicit and never fails the operation it serves.
+Every rebase loom runs: each weave rebase (Spec 004) and the plain pull-rebase of `update` (Spec 010); and the reset and replay around `merge` (Spec 005), whose candidates are the dirty files alone. There is no CLI; the behavior is implicit and never fails the operation it serves.
 
 A rebase checks out the upstream, replays each commit, then replays its autostash, so every file the replayed commits name and every dirty file is rewritten with a fresh mtime even when its bytes end up as they started — a no-op todo churns as much as a reword. Loom therefore records those mtimes before the rebase and puts them back once it is over, on the files whose bytes are unchanged.
 
@@ -35,6 +35,7 @@ Whether a path is restored depends on bytes alone, so the same rule holds under 
 | `reword`, `swap`, `branch` | All |
 | `fold`, `absorb`, `drop`, `split`, `commit` | Every file whose final bytes equal its starting bytes |
 | `update` | Those upstream did not change |
+| `merge` | Dirty files the merge does not change, also when git refuses it |
 | A failed rebase the command aborts itself | All, except after `absorb`, whose rollback hard-resets once the abort has run (Spec 014) |
 | Any operation that paused for the user; `loom continue`; `loom abort` | None |
 

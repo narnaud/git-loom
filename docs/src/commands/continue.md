@@ -32,6 +32,8 @@ git add src/shared.rs && git loom continue
 
 If you already finished the rebase yourself with `git rebase --continue`, `loom continue` still completes the loom command.
 
+Continuing a [`merge`](merge.md) puts your set-aside uncommitted changes back over it; if they conflict, it pauses again for you to resolve them.
+
 To give up instead, run [`abort`](abort.md). The [conflict guide](../guides/conflict-resolution.md) walks through a full resolution.
 
 ## Which Commands Pause

@@ -675,10 +675,12 @@ impl Paused {
             .unwrap_or_default();
         // `AUTO_MERGE` outlives the resolution until the step is committed, so
         // with no conflict left it covers `rerere` and the user's own alike.
-        let headline = if git_op.is_none() {
-            "No rebase is in progress — c wraps the operation up, a discards it"
-        } else if files.iter().any(is_conflicted) {
+        // Conflicts first: a `merge` pauses on its own replay with no git
+        // operation behind it (Spec 005).
+        let headline = if files.iter().any(is_conflicted) {
             "Conflicts — resolve them, stage each with Space, then c to continue"
+        } else if git_op.is_none() {
+            "No rebase is in progress — c wraps the operation up, a discards it"
         } else if git::auto_merge_id(workdir).is_some() {
             "No conflicts left — review the result, then c to continue"
         } else {

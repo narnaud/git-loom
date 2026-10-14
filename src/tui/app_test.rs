@@ -4410,6 +4410,36 @@ fn paused_app<'a>(repo: &crate::core::test_helpers::TestRepo, theme: &'a TuiThem
     app
 }
 
+/// A `merge` paused on its own replay has no git operation behind it, yet its
+/// conflicts are what the headline must point at.
+#[test]
+fn a_merge_paused_on_its_replay_headlines_the_conflicts() {
+    let repo = crate::core::test_helpers::TestRepo::new_with_remote();
+    repo.write_file("m.txt", "1\n");
+    repo.stage_files(&["m.txt"]);
+    repo.commit_staged("Add m");
+    let base = repo.head_oid();
+    repo.create_branch_at("feature-m", &base.to_string());
+    repo.switch_branch("feature-m");
+    repo.write_file("m.txt", "1 feature\n");
+    repo.stage_files(&["m.txt"]);
+    repo.commit_staged("Change m");
+    repo.switch_branch("integration");
+    repo.write_file("m.txt", "1 local\n");
+    repo.in_dir(|| crate::merge::run(Some("feature-m".to_string()), false))
+        .unwrap();
+    let theme = make_theme();
+    let app = paused_app(&repo, &theme);
+
+    let paused = app.paused.as_ref().unwrap();
+    assert_eq!(paused.command.as_deref(), Some("merge"));
+    assert!(
+        paused.headline.starts_with("Conflicts"),
+        "{}",
+        paused.headline
+    );
+}
+
 #[test]
 fn a_clean_repo_is_not_paused() {
     let repo = crate::core::test_helpers::TestRepo::new();

@@ -237,10 +237,13 @@ loom continue
      Where the rollback takes that commit out of reach, the message MUST NOT
      offer `loom drop` for it.
    - If `--continue` succeeds: moves to dispatch.
-3. If no rebase is in progress: assumes the user already ran `git rebase
+3. A merge in progress runs `git merge --continue` instead, then moves to
+   dispatch the same way.
+4. With neither in progress, assumes the user already ran `git rebase
    --continue` manually and moves to dispatch.
-4. Dispatches to the command-specific `after_continue` handler.
-5. Deletes the state file only after dispatch succeeds.
+5. Dispatches to the command-specific `after_continue` handler, which may pause
+   again (`merge`, whose set-aside work conflicts with it): the state stays.
+6. Deletes the state file only after dispatch succeeds and is done.
 
 ## `loom abort`
 
@@ -459,6 +462,33 @@ its result tree, never the resolution that produced it.
 Aborting needs no `rollback` field other than `saved_staged_patch`: the amend is
 made inside the rebase, so `git rebase --abort` discards it along with
 everything else.
+
+### `merge` context
+
+```json
+{
+  "branch_name": "<local branch merged>",
+  "replayed": false
+}
+```
+
+The state is saved, and synced to disk, before the merge, not on a pause
+(Spec 005): the rollback holds the pre-merge HEAD (`reset_hard_to`), the
+uncommitted work (`saved_staged_patch`, `saved_worktree_patch`, submodule
+pointers left out) and a remote pick's tracking branch (`delete_branches`).
+Then the tree is reset to HEAD: from there the state is the work's only copy.
+Abort returns to the transaction's start from any pause, whatever the user did
+meanwhile.
+
+After continue: unless `replayed`, stages tracked changes (`--3way` refuses a
+file edited during the pause) and replays `saved_worktree_patch` three-way over
+the merge, then sets `replayed` and saves the state — only then, so a lost
+replay is redone rather than dropped. Unmerged paths found before replaying are
+taken for its own conflicts, their state write lost. A conflict stays paused; a conflicted binary file, which cannot carry markers, gets the user's version (stage 3) in the tree, the merge's being in HEAD.
+Once replayed with no unmerged paths left, it resets the index to HEAD,
+re-applies `saved_staged_patch` best-effort, and prints the merge success
+message. A `git merge` still in progress is ended by abort's hard reset rather
+than `git merge --abort`, which refuses a file staged and then edited again.
 
 ### `fold` context
 

@@ -41,8 +41,9 @@ thread_local! {
 }
 
 /// Record the mtimes the rebase of `upstream..HEAD` (`None`: the whole
-/// history) is about to churn. Best-effort: a failure is traced and the rebase
-/// runs without a record.
+/// history) is about to churn; `Some("HEAD")` records the dirty files alone,
+/// for an operation that sets them aside and back around no replay (`merge`).
+/// Best-effort: a failure is traced and the rebase runs without a record.
 pub fn snapshot_mtimes(workdir: &Path, upstream: Option<&str>) {
     discard_mtimes();
     let note = match take_record(workdir, upstream) {

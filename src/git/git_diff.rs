@@ -211,6 +211,18 @@ pub fn diff_head(workdir: &Path) -> Result<String> {
     restore_stdout(workdir, &["HEAD"])
 }
 
+/// [`diff_head`] and [`diff_cached`] for the work `merge` sets aside: without
+/// submodule pointers, which its `reset --hard` does not move and its replay
+/// could not put back.
+pub fn diff_head_without_submodules(workdir: &Path) -> Result<String> {
+    restore_stdout(workdir, &["--ignore-submodules=all", "HEAD"])
+}
+
+/// See [`diff_head_without_submodules`].
+pub fn diff_cached_without_submodules(workdir: &Path) -> Result<String> {
+    restore_stdout(workdir, &["--ignore-submodules=all", "--cached"])
+}
+
 /// Get the unified diff for specific files against HEAD
 /// (`git diff --binary HEAD -- <files>`); saved to be restored, like
 /// [`diff_head`].

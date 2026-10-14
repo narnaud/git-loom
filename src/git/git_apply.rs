@@ -61,6 +61,37 @@ pub fn apply_patch_to_worktree(workdir: &Path, patch: &str) -> Result<()> {
     Ok(())
 }
 
+/// Whether the working tree already holds `patch`: it reverses cleanly. An
+/// empty patch never counts as applied.
+pub fn patch_is_applied(workdir: &Path, patch: &str) -> bool {
+    !patch.is_empty() && apply_patch_with_flags(workdir, patch, &["--reverse", "--check"]).is_ok()
+}
+
+/// Replay a HEAD-to-worktree patch over a HEAD that moved since
+/// (`git apply --3way`), leaving each overlap as an unmerged entry with
+/// conflict markers for the user to resolve. `Ok(false)`: conflicts left;
+/// `Err`: git refused the patch outright. Stages what it applies. The index
+/// must hold no unmerged path beforehand: after a failure, any is taken for
+/// the replay's own.
+///
+/// `rerere` is off for the reason [`apply_patch_three_way`] gives.
+pub fn replay_patch_three_way(workdir: &Path, patch: &str) -> Result<bool> {
+    if patch.is_empty() {
+        return Ok(true);
+    }
+    match run_apply(
+        workdir,
+        patch,
+        &["-c", "rerere.enabled=false"],
+        &["--3way"],
+        None,
+    ) {
+        Ok(()) => Ok(true),
+        Err(_) if super::has_unmerged_paths(workdir) => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
 /// Run the three-way apply against a throwaway copy of the index.
 ///
 /// `--3way` implies `--index`, but these changes belong in the working tree
