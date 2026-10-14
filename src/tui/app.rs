@@ -1677,6 +1677,24 @@ impl<'a> App<'a> {
 
     /// A key with no popup open and no action running.
     fn handle_tree_key(&mut self, focused: PaneId, code: KeyCode) {
+        // A whitelist, so an action key added later cannot fire mid-placement
+        // and discard it. `←`/`→` are out too: folding walks the cursor off
+        // the placeholder or fold target, or hides a commit-file source.
+        if let Some(what) = self.placing()
+            && !matches!(
+                code,
+                KeyCode::Esc
+                    | KeyCode::Enter
+                    | KeyCode::Up
+                    | KeyCode::Down
+                    | KeyCode::PageUp
+                    | KeyCode::PageDown
+                    | KeyCode::Char('k' | 'j' | 'L' | '?' | 'T')
+            )
+        {
+            self.notice = Some(format!("{}: Enter to confirm, Esc to cancel", what));
+            return;
+        }
         let action = match code {
             KeyCode::Esc => {
                 self.handle_escape();
@@ -1702,16 +1720,6 @@ impl<'a> App<'a> {
             }
             KeyCode::PageDown => {
                 self.diff.scroll_page(1);
-                None
-            }
-            // Folding is how the cursor leaves a row: `←` on a child walks up
-            // to its parent. The cursor must stay on the placeholder or the
-            // fold target, and a closed commit would hide a commit-file source.
-            KeyCode::Left | KeyCode::Right | KeyCode::Char('h' | 'l')
-                if self.placing().is_some() =>
-            {
-                let what = self.placing().unwrap_or_default();
-                self.notice = Some(format!("{}: Enter to confirm, Esc to cancel", what));
                 None
             }
             KeyCode::Right | KeyCode::Char('l') => {
@@ -1742,20 +1750,6 @@ impl<'a> App<'a> {
             }
             KeyCode::Char('T') => {
                 self.open_trace();
-                None
-            }
-            // While picking a fold target or placing a commit only navigation,
-            // Enter, and Esc apply — action keys must not fire and discard
-            // the pending operation.
-            KeyCode::Char(
-                ' ' | 'c' | 'C' | 'f' | 'F' | 'm' | 's' | 'S' | 'b' | 'd' | 'a' | 'r' | 'M' | 'U'
-                | 'u' | 'p' | 'P' | 'R' | '+' | '=' | '-',
-            )
-            | KeyCode::F(5)
-                if self.placing().is_some() =>
-            {
-                let what = self.placing().unwrap_or_default();
-                self.notice = Some(format!("{}: Enter to confirm, Esc to cancel", what));
                 None
             }
             KeyCode::Char(' ') => {
@@ -1920,7 +1914,7 @@ impl<'a> App<'a> {
     }
 
     /// The command whose target the tree is walking, if any: only navigation,
-    /// Enter and Esc apply then.
+    /// Enter, Esc and the read-only popups apply then.
     fn placing(&self) -> Option<&'static str> {
         match self.mode {
             Mode::CommitTarget { .. } => Some("commit"),

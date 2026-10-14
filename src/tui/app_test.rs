@@ -107,6 +107,27 @@ fn press(app: &mut App, code: KeyCode) -> KeyResult<Outcome> {
     app.handle_key(PaneId::Left, code, KeyModifiers::NONE)
 }
 
+/// Every key but the ones a placement keeps, generated rather than listed so
+/// that an action key added later is covered without being named (#388).
+fn keys_refused_while_placing() -> Vec<KeyCode> {
+    (' '..='~')
+        .filter(|c| !matches!(c, 'k' | 'j' | 'L' | '?' | 'T'))
+        .map(KeyCode::Char)
+        .chain((1..=12).map(KeyCode::F))
+        .chain([
+            KeyCode::Left,
+            KeyCode::Right,
+            KeyCode::Home,
+            KeyCode::End,
+            KeyCode::Backspace,
+            KeyCode::Delete,
+            KeyCode::Insert,
+            KeyCode::Tab,
+            KeyCode::BackTab,
+        ])
+        .collect()
+}
+
 /// Draw the whole shell and read the screen back as text.
 fn rendered_lines(shell: &mut Shell<App>) -> Vec<String> {
     rendered_lines_at(shell, 100)
@@ -1253,35 +1274,7 @@ fn commit_mode_blocks_action_keys() {
     move_cursor_to(&mut app, "wf:a.rs");
     press(&mut app, KeyCode::Char('c'));
 
-    for code in [
-        KeyCode::Char(' '),
-        KeyCode::Char('c'),
-        KeyCode::Char('C'),
-        KeyCode::Char('f'),
-        KeyCode::Char('F'),
-        KeyCode::Char('m'),
-        KeyCode::Char('s'),
-        KeyCode::Char('S'),
-        KeyCode::Char('b'),
-        KeyCode::Char('d'),
-        KeyCode::Char('a'),
-        KeyCode::Char('r'),
-        KeyCode::Char('M'),
-        KeyCode::Char('U'),
-        KeyCode::Char('u'),
-        KeyCode::Char('p'),
-        KeyCode::Char('P'),
-        KeyCode::Char('R'),
-        KeyCode::Char('+'),
-        KeyCode::Char('='),
-        KeyCode::Char('-'),
-        KeyCode::F(5),
-        // Folding walks the cursor off a row, so it is blocked too.
-        KeyCode::Left,
-        KeyCode::Right,
-        KeyCode::Char('h'),
-        KeyCode::Char('l'),
-    ] {
+    for code in keys_refused_while_placing() {
         press(&mut app, code);
         assert!(
             matches!(app.mode, Mode::CommitTarget { .. }),
@@ -1788,19 +1781,17 @@ fn move_mode_blocks_action_keys_and_escape_cancels_it() {
     let mut app = make_app(snapshot_of(two_branch_info()), &theme);
     let a = oid('a').to_string();
     move_start_on(&mut app, &a);
-    for code in [
-        KeyCode::Char(' '),
-        KeyCode::Char('m'),
-        KeyCode::Char('f'),
-        KeyCode::Char('d'),
-        KeyCode::Left,
-    ] {
+    for code in keys_refused_while_placing() {
         press(&mut app, code);
         assert!(
             matches!(app.mode, Mode::MoveTarget { .. }),
             "{code:?} left move mode"
         );
-        assert!(app.notice.is_some(), "{code:?} showed no notice");
+        assert_eq!(
+            app.notice.as_deref(),
+            Some("move: Enter to confirm, Esc to cancel"),
+            "{code:?} was not refused"
+        );
     }
 
     press(&mut app, KeyCode::Up);
@@ -1819,19 +1810,7 @@ fn fold_mode_blocks_action_keys() {
     app.action_fold_start();
     assert!(matches!(app.mode, Mode::FoldTarget { .. }));
 
-    for code in [
-        KeyCode::Char(' '),
-        KeyCode::Char('c'),
-        KeyCode::Char('f'),
-        KeyCode::Char('b'),
-        KeyCode::Char('d'),
-        KeyCode::Char('r'),
-        KeyCode::Char('R'),
-        KeyCode::Char('+'),
-        KeyCode::Char('='),
-        KeyCode::Char('-'),
-        KeyCode::F(5),
-    ] {
+    for code in keys_refused_while_placing() {
         let result = app.handle_key(PaneId::Left, code, KeyModifiers::NONE);
         assert!(
             matches!(result, KeyResult::Handled),
@@ -1842,7 +1821,11 @@ fn fold_mode_blocks_action_keys() {
             "{code:?} left fold mode"
         );
         assert!(app.selected.is_empty(), "{code:?} changed the selection");
-        assert!(app.notice.is_some(), "{code:?} showed no notice");
+        assert_eq!(
+            app.notice.as_deref(),
+            Some("fold: Enter to confirm, Esc to cancel"),
+            "{code:?} was not refused"
+        );
     }
 }
 
