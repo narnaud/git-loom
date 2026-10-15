@@ -182,18 +182,33 @@ pub fn run(
 
     let saved_head = repo::head_oid(&repo)?.to_string();
 
-    // Resolve branch target (may create a new branch at merge-base).
-    // Returns whether the branch was newly created — only newly-created
-    // branches are deleted on rollback (not pre-existing empty ones).
-    let (branch_name, branch_is_new) =
-        resolve_branch_target(&repo, &info, &workdir, explicit_branch)?;
+    let (branch_name, branch_is_new) = match explicit_branch {
+        Some(target) => target,
+        None => pick_branch(&repo, &info, &workdir)?,
+    };
+
+    do_commit()?;
+
+    // Spec 006: created only once the commit exists (#430).
+    if branch_is_new
+        && let Err(e) =
+            create_branch_at_merge_base(&workdir, &branch_name, info.upstream.merge_base_oid)
+    {
+        // `-b feature/x` next to a `feature` branch fails only here: take the
+        // commit back so a retry still finds its changes staged.
+        if let Err(reset) = git::reset_soft(&workdir, &saved_head) {
+            msg::warn(&format!(
+                "could not take the commit back off HEAD: {reset}\n\
+                 `git reset --soft {saved_head}` does"
+            ));
+        }
+        return Err(e);
+    }
 
     // Empty branches (pointing at merge-base) need a branch section and
     // merge entry created in the Weave before moving the commit there.
     let branch_is_empty =
         is_branch_at_merge_base(&repo, &branch_name, info.upstream.merge_base_oid)?;
-
-    do_commit()?;
 
     let head_oid = repo::head_oid(&repo)?;
 
@@ -215,6 +230,7 @@ pub fn run(
 
     // Save LoomState before the rebase so we can resume on conflict.
     let mut delete_branches = vec![];
+    // Only a branch this run created, not a pre-existing empty one.
     if branch_is_new {
         delete_branches.push(branch_name.clone());
     }
@@ -359,30 +375,6 @@ fn resolve_file_args(repo: &Repository, files: &[String]) -> Result<Vec<String>>
         .collect()
 }
 
-/// Resolve the target branch: explicit name/shortID, or interactive picker.
-///
-/// Returns `(branch_name, is_new)` — `is_new` is true when the branch was
-/// created by this call (only newly-created branches are deleted on rollback).
-///
-/// `explicit` is `check_explicit_branch`'s answer for `-b`: a new name is
-/// created at the merge-base here.
-fn resolve_branch_target(
-    repo: &Repository,
-    info: &repo::RepoInfo,
-    workdir: &std::path::Path,
-    explicit: Option<(String, bool)>,
-) -> Result<(String, bool)> {
-    match explicit {
-        Some((name, is_new)) => {
-            if is_new {
-                create_branch_at_merge_base(workdir, &name, info.upstream.merge_base_oid)?;
-            }
-            Ok((name, is_new))
-        }
-        None => pick_branch(repo, info, workdir),
-    }
-}
-
 /// Every refusal `-b` can get, without creating anything: the branch name and
 /// whether it is new.
 fn check_explicit_branch(
@@ -457,11 +449,10 @@ fn pick_branch(
 
     let name = name.trim().to_string();
 
-    // If user typed a name that isn't an existing woven branch, create it
+    // A typed name that isn't an existing woven branch is a new branch
     if !info.branches.iter().any(|b| b.name == name) {
         git::branch_validate_name(workdir, &name)?;
         repo::ensure_branch_not_exists(repo, &name)?;
-        create_branch_at_merge_base(workdir, &name, info.upstream.merge_base_oid)?;
         return Ok((name, true));
     }
 

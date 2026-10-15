@@ -43,9 +43,9 @@ After staging resolution, an empty index errors exactly `Nothing to commit`.
 
 1. Resolve staging.
 2. Select loose or branch-targeted mode.
-3. For branch-targeted mode, resolve/create target and obtain message.
+3. For branch-targeted mode, resolve target and obtain message.
 4. Create the commit, with a `Change-Id` trailer per Spec 002 (on `-m` and editor paths alike; `-- --no-verify` does not disable it).
-5. Move it to the feature branch and update topology/refs in one operation.
+5. Create a new target at the weave base, then move the commit to the feature branch and update topology/refs in one operation.
 
 ### Loose mode
 
@@ -65,7 +65,7 @@ Resolve `-b` with `resolve_arg(..., [Branch])` (Spec 002):
 - no existing match: treat as a new name, validate by Spec 005, create it at the weave base, then weave it;
 - commit/file target: reject with `Commit target must be a branch.`.
 
-Every `-b` refusal comes before staging, so it leaves the index untouched; a new branch is created only after staging.
+Every `-b` refusal comes before staging, so it leaves the index untouched; a new branch is created only once the commit exists, so a failed `git commit` (a hook, an empty editor message) leaves none behind; if creating it fails (`feature/x` next to `feature`), the commit is undone with its changes left staged.
 
 Without `-b`/`-l` when loose-mode name matching does not apply, show a picker of woven branches plus “create new branch.” If none exist, prompt directly to create one.
 

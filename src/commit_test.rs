@@ -237,6 +237,65 @@ fn a_failed_commit_puts_back_the_staging_it_set_aside() {
     assert!(status.contains("A  kept.txt"), "{status}");
 }
 
+/// #430: the branch was created before `git commit`, so a rejecting hook left
+/// it behind and the retry was refused as a non-woven branch.
+#[test]
+fn commit_to_new_branch_leaves_no_branch_when_git_commit_fails() {
+    let test_repo = TestRepo::new_with_remote();
+    write_hook(&test_repo, "pre-commit", "exit 1");
+    test_repo.write_file("new.txt", "content");
+
+    let result = test_repo.in_dir(|| {
+        run(
+            Some("feature-new".to_string()),
+            Some("Add file".to_string()),
+            vec!["new.txt".to_string()],
+        )
+    });
+
+    assert!(result.is_err());
+    assert!(!test_repo.branch_exists("feature-new"));
+
+    std::fs::remove_file(test_repo.workdir().join(".git/hooks/pre-commit")).unwrap();
+    let retry = test_repo.in_dir(|| {
+        run(
+            Some("feature-new".to_string()),
+            Some("Add file".to_string()),
+            vec!["new.txt".to_string()],
+        )
+    });
+    assert!(retry.is_ok(), "{retry:?}");
+    assert_eq!(test_repo.branch_commit_summary("feature-new"), "Add file");
+}
+
+/// Creating the branch is the one step after `git commit` that a valid name
+/// can still fail (a `feature` ref blocks `feature/x`); the commit must not
+/// stay behind on the integration branch.
+#[test]
+fn commit_to_new_branch_undoes_the_commit_when_the_branch_cannot_be_created() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.create_branch("feature");
+    test_repo.write_file("kept.txt", "staged before the commit");
+    test_repo.stage_files(&["kept.txt"]);
+    test_repo.write_file("new.txt", "content");
+    let before = test_repo.head_oid();
+
+    let result = test_repo.in_dir(|| {
+        run(
+            Some("feature/x".to_string()),
+            Some("Add file".to_string()),
+            vec!["new.txt".to_string()],
+        )
+    });
+
+    assert!(result.is_err());
+    assert_eq!(test_repo.head_oid(), before);
+    assert!(!test_repo.branch_exists("feature/x"));
+    let status = test_repo.status_porcelain();
+    assert!(status.contains("A  new.txt"), "{status}");
+    assert!(status.contains("A  kept.txt"), "{status}");
+}
+
 #[test]
 fn commit_to_new_branch_creates_and_weaves() {
     let test_repo = TestRepo::new_with_remote();
