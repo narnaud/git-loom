@@ -1,5 +1,15 @@
 // ── Unit tests for diff parsing ──────────────────────────────────────
 
+/// A CRLF file's `\r` is part of each line: dropped, the hunk's context no
+/// longer matches the file and `git apply` refuses it.
+#[test]
+fn parse_hunks_keeps_crlf() {
+    let diff = "--- a/f.txt\n+++ b/f.txt\n@@ -1,2 +1,2 @@\n-old\r\n+new\r\n ctx\r\n";
+    let hunks = super::parse_hunks(diff);
+    assert_eq!(hunks.len(), 1);
+    assert_eq!(hunks[0].text, "@@ -1,2 +1,2 @@\n-old\r\n+new\r\n ctx\r\n");
+}
+
 #[test]
 fn parse_hunks_single_hunk() {
     let diff = "\

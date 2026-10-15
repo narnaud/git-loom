@@ -350,6 +350,20 @@ assert_contains "$JSON" '"stacked_on":"local-base","stacked_on_hidden":true' "hi
 # The fingerprint out of the JSON status (the last line of the captured output).
 json_fingerprint() { tail -1 <<< "$OUT" | grep -o '"fingerprint":"[0-9a-f]*"' | cut -d'"' -f4; }
 
+describe "agent mode: add -p stages one hunk of a CRLF file"
+setup_repo_with_remote
+git -C "$WORK" config core.autocrlf false
+printf '1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7\r\n8\r\n9\r\n' > "$WORK/crlf.txt"
+git -C "$WORK" add crlf.txt
+git -C "$WORK" commit -qm "Add crlf"
+printf '1 x\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7\r\n8\r\n9 y\r\n' > "$WORK/crlf.txt"
+gl_capture add -p crlf.txt --agent
+FP="$(json_fingerprint)"
+gl_capture add -p crlf.txt --hunks crlf.txt:1 --hunks-from "$FP" --agent
+assert_exit_ok "$CODE" "crlf_hunk_exit"
+assert_eq "$(printf '1 x\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7\r\n8\r\n9\r\n' | od -An -c)" \
+    "$(git -C "$WORK" cat-file blob :crlf.txt | od -An -c)" "crlf_hunk_bytes"
+
 # Two edits far enough apart in one file to be two hunks.
 setup_two_hunk_commit() {
     setup_repo_with_remote

@@ -71,7 +71,10 @@ pub(crate) fn parse_hunks(diff: &str) -> Vec<DiffHunk> {
     let mut current_orig_line: usize = 0;
     let mut in_hunk = false;
 
-    for line in diff.lines() {
+    // Not `lines()`: it strips a CRLF file's `\r`, part of each line's content,
+    // and the context left no longer matches for `git apply`.
+    for raw in diff.split_inclusive('\n') {
+        let line = raw.strip_suffix('\n').unwrap_or(raw);
         if line.starts_with(HUNK_HEADER) {
             // Save previous hunk if any
             if in_hunk {
