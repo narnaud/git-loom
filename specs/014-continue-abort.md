@@ -60,6 +60,9 @@ The state file contains:
   target); the refusal does not offer `loom drop` for them.
 - `context`: Command-specific resume data (serialized as JSON)
 
+Patches, here and parked, are kept byte for byte: a byte that is not UTF-8 is
+held as a private-use escape and written back as itself (`git::raw_text`).
+
 The `.git/loom/` directory is created lazily when state is first saved.
 
 ## Why a Rebase Stops

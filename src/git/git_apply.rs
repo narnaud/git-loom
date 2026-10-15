@@ -212,7 +212,7 @@ fn run_apply(
     let mut child = command.spawn()?;
 
     if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(patch.as_bytes())?;
+        stdin.write_all(&super::raw_text::encode(patch))?;
     }
 
     let output = child.wait_with_output()?;
@@ -507,7 +507,7 @@ pub fn save_patch_aside(workdir: &Path, name: &str, patch: &str) -> Result<PathB
                 // created entry is not durable until its directory is. Both
                 // are best effort — Windows refuses to open a directory.
                 let written = file
-                    .write_all(patch.as_bytes())
+                    .write_all(&super::raw_text::encode(patch))
                     .and_then(|()| file.sync_all())
                     .with_context(|| format!("Failed to save '{}'", path.display()));
                 if let Err(e) = written {

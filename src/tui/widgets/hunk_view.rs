@@ -151,7 +151,8 @@ impl HunkView {
             };
             lines.push(Line::from(Span::styled(header_text, header_style)));
 
-            for raw_line in entry.hunk.text.lines() {
+            let shown = crate::git::raw_text::for_display(&entry.hunk.text);
+            for raw_line in shown.lines() {
                 let style = hunk_line_style(raw_line, theme);
                 lines.push(Line::from(Span::styled(raw_line.to_string(), style)));
             }

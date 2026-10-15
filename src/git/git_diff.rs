@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use super::{literal_pathspec, literal_pathspecs, run_git_stdout};
+use super::{literal_pathspec, literal_pathspecs, run_git_stdout, run_git_stdout_raw};
 
 /// Flags forced on every diff loom reads back, for display or otherwise.
 ///
@@ -27,9 +27,23 @@ const REPLAY: &[&str] = &[
     "--full-index",
 ];
 
-/// Run `git diff` with the flags that keep its output replayable, and return it.
+/// Run `git diff` with the flags that keep its output replayable, and return it
+/// decoded byte for byte ([`super::raw_text`]): it goes back to `git apply`.
 fn diff_stdout(workdir: &Path, args: &[&str]) -> Result<String> {
-    patch_stdout(workdir, "diff", REPLAY, args)
+    let mut full = vec!["diff"];
+    full.extend(REPLAY);
+    full.extend(args);
+    run_git_stdout_raw(workdir, &full)
+}
+
+/// [`diff_stdout`] for output that is no patch — names, numstat — decoded
+/// lossily like every other path loom reads: escapes would leak into argv and
+/// compare unequal to the same path read elsewhere.
+fn meta_stdout(workdir: &Path, args: &[&str]) -> Result<String> {
+    let mut full = vec!["diff"];
+    full.extend(REPLAY);
+    full.extend(args);
+    run_git_stdout(workdir, &full)
 }
 
 /// Run `git diff` the way [`diff_stdout`] does, plus `--binary`, and return it.
@@ -42,7 +56,7 @@ fn diff_stdout(workdir: &Path, args: &[&str]) -> Result<String> {
 fn restore_stdout(workdir: &Path, args: &[&str]) -> Result<String> {
     let mut full = vec!["--binary"];
     full.extend(args);
-    patch_stdout(workdir, "diff", REPLAY, &full)
+    diff_stdout(workdir, &full)
 }
 
 fn patch_stdout(workdir: &Path, command: &str, flags: &[&str], args: &[&str]) -> Result<String> {
@@ -97,7 +111,7 @@ pub fn diff_cached_files(workdir: &Path, files: &[&str]) -> Result<String> {
 /// Get the diff of all tracked files against HEAD, one filename per line
 /// (`git diff HEAD --name-only`).
 pub fn diff_head_name_only(workdir: &Path) -> Result<String> {
-    diff_stdout(workdir, &["HEAD", "--name-only"])
+    meta_stdout(workdir, &["HEAD", "--name-only"])
 }
 
 /// Get the unified diff for a single file against HEAD
@@ -111,7 +125,7 @@ pub fn diff_head_file(workdir: &Path, path: &str) -> Result<String> {
 /// Uses `git diff --numstat HEAD -- <path>`: binary files report dashes instead
 /// of counts, which is locale-independent unlike the "Binary files" string.
 pub fn diff_head_file_is_binary(workdir: &Path, path: &str) -> Result<bool> {
-    let out = diff_stdout(
+    let out = meta_stdout(
         workdir,
         &["--numstat", "HEAD", "--", &literal_pathspec(path)],
     )?;
@@ -132,14 +146,14 @@ pub fn diff_cached_file(workdir: &Path, path: &str) -> Result<String> {
 
 /// Whether a file's unstaged changes are binary (`git diff --numstat -- <path>`).
 pub fn diff_file_is_binary(workdir: &Path, path: &str) -> Result<bool> {
-    let out = diff_stdout(workdir, &["--numstat", "--", &literal_pathspec(path)])?;
+    let out = meta_stdout(workdir, &["--numstat", "--", &literal_pathspec(path)])?;
     Ok(out.starts_with("-\t"))
 }
 
 /// Whether a file's staged changes are binary
 /// (`git diff --cached --numstat -- <path>`).
 pub fn diff_cached_file_is_binary(workdir: &Path, path: &str) -> Result<bool> {
-    let out = diff_stdout(
+    let out = meta_stdout(
         workdir,
         &["--cached", "--numstat", "--", &literal_pathspec(path)],
     )?;
@@ -149,7 +163,7 @@ pub fn diff_cached_file_is_binary(workdir: &Path, path: &str) -> Result<bool> {
 /// Whether a file's changes within a commit are binary
 /// (`git diff --numstat <oid>^..<oid> -- <path>`).
 pub fn diff_commit_file_is_binary(workdir: &Path, oid: &str, path: &str) -> Result<bool> {
-    let out = diff_stdout(
+    let out = meta_stdout(
         workdir,
         &[
             "--numstat",
@@ -169,7 +183,7 @@ pub fn diff_commit_file_is_binary(workdir: &Path, oid: &str, path: &str) -> Resu
 /// `-z` because the default `core.quotePath` would otherwise escape and quote
 /// a non-ASCII path into something no other git command takes.
 pub fn diff_commit_name_status(workdir: &Path, oid: &str) -> Result<Vec<(char, String)>> {
-    let out = diff_stdout(
+    let out = meta_stdout(
         workdir,
         &[
             "-z",

@@ -6,6 +6,7 @@ pub mod git_merge;
 pub mod git_mtime;
 pub mod git_rebase;
 pub mod git_worktree;
+pub mod raw_text;
 
 pub use git_apply::{
     Replay, apply_cached_patch, apply_cached_patch_reverse, apply_patch, apply_patch_reverse,
@@ -182,6 +183,13 @@ pub fn run_git(workdir: &Path, args: &[&str]) -> Result<()> {
 pub fn run_git_stdout(workdir: &Path, args: &[&str]) -> Result<String> {
     let output = run_git_captured(workdir, args)?;
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// [`run_git_stdout`] for output handed back to git byte for byte, a patch:
+/// decoded with [`raw_text::decode`], so what is not UTF-8 survives.
+pub fn run_git_stdout_raw(workdir: &Path, args: &[&str]) -> Result<String> {
+    let output = run_git_captured(workdir, args)?;
+    Ok(raw_text::decode(&output.stdout))
 }
 
 /// Run a git command and return its combined stdout+stderr, trimmed. For

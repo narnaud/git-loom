@@ -449,6 +449,74 @@ fn restore_or_park_after_abort_restages_when_the_rebase_is_gone() {
     );
 }
 
+/// A Latin-1 line is text to git, so its raw bytes sit in the patch: saved and
+/// restored, they must come back as they were, not as U+FFFD.
+#[test]
+fn a_saved_patch_keeps_bytes_that_are_not_utf8() {
+    let t = TestRepo::new();
+    t.write_file("l.txt", "ascii\n");
+    t.stage_files(&["l.txt"]);
+    t.commit_staged("Add l");
+    let latin1 = b"ascii\nna\xefve caf\xe9\n";
+    std::fs::write(t.workdir().join("l.txt"), latin1).unwrap();
+    t.stage_files(&["l.txt"]);
+    let staged = git::diff_cached(&t.workdir()).unwrap();
+    let worktree = git::diff_head(&t.workdir()).unwrap();
+
+    git::reset_hard(&t.workdir(), "HEAD").unwrap();
+    git::restore_staged_patch(&t.workdir(), &staged);
+    git::apply_patch(&t.workdir(), &worktree).unwrap();
+
+    assert_eq!(std::fs::read(t.workdir().join("l.txt")).unwrap(), latin1);
+    let blob = git::run_git_stdout_raw(&t.workdir(), &["show", ":l.txt"]).unwrap();
+    assert_eq!(crate::git::raw_text::encode(&blob), latin1);
+}
+
+/// Hunk-staging a Latin-1 file goes through the hunk parser and builder: the
+/// staged bytes must be the file's, not U+FFFD.
+#[test]
+fn a_picked_hunk_keeps_bytes_that_are_not_utf8() {
+    let t = TestRepo::new();
+    t.write_file("l.txt", "1\n2\n3\n4\n5\n6\n7\n8\n9\n");
+    t.stage_files(&["l.txt"]);
+    t.commit_staged("Add l");
+    std::fs::write(
+        t.workdir().join("l.txt"),
+        b"1 caf\xe9\n2\n3\n4\n5\n6\n7\n8\n9 na\xefve\n",
+    )
+    .unwrap();
+    let diff = git::diff_file(&t.workdir(), "l.txt").unwrap();
+    let hunks = crate::core::diff::parse_hunks(&diff);
+    assert_eq!(hunks.len(), 2);
+
+    let patch = crate::core::diff::build_hunk_patch("l.txt", &hunks[..1]);
+    git::apply_cached_patch(&t.workdir(), &patch).unwrap();
+
+    let staged = git::run_git_stdout_raw(&t.workdir(), &["show", ":l.txt"]).unwrap();
+    assert_eq!(
+        git::raw_text::encode(&staged),
+        b"1 caf\xe9\n2\n3\n4\n5\n6\n7\n8\n9\n"
+    );
+}
+
+/// A parked patch is what the user replays by hand: its file must carry the
+/// bytes, not the escapes the text holds them as.
+#[test]
+fn a_parked_patch_keeps_bytes_that_are_not_utf8() {
+    let t = TestRepo::new();
+    t.write_file("l.txt", "ascii\n");
+    t.stage_files(&["l.txt"]);
+    t.commit_staged("Add l");
+    std::fs::write(t.workdir().join("l.txt"), b"ascii\nna\xefve\n").unwrap();
+    let patch = git::diff_head(&t.workdir()).unwrap();
+
+    let parked = git::save_patch_aside(&t.workdir(), "latin1", &patch).unwrap();
+
+    let bytes = std::fs::read(parked).unwrap();
+    assert!(bytes.windows(4).any(|w| w == b"\xefve\n"), "{bytes:?}");
+    assert!(!bytes.windows(3).any(|w| w == "\u{FFFD}".as_bytes()));
+}
+
 /// Several call sites restore before deleting their state file, so a failed
 /// delete can leave the restore to run a second time. Re-applying a patch the
 /// index already carries has to be a no-op, binary entries included.

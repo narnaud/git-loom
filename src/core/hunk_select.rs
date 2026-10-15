@@ -177,7 +177,7 @@ pub fn items(entries: Vec<FileEntry>) -> Vec<HunkItem> {
             let diff = if whole_new_file {
                 new_file_summary(&entry.hunk)
             } else {
-                entry.hunk.text
+                crate::git::raw_text::for_display(&entry.hunk.text).into_owned()
             };
             items.push(HunkItem {
                 id: hunk_id(&file.path, index),
