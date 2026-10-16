@@ -30,6 +30,8 @@ git add src/shared.rs && git loom continue
 # ✓ Created commit `mqt` (a1b2c3d) on branch `feature-auth`
 ```
 
+If your resolution leaves a commit with no changes, git drops it, and the command's success line may still name it; the commit stays in the reflog.
+
 If you already finished the rebase yourself with `git rebase --continue`, `loom continue` still completes the loom command.
 
 Continuing a [`merge`](merge.md) puts your set-aside uncommitted changes back over it; if they conflict, it pauses again for you to resolve them.

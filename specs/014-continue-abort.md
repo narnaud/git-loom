@@ -236,7 +236,10 @@ loom continue
      the rollback is applied, the state file goes, and the refusal is reported as an error.
      Where the rollback takes that commit out of reach, the message MUST NOT
      offer `loom drop` for it.
-   - If `--continue` succeeds: moves to dispatch.
+   - If `--continue` succeeds: moves to dispatch. A resolution that leaves the
+     stopped commit with no changes makes `--continue` drop it, even under
+     `--empty=stop`; loom does not detect this, and the command reports as if
+     the commit survived.
 3. A merge in progress runs `git merge --continue` instead, then moves to
    dispatch the same way.
 4. With neither in progress, assumes the user already ran `git rebase
