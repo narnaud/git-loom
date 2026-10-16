@@ -1607,24 +1607,28 @@ fn a_push_that_cannot_reach_the_remote_is_not_refused() {
     );
 }
 
-#[test]
-fn a_push_a_hook_declines_is_server_rejected() {
-    let test_repo = TestRepo::new_with_remote();
-    let workdir = test_repo.workdir();
-    test_repo.create_branch("feature-a");
+fn install_pre_receive(test_repo: &TestRepo, script: &str) {
     let remote = test_repo.remote_path().unwrap();
     let hooks = remote.join("hooks");
     std::fs::create_dir_all(&hooks).unwrap();
     // As in the fixtures: a `core.hooksPath` in the user's config would leave it inert.
     let hooks_path = hooks.display().to_string().replace('\\', "/");
     crate::git::run_git(&remote, &["config", "core.hooksPath", &hooks_path]).unwrap();
-    std::fs::write(hooks.join("pre-receive"), "#!/bin/sh\nexit 1\n").unwrap();
+    std::fs::write(hooks.join("pre-receive"), script).unwrap();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let hook = hooks.join("pre-receive");
         std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
+}
+
+#[test]
+fn a_push_a_hook_declines_is_server_rejected() {
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    test_repo.create_branch("feature-a");
+    install_pre_receive(&test_repo, "#!/bin/sh\nexit 1\n");
 
     let plan = super::PushPlan::single("feature-a");
     let failed =
@@ -1633,4 +1637,60 @@ fn a_push_a_hook_declines_is_server_rejected() {
         failed.downcast_ref::<super::PushFailed>(),
         Some(&super::PushFailed::ServerRejected)
     );
+}
+
+/// #443: this path dropped the `remote:` links and pushed without `-u`.
+#[test]
+fn a_gerrit_push_as_wip_shows_the_links_and_sets_the_upstream() {
+    use crate::core::ui::{self, Answer, Level, Request};
+
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    test_repo.create_branch("feature-a");
+    install_pre_receive(
+        &test_repo,
+        "#!/bin/sh\necho 'https://review.example.com/c/project/+/123' >&2\n",
+    );
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (success, result) = std::thread::scope(|scope| {
+        let worker = scope.spawn(|| {
+            ui::install(tx);
+            let mut report = Default::default();
+            let result =
+                super::push_gerrit_no_pr(&workdir, "origin", "feature-a", false, &mut report)
+                    .map(|()| report);
+            ui::uninstall();
+            result
+        });
+        let mut success = Vec::new();
+        for request in rx {
+            match request {
+                Request::Prompt { reply, .. } => {
+                    let wip = "Push as `wip/feature-a` instead".to_string();
+                    let _ = reply.send(Some(Answer::Text(wip)));
+                }
+                Request::Message {
+                    level: Level::Success,
+                    text,
+                } => success.push(text),
+                _ => {}
+            }
+        }
+        (success, worker.join().unwrap())
+    });
+
+    let report: crate::core::push_json::PushReport = result.unwrap();
+    assert_eq!(report.links, ["https://review.example.com/c/project/+/123"]);
+    assert_eq!(
+        success,
+        ["Pushed `feature-a` to `origin` as `wip/feature-a`\n\
+          https://review.example.com/c/project/+/123"]
+    );
+    let upstream = crate::git::run_git_stdout(
+        &workdir,
+        &["rev-parse", "--abbrev-ref", "feature-a@{upstream}"],
+    )
+    .unwrap();
+    assert_eq!(upstream.trim(), "origin/wip/feature-a");
 }

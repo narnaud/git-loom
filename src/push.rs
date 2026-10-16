@@ -2121,12 +2121,11 @@ fn push_gerrit_no_pr(
         let refspec = format!("{}:{}", branch, wip_name);
         let mut args = vec!["push"];
         args.extend_from_slice(force_args(force));
-        args.extend_from_slice(&[remote, &refspec]);
-        run_push_capture(workdir, &args)?;
-        msg::success(&format!(
-            "Pushed `{}` to `{}` as `{}`",
-            branch, remote, wip_name
-        ));
+        args.extend_from_slice(&["-u", remote, &refspec]);
+        let stderr = run_push_capture(workdir, &args)?;
+        let mut message = format!("Pushed `{}` to `{}` as `{}`", branch, remote, wip_name);
+        report.links = append_remote_urls(&mut message, &stderr, None);
+        msg::success(&message);
         report.pushed = vec![wip_name];
         Ok(())
     } else {

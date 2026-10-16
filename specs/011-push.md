@@ -599,7 +599,7 @@ to delete it later:
 ```
 
 - **Push as-is**: pushes `feature-a` to `remote/feature-a` with `--force-with-lease`
-- **Push as `wip/<branch>`**: pushes with refspec `feature-a:wip/feature-a` — no admin needed to delete it
+- **Push as `wip/<branch>`**: pushes with `-u` and refspec `feature-a:wip/feature-a` — no admin needed to delete it
 - **Cancel**: aborts with `Push cancelled`
 
 ## Design Decisions
