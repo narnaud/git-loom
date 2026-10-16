@@ -13,7 +13,7 @@ use ratatui::{
 };
 
 use crate::tui::theme::TuiTheme;
-use crate::tui::widgets::popup::highlight_backticks;
+use crate::tui::widgets::popup::{centered, highlight_backticks};
 
 /// Default width, like lazygit's menus; narrower terminals shrink it.
 const WIDTH: u16 = 80;
@@ -96,8 +96,14 @@ impl Menu {
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect, theme: &TuiTheme) {
-        let width = WIDTH.min(area.width.saturating_sub(2)).max(20);
-        let inner = width.saturating_sub(2) as usize;
+        // The menu alone is centered, so it stays put whether or not the
+        // cursor item has help; the help box hangs below it.
+        let menu_rect = centered(
+            area,
+            WIDTH.min(area.width.saturating_sub(2)).max(20),
+            self.items.len() as u16 + 2,
+        );
+        let inner = menu_rect.width.saturating_sub(2) as usize;
         let has_key = self.items.iter().any(|i| i.key.is_some());
         let help: Vec<Line<'static>> = self
             .items
@@ -109,22 +115,10 @@ impl Menu {
                     .collect()
             })
             .unwrap_or_default();
-
-        // The menu alone is centered, so it stays put whether or not the
-        // cursor item has help; the help box hangs below it.
-        let rows = (self.items.len() as u16 + 2).min(area.height);
-        let top = area.y + area.height.saturating_sub(rows) / 2;
         let help_rows = if help.is_empty() {
             0
         } else {
-            (help.len() as u16 + 2).min(area.bottom().saturating_sub(top + rows))
-        };
-        let x = area.x + (area.width - width) / 2;
-        let menu_rect = Rect {
-            x,
-            y: top,
-            width,
-            height: rows,
+            (help.len() as u16 + 2).min(area.bottom().saturating_sub(menu_rect.bottom()))
         };
 
         let lines: Vec<Line<'static>> = self
@@ -161,10 +155,9 @@ impl Menu {
 
         if help_rows > 0 {
             let help_rect = Rect {
-                x,
-                y: top + rows,
-                width,
+                y: menu_rect.bottom(),
                 height: help_rows,
+                ..menu_rect
             };
             frame.render_widget(Clear, help_rect);
             let block = Block::default()

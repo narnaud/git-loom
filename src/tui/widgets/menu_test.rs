@@ -24,8 +24,8 @@ fn key(menu: &mut Menu, code: KeyCode) -> MenuOutcome {
     menu.handle_key(code, KeyModifiers::NONE)
 }
 
-fn render_lines(mut f: impl FnMut(&mut Frame, Rect)) -> Vec<String> {
-    let backend = ratatui::backend::TestBackend::new(100, 24);
+fn render_lines(width: u16, mut f: impl FnMut(&mut Frame, Rect)) -> Vec<String> {
+    let backend = ratatui::backend::TestBackend::new(width, 24);
     let mut terminal = ratatui::Terminal::new(backend).unwrap();
     terminal.draw(|frame| f(frame, frame.area())).unwrap();
     let buffer = terminal.backend().buffer();
@@ -90,7 +90,7 @@ fn enter_on_an_empty_menu_picks_nothing() {
 fn renders_title_counter_gutter_and_help_for_the_cursor_item() {
     let theme = theme();
     let mut menu = menu();
-    let lines = render_lines(|f, area| menu.render(f, area, &theme));
+    let lines = render_lines(100, |f, area| menu.render(f, area, &theme));
     let text = lines.join("\n");
     assert!(text.contains(" Discard changes "));
     assert!(text.contains(" 1 of 3 "));
@@ -116,7 +116,7 @@ fn renders_title_counter_gutter_and_help_for_the_cursor_item() {
         .position(|l| l.contains("Discard changes"))
         .unwrap();
     key(&mut menu, KeyCode::Down);
-    let lines = render_lines(|f, area| menu.render(f, area, &theme));
+    let lines = render_lines(100, |f, area| menu.render(f, area, &theme));
     let text = lines.join("\n");
     assert!(text.contains(" 2 of 3 "));
     assert!(!text.contains("Discard both staged"));
@@ -125,4 +125,17 @@ fn renders_title_counter_gutter_and_help_for_the_cursor_item() {
         lines.iter().position(|l| l.contains("Discard changes")),
         Some(title_row)
     );
+}
+
+// #446: under 20 columns the menu's x underflowed: a panic in debug, and in
+// release a menu drawn off-screen that still took `Enter`.
+#[test]
+fn menu_fills_a_terminal_narrower_than_its_minimum_width() {
+    let theme = theme();
+    let menu = menu();
+    let lines = render_lines(15, |f, area| menu.render(f, area, &theme));
+    let top = lines.iter().find(|l| l.starts_with('┌')).unwrap();
+    assert_eq!(top.chars().count(), 15);
+    assert!(top.ends_with('┐'));
+    assert!(lines.iter().any(|l| l.contains("Discard")));
 }
