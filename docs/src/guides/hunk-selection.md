@@ -1,8 +1,8 @@
 # Selecting Hunks with -p
 
-Sometimes you want to stage or commit only part of your changes — a few specific lines rather than entire files. The `-p` (patch) flag opens an interactive TUI that lets you pick individual hunks before the operation runs. It works with `add`, `commit`, and `fold`.
+To stage, commit, fold or split part of a file rather than all of it, add `-p` (patch). An interactive picker opens before the command runs. It works with `add`, `commit`, `fold` and `split`.
 
-## The TUI
+## The Picker
 
 ```
 ╭─ Files ──────────╮╭─ Diff ─────────────────────────╮
@@ -15,102 +15,40 @@ Sometimes you want to stage or commit only part of your changes — a few specif
  Toggle: space | Confirm: Enter | Help: ? | Cancel: Esc
 ```
 
-The left pane lists files with `git status`–style codes (`M`, `MM`, `A`, `??`, `D`). The right pane shows diff hunks — check the ones you want, leave the rest unchecked, then confirm. A deleted, binary, submodule or empty file has no hunks to choose between: it shows as `Whole file` instead of a numbered hunk.
+Files are on the left, their hunks on the right. Check the hunks you want, then confirm. A binary, deleted or empty file, or a submodule, has no hunks to choose from: it shows as one `Whole file` entry.
 
 | Key | Action |
 |-----|--------|
-| `↑` / `k`, `↓` / `j` | Navigate up/down |
-| `Tab` / `Shift+Tab` | Switch between left and right pane |
-| `Space` | Toggle hunk (right pane) or all hunks in file/directory (left pane) |
-| `Enter` | Confirm selections |
-| `q` / `Esc` / `Ctrl+C` | Cancel without changes |
-| `?` | Show the help popup |
+| `↑`/`k`, `↓`/`j` | Move |
+| `Tab` / `Shift+Tab` | Switch pane |
+| `Space` | Toggle a hunk, or every hunk of a file or directory |
+| `Enter` | Confirm |
+| `q` / `Esc` / `Ctrl+C` | Cancel, changing nothing |
+| `?` | Help |
 
-## Staging hunks (`add -p`)
+## Commands
 
-To stage a subset of changes before any commit:
+| Command | Picks from | Result |
+|---------|------------|--------|
+| `git loom add -p [<files>]` | Local changes | Selected hunks staged, the others unstaged |
+| `git loom commit -b <branch> -p [<files>]` | Local changes | Selected hunks committed to the branch |
+| `git loom fold -p [<files>] <commit>` | Local changes | Selected hunks amended into the commit |
+| `git loom fold -p <source> <target>` | A commit | Selected hunks moved into an older commit |
+| `git loom fold -p <commit> zz` | A commit | Selected hunks uncommitted |
+| `git loom split -p <commit>` | A commit | Selected hunks become the first of two commits |
 
-```bash
-$ git loom add -p
-# Opens TUI showing all changed files
-```
+Listing files narrows the picker to them. Hunks you leave out are untouched, except with `add -p`, where unticking a staged hunk unstages it.
 
-Filter to specific files:
+## Example: Two Changes in One File
 
-```bash
-$ git loom add -p src/auth.rs
-$ git loom add -p a3          # using a short ID
-```
-
-## Committing hunks (`commit -p`)
-
-Commit only selected hunks to a feature branch, without staging anything first:
+You edited `src/auth.rs` for two features. Send each hunk to its own branch:
 
 ```bash
-$ git loom commit -b feature-auth -p
-# Opens TUI for all working tree changes
-# Only selected hunks are committed to feature-auth
+git loom commit -b feature-auth -p src/auth.rs -m "tighten auth check"
+# Pick the first hunk
+
+git loom commit -b feature-ui -p src/auth.rs -m "restyle auth form"
+# Pick the remaining hunk
 ```
 
-You can narrow the picker to specific files:
-
-```bash
-$ git loom commit -b feature-auth -p src/auth.rs -m "partial auth fix"
-# TUI shows only src/auth.rs hunks
-# Other staged files are saved aside and restored after the commit
-```
-
-## Amending hunks into a past commit (`fold -p`)
-
-Fold only selected working tree hunks into an existing commit:
-
-```bash
-$ git loom fold -p mqt
-# Opens TUI for all working tree changes
-# Selected hunks are staged and folded into commit mqt
-```
-
-Narrow to specific files by listing them before the target:
-
-```bash
-$ git loom fold -p src/auth.rs mqt
-# TUI shows only src/auth.rs hunks
-# Selected hunks are folded into mqt; the rest stay in the working tree
-```
-
-## Common patterns
-
-### Split a file's changes across two commits
-
-You edited `src/auth.rs` and want different hunks in different branches.
-
-```bash
-$ git loom commit -b feature-auth -p src/auth.rs -m "tighten auth check"
-# Pick the first hunk → committed to feature-auth
-
-$ git loom commit -b feature-ui -p src/auth.rs -m "restyle auth form"
-# Pick the remaining hunk → committed to feature-ui
-```
-
-### Amend only part of a file into a past commit
-
-```bash
-$ git loom fold -p src/auth.rs mqt
-# Opens TUI filtered to src/auth.rs
-# Pick only the hunks that belong in mqt
-# Unselected hunks stay in the working tree unchanged
-```
-
-### Stage interactively, then commit
-
-If you prefer to separate the two steps:
-
-```bash
-$ git loom add -p
-# Select exactly what to stage
-
-$ git loom commit -b feature-auth -m "fix auth check"
-# Commits whatever is staged
-```
-
-See also: [add](../commands/add.md) · [commit](../commands/commit.md) · [fold](../commands/fold.md)
+See also: [add](../commands/add.md) · [commit](../commands/commit.md) · [fold](../commands/fold.md) · [split](../commands/split.md)

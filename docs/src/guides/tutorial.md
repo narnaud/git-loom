@@ -1,54 +1,51 @@
 # Tutorial
 
-This tutorial walks you through a typical *git-loom* workflow — from initializing an integration branch to working on multiple features simultaneously.
+This tutorial walks through a typical *git-loom* session: set up an integration branch, work on two features at once, and stay up to date with upstream.
 
 ## Getting Started
 
-You have a project tracked by Git with a remote `origin/main`. Let's set up *git-loom*.
+Your project has a remote `origin/main`. Create an integration branch from it:
 
 ```bash
 git checkout main
 git loom init
 ```
 
-*git-loom* creates an integration branch that tracks `origin/main`. Run `git loom status` (or just `git loom`) to see the baseline:
+Run `git loom status` (or just `git loom`) to see where you are:
 
 ```
 ╭─ zz [local changes]
+│   no changes
 │
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit
 ```
 
-A clean slate — the `zz` local changes section is empty, and you can see the upstream marker. Time to start working.
+Nothing yet: no local changes, and the upstream commit your work will build on.
 
 ## Your First Commit
 
-You add a login form to your project — create `src/auth.rs` and `templates/login.html`. Check the status:
+You add a login form: `src/auth.rs` and `templates/login.html`. They show up as local changes:
 
 ```
 ╭─ zz [local changes]
-│    ⁕ src/auth.rs
-│    ⁕ templates/login.html
+│   au  ⁕ src/auth.rs
+│   lo  ⁕ templates/login.html
 │
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit
 ```
 
-Your new files show up as untracked in the local changes section. Instead of the usual `git add` / `git commit` dance, you use *git-loom* to commit directly to a feature branch:
+Commit them straight to a feature branch:
 
 ```bash
 git loom commit -b feature-auth -m "add login form" zz
 ```
 
-This single command:
-
-1. Stages all your changes (`zz` means "everything")
-2. Creates the `feature-auth` branch (it didn't exist yet)
-3. Weaves it into the integration topology
-4. Creates the commit on that branch
-
-Check the status:
+`zz` means "all local changes". The `feature-auth` branch doesn't exist yet, so loom creates it and weaves it into the integration branch:
 
 ```
+╭─ zz [local changes]
+│   no changes
+│
 │╭─ fa [feature-auth]
 │●    mqt  711d082 add login form
 ├╯
@@ -56,17 +53,16 @@ Check the status:
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit
 ```
 
-Your commit sits on `feature-auth`, shown as a side branch off the integration line. The short IDs `fa` (branch) and `mqt` (commit) are what you'll type in subsequent commands.
-
-You keep working on the same feature — add password validation and commit again:
+`fa` and `mqt` are short IDs for the branch and the commit; you type them in later commands. Add password validation and commit again, this time naming the branch by its short ID:
 
 ```bash
 git loom commit -b fa -m "add password validation" zz
 ```
 
-Notice you can use the short ID `fa` instead of the full branch name. The status now shows:
-
 ```
+╭─ zz [local changes]
+│   no changes
+│
 │╭─ fa [feature-auth]
 │●    pkz  4f825d2 add password validation
 │●    mqt  711d082 add login form
@@ -77,28 +73,16 @@ Notice you can use the short ID `fa` instead of the full branch name. The status
 
 ## Working on Multiple Features
 
-While `feature-auth` is in progress, you want to start on a dashboard. You create `src/dashboard.rs` and `templates/dashboard.html`:
-
-```
-╭─ zz [local changes]
-│    ⁕ src/dashboard.rs
-│    ⁕ templates/dashboard.html
-│
-│╭─ fa [feature-auth]
-│●    pkz  4f825d2 add password validation
-│●    mqt  711d082 add login form
-├╯
-│
-● a1b2c3d (upstream) [origin/main] Latest upstream commit
-```
-
-No need to switch branches — just commit to a new one:
+Now you start a dashboard, `src/dashboard.rs` and `templates/dashboard.html`. No need to switch branches — commit to a new one:
 
 ```bash
 git loom commit -b feature-dashboard -m "add dashboard layout" zz
 ```
 
 ```
+╭─ zz [local changes]
+│   no changes
+│
 │╭─ fd [feature-dashboard]
 │●    rsv  7a5bb0b add dashboard layout
 ├╯
@@ -111,19 +95,20 @@ git loom commit -b feature-dashboard -m "add dashboard layout" zz
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit
 ```
 
-Two independent feature branches, both woven into the integration branch. You can build and test everything together while keeping the branches separate. This is the core of *git-loom*: **work on multiple features simultaneously without branch switching.**
+Both branches are in your working tree, so you build and test them together, while each stays independent for review. That is the core of *git-loom*.
 
 ## Staying Up to Date
 
-Your teammates have been pushing to `origin/main`. Time to pull their changes and rebase your work on top:
+Your teammates pushed to `origin/main`. Fetch their work and rebase yours on top:
 
 ```bash
 git loom update
 ```
 
-This fetches upstream changes, rebases your integration branch (including all woven feature branches) on top, and updates submodules if any. Your working tree changes are automatically preserved.
-
 ```
+╭─ zz [local changes]
+│   no changes
+│
 │╭─ fd [feature-dashboard]
 │●    rsv  8f74d1c add dashboard layout
 ├╯
@@ -134,30 +119,22 @@ This fetches upstream changes, rebases your integration branch (including all wo
 ├╯
 │
 ● b2c3d4e (upstream) [origin/main] Teammate's latest commit
-· a1b2c3d 2026-03-07 Latest upstream commit
 ```
 
-The upstream marker moved forward — your branches are now rebased on top of the latest changes.
+Every branch moved onto the new upstream. The hashes changed, the short IDs did not. Your uncommitted changes are kept.
 
-If any of your pushed feature branches have been merged and deleted on the remote, `update` will notice and offer to clean up the local branches:
+Once a branch you pushed is merged and deleted on the remote, `update` offers to remove your local copy:
 
 ```
 #   › `feature-auth`: upstream gone
 # ? Remove local branch? [y/N]
 ```
 
-> [!NOTE]
-> If a rebase conflict occurs, `update` aborts automatically and tells you the full `git rebase` command to re-run and resolve conflicts manually.
+If the rebase hits a conflict, `update` pauses so you can resolve it — see [Resolving Conflicts](conflict-resolution.md).
 
-See also: [update reference](../commands/update.md)
+## Next Steps
 
-Now that you know the basics, check out the recipe guides for common operations:
-
-- [Amending a Past Commit](amending.md)
-- [Fixing Up a Commit](fixup.md)
-- [Splitting a Commit](splitting.md)
-- [Moving a Commit Between Branches](moving-commits.md)
-- [Moving Files Between Commits](moving-files.md)
-- [Uncommitting Changes](uncommitting.md)
-- [Auto-absorbing Changes](absorbing.md)
-- [Pushing for Review](pushing.md)
+- Reshape your work: [amend](amending.md), [fix up](fixup.md), [split](splitting.md), [move commits](moving-commits.md) or [files](moving-files.md), [uncommit](uncommitting.md), [absorb](absorbing.md)
+- Work hunk by hunk with [`-p`](hunk-selection.md)
+- [Push for review](pushing.md)
+- Let an AI agent do it: [Working with AI Agents](agents.md)

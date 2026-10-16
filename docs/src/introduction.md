@@ -1,8 +1,6 @@
 # ![Introduction](assets/banner-adaptive.svg)
 
-*git-loom* is a Git CLI tool that weaves your branches together into a single integration branch. Inspired by tools like [jujutsu](https://github.com/martinvonz/jj) and [Git Butler](https://gitbutler.com/), *git-loom* helps you work on multiple features simultaneously while keeping your branches organized and independent.
-
-Think of it as a loom that weaves multiple threads (feature branches) into a single fabric (integration branch).
+*git-loom* weaves your feature branches into a single integration branch, so you can work on all of them at once — committing, amending, splitting and reordering — without ever switching branches. It is inspired by [jujutsu](https://github.com/martinvonz/jj) and [GitButler](https://gitbutler.com/).
 
 ![git-loom status](assets/git-loom-status-750.png)
 
@@ -20,57 +18,47 @@ The same operations from the interactive [`git loom tui`](commands/tui.md):
 
 ### Integration Branch
 
-An integration branch merges multiple feature branches together, allowing you to:
-
-- Work on several features at once in a single branch
-- Test how features interact with each other
-- Keep feature branches independent and manageable
-- See a clear relationship between your integration and feature branches
-
-You create an integration branch with [`git loom init`](commands/init.md). It tracks a remote upstream (e.g. `origin/main`) and serves as the hub for all your feature work.
+The branch you work on. It tracks a remote branch (e.g. `origin/main`) and merges in all your feature branches, so you build and test them together. Create it with [`git loom init`](commands/init.md).
 
 ### Feature Branches
 
-Feature branches are independent branches combined into the integration branch. You can manage them — reorder, amend, split — without leaving the integration context:
+Independent branches woven into the integration branch, each pushed and reviewed on its own. You manage them from the integration branch:
 
-- Commit to the feature branch from the integration branch with [`git loom commit`](commands/commit.md)
-- Move commits between branches with [`git loom fold`](commands/fold.md)
-- Remove branches cleanly with [`git loom drop`](commands/drop.md)
-- Create feature branches with [`git loom branch`](commands/branch.md)
+- [`commit`](commands/commit.md) commits to a feature branch, creating it if needed
+- [`fold`](commands/fold.md) amends, fixes up, or moves commits and files between branches
+- [`push`](commands/push.md) pushes a branch and opens its pull request
 
 > [!TIP]
-> [`git loom commit`](commands/commit.md) is the primary way to create branches — it will prompt you for the branch name, or let you create a new one on the fly. Use [`git loom branch`](commands/branch.md) only for advanced cases where you need to create an empty branch ahead of time or for branching out loose commits.
+> [`git loom commit -b <name>`](commands/commit.md) is the usual way to start a branch. [`git loom branch`](commands/branch.md) is for creating an empty branch ahead of time, or turning existing commits into one.
 
 ### Weaving
 
-When a feature branch is created inside the integration branch, *git-loom* automatically **weaves** it into the topology — restructuring the linear history into a merge-based layout where each feature branch appears as a side branch joined by a merge commit. This is what makes `git loom status` able to display the clear branch-aware graph.
+Each feature branch sits on the integration branch as a side branch joined by a merge, which is what `git loom status` draws. Every loom command rewrites history to keep that shape, so you never rebase by hand.
 
-Weaving rewrites history with `git rebase`, which rewrites every file the replayed commits touch even when its content is unchanged. *git-loom* puts the modification times of those files back afterwards, so a reword or a swap does not make your build tool rebuild everything; only files whose bytes actually changed get a new timestamp. Keep watcher-driven builds (`cargo watch`, an IDE building on save) off the tree while a loom operation runs: one that reads files mid-rebase compiles intermediate content and then treats its output as current.
+A rewrite keeps the modification time of files whose content did not change, so your build tool does not rebuild everything. Pause watcher-driven builds (`cargo watch`, build on save) while a loom command runs: they may compile half-rewritten files.
 
 ### Short IDs
 
-*git-loom* assigns compact, human-friendly identifiers to branches, commits, and files shown in `git loom status`. You can use these short IDs with any command instead of typing full hashes or branch names. What you see in the status output is what you type.
+`git loom status` labels every branch, commit and file with a short ID (`fa`, `mqt`, `ma`) that you type in other commands instead of hashes, names or paths.
 
-Commit IDs are persistent: every commit loom creates carries a Gerrit-style `Change-Id` trailer, and its ID (letters such as `mqt`) is derived from that trailer rather than from the hash. Rewrites change the hash, not the ID, so you can chain commands on the same ID across an `update`, a `fold`, or a `swap`.
+Commit IDs are persistent: they come from a `Change-Id` trailer that loom adds to every commit it creates (see [`loom.changeId`](configuration.md#loomchangeid)), so they survive rewrites and you can chain commands on the same ID.
 
 ## Quick Start
 
 ```bash
-# Start on your main branch
+# Create an integration branch from your main branch
 git checkout main
-
-# Create an integration branch
 git loom init
 
-# Create a commit on a feature branch (branch `feature-auth` is automatically created)
+# Commit everything to a new feature branch, then add a second commit
 git loom commit -b feature-auth -m "add login form" zz
-
-# Create a second commit on the branch
 git loom commit -b feature-auth -m "improve login form" zz
 
 # See the branch-aware status
-git loom status
+git loom
 
-# Push a feature branch for review
+# Push the branch for review
 git loom push feature-auth
 ```
+
+Next: the [Tutorial](guides/tutorial.md), or [Working with AI Agents](guides/agents.md) to let Claude Code drive loom for you.

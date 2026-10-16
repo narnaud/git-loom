@@ -1,111 +1,71 @@
 # add
 
-Stage files into the git index using short IDs, paths, or `zz` for all — with optional interactive hunk selection.
+Stage files using short IDs, paths, or `zz` for everything — or pick individual hunks.
 
 ## Usage
 
 ```
-git-loom add [-p] [<files...>] [-- <git args>...]
+git loom add [-p] [<files>...] [-- <git args>...]
 ```
 
-File arguments are optional: with none, `add` opens the same interactive hunk selector as `-p`, showing all changed files.
+With no files, `add` opens the hunk picker, as with `-p`.
 
 ### Arguments
 
 | Argument | Description |
 |----------|-------------|
-| `<files...>` | Files to stage: short IDs from `loom status`, relative paths, or `zz` to stage everything |
+| `<files>...` | File short IDs, paths, or `zz` for all changes. `zz` wins over any other argument. |
 
 ### Options
 
 | Option | Description |
 |--------|-------------|
-| `--hunks <id>` | Stage that hunk instead of opening the picker; repeat it per hunk, with `--hunks-from`. The ids are the whole selection: a staged hunk left out is unstaged — see [agent mode](agent.md). |
-| `--hunks-from <fingerprint>` | Fingerprint of the listing `--hunks` came from. Loom refuses a selection taken from a diff that has since changed. |
-| `-p, --patch` | Open the interactive hunk selector TUI |
+| `-p, --patch` | Pick hunks to stage or unstage in the [hunk picker](../guides/hunk-selection.md); files narrow it down |
+| `--hunks <id>` | Select that hunk instead of opening the picker; repeat per hunk. Needs `-p` and `--hunks-from` — see [agent mode](agent.md#hunk-selection) |
+| `--hunks-from <fingerprint>` | Fingerprint of the listing the `--hunks` ids came from |
 
 ### Git Options
 
-Everything after a `--` separator goes to `git add` untouched, ahead of the pathspec loom builds — see [Passing Options to Git](README.md#passing-options-to-git):
+Arguments after `--` go to `git add`, unchecked — expert mode, see [Passing Options to Git](README.md#passing-options-to-git). Hunk picking takes none.
 
 ```bash
-git loom add zz -- -f            # stage an ignored file too
-git loom add src/main.rs -- -N   # record the path, not the content
+git loom add zz -- -f            # stage ignored files too
+git loom add src/main.rs -- -N   # intent to add
 ```
-
-Forwarded arguments run uncaptured, so git's own output (a `--dry-run` listing, `-v`) reaches you, and loom drops its own "Staged N file(s)" line — what was staged is the option's business, not loom's to claim.
-
-Interactive staging (`-p`, or no file arguments) applies a patch rather than running `git add`, so it takes no forwarded arguments.
 
 ## What It Does
 
-### Plain Staging
+### Staging files
 
-Resolves each argument to a file path (via short ID or filename) and stages it. If any argument is `zz`, all changes are staged immediately regardless of other arguments.
+Stages each named file as `git add` would.
 
-Prints `"Staged N file(s)"` on success, or `"Staged all changes"` when `zz` is used.
+### Picking hunks (`-p`)
 
-With no file arguments, `add` opens the hunk selector below instead of staging whole files.
-
-### Interactive Hunk Staging (`-p`)
-
-Opens a two-pane TUI showing all staged and unstaged hunks across the affected files. Staged hunks start selected; unstaged hunks start deselected. The user can toggle individual hunks (or entire files/directories) in either direction, then confirm to apply all changes atomically.
-
-On confirm, prints `"Applied N change(s) across M file(s)"` or `"No changes to apply"` if nothing was toggled.
-
-## File Resolution
-
-Arguments (in both plain and `-p` modes) are resolved in this order:
-
-1. **`zz`** — always stages everything (plain mode) or shows all files (`-p` mode)
-2. **Short IDs** — file short IDs from `loom status` output (e.g. `a3`, `0f`)
-3. **Plain paths** — relative file paths (e.g. `src/main.rs`)
+The picker shows staged and unstaged hunks: staged ones start selected. Toggle them either way, then confirm with `Enter` to apply everything at once. `q` or `Esc` cancels.
 
 ## Examples
 
-### Stage a file by short ID
+### Stage files by short ID or path
 
 ```bash
-git-loom add a3
-# Staged 1 file(s)
-```
-
-### Stage multiple files
-
-```bash
-git-loom add a3 0f src/lib.rs
-# Staged 3 file(s)
+git loom add ma src/lib.rs
+# ✓ Staged 2 file(s)
 ```
 
 ### Stage everything
 
 ```bash
-git-loom add zz
-# Staged all changes
+git loom add zz
+# ✓ Staged all changes
 ```
 
-### Interactive hunk selection for all files
+### Pick hunks in one file
 
 ```bash
-git-loom add -p
-# Opens TUI — confirm with c/Enter, cancel with q/Esc
-```
-
-### Interactive hunk selection for a specific file
-
-```bash
-git-loom add -p src/main.rs
-# Opens TUI filtered to src/main.rs hunks
-```
-
-### Interactive hunk selection by short ID
-
-```bash
-git-loom add -p a3
-# Opens TUI filtered to the file identified by short ID a3
+git loom add -p ma
+# Opens the hunk picker on src/main.rs
 ```
 
 ## Prerequisites
 
-- Must be in a git repository with a working tree (not bare)
-- At least one file must have changes (staged, unstaged, or untracked) for `-p` mode
+- A working tree with changes

@@ -1,31 +1,28 @@
 # status
 
-Show the branch-aware commit graph. This is the default command when running `git loom` with no arguments.
+Show the branch-aware status: local changes, then your branches and their commits. This is the default command, so `git loom` alone runs it.
 
 ## Usage
 
 ```
-git loom [status] [-f [COMMIT...]] [-n <N>]
+git loom [status] [-f [<commit>...]] [-n <N>] [-a]
 ```
 
 ### Options
 
 | Option | Description |
 |--------|-------------|
-| `-f, --files [COMMIT...]` | Show files changed in each commit, optionally filtered to specific commits |
-| `-n, --context <N>` | Number of commits to show at and before the base (default: [`loom.statusContext`](../configuration.md#loomstatuscontext), else 1) |
-| `-a, --all` | Show all branches including hidden ones |
+| `-f, --files [<commit>...]` | Show the files changed in each commit, or only in the commits named |
+| `-n, --context <N>` | Show `N-1` commits before the base, dimmed (default: [`loom.statusContext`](../configuration.md#loomstatuscontext), else 1) |
+| `-a, --all` | Also show [hidden branches](#hidden-branches) |
 
 ## Output
 
-The status displays a branch-aware commit graph using UTF-8 box-drawing characters, showing commits grouped by feature branch:
-
 ```
-╭─ [local changes]
-│   !! conflicted.rs
-│    M file.txt
-│   A  new_file.rs
-│    ⁕ untracked.txt
+╭─ zz [local changes]
+│   ma  M src/main.rs
+│   nf A  new_file.rs
+│   un  ⁕ untracked.txt
 │
 │╭─ fb [feature-b] ✓
 │●    mqt  d0472f9 Fix bug in feature B
@@ -39,216 +36,111 @@ The status displays a branch-aware commit graph using UTF-8 box-drawing characte
 ● ff1b247 (upstream) [origin/main] Initial commit
 ```
 
-### Sections
+From top to bottom:
 
-The graph is rendered top-to-bottom with these sections:
-
-1. **Local changes** — shown only if the working tree has modifications, new files, or deletions. Files are split into three groups:
-   - **Conflicted files** are shown first with a `!!` marker in bold red (filename also bold red). These appear during an in-progress rebase or merge.
-   - **Tracked changes** are listed next with a 2-char `XY` status matching `git status --short` (index green, worktree red).
-   - **Untracked files** are listed last with a `⁕` marker (magenta). When there are more than 5 untracked files, they are displayed in a multi-column grid layout sized to the terminal width.
-
-2. **Feature branches** — each branch is rendered as a side branch with its name in brackets, followed by its commits, closed with `├╯`. A remote tracking indicator appears after the closing `]` when an upstream has been configured for the branch.
-
-3. **Loose commits** — commits not belonging to any feature branch, shown on the main integration line.
-
-4. **Upstream marker** — the merge-base between HEAD and the upstream tracking branch.
+1. **Local changes** (`zz`): conflicted files (`!!`), then changed files with their `git status --short` code, then untracked files (`⁕`). Shows `no changes` when the working tree is clean.
+2. **Loose commits**: commits on the integration branch that belong to no feature branch.
+3. **Feature branches**: empty ones first, then each branch with its commits, newest first.
+4. **Upstream**: the commit your branches are based on.
 
 ### Symbols
 
 | Symbol | Meaning |
 |--------|---------|
-| `╭─` | Start of a section |
-| `├─` | Start of a subsequent branch in a stack |
-| `│` | Integration line continuation |
-| `││` | Continuation between stacked branches |
 | `●` | A commit |
-| `├╯` | End of a side branch |
-| `!!` | Conflicted file marker (bold red) |
-| `⁕` | Untracked file marker (magenta) |
-| `⏫` | Upstream has new commits |
-| `·` | Context commit before the base (dimmed) |
-| `✓` | Branch remote is in sync (green) |
-| `↑` | Branch tip differs from its remote (yellow) |
-| `✗` | Branch remote is gone (red) |
+| `├─` | Next branch of a stack, or another branch at the same tip |
+| `!!` | Conflicted file |
+| `⁕` | Untracked file |
+| `✓` | Branch is pushed and up to date |
+| `↑` | Branch differs from its pushed version |
+| `✗` | Branch's remote was deleted |
+| `⏫` | Upstream has new commits; run [`update`](update.md) |
+| `·` | Context commit before the base (`-n`) |
 
 ### Short IDs
 
-Each branch, commit, and file in the output is assigned a short ID — a compact identifier you can use with other *git-loom* commands. What you see in the status is what you type.
+Every branch, commit and file gets a short ID — what you see is what you type in other commands. `zz` always means all local changes.
 
-A commit's short ID comes first on its line, in a fixed column, followed by the abbreviated hash, so ID and hash sit together at the head of the line. Commits that carry a `Change-Id` trailer (every commit loom creates, see [`loom.changeId`](../configuration.md#loomchangeid)) get a **persistent** ID made of the letters `k`–`z`, such as `mqt`: it is derived from the Change-Id, not from the hash, so it survives `update`, `fold`, `swap`, `split`, and every other rewrite. Any longer prefix of the ID also works, and so does the full `Change-Id` value. A commit without a Change-Id — made with plain `git commit`, or cherry-picked from elsewhere — falls back to a hex prefix of its hash, such as `3a`, which changes whenever the commit is rewritten.
-
-IDs are the shortest prefix that tells commits apart. When a new commit happens to share the first letters of an existing one, both IDs grow by a letter and the old shorter form stops resolving, so a stale ID can never point at the wrong commit.
+- **Commits** made by loom get a persistent ID of letters `k`–`z`, such as `mqt`. It comes from the commit's `Change-Id` trailer, so it survives every rewrite. Other commits get a hash prefix, such as `3a`, which changes when the commit is rewritten.
+- IDs are as short as they can be while staying unique. When a new commit shares an ID's first letters, both IDs grow, and the shorter form stops working rather than point at the wrong commit.
+- Any longer prefix of a letter ID works too; a hash ID works from four characters, as in git.
 
 ## Showing Files
 
-Use `-f` to show the files changed in each commit:
-
-```
-git loom status -f
+```bash
+git loom status -f rsv
 ```
 
 ```
 │╭─ fa [feature-a]
-│●    mqt  2ee61e1 Add feature A
-│┊      mqt:0 M  src/feature.rs
-│┊      mqt:1 A  tests/feature_test.rs
-├╯
-```
-
-To show files for specific commits only, pass their short IDs or git hashes after `-f`:
-
-```
-git loom status -f mqt
-git loom status -f mqt pkz
-git loom status -f abc1234
-```
-
-Only the listed commits display their file list; all other commits are rendered normally. Unknown identifiers are silently ignored.
-
-## Branch Topologies
-
-### Independent branches
-
-Each feature branch forks from the integration line independently:
-
-```
-│╭─ fb [feature-b]
-│●    mqt  d0472f9 Fix bug in feature B
-├╯
-│
-│╭─ fa [feature-a]
 │●    rsv  2ee61e1 Add feature A
+│┊      rsv:0 M  src/feature.rs
+│┊      rsv:1 A  tests/feature_test.rs
 ├╯
 ```
 
-### Stacked branches
+Commit files get IDs such as `rsv:0`, which [`fold`](fold.md) accepts to move or uncommit a single file.
 
-Feature-b is stacked on top of feature-a:
+## Branch Layouts
 
 ```
-│╭─ fb [feature-b]
-│●    mqt  4e046ab Second commit on feature-b
-│●    pkz  0b85ca7 First commit on feature-b
-││
-│├─ fa [feature-a]
-│●    rsv  caa87a9 Second commit on feature-a
-│●    tqn  18faee8 First commit on feature-a
+│╭─ fb [feature-b]        │╭─ fv [feature-a-v2]     │╭─ fs [feature-stale]
+│●    mqt  4e046ab B      │├─ fa [feature-a]        ├╯
+││                        │●    rsv  2ee61e1 A      │
+│├─ fa [feature-a]        ├╯
+│●    rsv  caa87a9 A
 ├╯
 ```
 
-### Co-located branches
+From left to right: `feature-b` **stacked** on `feature-a`; two branches **sharing** one tip; an **empty** branch at the base.
 
-Multiple branches pointing to the same commit:
-
-```
-│╭─ fv [feature-a-v2]
-│├─ fa [feature-a]
-│●    rsv  2ee61e1 Add feature A
-├╯
-```
-
-### Upstream ahead
-
-When upstream has new commits beyond the common base:
+When upstream has moved on since your base:
 
 ```
-●    mqt  abc1234 Fix typo
-│
 │●  [origin/main] ⏫ 3 new commits
 ├╯ 204e309 (common base) 2025-07-06 Merge pull request #10
 ```
 
-### Context commits
-
-Show history before the base with `-n` (`git loom status -n 3`):
-
-```
-● ff1b247 (upstream) [origin/main] Initial commit
-· abc1234 2025-07-05 Previous work
-· def5678 2025-07-04 Earlier change
-```
-
-Context commits are dimmed and display-only (no short ID, not actionable). The default is `loom.statusContext`, falling back to 1: the base alone, no extra context.
-
 ## Hidden Branches
 
-Branches whose names start with the configured prefix (default: `local-`) are hidden from the status output by default. Both the branch section and its commits are fully suppressed — they do not appear as loose commits either.
+Branches starting with [`loom.hideBranchPattern`](../configuration.md#loomhidebranchpattern) (default `local-`) are hidden, commits included — handy for local-only configuration. Every other command still accepts them. `--all` shows them.
 
-This is useful for keeping local-only branches (personal configuration, secrets) out of the status view without removing them from the integration branch.
+## Agent Mode
 
-```bash
-git loom --all          # show all branches including hidden
-git loom status --all   # same, explicit
-```
-
-The hidden prefix is configurable (see [Configuration](../configuration.md#loomhidebranchpattern)).
-
-## Theming
-
-The graph colors adapt to the terminal background via the global `--theme` flag:
-
-```bash
-git loom --theme light status   # Light terminal background
-git loom --theme dark status    # Dark terminal background
-git loom --theme auto status    # Auto-detect (default)
-```
-
-See [Configuration](../configuration.md#--theme) for details.
-
-## Agent mode
-
-With the global `--agent` flag, `status` emits the graph as JSON on stdout — one
-line, nothing else — while the rendered tree goes to stderr with the rest of the
-human output. Tools read stdout alone; see [agent](agent.md#agent-mode---agent).
-
-```bash
-git loom status --agent            # one JSON line on stdout, the tree on stderr
-git loom status --agent 2>/dev/null | jq   # machine stream only
-```
-
-The graph sits under `graph` in the `ok` object and mirrors the tree — same
-sections, same order, same short IDs:
+With [`--agent`](agent.md#agent-mode), the tree goes to stderr and stdout gets the same graph as JSON, under `graph`:
 
 ```json
 {"status":"ok","graph":{
   "schema": 1,
   "integration_branch": "integration",
   "cwd_prefix": "",
-  "local_changes": {
-    "id": "zz",
-    "files": [{"id":"ma","path":"src/main.rs","index":"M","worktree":" ",
-               "state":"tracked"}]
-  },
+  "local_changes": {"id": "zz", "files": [
+    {"id":"ma","path":"src/main.rs","index":"M","worktree":" ","state":"tracked"}]},
   "branches": [
     {"names": [{"id":"fu","name":"feature-ui","remote":null}],
      "stacked_on": "feature-api", "stacked_on_hidden": false,
      "commits": [{"id":"qvn","hash":"9c1d044","oid":"9c1d0448…",
-                  "subject":"feat(ui): settings panel","change_id":"I9c1d…",
-                  "files":[]}]}
+                  "subject":"feat(ui): settings panel","change_id":"I9c1d…","files":[]}]}
   ],
   "loose_commits": [],
   "upstream": {"label":"origin/main","base_hash":"7f3e9b0","base_oid":"7f3e9b0c…",
-               "base_subject":"chore(release): 2.4.0","base_date":"2026-09-14",
-               "commits_ahead":0},
+               "base_subject":"chore(release): 2.4.0","base_date":"2026-09-14","commits_ahead":0},
   "context_commits": []
 }}
 ```
 
 | Field | Meaning |
-|---|---|
-| `schema` | Bumped on any breaking change to this shape. |
-| `branches[]` | Branch groups in render order: empty ones first, then each stack top-down. `names[]` holds co-located branches sharing one tip. |
-| `stacked_on` | The branch directly below in the stack, or `null` — named as a [stacked push](push.md) names it (a co-located group's last `names` entry). |
-| `stacked_on_hidden` | `true` when the branch below is [hidden](#hidden-branches): a push refuses this group, and `stacked_on` is `null` unless `--all` shows it. |
-| `remote` | `synced` / `different` / `gone`, or `null` when never pushed — the `✓` / `↑` / `✗` indicators. |
-| `state` | `conflicted`, `tracked` or `untracked`; `index`/`worktree` carry the raw `XY` characters. |
-| `commits[]` | Newest first. Each branch lists only the commits it owns. |
-| `files[]` | Populated by `-f`; ids are `<commit id>:<n>` counting from 0. |
-
-`-f`, `--all` and `-n` work exactly as they do on the tree.
+|-------|---------|
+| `schema` | Bumped on any breaking change to this format |
+| `cwd_prefix` | The directory paths are relative to |
+| `branches[]` | In display order. `names[]` lists branches sharing one tip. |
+| `stacked_on` | The branch below in a stack, or `null` |
+| `stacked_on_hidden` | The branch below is hidden: `push` refuses this branch |
+| `remote` | `synced`, `different`, `gone`, or `null` if never pushed |
+| `commits[]` | Newest first; each branch lists only its own commits |
+| `state` | `conflicted`, `tracked` or `untracked`; `index` and `worktree` hold the `XY` status code |
+| `commits[].files` | Filled in with `-f` |
 
 ## Prerequisites
 
-- Must be on a local branch (not detached HEAD)
-- Branch must have an upstream tracking branch configured
+- On a branch with an upstream

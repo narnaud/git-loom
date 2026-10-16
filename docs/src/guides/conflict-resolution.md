@@ -1,171 +1,75 @@
 # Resolving Conflicts
 
-When a loom operation rewrites history and two commits touch the same lines,
-git can't merge them automatically. Instead of aborting, loom **pauses** the
-operation and lets you fix the conflict before continuing.
+When a loom command rewrites history and two changes touch the same lines, git can't combine them on its own. Most commands then **pause**, so you can resolve the conflict and carry on. Nothing is lost either way.
 
-## What a Paused Operation Looks Like
+## 1. The Pause
 
 ```bash
-$ git loom commit -b feature-auth -m "add auth middleware" zz
-✓ Created branch `feature-auth` at `a1b2c3d`
-! Conflicts detected — resolve them with git, then run:
-  loom continue   to complete the commit
-  loom abort      to cancel and restore original state
+git loom commit -b feature-auth -m "add auth middleware" zz
+# ✓ Created branch `feature-auth` at `a1b2c3d`
+# ! Conflicts detected — resolve them with git, then run:
+#   › loom continue   to complete the commit
+#   › loom abort      to cancel and restore original state
 ```
 
-The process exits with code 0. Your work is safe — loom saved the operation
-state to `.git/loom/state.json` and left the rebase paused at the conflicting
-commit.
+Until you continue or abort, most loom commands are refused; `show`, `diff`, `trace` and `tui` still work.
 
-## Step 1: Find the Conflicts
+## 2. Find the Conflicts
 
-```bash
-$ git status
-You are currently rebasing branch 'integration' on 'a1b2c3d'.
-  (fix conflicts and then run "git rebase --continue")
+`git status` lists them under *Unmerged paths*, and `git loom tui` marks them `!!`. `git diff` shows the conflicts inline.
 
-Unmerged paths:
-  (use "git add <file>..." to mark resolution)
-        both modified:   src/middleware.rs
-```
+## 3. Resolve Each File
 
-The conflicting files are listed under *Unmerged paths*. You can also run
-`git diff` to see the conflict markers inline.
-
-## Step 2: Resolve Each File
-
-Open each conflicting file in your editor. Git inserts conflict markers to
-show both versions:
+Git marks both versions in the file:
 
 ```
 <<<<<<< HEAD
 // existing middleware code
 =======
 // your new auth middleware
->>>>>>> feature-auth
+>>>>>>> 1a2b3c4 (add auth middleware)
 ```
 
-Edit the file to keep what you want — either one side, the other, or a
-combination of both — and remove the `<<<<<<<`, `=======`, and `>>>>>>>`
-markers entirely.
+Edit the file to keep what you want, and remove the `<<<<<<<`, `=======` and `>>>>>>>` lines. Most editors have buttons for this, or run `git mergetool`.
 
-> [!TIP]
-> Most editors have built-in conflict resolution UI. In VS Code, click
-> *Accept Current*, *Accept Incoming*, or *Accept Both* above each conflict
-> block. For a dedicated mergetool, run `git mergetool`.
-> See the [git documentation on resolving conflicts](https://git-scm.com/docs/git-merge#_how_conflicts_are_presented)
-> for more detail.
+## 4. Mark Them Resolved
 
-## Step 3: Mark Files as Resolved
-
-Once a file is clean (no more conflict markers), stage it:
+Stage each resolved file with plain git:
 
 ```bash
-$ git add src/middleware.rs
+git add src/middleware.rs
 ```
 
-For a file that should be deleted entirely as the resolution, use:
+Use `git rm` for a file the resolution deletes.
+
+## 5. Continue or Abort
 
 ```bash
-$ git rm src/middleware.rs
+git loom continue
+# ✓ Created commit `mqt` (b2c3d4e) on branch `feature-auth`
 ```
 
-Repeat for every conflicting file. When `git status` shows no more unmerged
-paths, you're ready to continue.
+Loom finishes the command as if nothing had happened, staged changes included. If a later commit conflicts too, it pauses again: repeat steps 2 to 5.
 
-## Step 4: Continue or Abort
-
-**To finish the operation:**
+To give up instead:
 
 ```bash
-$ git loom continue
-✓ Created commit `mqt` (b2c3d4e) on branch `feature-auth`
+git loom abort
+# ✓ Aborted `loom commit` and restored original state
 ```
 
-Loom runs `git rebase --continue` internally, completes the interrupted
-command's post-rebase work (restoring staged patches, printing the success
-message), and removes the saved state.
+Everything goes back to how it was before the command: history, branches, staged and unstaged changes.
 
-**To cancel and go back to where you started:**
+You can also resolve with the [TUI](../commands/tui.md#conflicts), which opens on a paused operation.
 
-```bash
-$ git loom abort
-✓ Aborted `loom commit` and restored original state
-```
+## Commands That Don't Pause
 
-Abort rolls back all branch refs, removes any branches created during the
-operation, and restores any staged changes that were saved aside. For `commit`,
-the content you were committing comes back as unstaged working-tree changes so
-nothing is lost.
+`split`, `branch`, `unmerge`, dropping a branch, and some `fold` forms don't pause: on a conflict they roll back and leave everything as it was. See [continue](../commands/continue.md#which-commands-pause) for the full list.
 
-Staging is restored whichever way the operation ends, not only on abort: a
-command that finishes, and `loom continue` after you resolve a conflict, both
-put the index back the way you left it.
+## When Things Go Off Script
 
-Two cases cannot be put back automatically, and neither loses anything. If git
-could not replay its own stash, your changes wait in `git stash list` and the
-conflict markers are yours to resolve. If your staged changes no longer apply
-over what the rewrite wrote, loom saves them as a patch under the git dir and
-prints the `git apply --cached --3way` line that replays them.
+- **You finished the rebase with git**: if you ran `git rebase --continue` to the end, `git loom continue` still completes the loom command.
+- **Changes that can't be put back**: if git couldn't replay its stash, your changes wait in `git stash list`. If your staged changes no longer apply, loom saves them as a patch and prints the `git apply` command that restores them.
+- **Loom says an operation is paused but no rebase is in progress**: run `git loom continue` if you finished it yourself, or `git loom abort` to discard it. Never delete the paused-operation state by hand: it is what abort uses to restore your changes.
 
-## Multiple Conflicts
-
-If your branch has several commits that conflict, each `loom continue` may
-pause again at the next one. Repeat the resolve → `git add` → `loom continue`
-cycle until the operation completes:
-
-```bash
-$ git loom update
-! Conflicts detected...
-
-$ git add src/api.rs && git loom continue
-! Conflicts remain — resolve them and run `loom continue` again
-
-$ git add src/models.rs && git loom continue
-✓ Updated branch `integration` with `origin/main` (abc1234 Latest commit)
-```
-
-## If You Finished the Rebase Yourself
-
-That's fine. If you resolved the conflicts with raw git commands and ran
-`git rebase --continue` to the end, loom notices the rebase is no longer
-active and skips straight to the post-rebase work when you run
-`loom continue`: worktree syncs, submodule updates, branch cleanup, and
-finally removing the state file.
-
-The blocked-command error tells you which case you are in:
-
-```
-✗ A `loom update` is paused, but no rebase is in progress.
-  › If you finished it yourself, run `loom continue` to wrap up and clear the state.
-  › Run `loom abort` to discard it instead.
-```
-
-## If the State File is Stale
-
-If loom blocks you with a "paused operation" error but you know no operation
-is actually in progress (e.g., after a crash or force-reset), run
-`loom continue` to finish up, or `loom abort` to discard the operation.
-
-As a last resort you can move the state file aside by hand. Keep the copy: it
-is the only record of what `loom abort` would undo, such as staged changes
-loom set aside.
-
-```bash
-mv .git/loom/state.json .git/loom/state.json.bak
-```
-
-In a linked worktree it lives under that worktree's git directory instead:
-`.git/worktrees/<name>/loom/state.json`.
-
-> [!WARNING]
-> Only do this if you are certain no loom operation is paused. If a rebase is
-> still in progress, run `loom abort` instead — that also aborts the rebase
-> and restores your branch refs.
-
-## See Also
-
-- [`continue`](../commands/continue.md) — reference for `loom continue`
-- [`abort`](../commands/abort.md) — reference for `loom abort`
-- [Git documentation: Basic Merge Conflicts](https://git-scm.com/book/en/v2/Git-Branching-Basic-Branching-and-Merging#_basic_merge_conflicts)
+See also: [`continue`](../commands/continue.md) · [`abort`](../commands/abort.md)

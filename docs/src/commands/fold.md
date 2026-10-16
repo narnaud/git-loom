@@ -1,203 +1,92 @@
 # fold
 
-Fold source(s) into a target — a polymorphic command that amends files into commits, fixups commits together, moves commits between branches, or uncommits changes.
+Fold sources into a target: amend changes into a commit, fix up one commit into another, move commits or files between branches, or uncommit.
+
+**Aliases:** `amend`, `fixup`, `mv`, `rub`
 
 ## Usage
 
 ```
-git loom fold <target>
+git loom fold <commit>
 git loom fold <source>... <target>
-git loom fold -p [<files>...] <target>
-git loom fold -p <commit1> <commit2>
-git loom fold -p <commit> zz
-git loom fold --create <commit>... <new-branch>
 git loom fold <commit>... --above <commit>
 git loom fold <commit>... --below <commit>
+git loom fold -c <commit>... <new-branch>
+git loom fold -p [<files>...] <commit>
+git loom fold -p <commit> <commit>
+git loom fold -p <commit> zz
 ```
 
-When only a target is given, currently staged files are folded into the target commit. When two or more arguments are provided, the last argument is the target and all preceding arguments are sources. With `--above` or `--below`, the option names the target and every positional argument is a source commit.
+The last argument is the target and the others are sources. With only a target, the staged changes are folded into it. With `--above`/`--below`, the option names the target.
 
 ### Options
 
 | Option | Description |
 |--------|-------------|
-| `-p, --patch` | Interactively select hunks before folding. Three forms depending on argument types (see below). Cannot be combined with `-c`, which moves whole commits. |
-| `--hunks <id>` | Select that hunk instead of opening the picker, in any `-p` form; repeat it per hunk. Needs `-p` and `--hunks-from`; see [agent mode](agent.md). |
-| `--hunks-from <fingerprint>` | Fingerprint of the listing `--hunks` came from. Loom refuses a selection taken from a diff that has since changed. |
-| `-c, --create` | Create a new branch and move the source commit(s) into it. |
-| `--above <commit>` | Move the source commit(s) directly above (newer than) this commit. |
-| `--below <commit>` | Move the source commit(s) directly below (older than) this commit. |
+| `-c, --create` | Create a new branch and move the source commits into it |
+| `--above <commit>` | Move the source commits directly above (after) this commit |
+| `--below <commit>` | Move the source commits directly below (before) this commit |
+| `-p, --patch` | Pick hunks in the [hunk picker](../guides/hunk-selection.md) instead of folding whole files or commits |
+| `--hunks <id>` | Select that hunk instead of opening the picker; repeat per hunk. Needs `-p` and `--hunks-from` — see [agent mode](agent.md#hunk-selection) |
+| `--hunks-from <fingerprint>` | Fingerprint of the listing the `--hunks` ids came from |
 
 ### Git Options
 
-The forms that commit take a `--` separator — see
-[Passing Options to Git](README.md#passing-options-to-git):
+Folds that amend a commit with files or hunks pass arguments after `--` to that `git commit`, unchecked — expert mode, see [Passing Options to Git](README.md#passing-options-to-git). Folds that move, fix up, or uncommit whole commits take none.
 
 ```bash
-git loom fold src/auth.rs ab -- --no-verify
-git loom fold -p ab -- --no-verify
+git loom fold src/auth.rs mqt -- --no-verify
 ```
-
-They reach the amend, or the `fixup!` commit loom makes for a non-HEAD target —
-the two places your commit hooks run. The rebase that rewrites the rest runs no
-hooks, so a fold that moves whole commits around (fixup, move, uncommit a
-commit, `--create`, `--above`/`--below`) takes no arguments after `--` and says
-so.
-
-Loom's own arguments go last, so a boolean git resolves last-wins keeps the
-value loom asked for: a forwarded `--no-amend` or `--edit` has no effect.
-
-Everything else reaches git as written, gaps included, because `--` is for
-someone who knows what they are asking git to do:
-
-- a message source — `-m`, `-F`, `-c`/`-C`, `--fixup`, `--squash` — rewords
-  every commit loom makes, which for a HEAD target is the target itself, and on
-  a move between two commits is *both* of them; use [reword](reword.md)
-  instead;
-- a pathspec restricts the commit and brings `--only` semantics with it, so git
-  commits the working tree's copy of that path rather than what is staged;
-- `-a` and `-i` sweep in tracked changes you did not name, and a fold into an
-  older commit buries them there. That includes your *own staged* files: loom
-  moves them out of the index for the duration and leaves them in the working
-  tree, which is where `-a` finds them;
-- a second `--` becomes a pathspec and takes loom's own arguments with it, so
-  git fails on them.
-
-One thing loom does not leave to you: `--dry-run` and the status formats make
-git print without committing at all, which would leave a fold rewriting history
-around a commit that was never made. Loom checks what git actually did and
-takes the whole attempt back — HEAD, its own staging, and your other staged
-files — rather than going on.
 
 ## Type Dispatch
 
-The action depends on the types of the arguments, detected automatically:
+The action follows from what the arguments are:
 
 | Source | Target | Action |
 |--------|--------|--------|
-| *(staged)* | Commit | **Amend staged**: fold currently staged files into the commit |
-| File(s) | Commit | **Amend**: stage files into the commit |
-| `zz` | Commit | **Amend all**: stage all changed files into the commit |
-| Commit | Commit | **Fixup**: absorb source commit into target |
-| Commit | Branch | **Move**: relocate commit(s) to the branch |
-| Commit | `zz` | **Uncommit**: remove commit, put changes in working directory |
-| CommitFile | `zz` | **Uncommit file**: remove one file from a commit to working directory |
-| CommitFile | Commit | **Move file**: move one file's changes between commits |
-| Commit | New branch (`-c`) | **Create**: make a new branch and move the commit(s) into it |
-| Commit | Commit (`--above` / `--below`) | **Move next to**: reorder or relocate commit(s) right above or below another commit |
+| *(staged changes)* | Commit | **Amend** the staged changes into the commit |
+| Files or `zz` | Commit | **Amend** those files (or all changes) into the commit |
+| Commit | Commit | **Fix up**: merge the source into the target |
+| Commit | Branch | **Move** the commit to the top of the branch |
+| Commit | `--above`/`--below` commit | **Move** the commit next to another commit |
+| Commit | New branch (`-c`) | **Create** a branch holding the commit |
+| Commit | `zz` | **Uncommit**: back to the working tree |
+| Commit file (`mqt:1`) | Commit | **Move a file** to another commit |
+| Commit file (`mqt:1`) | `zz` | **Uncommit a file** |
 
-CommitFile sources use the `commit_sid:index` format shown by `git loom status -f` (e.g. `mqt:0` for the first file in commit `mqt`).
+Commit files use the `<commit>:<index>` IDs shown by [`git loom status -f`](status.md#showing-files).
 
 ## Actions
 
-### Fold staged files into a commit
-
-When only a target is given, staged files are folded into the commit:
+### Amend a commit
 
 ```bash
-git add src/auth.rs
-git loom fold osy
-# Folds staged changes into commit osy
+git loom fold src/auth.rs mqt     # amend one file
+git loom fold zz mqt              # amend all changes
+git add src/auth.rs && git loom fold mqt   # amend what is staged
 ```
 
-Only files in the git index are folded — unstaged changes to the same files are preserved. Errors with `"Nothing to commit"` if nothing is staged.
+Unstaged changes to the same files stay in the working tree when you fold only the staged ones.
 
-### Amend files into a commit
+### Fix up a commit
 
 ```bash
-git loom fold src/auth.rs osy
-# Stages src/auth.rs and amends it into commit osy
+git loom fold pkz mqt
+# pkz's changes go into mqt; pkz disappears, mqt keeps its message
 ```
 
-Multiple files can be folded at once:
+The source must be newer than the target.
+
+### Move commits to a branch
 
 ```bash
-git loom fold src/main.rs src/lib.rs HEAD
-# Amends both files into the HEAD commit
+git loom fold tqn feature-dashboard
+# ✓ Moved `tqn` (was: 6395f01, now: db04256) to branch `feature-dashboard`
 ```
 
-Use `zz` to fold all working tree changes at once (staged and unstaged):
+Name several commits to move them together; they keep their history order whatever order you list them in. The target can be a branch lower in a stack: the commit lands on its tip and the branches above are replayed on it.
 
-```bash
-git loom fold zz osy
-# Stages all changed files and amends them into commit osy
-```
-
-If `zz` is mixed with individual file arguments, `zz` takes precedence and all changed files are folded.
-
-### Interactive hunk selection (`-p`)
-
-With `-p`, an interactive TUI opens for hunk-level selection. There are three forms depending on the argument types.
-
-**Form 1 — pick working-tree hunks → fold into commit:**
-
-```bash
-git loom fold -p osy
-# Opens hunk picker for all working-tree changes
-# Selected hunks are staged and folded into commit osy
-```
-
-A picked binary or deleted file is staged whole here, the way [`split -p`](split.md) does. `--hunks` works here too, and is the whole selection: a hunk you had staged and leave out is not folded, and stays staged.
-
-Provide file arguments before the target to narrow the picker:
-
-```bash
-git loom fold -p src/auth.rs osy
-# Opens hunk picker filtered to src/auth.rs
-```
-
-**Form 2 — pick hunks from a commit → move into another commit:**
-
-```bash
-git loom fold -p pkz wsl
-# Opens commit-diff picker for pkz
-# Selected hunks are removed from pkz and added to wsl
-```
-
-The source (`pkz`) must be newer than the target (`wsl`). A submodule, a deleted file or a binary file moves whole. A binary or deleted file only moves onto the exact content it was changed from: if the target holds a different version, the fold refuses before rewriting anything.
-
-In form 3 below, a picked deletion comes back as an unstaged deletion, and a picked binary file as an unstaged change (untracked, if the commit added it).
-
-**Form 3 — pick hunks from a commit → uncommit to working tree:**
-
-```bash
-git loom fold -p osy zz
-# Opens commit-diff picker for osy
-# Selected hunks are removed from osy and appear as unstaged modifications
-```
-
-All `-p` forms error with `"No hunks selected"` if nothing is selected.
-
-### Fixup a commit into another
-
-Absorbs the source commit's changes into the target. The source disappears from history; the target keeps its message.
-
-```bash
-git loom fold pkz wsl
-# pkz's changes are absorbed into wsl, pkz disappears
-```
-
-The source commit must be newer than the target.
-
-### Move a commit to another branch
-
-Removes the commit from its current branch and appends it to the target branch's tip.
-
-```bash
-git loom fold mqt feature-b
-# Commit mqt moves to feature-b, removed from its original branch
-```
-
-Several commits can go in one move. They are ordered oldest-first whatever order you list them in — ancestors before their descendants, and commits from unrelated branches by commit date — so they travel in a single rebase and land in history order.
-
-```bash
-git loom fold mqt tqn rsv feature-b
-# mqt, tqn and rsv all move to feature-b
-```
-
-A single commit can be resumed with `git loom continue` if it conflicts. A move of several rolls back instead, leaving history as it was.
-
-A branch that ended at `mqt` (a stacked branch) stays behind: it ends at the commit before, or at the base if `mqt` was its only commit. It never follows the commit into `feature-b`. A branch left empty this way is named in the result:
+A branch left with no commits stays, empty, at the base, and the result says so:
 
 ```bash
 git loom fold mqt feature-b
@@ -205,183 +94,79 @@ git loom fold mqt feature-b
 #   › branch feature-x now empty, at the base
 ```
 
-The target can be a branch stacked inside another one: the commit lands right after that branch's tip, and the branch stacked on top is replayed over it.
+### Move a commit next to another
+
+`--above` and `--below` place the commit right after or right before another commit, in the same branch (a reorder), another branch, or the integration line. "Above" reads as in `git loom status`, where newer commits are higher.
 
 ```bash
-git loom fold mqt feature-a
-# feature-c is stacked on feature-a: mqt becomes feature-a's tip,
-# feature-c's commits now build on mqt
+git loom fold rsv --below mqt     # reorder within a branch
+git loom fold mqt --above wsl     # land right after wsl, in wsl's branch
 ```
 
-### Move a commit next to another commit
+Moving a commit above a branch tip makes it the branch's new tip.
 
-`--above` and `--below` place the commit relative to another commit instead of at a branch tip. The target can be in the same branch (a reorder), in another branch, or on the integration line. "Above" and "below" read as in `git loom status`, where newer commits are drawn higher.
+### Create a branch from commits
 
 ```bash
-git loom fold rsv --below mqt
-# rsv is pulled down to sit right under mqt
-
-git loom fold mqt --above wsl
-# mqt leaves its branch and lands right after wsl, in wsl's branch
+git loom fold -c mqt tqn new-feature
+# Creates new-feature holding mqt and tqn
 ```
 
-Several commits move as one block, in history order, and land together:
+The name must be new: `-c` refuses an existing branch, so a typo can't drop your commits into another one.
+
+### Uncommit
 
 ```bash
-git loom fold mqt tqn --above wsl
-# wsl, mqt, tqn
+git loom fold osy zz       # the whole commit
+git loom fold osy:1 zz     # one file of it
 ```
 
-A branch whose tip was the target follows an `--above` move: the moved commit becomes its new tip, so `--above` a branch tip is the same as moving onto that branch — except when several branches share that tip, where all of them advance, while moving onto a named branch splits the section and advances only that one. With `--below`, the target keeps its branches. As with any move, a branch that ended at the moved commit stays behind, and a branch left empty is parked at its base and named in the result.
+The changes come back as unstaged changes (a new file as untracked). If they don't apply cleanly — over uncommitted edits to the same files, for example — the fold fails and nothing changes. (After a `loom continue`, loom saves them to a patch file instead and says where.) A branch whose only commit this was stays, empty, at the base.
 
-A move that would change nothing is refused:
-
-```bash
-git loom fold tqn --above mqt
-# ✗ Commit `6395f01` is already directly above `a337eda`
-```
-
-A single commit can be resumed with `git loom continue` if it conflicts. A move of several rolls back instead.
-
-### Create a new branch and move a commit into it
-
-Use `--create` (`-c`) to create a new branch and move the commit in one step. Works whether the commit is a loose commit on the integration line or already on an existing branch.
-
-```bash
-git loom fold -c mqt new-feature
-# Creates new-feature and moves commit mqt into it
-```
-
-You can list several commits to move them all into the new branch. They are ordered oldest-first so the new branch preserves their history order.
-
-```bash
-git loom fold -c mqt tqn rsv new-feature
-# Creates new-feature and moves mqt, tqn, rsv into it
-```
-
-Like any move of several commits, `-c` is not resumable: a conflict rolls it back rather than pausing for `git loom continue`.
-
-`-c` creates, so a name that is already taken is refused. Moving onto a branch that exists is a plain fold, and accepting the name here would let a typo drop your commits into another branch.
-
-```bash
-git loom fold -c mqt existing-branch
-# ✗ Branch `existing-branch` already exists
-#   Use `loom fold <commit>... existing-branch` to move commits onto it
-```
-
-### Uncommit to the working directory
-
-Removes a commit from history and places its changes as unstaged modifications.
-
-```bash
-git loom fold osy zz
-# Removes commit osy, its changes appear as unstaged modifications
-```
-
-On HEAD the working tree is left alone: it already holds the changes. Below
-HEAD, the changes are merged back into the working tree three-way, so a later
-commit that edited nearby lines does not break the apply (`-p` hunk selections
-are the exception — they carry no blob ids to merge through). It still fails
-when they overlap for real, or when you have uncommitted changes in one of the
-same files. Either way nothing is left half-done: history and your uncommitted
-changes both go back to where they were.
-
-Staged changes stay staged. If a staged edit to one of the uncommitted files no
-longer applies over the parent's version, the staged edits to the uncommitted
-files are saved together as a patch under `.git/loom/` instead, and the command
-says where. Your other staged changes stay staged.
-
-If `osy` was the only commit of a branch, the branch survives, empty, at the base it built on — ready for `git loom commit -b <branch>` once the change is reworked:
-
-```bash
-git loom fold osy zz
-# ✓ Uncommitted `9c41d7e` to working directory
-#   › branch feature-x now empty, at the base
-```
-
-### Uncommit a single file
-
-Removes one file's changes from a commit, preserving the rest of the commit.
-
-```bash
-git loom fold osy:1 zz
-# Removes the second file from commit osy to the working directory
-```
-
-On HEAD, if the commit deleted the file and you have staged it again, the fold
-refuses: unstage it first.
-
-### Submodules
-
-A submodule pointer moves through the index, and your submodule checkout is
-never touched. Uncommitting a bump leaves it as an unstaged change; uncommitting
-the commit that added a submodule leaves the directory untracked. Uncommitting a
-*removal* stages the deletion instead, because a submodule that is still checked
-out cannot show as deleted in the working tree.
-
-`-p` shows a submodule as a single `(submodule)` entry: take it or leave it,
-there is nothing inside to pick apart.
-
-### Move a file between commits
-
-Moves one file's changes from one commit to another.
+### Move a file to another commit
 
 ```bash
 git loom fold pkz:1 wsl
-# Moves the second file from pkz to wsl
+# The second file of pkz moves to wsl
 ```
 
-## Arguments
+### Fold hunks (`-p`)
 
-Arguments can be:
+```bash
+git loom fold -p mqt                # working-tree hunks → amend mqt
+git loom fold -p src/auth.rs mqt    # same, picking only from src/auth.rs
+git loom fold -p pkz wsl            # hunks of pkz → move into the older wsl
+git loom fold -p osy zz             # hunks of osy → uncommit
+```
 
-- **File paths** — files with changes in the working tree
-- **Commit hashes** — full or partial git hashes
-- **Branch names** — local branch names
-- **Short IDs** — compact IDs from `git loom status`
-- **Git references** — `HEAD`, `HEAD~2`, etc.
-- **`zz`** — reserved token for the unstaged working directory
+A binary file, a deleted file or a submodule is a single entry that moves whole.
 
-## Commits that are already upstream
+## Commits Already Upstream
 
-A fold replays the commits it touches onto the current upstream. If everything a
-commit changes is already there, it has nothing left to apply, and loom refuses
-rather than report a commit you never touched:
+If upstream already has everything a commit you're folding from or into changes, loom refuses rather than fold into something that would vanish:
 
-```console
-$ loom fold mqt feature-b
+```bash
+git loom fold mqt feature-b
 # ✗ Commit `a337eda` is redundant — the history below it already has its change
 #   › Nothing was rewritten. Run `loom update` if it landed upstream, or `loom drop a337eda -y` to remove it now
 ```
 
-This covers the commit you move and the commit you fold into. A redundant commit
-that is neither is dropped, and loom says so.
-
-When the redundant commit is the *target* of the fold, loom does not offer to drop
-it, since that removes what you were folding into:
-
-```console
-# ✗ Commit `a337eda` is redundant — the history below it already has its change
-#   › Nothing was rewritten. Run `loom update` if it landed upstream
-```
+Any other such commit is dropped along the way, and loom says so.
 
 ## Conflicts
 
-The following fold operations support conflict recovery (pause/resume):
+These folds pause on a conflict:
 
-- Amend files into a non-HEAD commit
-- Fixup a commit into another
-- Move a commit to a branch
-- Move a commit above or below another commit
-- Uncommit a commit to the working directory (non-HEAD)
-
-If a supported fold hits a conflict, the operation is paused:
+- Amending a commit other than the last one, `-p` included
+- Fixing up a commit
+- Moving a single commit, to a branch or with `--above`/`--below`
+- Uncommitting a whole commit
 
 ```bash
 git loom fold mqt feature-b
 # ! Conflicts detected — resolve them with git, then run:
-#   loom continue   to complete the fold
-#   loom abort      to cancel and restore original state
+#   › loom continue   to complete the fold
+#   › loom abort      to cancel and restore original state
 ```
 
 ```bash
@@ -389,19 +174,4 @@ git add <resolved-files> && git loom continue
 # ✓ Moved `mqt` (was: a337eda, now: e1f2a3b) to branch `feature-b`
 ```
 
-The following fold operations **do not** support pause/resume and abort immediately on conflict:
-
-- All `-p` (patch mode) forms — any conflict causes an automatic abort and restores the original state
-- Uncommit a single file (`CommitFile → zz`)
-- Move a file between commits (`CommitFile → Commit`)
-- Create a new branch and move a commit (`--create`)
-- Any move of several commits, to a branch or with `--above`/`--below`
-
-See [`continue`](continue.md) and [`abort`](abort.md) for details.
-
-## Prerequisites
-
-- Must be in a git repository with a working tree
-- For short ID arguments: must have upstream tracking configured
-- All operations are atomic and automatically preserve uncommitted changes,
-  staged ones as staged
+Every other fold — moving several commits, `-c`, moving or uncommitting hunks with `-p`, and moving or uncommitting a single file — rolls back on a conflict and leaves everything as it was. See [`continue`](continue.md) and [`abort`](abort.md).

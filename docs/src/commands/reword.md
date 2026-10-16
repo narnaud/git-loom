@@ -1,6 +1,8 @@
 # reword
 
-Reword a commit message or rename a branch.
+Change a commit's message, or rename a branch.
+
+**Alias:** `rw`
 
 ## Usage
 
@@ -12,146 +14,80 @@ git loom reword <target> [-m <message>] [-- <git args>...]
 
 | Argument | Description |
 |----------|-------------|
-| `<target>` | Commit hash, branch name, or short ID |
+| `<target>` | A commit (short ID or hash) or a branch (name or short ID) |
 
 ### Options
 
 | Option | Description |
 |--------|-------------|
-| `-m, --message <message>` | New commit message or branch name. Opens editor/prompt if omitted. |
+| `-m, --message <message>` | The new message or branch name. Without it, your editor opens for a commit, a prompt for a branch. |
 
 ### Git Options
 
-When the target is a commit, anything after a `--` separator reaches the
-`git commit --amend` that rewrites it — see
-[Passing Options to Git](README.md#passing-options-to-git):
+For a commit, arguments after `--` go to the `git commit --amend` that rewrites it, unchecked — expert mode, see [Passing Options to Git](README.md#passing-options-to-git):
 
 ```bash
-git loom reword ab -m "Better message" -- --no-verify
-git loom reword ab -- --reset-author
+git loom reword mqt -- --reset-author
 ```
-
-Loom's own `--amend` and `--only` go last, so they keep their meaning. An
-amend that leaves the commit as it was, such as a forwarded `--dry-run`, aborts
-the reword. Renaming a branch runs no `git commit`, so it takes no arguments
-after `--`.
 
 ## What It Does
 
-### When Target is a Commit
+### Commit
 
-Changes the commit message using git's native interactive rebase. All descendant commits are replayed to update their hashes.
+Replaces the message and replays the commits above it. Content and branches are unchanged, and so is the short ID of a commit loom created. Any local commit can be reworded; without an upstream, any commit at all, the root included.
 
-- Works on any commit in history, including the root commit
-- With `-m`: applies the new message non-interactively
-- Without `-m`: opens the git editor with the current message
+### Branch
 
-**What changes:** target commit gets a new message and hash; all descendant commits get new hashes.
+Renames the branch. A name starting with the [hidden prefix](../configuration.md#loomhidebranchpattern) prints a warning, since the branch disappears from `git loom status`.
 
-**What stays the same:** commit content (files, diffs), topology, and branches outside the ancestry chain.
+## Target Resolution
 
-#### Commits that are already upstream
+1. **Branch names**: rename the branch
+2. **Git revisions**: hashes, `HEAD`, … reword the commit
+3. **Short IDs**: a branch ID renames, a commit ID rewords
 
-Rewording replays the commit onto the current upstream, which may have moved since you
-wrote it. If everything the commit changes is already there, it has nothing left to
-apply and loom refuses rather than rewrite something else:
+To reword the commit at a branch tip, name the commit, not the branch.
 
-```console
-$ loom reword osy
+## Examples
+
+### Reword a commit
+
+```bash
+git loom reword mqt -m "Fix authentication bug in login flow"
+# ✓ Updated commit message for `mqt` (was: ab12cd3, now: e45f678)
+```
+
+### Rename a branch
+
+```bash
+git loom reword fa -m feature-authentication
+# ✓ Renamed branch `feature-auth` to `feature-authentication`
+```
+
+## Commits Already Upstream
+
+If upstream already has everything the commit changes, loom refuses rather than rewrite something else:
+
+```bash
+git loom reword mqt
 # ✗ Commit `4783c1b` is redundant — the history below it already has its change
 #   › Nothing was rewritten. Run `loom update` if it landed upstream, or `loom drop 4783c1b -y` to remove it now
 ```
 
-A redundant commit that is *not* the one you are rewording is dropped, and loom says so.
+## Conflicts
 
-#### Conflicts
-
-Every commit above the target gets a new hash, so any merge commit in the way has to be rebuilt instead of reused. A merge you originally resolved by hand will conflict again — a merge commit records the tree it produced, never the resolution that produced it. (With `rerere` enabled, git replays your recorded resolution, so the file has no conflict markers — the reword still pauses, and you stage the replayed resolution before `loom continue`.)
-
-When that happens the reword pauses rather than throwing away the new message:
+Rewording replays the merges above the commit. A merge whose conflicts you resolved by hand conflicts again, and the reword pauses:
 
 ```bash
-git loom reword osy -m "Fix authentication bug"
+git loom reword mqt -m "Fix authentication bug"
 # ! Conflicts detected — resolve them with git, then run:
-#   `loom continue`   to complete the reword
-#   `loom abort`      to cancel and restore original state
+#   › loom continue   to complete the reword
+#   › loom abort      to cancel and restore original state
+```
 
+```bash
 git add shared.rs && git loom continue
 # ✓ Updated commit message for `mqt` (was: ab12cd3, now: e45f678)
 ```
 
-With `rerere.autoUpdate` set too, git stages the replayed resolution, so there is nothing left to settle and the reword carries on by itself, saying what it took:
-
-```bash
-git loom reword osy -m "Fix authentication bug"
-# ! `rerere` resolved the conflicts replaying `ab12cd3` — carried on with its recorded resolution
-# ✓ Updated commit message for `mqt` (was: ab12cd3, now: e45f678)
-```
-
-`git loom abort` restores the original message, HEAD, and every branch ref. See [continue](continue.md) and [abort](abort.md).
-
-### When Target is a Branch
-
-Renames the branch using `git branch -m`.
-
-- With `-m`: renames non-interactively
-- Without `-m`: interactive prompt showing current name as placeholder
-
-## Target Resolution
-
-The target is resolved in this order:
-
-1. **Branch names** — exact match resolves to a branch (for renaming)
-2. **Git references** — full/partial hashes, `HEAD`, etc. resolve to commits
-3. **Short IDs** — branch short IDs resolve to branches, commit short IDs to commits
-
-To reword the commit at a branch tip, use its commit hash or commit short ID (not the branch name, which would trigger a rename).
-
-## Examples
-
-### Reword a commit with editor
-
-```bash
-git loom reword osy
-# Opens editor with current message
-```
-
-### Reword a commit directly
-
-```bash
-git loom reword osy -m "Fix authentication bug in login flow"
-```
-
-### Rename a branch interactively
-
-```bash
-git loom reword feature-a
-# ? New branch name › feature-a
-# User types: feature-authentication
-```
-
-### Rename a branch directly
-
-```bash
-git loom reword fa -m feature-authentication
-```
-
-### Rename to a hidden branch name
-
-If the new name matches the configured hidden prefix (default: `local-`), *git-loom* prints a warning before the success message:
-
-```bash
-git loom reword feature-secrets -m local-secrets
-# ! Branch `local-secrets` is hidden from status by default. Use `--all` to show it.
-# ✓ Renamed branch `feature-secrets` to `local-secrets`
-```
-
-## Prerequisites
-
-- Any git repository for commit rewording
-- For short IDs: must be on a branch with upstream tracking configured
-
-## Notes
-
-- Uncommitted working tree changes are preserved automatically, and staged
-  changes come back staged
+With git's `rerere` enabled, your recorded resolution is replayed for you: stage it and continue. With `rerere.autoUpdate` too, the reword carries on by itself. See [`continue`](continue.md) and [`abort`](abort.md).

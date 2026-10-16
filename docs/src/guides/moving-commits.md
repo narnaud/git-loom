@@ -1,6 +1,6 @@
 # Moving a Commit Between Branches
 
-You committed a logging helper to `feature-auth` by mistake — it belongs in `feature-dashboard`.
+You committed a logging helper to `feature-auth` by mistake. It belongs in `feature-dashboard`:
 
 ```
 │╭─ fd [feature-dashboard]
@@ -15,13 +15,11 @@ You committed a logging helper to `feature-auth` by mistake — it belongs in `f
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit
 ```
 
-Move it with fold:
+Fold the commit into the branch:
 
 ```bash
-$ git loom fold tqn fd
+git loom fold tqn fd
 ```
-
-Commit `tqn` is removed from `feature-auth` and appended to `feature-dashboard`:
 
 ```
 │╭─ fd [feature-dashboard]
@@ -36,10 +34,12 @@ Commit `tqn` is removed from `feature-auth` and appended to `feature-dashboard`:
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit
 ```
 
-You can also move a commit into a **new** branch in one step with `--create`:
+The commit lands on top of the branch. Some variations:
 
 ```bash
-$ git loom fold -c tqn feature-logging
+git loom fold tqn mqt fd            # move several commits at once
+git loom fold tqn --below rsv       # land right under rsv instead of on top
+git loom fold -c tqn feature-logging   # move it into a new branch
 ```
 
 See also: [fold reference](../commands/fold.md)

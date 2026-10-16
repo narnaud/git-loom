@@ -1,6 +1,6 @@
 # Splitting a Commit
 
-A commit touches multiple files that should really be separate commits. Let's look at the current state:
+"add login form" (`mqt`) also brought in validation helpers that deserve their own commit:
 
 ```bash
 git loom status -f mqt
@@ -17,17 +17,15 @@ git loom status -f mqt
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit
 ```
 
-You want `src/validation.rs` in its own commit. Split the commit:
+Split it, picking the files for the first commit:
 
 ```bash
-$ git loom split mqt -m "add validation helpers"
+git loom split mqt -m "add validation helpers"
 # ? Select files for the first commit
 # > [x] src/validation.rs
 #   [ ] src/auth.rs
 #   [ ] templates/login.html
 ```
-
-Select the files for the **first** commit — the remaining files stay in the **second** commit, which keeps the original message. The result:
 
 ```
 │╭─ fa [feature-auth]
@@ -38,9 +36,8 @@ Select the files for the **first** commit — the remaining files stay in the **
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit
 ```
 
-The commit must have at least two files — otherwise there's nothing to split. Both sides must get at least one file.
+The files you picked form the first commit, with the new message. The rest stay in the second, which keeps the original message and its short ID `mqt`.
 
-> [!TIP]
-> If you omit `-m`, *git-loom* opens your editor for the first commit's message.
+To skip the picker, name the files: `git loom split mqt -m "add validation helpers" src/validation.rs`. To split within a file, or a commit that touches a single file, pick hunks with `git loom split -p mqt`. Without `-m`, your editor opens for the first commit's message.
 
 See also: [split reference](../commands/split.md)

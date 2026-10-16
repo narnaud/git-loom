@@ -1,30 +1,26 @@
 # Shell Setup
 
-*git-loom* provides shell completions for tab-completion of commands and options.
-
-Every subcommand and its aliases are completed, along with each command's own flags. Git options passed after a `--` are not completed — git's option surface is not mirrored here.
+*git-loom* completes commands and their flags in PowerShell, Clink, Bash, Zsh and Fish. Short aliases such as `ci` or `up` are not offered, and options passed to git after `--` are not completed.
 
 ## PowerShell
 
-Add the following to your PowerShell profile (`$PROFILE`):
+Add to your profile (`echo $PROFILE` shows where it is):
 
 ```powershell
 Invoke-Expression (&git loom completions powershell | Out-String)
 ```
 
-To find your profile path, run `echo $PROFILE` in PowerShell.
-
 `loom` completes too, so `Set-Alias loom git-loom` works wherever you put it. Any other alias for `git-loom` completes only when it is defined before that line.
 
 ## Clink
 
-[Clink](https://chrisant996.github.io/clink/) adds completion support to `cmd.exe`. Create a file at `%LocalAppData%\clink\git-loom.lua` with:
+[Clink](https://chrisant996.github.io/clink/) adds completion to `cmd.exe`. Create `%LocalAppData%\clink\git-loom.lua` with:
 
 ```lua
 load(io.popen('git loom completions clink'):read("*a"))()
 ```
 
-To give your own doskey macros completion, list them in `loom_commands` before the `load` line; it defaults to `"loom"`:
+To complete your own doskey macros, list them in `loom_commands` before the `load` line (default `"loom"`):
 
 ```lua
 loom_commands = "loom l"
@@ -38,9 +34,9 @@ Add to `~/.bashrc`:
 eval "$(git loom completions bash)"
 ```
 
-`git loom <Tab>` completes as well when git's own bash completion is loaded.
+`git loom <Tab>` completes too when git's own bash completion is loaded.
 
-Bash never completes through an alias, so `loom` gets completion by name. To give your own aliases completion, list them in `LOOM_COMMANDS` before the `eval` line; it defaults to `"loom"`:
+Bash does not complete through aliases, so `loom` is completed by name. To complete your own aliases, list them in `LOOM_COMMANDS` before the `eval` line (default `"loom"`):
 
 ```bash
 LOOM_COMMANDS="loom gl"
@@ -54,7 +50,7 @@ Add to `~/.zshrc`, after `compinit`:
 eval "$(git loom completions zsh)"
 ```
 
-`git loom <Tab>` completes as well, through zsh's git completion. An alias for `git-loom` completes like it; a function needs `compdef _git-loom <name>`.
+`git loom <Tab>` completes too, through zsh's git completion. An alias for `git-loom` completes like it; a function needs `compdef _git-loom <name>`.
 
 ## Fish
 
@@ -64,4 +60,4 @@ Add to `~/.config/fish/config.fish`:
 git loom completions fish | source
 ```
 
-`git loom <Tab>` completes as well: fish's git completion hands custom commands to `git-loom`'s. An `alias` for `git-loom` completes like it; a function needs `--wraps git-loom`.
+`git loom <Tab>` completes too, through fish's git completion. An `alias` for `git-loom` completes like it; a function needs `--wraps git-loom`.

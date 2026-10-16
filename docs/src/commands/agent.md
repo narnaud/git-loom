@@ -1,6 +1,8 @@
 # agent
 
-Set up AI agent integration: install the loom skill for an AI coding agent, and drive loom itself with the machine-readable `--agent` mode.
+Install the loom skill for an AI coding agent, and drive loom from agents or scripts with `--agent`.
+
+For a walkthrough, see [Working with AI Agents](../guides/agents.md).
 
 ## Usage
 
@@ -12,64 +14,76 @@ git loom agent install [<agent>] [--project]
 
 | Argument | Description |
 |----------|-------------|
-| `<agent>` | AI agent to install the skill for. Currently `claude` (default). |
+| `<agent>` | Agent to install the skill for. Only `claude` (the default). |
 
 ### Options
 
 | Option | Description |
 |--------|-------------|
-| `--project` | Install into the repository (`.claude/skills/git-loom/SKILL.md`) instead of the home directory |
+| `--project` | Install into the repository (`.claude/skills/git-loom/SKILL.md`) instead of your home directory |
 
 ## What It Does
 
-### agent install
+Writes the skill to `~/.claude/skills/git-loom/SKILL.md`, or into the repository with `--project`. The skill teaches the agent to use loom instead of raw git history rewrites.
 
-Installs a skill file at `~/.claude/skills/git-loom/SKILL.md` (or under the work tree root with `--project`) that teaches the agent to use loom instead of raw git — including the `--agent` invocation rules below. Re-run it after upgrading loom to refresh the skill:
+Re-run it after upgrading loom: it reports whether the skill was installed, updated, or already up to date. The file belongs to loom, so local edits are overwritten.
 
-- File absent → created (`Installed Claude skill at ...`)
-- File differs → overwritten (`Updated Claude skill at ...`)
-- File identical → untouched (`Claude skill already up to date`)
+In agent mode, every command checks the installed skills. One that differs from the skill this loom ships adds a message to the JSON output, telling the agent to run `git-loom agent install` and restart.
 
-### Keeping the skill up to date
+## Agent Mode
 
-The skill is compiled into the loom binary, so loom can see when an installed copy no longer matches what it ships. In agent mode every invocation checks the installed skills — the home one, plus the in-repo one when inside a work tree — and warns on any that differ:
+The global `--agent` flag, or the `LOOM_AGENT` environment variable set to any non-empty value other than `0`, makes loom machine-readable. It is never turned on automatically.
 
-```json
-{"status":"ok","messages":["The Claude git-loom skill at `~/.claude/skills/git-loom/SKILL.md` differs from the one this loom ships. Run `git-loom agent install` to refresh it (local edits are overwritten). Restart Claude Code to pick up the new skill."]}
-```
+### Output
 
-The notice exists only in the JSON — it is not printed as a `!` line, since the agent parses the JSON and would otherwise read it twice. It rides on `ok` and `paused` responses; an `error` response carries no `messages`, and the check simply reports again on the next command that succeeds. Nothing is rewritten automatically, and a location with no skill installed is never mentioned.
-
-Because the comparison is byte-for-byte, the installed skill is not a file to edit: any local change is reported as stale, and `agent install` overwrites it.
-
-### Agent mode (`--agent`)
-
-The global `--agent` flag (or the `LOOM_AGENT` environment variable, any value except `0`) splits loom's output by audience:
-
-- **stdout is the machine stream**: exactly one JSON status object, always as the **last line** — read that line, not the whole stream. The output you asked for comes there first — the patch from `show` and `diff`, the log from `trace`, the plan from `absorb`. For everything else the last line is the only line.
-- **stderr is the human stream**: the `✓`/`!`/`✗` progress lines, the rendered status tree (its data is in the JSON), and `update`'s fetch summaries. No JSON is written there.
-
-`completions` ignores agent mode: it always prints the script alone.
+- **stdout** ends with exactly one JSON object on its **last line**. `show`, `diff`, `trace`, `absorb`, `worktree list` and `worktree path` print their own output before it; every other command prints only the JSON.
+- **stderr** carries the human output: progress lines and the status tree.
 
 | Status | Exit code | Meaning |
 |--------|-----------|---------|
-| `ok` | 0 | Success. `messages` collects the progress lines, including skipped optional follow-ups. |
-| `needs_input` | 10 | A prompt would have opened; nothing was changed. `options` lists the choices, `hint` the command to re-run. `allow_other: true` means a new value is also accepted. |
-| `needs_confirmation` | 10 | A yes/no question would have opened; nothing was changed. |
-| `paused` | 0 | A rebase stopped on conflicts — resolve, then [`continue`](continue.md) or [`abort`](abort.md). |
-| `error` | 1 | The command failed. |
+| `ok` | 0 | Success. `messages` lists what happened. |
+| `needs_input` | 10 | A prompt would have opened. No history changed (files you named may already be staged). `options` lists the choices (`allow_other: true` also accepts a new value) and `hint` the command to re-run. |
+| `needs_confirmation` | 10 | A yes/no question would have opened. No history changed. Re-run with `-y` to confirm. |
+| `paused` | 0 | A conflict paused the operation. Resolve it, then [`continue`](continue.md) or [`abort`](abort.md). |
+| `error` | 1 | The command failed; `message` says why. |
 
-In agent mode:
+A malformed command line exits with 2 and prints no JSON.
 
-- Interactive prompts never render — they answer `needs_input`/`needs_confirmation` instead.
-- `-p`/`--patch` answers with a hunk listing instead of opening the picker (see below) — on [`add`](add.md), [`commit`](commit.md), [`fold`](fold.md) and [`split`](split.md) alike.
-- `commit`, `split`, and `reword` require `-m` (no editor is opened).
-- `push` creates PRs as it does in a terminal, never opening a browser, and attaches a `push` object to its `ok` line: the branches pushed and each PR's `state` (`created`, `updated`, `not_created`) and `url` — see [push](push.md#agent-mode). A branch with several commits needs `--title`; without it, that PR is reported `not_created` with the command to re-run.
-- `update` skips the gone-branch pruning question (use `-y` to prune).
-- `show`/`diff` disable the git pager.
-- `status` attaches the whole branch graph to its `ok` object as `graph` — see [status](status.md#agent-mode).
+### What Changes
 
-Agent mode is never inferred from a missing terminal — it must be requested explicitly.
+- Prompts never open: they answer `needs_input` or `needs_confirmation`. Two questions come after the work is done, so they take the safe default instead: `update` keeps branches it would offer to remove (pass `-y` to remove them), and `push` leaves a branch of several commits without a PR unless you pass `--title`.
+- `commit`, `split` and `reword` need `-m`; no editor opens.
+- `-p` lists hunks instead of opening the picker (see below).
+- `show` and `diff` never start a pager.
+- `tui` is unavailable.
+- `status` adds the branch graph to its JSON as `graph` (see [status](status.md#agent-mode)), and `push` adds a `push` report (see [push](push.md#agent-mode)).
+
+### Hunk Selection
+
+Every `-p` form (`add`, `commit`, `fold`, `split`) takes two calls. The first lists the hunks and changes nothing:
+
+```bash
+git loom split mqt --agent -m "Fix the off-by-one" -p
+# {"status":"needs_input","kind":"multiselect","prompt":"Select hunks",
+#  "options":["src/parse.rs:1","src/parse.rs:2"],"fingerprint":"a91c3f2be417",
+#  "items":[{"id":"src/parse.rs:1","path":"src/parse.rs","diff":"@@ -12,7 +12,7 @@ fn scan\n..."},
+#           {"id":"src/parse.rs:2", ...}],
+#  "hint":"re-run with: loom split mqt -m 'Fix the off-by-one' -p --hunks <id> [--hunks <id>...] --hunks-from a91c3f2be417"}
+```
+
+The second re-runs the `hint` with the chosen ids, one `--hunks` per id:
+
+```bash
+git loom split mqt --agent -m "Fix the off-by-one" -p --hunks src/parse.rs:1 --hunks-from a91c3f2be417
+# {"status":"ok","messages":["Split `b41c298` into `kmr` (2a0a929) and `mqt` (d979b2b)"]}
+```
+
+- `--hunks` is the whole selection. Hunks already staged are listed with `"staged": true`: leaving one out unstages it with `add -p`, and keeps it staged but out of the commit with `commit -p` and `fold -p`.
+- A binary file, a deleted file and a submodule are a single entry that moves whole; its `diff` is a label such as `(binary file)`. An untracked file is listed as `(new file, <n> line(s))`. Read the file at `path` for its content.
+- If the diff changed since the listing, the fingerprint no longer matches and loom refuses the selection. List again.
+- Keep every argument of the `hint`, including file filters: they shape the listing.
+
+`--hunks` also works outside agent mode, but only a listing gives you the fingerprint.
 
 ## Examples
 
@@ -77,18 +91,11 @@ Agent mode is never inferred from a missing terminal — it must be requested ex
 
 ```bash
 git loom agent install
-# ✓ Installed Claude skill at `C:\Users\me\.claude\skills\git-loom\SKILL.md`
+# ✓ Installed Claude skill at `/home/me/.claude/skills/git-loom/SKILL.md`
 #   › Restart Claude Code to pick up the new skill
 ```
 
-### Install into the current repository
-
-```bash
-git loom agent install claude --project
-# ✓ Installed Claude skill at `D:\myrepo\.claude\skills\git-loom\SKILL.md`
-```
-
-### An agent commits without picking a branch
+### Commit without choosing a branch
 
 ```bash
 git loom commit --agent -m "Fix login"
@@ -100,43 +107,6 @@ git loom commit --agent -b feature-auth -m "Fix login"
 # {"status":"ok","messages":["Created commit `mqt` (1a2b3c4) on branch `feature-auth`"]}
 ```
 
-### Picking hunks without the picker
-
-Every `-p` form lists its hunks instead of drawing the picker. It takes two calls: the first lists, the second selects.
-
-```bash
-git loom split ab --agent -m "Fix the off-by-one" -p
-# {"status":"needs_input","kind":"multiselect","prompt":"Select hunks",
-#  "options":["src/parse.rs:1","src/parse.rs:2"],"fingerprint":"a91c3f2be417",
-#  "items":[{"id":"src/parse.rs:1","path":"src/parse.rs",
-#            "diff":"@@ -12,7 +12,7 @@ fn scan\n..."},
-#           {"id":"src/parse.rs:2", ...}],
-#  "hint":"re-run with: loom split ab -m <message> -p --hunks <id> [--hunks <id>...] --hunks-from a91c3f2be417"}
-
-git loom split ab --agent -m "Fix the off-by-one" -p --hunks src/parse.rs:1 --hunks-from a91c3f2be417
-# {"status":"ok","messages":["Split `b41c298` into `2a0a929` and `d979b2b`"]}
-```
-
-`items` lists every entry of the diff, and `options` repeats their ids. A binary file, a deletion and a submodule are one entry each and move whole; their `diff` is only a label — `(binary file)`, `(file deleted)`, `(submodule)` — so read the file at `path` if its content matters. On the working tree the fingerprint still covers a binary's content, so editing it after the listing invalidates the ids. With the one exception below, a `diff` is never truncated, so narrow a large listing with `split -p <files>` rather than expecting loom to cut it short.
-
-The one exception is an untracked file's sole entry, which lists as `(new file, <n> line(s))`: loom built that entry from the bytes on disk, so reading the file gives exactly what the id stands for. Nothing else is summarized. Once the path is in the index — staged or `git add -N` — the entry is git's diff of the indexed content, which a clean or eol filter can make something else than the file on disk, so it is listed verbatim. So is a file a commit adds, which need not be on disk at all.
-
-Re-run the `hint` as given, including any `<files>` filter — it carries every argument that shapes the listing.
-
-Hunk ids are positional, so `--hunks-from` carries the fingerprint of the listing they came from. Loom recomputes it and refuses a selection taken from a diff that has since changed, rather than move whatever now sits at those positions:
-
-```bash
-# ab was rewritten in between, so the ids no longer number the same hunks
-git loom split ab --agent -m "..." -p --hunks src/parse.rs:1 --hunks-from 35374d8ca902
-# {"status":"error","message":"The hunks changed since the listing fingerprinted 35374d8ca902 (now 6b0f19d4c773)\nRe-run with -p alone to list them again"}
-```
-
-`--hunks` repeats, once per id, and takes no separated list: an id contains a path, and any separator is a character some path may hold. A comma-joined value errors and says so.
-
-`--hunks` is the **whole** selection, exactly as confirming the picker with those entries ticked. That matters for a working-tree source (`add -p`, `commit -p`, `fold -p <files> <commit>`), where an already-staged hunk starts selected and is marked `"staged": true` in the listing: leave its id out and `add -p` unstages it, while `commit -p` and `fold -p` leave it out of what they create and keep it staged. For `add -p`, leaving it out is refused when the working tree changed those lines again, since the staged version then exists only in the index. A commit source has nothing selected to begin with, so there the distinction does not arise.
-
-`--hunks` needs `-p` and works outside agent mode too, though the fingerprint only comes from a listing, so the first call still needs `--agent` or `LOOM_AGENT=1`.
-
 ### A conflicting update
 
 ```bash
@@ -144,12 +114,6 @@ git loom update --agent -y
 # {"status":"paused","message":"Conflicts detected — the `loom update` is paused",
 #  "hint":"resolve conflicts, stage them, then run: loom continue (or loom abort)"}
 
-# resolve the conflicts, then:
-git loom continue --agent
+git add src/auth.rs && git loom continue --agent
 # {"status":"ok","messages":["Updated branch `integration` with `origin/main`"]}
 ```
-
-## Prerequisites
-
-- `agent install`: a resolvable home directory (or a git repository with `--project`)
-- Agent mode: none beyond each command's own prerequisites

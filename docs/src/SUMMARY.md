@@ -10,6 +10,7 @@
 # Guides
 
 - [Tutorial](guides/tutorial.md)
+- [Working with AI Agents](guides/agents.md)
 - [Amending a Past Commit](guides/amending.md)
 - [Fixing Up a Commit](guides/fixup.md)
 - [Splitting a Commit](guides/splitting.md)

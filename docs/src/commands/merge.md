@@ -1,54 +1,43 @@
 # merge
 
-Merge an existing branch into the integration branch, with a merge commit loom keeps as the branch's own section.
+Weave an existing branch into the integration branch.
 
-Branches are created with [`branch`](branch.md); [`unmerge`](unmerge.md) takes one back out.
+To take a branch back out, use [`unmerge`](unmerge.md). To create a new branch, use [`branch`](branch.md) or [`commit -b`](commit.md).
 
 ## Usage
 
 ```
-git loom merge [branch] [--all]
+git loom merge [<branch>] [--all]
 ```
 
-## Arguments
+### Arguments
 
 | Argument | Description |
 |----------|-------------|
-| `[branch]` | Branch name (optional; shows interactive picker if omitted) |
+| `<branch>` | A local branch, or a remote one such as `origin/feature-x`. A picker opens if omitted. |
 
-## Options
+### Options
 
 | Option | Description |
 |--------|-------------|
-| `-a, --all` | Also show remote branches without a local counterpart |
+| `-a, --all` | Also list remote branches that have no local branch |
 
 ## What It Does
 
-1. **Branch selection** — uses the provided name, or shows an interactive picker listing non-woven local branches
-2. **Validation** — checks that nothing is staged (`git merge` refuses it), that the branch exists, that the integration branch does not already contain it (there would be nothing to merge), that it is not already woven, into this integration branch or into the integration branch of another [worktree](worktree.md), and is not that integration branch itself: a branch lives in one integration branch at a time, since rewriting it from one would leave the other with its old commits
-3. **Remote handling** — if a remote branch is selected (with `--all`), creates a local tracking branch automatically; it is deleted again if the merge fails or is aborted
-4. **Merge** — performs a `git merge --no-ff`, so the branch keeps its own section in the integration topology
+Merges the branch so it gets its own section in `git loom status`. Merging a remote branch first creates a local branch tracking it.
+
+A branch can be woven into only one integration branch at a time. `merge` refuses a branch already woven here or into another [worktree](worktree.md)'s integration branch, as well as a branch with nothing to merge. Staged changes must be committed or unstaged first.
 
 ## Examples
 
-### Merge a specific branch
+### Merge a branch
 
 ```bash
 git loom merge feature-auth
 # ✓ Merged `feature-auth` into integration branch
 ```
 
-### Interactive picker
-
-```bash
-git loom merge
-# ? Select branch to merge ›
-#   feature-auth
-#   feature-logging
-# ✓ Merged `feature-auth` into integration branch
-```
-
-### Include remote branches
+### Pick one, remote branches included
 
 ```bash
 git loom merge --all
@@ -59,20 +48,18 @@ git loom merge --all
 
 ## Conflicts
 
-If the merge encounters a conflict, loom saves state and pauses:
+If the merge conflicts, it pauses:
 
 ```bash
 git loom merge feature-auth
 # ! Conflicts detected — resolve them with git, then run:
-#   loom continue   to complete the merge
-#   loom abort      to cancel and restore original state
+#   › loom continue   to complete the merge
+#   › loom abort      to cancel and restore original state
 ```
-
-After resolving:
 
 ```bash
 git add <resolved-files> && git loom continue
 # ✓ Merged `feature-auth` into integration branch
 ```
 
-See [`continue`](continue.md) and [`abort`](abort.md) for details.
+See [`continue`](continue.md) and [`abort`](abort.md).

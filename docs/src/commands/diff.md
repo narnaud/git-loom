@@ -1,132 +1,62 @@
 # diff
 
-Show a diff using short IDs, like `git diff`.
+Show a diff, like `git diff`, naming files and commits by short ID.
+
+**Alias:** `di`
 
 ## Usage
 
 ```
-git loom diff [args...] [--staged] [--all] [-- <git args>...]
+git loom diff [<arg>...] [--staged | --all] [-- <git args>...]
 ```
-
-Alias: `di`
-
-Each argument is a file, commit, or commit range. Arguments can be mixed freely in a single invocation.
 
 ### Arguments
 
 | Argument | Description |
 |----------|-------------|
-| `[args...]` | Files (short ID or path), commits (short ID, hash), or ranges (`left..right`) |
+| `<arg>...` | Files (short ID or path), commits (short ID or hash), or ranges such as `mqt..pkz`. Mix them freely. |
 
 ### Options
 
 | Option | Description |
 |--------|-------------|
-| `--staged` (alias `--cached`) | Show staged changes (index vs `HEAD`) |
-| `-a`, `--all` | Show all changes, staged and unstaged combined (working tree vs `HEAD`) |
+| `--staged` (alias `--cached`) | Staged changes only |
+| `-a, --all` | Staged and unstaged changes together |
 
-`--staged` and `--all` are mutually exclusive. With neither flag, only unstaged changes are shown, exactly like `git diff`.
+Without either, `diff` shows unstaged changes, like `git diff`.
 
 ### Git Options
 
-Everything after a `--` separator goes to `git diff` untouched — see [Passing Options to Git](README.md#passing-options-to-git):
+Arguments after `--` go to `git diff` — see [Passing Options to Git](README.md#passing-options-to-git):
 
 ```bash
 git loom diff -- --stat
-git loom diff ma -- -w
-git loom diff osy..mqt -- --name-only
+git loom diff mqt..pkz -- --name-only
 git loom diff -- -a            # git's --text; loom's own -a is --all
 ```
 
 ## What It Does
 
-### When No Arguments Are Given
+| Arguments | Diff |
+|-----------|------|
+| *(none)* | Your unstaged changes |
+| A file | That file's unstaged changes (or staged, or both, with `--staged`/`--all`) |
+| A commit | Between that commit and your working tree |
+| A range `a..b` | Between the two ends; each end can also be a branch, tag or `HEAD` |
+| A commit and a file | That file, between the commit and your working tree |
 
-Shows unstaged changes in the working tree — identical to `git diff` with no arguments. Use `--staged` to show staged changes instead, or `--all` to show both.
-
-### When a Commit Is Given
-
-Resolves the token to a full hash and passes it to `git diff`, showing the diff between that commit and the working tree.
-
-### When a File Is Given
-
-Resolves the token to a file path and runs `git diff -- <path>`, showing unstaged changes to that file. With `--staged` the staged changes are shown (`git diff --staged -- <path>`); with `--all` both are shown (`git diff HEAD -- <path>`).
-
-### When a Commit Range Is Given
-
-Tokens of the form `left..right` are resolved on each side and forwarded to `git diff`. Branch names, `HEAD`, and tags that can't be resolved as short IDs are passed through to git unchanged, so all standard range forms work:
-
-```bash
-git loom diff HEAD~3..HEAD
-git loom diff main..HEAD
-git loom diff osy..rsv
-```
-
-### When a Commit and a File Are Both Given
-
-The commit is placed before `--` and the file after, limiting the diff to that file at that commit.
-
-## Target Resolution
-
-Single tokens (not ranges) are resolved in this order:
-
-1. **Files** — short ID or repository-relative path (checked before commits)
-2. **Commits** — short ID, partial hash, or full hash
-
-Range endpoints use lenient resolution: if a token cannot be resolved as a short ID or hash it is passed to git as-is, allowing `HEAD`, branch names, and tags.
+A single target can't be a branch name or a merge commit: use a range.
 
 ## Examples
 
-### Show unstaged changes
-
 ```bash
-git loom diff
-# Equivalent to: git diff
-```
-
-### Show staged changes
-
-```bash
-git loom diff --staged
-# Equivalent to: git diff --staged
-```
-
-### Show all changes, staged and unstaged
-
-```bash
-git loom diff --all
-# Equivalent to: git diff HEAD
-```
-
-### Diff a commit by short ID
-
-```bash
-git loom diff osy
-# Shows the diff between commit "osy" and the working tree
-```
-
-### Diff a file by short ID
-
-```bash
-git loom diff ma
-# Shows unstaged changes to the file with short ID "ma"
-```
-
-### Diff a commit range
-
-```bash
-git loom diff osy..mqt
-# Shows what changed between those two commits
-```
-
-### Limit diff to a file at a specific commit
-
-```bash
-git loom diff osy ma
-# Equivalent to: git diff <hash-of-osy> -- src/auth/login.rs
+git loom diff --all          # everything not committed
+git loom diff ma             # one file, by short ID
+git loom diff mqt            # since commit mqt
+git loom diff mqt..pkz       # between two commits
+git loom diff mqt ma         # one file, since commit mqt
 ```
 
 ## Prerequisites
 
-- A non-bare git repository.
-- For short IDs: upstream tracking configured on the current branch (same as `git loom status`).
+- For short IDs: on a branch with an upstream

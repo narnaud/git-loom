@@ -17,6 +17,7 @@ Full documentation is available at **<https://narnaud.github.io/git-loom/>**
 
 - [Shell setup](https://narnaud.github.io/git-loom/shell-setup.html) (completions for PowerShell, Clink, bash, zsh, fish)
 - [Configuration](https://narnaud.github.io/git-loom/configuration.html) (remote type, push remote, hidden branches)
+- [Working with AI agents](https://narnaud.github.io/git-loom/guides/agents.html) (let Claude Code drive loom)
 
 ## Commands
 
@@ -44,7 +45,7 @@ Branches:
   merge             Merge an existing branch into integration
   unmerge           Remove a branch from integration (keeps the ref)
   switch, sw        Switch to any branch for testing (without merging)
-  worktree, wt      Manage worktrees, each with its own integration branch (new, list, drop)
+  worktree, wt      Manage worktrees, each with its own integration branch (list by default, new, drop, path)
 
 Inspection:
   status            Show the branch-aware status (default command)

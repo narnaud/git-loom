@@ -1,6 +1,6 @@
 # tui
 
-Open an interactive, full-screen status view: the branch-aware tree on the left, the diff of the item under the cursor on the right, with common loom actions one keypress away.
+An interactive, full-screen status: the branch tree on the left, the diff of the row under the cursor on the right, and loom's actions one key away.
 
 ## Usage
 
@@ -8,11 +8,9 @@ Open an interactive, full-screen status view: the branch-aware tree on the left,
 git loom tui
 ```
 
-No arguments or flags. The global `--theme` and `--no-color` options apply.
+No arguments. The global `--theme` and `--no-color` options apply.
 
-## What It Does
-
-Shows the same tree as `git loom status` with files enabled, plus a live diff pane. Navigate to the thing you see, press one key, and the underlying loom command runs with the right arguments filled in. After every action the tree reloads.
+## Layout
 
 ```
 ┌ Status ──────────────────────────────┐┌ Diff ─────────────────────────┐
@@ -23,76 +21,61 @@ Shows the same tree as `git loom status` with files enabled, plus a live diff pa
 │ ├╯                                   ││                               │
 │ ●  9999999 (upstream) ...            ││                               │
 └──────────────────────────────────────┘└───────────────────────────────┘
- Navigate: ↑/↓ | Close/open: ←/→ | Select: space | Commit: c/C | ...
+ Commit: c/C | Fold: f/F | Branch: b | Drop: d | Help: ? | Quit: q
 ```
 
-Short IDs are displayed like in `git loom status`, so the tree doubles as a cheat-sheet for manual commands. Commit rows leave out the abbreviated hash: the short ID already names the commit for every loom command.
+The tree is the one `git loom status -f` shows, with the same short IDs. Commits start collapsed; open one to see its files.
 
-### Navigation
+## Navigation
 
 | Key | Effect |
 |-----|--------|
-| `↑`/`k`, `↓`/`j` | Move the cursor (tree focused) or scroll the diff (diff focused) |
-| `←`/`h` / `→`/`l` | Close / open the current row; `←` on a file row jumps to its parent |
-| `Enter` | Toggle open/close (or confirm a fold target — see below) |
-| `Tab` | Switch focus between tree and diff pane |
-| `Ctrl-←` / `Ctrl-→` | Narrow / widen the left pane (2% per press, clamped to 10–90%) |
+| `↑`/`k`, `↓`/`j` | Move the cursor, or scroll the diff when it has focus |
+| `←`/`h`, `→`/`l`, `Enter` | Close / open the current row |
+| `Tab` | Switch focus between tree and diff |
 | `PgUp`/`PgDn` | Scroll the diff by a page |
-| Mouse click / wheel | Focus, move, scroll |
-| `?` | Show the help popup listing every key |
+| `Ctrl-←` / `Ctrl-→` | Narrow / widen the tree pane |
+| Mouse | Click to focus and move, wheel to scroll |
+| `Space` | Select the row (`✓`) and move down |
+| `+` (or `=`) / `-` | One more / one fewer context commit before the base |
+| `R` / `F5` | Reload |
 | `L` | Show the action log |
-| `T` | Show the latest [trace](trace.md): the git commands the last finished action ran |
-| `R` / `F5` | Reload from the repo |
-| `+` (or `=`) / `-` | Show one more / one fewer context commit before the base (starts at [`loom.statusContext`](../configuration.md#loomstatuscontext), never goes below 1) |
-| `Esc` | Cancel fold, commit, move, rename, or new-branch mode → clear selection (first that applies); it never quits |
+| `T` | Show the latest [trace](trace.md) |
+| `?` | Show every key |
+| `Esc` | Cancel the current mode, else clear the selection. Never quits. |
 | `q` / `Ctrl-C` | Quit |
 
-Commits are collapsed by default; opening one reveals a row per changed file. Local changes start expanded. Expansion state survives reloads.
+Actions take the selected rows, or the row under the cursor when nothing is selected. A selection holds one kind of row: working files, commits, branches, commit files, or the `[local changes]` header.
 
-### Selection
+## Actions
 
-`Space` toggles selection of the current row (marked `✓`) and advances the cursor. Actions use the selection when one exists, otherwise the cursor row. Selection is cleared on reload, and collapsing a row drops the selection of the rows it hides.
+| Key | Command | What it does |
+|-----|---------|--------------|
+| `c` | [`commit`](commit.md) | Commit the selected files (or the `[local changes]` header for everything). The new commit appears in the tree: move it with `↑`/`↓` to the integration branch or any woven branch, then `Enter`. To commit to a new branch, create it with `b` first. |
+| `C` | [`add -p`](add.md) + `commit` | Pick hunks first, then place the commit as with `c`. What you pick is staged, so cancelling the placement leaves it staged. |
+| `f` | [`fold`](fold.md) | Fold the selection: move to a target with `↑`/`↓` — each tagged `[AMEND]`, `[MOVE]` or `[UNCOMMIT]` — then `Enter`. |
+| `F` | [`fold -p`](fold.md) | Like `f`, picking hunks first: working-tree hunks to amend into a commit, or a commit's hunks to move or uncommit. |
+| `m` | [`fold --above/--below`](fold.md) | Move a commit: `↑`/`↓` show it in each place it can go, `Enter` moves it there. |
+| `s` | [`split`](split.md) | On commit files: those files become the first commit. On a commit: like `S`. |
+| `S` | [`split -p`](split.md) | Pick the hunks that become the first commit. |
+| `b` | [`branch`](branch.md) | Type the new branch's name where it will appear: at the cursor commit or branch, else at the base. |
+| `a` | [`absorb`](absorb.md) | Show where each change would go, then absorb on confirmation. |
+| `d` | [`drop`](drop.md) | Drop the selected files, or the row under the cursor, after confirmation. |
+| `r` | [`reword`](reword.md) | On a commit: edit its message. On a branch: rename it in place. |
+| `M` | [`merge`](merge.md) | Pick a branch to merge, local or remote. |
+| `U` | [`unmerge`](unmerge.md) | Take a branch out of the integration branch, after confirmation. |
+| `u` | [`update`](update.md) | Fetch and rebase onto upstream. |
+| `p` | [`push`](push.md) | Push a branch with its stack and open its pull request. |
+| `P` | [`push -f`](push.md) | Force-push, after confirmation — for a push refused because the branch changed on the remote. |
 
-A selection holds one kind of row — working files, commits, branches, commit files, or the `[local changes]` header — since no loom command takes a mixed list of targets. Pressing `Space` on a row of another kind is refused with a notice and changes nothing; press `Esc` to clear the selection and start another one.
+Actions run with the TUI still up. Questions appear as popups and menus, and only an editor (a commit message, a reword) takes over the terminal. When an action finishes, its result shows in the status bar, or an error popup opens, and the tree reloads. `L` shows each action's full output.
 
-### Actions
-
-Every action suspends the TUI, runs the regular loom command — prompts and editors work exactly as on the command line — prints its output, waits for Enter, then reloads the tree.
-
-| Key | Command | Arguments |
-|-----|---------|-----------|
-| `c` | [`commit`](commit.md) | Two-step: the selected working files — or the `[local changes]` header for everything — become the commit, then the tree shows it where it will land. `↑`/`↓` move it between the integration branch and every woven branch, `Enter` commits, `Esc` cancels. The message is prompted as usual. What you select is what goes in: the index is never consulted, so a file staged outside the TUI is committed whole or not at all. The destinations are the branches the tree already shows — to commit to a new one, create it with `b` first. |
-| `C` | [`add -p`](add.md) + [`commit`](commit.md) | Same as `c`, but the hunk selector opens first: pick the hunks you want, confirm, and then place the commit as usual. It always shows every local change, whatever the cursor is on — the selection plays no part. Confirming stages what you kept, exactly as `loom add -p` would, and the commit then takes the index: the placeholder counts its files and the diff pane shows it. What you left out stays a working change. Cancelling the selector changes nothing; cancelling the placement afterwards leaves your hunks staged, ready for another `C` or a plain `loom commit` — not `c`, which names whole files and would replace what you picked. |
-| `f` | [`fold`](fold.md) | Two-step: `f` captures the selection (or cursor row) as sources; `↑`/`↓` then move through the rows they can fold into, tagged with what happens there: `[AMEND]` (files into a commit, or a commit fixed up into an older one), `[MOVE]` (a commit file to another commit), `[UNCOMMIT]` (back to the local changes), `[NOOP]` (a source itself). `Enter` folds, `Esc` cancels. While picking a target, other action keys are inactive. |
-| `F` | [`fold -p`](fold.md) | Like `f`, but pick the hunks first: on files or local changes, the working-tree hunks to fold into a commit (`[AMEND]`) — like `C`, the selector shows every local change, whatever the cursor or selection; on a commit, its hunks to uncommit (`[UNCOMMIT]`) or move into an older commit (`[MOVE]`). Nothing changes until the target is confirmed. |
-| `m` | [`fold --above`/`--below`](fold.md) | Move one commit. `↑`/`↓` walk it through every place it can go, the tree redrawn with it there and tagged `[MOVE]`, the cursor on it: above or below any other commit, or into an empty branch. It starts where it is; `Enter` moves it, `Esc` cancels. |
-| `s` | [`split`](split.md) | Split a commit in two. On commit files — the selection, or the one under the cursor — those files become the first commit and the rest of the commit the second, which keeps the original message; the editor asks for the first one's message. On a commit row, it works like `S`. At least one file must stay behind; a single-file commit splits by hunk, with `S`. |
-| `S` | [`split -p`](split.md) | Like `s`, but pick the hunks first: the selector shows the whole diff of the commit under the cursor (or of the selected commit files' commit), and the hunks you keep become the first commit. Keeping none or all of them changes nothing, and a commit with a single hunk has nothing to split. |
-| `b` | [`branch`](branch.md) | The branch appears in the tree where it will land once created — at the cursor commit or branch tip (its `--on` target), else at the base — and you type its name right there. `Enter` creates it, `Esc` or an empty name cancels. |
-| `a` | [`absorb`](absorb.md) | Absorb the selected working files, else the one under the cursor, else every local change. A menu shows the plan first — each file or hunk and the commit it goes into, or why it is skipped — and `Enter` on the action runs it, `Cancel` or `Esc` leaves with nothing changed. |
-| `d` | [`drop`](drop.md) | Selected working files, all at once; else the cursor commit, branch, working file, or the `[local changes]` header (drops everything, like `drop zz`). A menu asks for confirmation: `Enter` on the action runs it, `Cancel` or `Esc` leaves. |
-| `r` | [`reword`](reword.md) | Cursor commit: opens the editor. Cursor branch: edit the name in place on its row — `Enter` renames, `Esc` cancels. |
-| `M` | [`merge --all`](merge.md) | Merge a branch that is not woven yet, whatever the cursor is on: a menu lists the local branches, then the remote ones under their own heading. Picking a remote branch creates a local branch tracking it first. If the merge conflicts, the paused view opens. |
-| `U` | [`unmerge`](unmerge.md) | Take the selected branch, else the one under the cursor, out of the integration branch, keeping the branch itself — `M` brings it back. A menu confirms it first: `Enter` on the action runs it, `Cancel` or `Esc` leaves. With no branch selected or under the cursor, a menu asks which one, and picking it is the confirmation — unless other branches share its commit and would leave with it, which a menu then confirms. |
-| `u` | [`update`](update.md) | Fetch and rebase the integration branch onto its upstream, whatever the cursor is on. Removing branches that are fully merged upstream or whose upstream is gone asks first, naming each one. Git cannot prompt for credentials inside the TUI: an HTTPS remote that needs them fails with an error — set up a credential helper, or run `loom update` in the terminal. ssh is the exception: a key passphrase or a first connection's host-key question is asked on the terminal by ssh itself, which hangs the TUI, so load the key into ssh-agent and connect once from a terminal first. |
-| `p` | [`push`](push.md) | Push the selected branch, else the one under the cursor, with its stack. With no branch selected or under the cursor, a menu asks which branch to push. Pull requests are opened as on the command line; a PR title asked for a stack is typed in a popup. Credentials work as for `u`. |
-| `P` | [`push -f`](push.md) | Force-push the branch `p` would push — selected or under the cursor, never picked — after a menu confirms it, naming every branch of the stack it forces. The way past a push refused because the branch moved on the remote. |
-
-### Diff Pane
-
-| Row | Diff shown |
-|-----|------------|
-| `[local changes]` | Staged + unstaged changes (`git diff HEAD`) |
-| Working file | That file's diff; untracked files show their content as added lines |
-| Branch name | Everything the branch owns (nothing while a new branch is still being named) |
-| Commit | `git show` with stats and patch |
-| Commit file | That file's change within the commit |
-| Commit being placed with `c` | The changes it will hold |
-| Commit being placed with `C` | The staged changes it will commit |
+> [!NOTE]
+> Git can't ask for a password inside the TUI. If `u` or `p` need credentials, use a credential helper or ssh-agent, or run the command from a terminal once.
 
 ## Conflicts
 
-If an action pauses on conflicts, the tree gives way to the paused view; `git loom tui` also opens on it when an operation is already paused. It lists every changed file, conflicts marked `!!`, under a line saying what to do next, and the diff pane shows the file under the cursor, conflict markers included:
+When an action pauses on a conflict — or when you open the TUI while an operation is paused — the tree gives way to the paused view. It lists the changed files, conflicts marked `!!`, and the diff pane shows conflict markers:
 
 ```
 ┌ Paused: loom fold — step 2/5 ────────┐┌ Diff ─────────────────────────┐
@@ -109,13 +92,12 @@ Resolve the files in your editor, then:
 
 | Key | Effect |
 |-----|--------|
-| `Space` | Stage the file under the cursor (`git add`) and move to the next |
-| `c` | [`continue`](continue.md); another conflict keeps the paused view, otherwise the tree comes back |
-| `a` | [`abort`](abort.md), once a menu confirms it, restoring the state from before the command |
-| `T` | Show the trace, for an operation that stopped for another reason than a conflict |
+| `Space` | Stage the file under the cursor and move to the next |
+| `c` | [Continue](continue.md) |
+| `a` | [Abort](abort.md), after confirmation |
 | `R` / `F5` | Reload, after resolving outside the TUI |
 
 ## Prerequisites
 
-- Must be on an integration branch with upstream tracking configured (same requirement as [`status`](status.md))
-- An interactive terminal — the TUI is unavailable in [agent mode](agent.md)
+- On a branch with an upstream, as for [`status`](status.md)
+- An interactive terminal: the TUI is not available in [agent mode](agent.md)

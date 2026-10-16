@@ -1,45 +1,33 @@
 # unmerge
 
-Remove a branch from the integration topology without deleting the branch ref.
+Take a branch out of the integration branch, keeping the branch itself.
 
 ## Usage
 
 ```
-git loom unmerge [branch]
+git loom unmerge [<branch>]
 ```
 
-## Arguments
+### Arguments
 
 | Argument | Description |
 |----------|-------------|
-| `[branch]` | Branch name or short ID (optional; shows interactive picker if omitted) |
+| `<branch>` | A woven branch, by name or short ID. A picker opens if omitted. |
 
 ## What It Does
 
-1. **Branch selection** — uses the provided name/short ID, or shows an interactive picker listing woven branches
-2. **Validation** — checks that the branch is actually woven into the integration branch. A branch stacked under another is refused, since its commits are the outer branch's as well; unmerge the outer branch first. Branches at the same commit share their commits, so they leave together, and the message names each one
-3. **Unweave** — rebases the integration branch to remove the branch's merge topology
-4. **Preserve** — the branch ref is kept intact, pointing at its original commits
+Removes the branch's commits from the integration branch. The branch keeps them, so [`merge`](merge.md) brings it back. To delete the branch and its commits instead, use [`drop`](drop.md).
 
-This is different from [`drop`](drop.md), which deletes the branch entirely.
-
-If the unweave rebase encounters conflicts, it aborts automatically and reports an error — no state is saved and no `loom continue` is available.
+- Branches sharing the same tip leave together, and the result names each one.
+- A branch with another stacked on it is refused: unmerge the upper branch first.
 
 ## Examples
-
-### Unmerge a specific branch
 
 ```bash
 git loom unmerge feature-auth
 # ✓ Unmerged `feature-auth` from integration branch
 ```
 
-### Interactive picker
+## Conflicts
 
-```bash
-git loom unmerge
-# ? Select branch to unmerge ›
-#   feature-auth
-#   feature-logging
-# ✓ Unmerged `feature-auth` from integration branch
-```
+If removing the commits conflicts, `unmerge` rolls back and leaves everything as it was.

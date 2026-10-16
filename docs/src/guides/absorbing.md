@@ -1,17 +1,9 @@
 # Auto-absorbing Changes
 
-You've been tweaking code across several files — fixing a typo in `src/auth.rs`, adjusting a layout in `templates/dashboard.html`. Each change was last touched by a different commit. Instead of manually folding each one, let *git-loom* figure it out:
+You've made small fixes across several files: a typo in `src/auth.rs`, a layout tweak in `templates/dashboard.html`. Each belongs in a different commit. Instead of folding them one by one, let loom work out where each goes:
 
 ```bash
-git loom absorb
-```
-
-For each changed file, absorb splits the diff into hunks, blames each hunk's original lines to find the originating commit, and folds each hunk into the right place — even when a single file has changes belonging to different commits.
-
-Run a **dry run** first to see what would happen:
-
-```bash
-$ git loom absorb -n  # or --dry-run
+git loom absorb -n
 #   src/auth.rs -> d0472f9 "add login form" (feature-auth)
 #   templates/dashboard.html -> 2ee61e1 "add dashboard layout" (feature-dashboard)
 #   src/shared.rs [hunk 1/2] -> d0472f9 "add login form" (feature-auth)
@@ -19,15 +11,12 @@ $ git loom absorb -n  # or --dry-run
 # Dry run: would absorb 3 hunk(s) from 3 file(s) into 2 commit(s)
 ```
 
-When a file has hunks going to different commits, each hunk is absorbed independently. Hunks that can't be attributed are left in the working tree.
-
-> [!NOTE]
-> Absorb works by blaming existing lines to find their originating commit. It handles modified and deleted lines well, but **newly added lines** (insertions that don't replace existing code) cannot be traced to a commit and will be skipped. Use `fold` for those.
-
-You can also restrict absorption to specific files:
+`-n` shows the plan without changing anything. Each hunk goes to the commit that last changed the lines it touches, so one file can feed several commits. When the plan looks right, run it:
 
 ```bash
-git loom absorb src/auth.rs
+git loom absorb
 ```
+
+Hunks without a clear target stay in the working tree. Newly added lines, in particular, have no history to trace: [fold](amending.md) them yourself. To absorb only some files, name them: `git loom absorb src/auth.rs`.
 
 See also: [absorb reference](../commands/absorb.md)

@@ -1,53 +1,42 @@
 # absorb
 
-Automatically distribute working tree changes into the commits that last touched the affected lines. Uses blame to determine the correct target for each hunk, then amends those commits — all in a single operation.
+Fold each uncommitted change into the commit that last touched the same lines.
 
 ## Usage
 
 ```
-git loom absorb [-n] [files...] [-- <git args>...]
+git loom absorb [-n] [<files>...] [-- <git args>...]
 ```
-
-### Options
-
-| Option | Description |
-|--------|-------------|
-| `-n, --dry-run` | Show what would be absorbed without making changes |
 
 ### Arguments
 
 | Argument | Description |
 |----------|-------------|
-| `[files...]` | Files to restrict absorption to (default: all tracked changed files) |
+| `<files>...` | File short IDs or paths to absorb (default: every changed tracked file) |
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `-n, --dry-run` | Show where each change would go, without changing anything |
 
 ### Git Options
 
-Anything after a `--` separator reaches the `git commit` of every `fixup!`
-commit absorb makes — the one place your commit hooks run. See
-[Passing Options to Git](README.md#passing-options-to-git):
+Arguments after `--` go to the `git commit` behind each fixup, unchecked — expert mode, see [Passing Options to Git](README.md#passing-options-to-git):
 
 ```bash
 git loom absorb -- --no-verify
 ```
 
-The arguments reach git as written, with the same gaps as
-[fold](fold.md#git-options): `-a` and `-i` sweep changes absorb skipped into
-the first `fixup!` commit, and so into its target. `-n` before the separator
-is absorb's own dry run; a `--dry-run` after it makes git commit nothing, which
-loom catches. Every `fixup!` commit must be a new, non-empty commit on HEAD, or
-loom takes the whole attempt back before anything is rewritten.
+## What It Does
 
-## How It Works
+For each hunk, absorb finds the commit that last changed the lines it modifies or deletes, among the commits on your integration branch. Hunks of one file can go to different commits. All the fixups happen in one rewrite.
 
-For each file with uncommitted changes:
+A hunk stays in the working tree when its target can't be told:
 
-1. Parses the unified diff into individual hunks
-2. For each hunk, blames the modified/deleted lines to find their originating commit
-3. If all hunks trace to the **same in-scope commit**, the whole file is absorbed
-4. If hunks trace to **different commits**, each hunk is independently absorbed into its target
-5. Hunks that can't be attributed (pure additions, ambiguous) are **skipped** and left in the working tree
-
-After analysis, all assigned hunks are folded into their target commits in a single rebase operation.
+- it only adds lines, so there is nothing to trace back (use [`fold`](fold.md) instead)
+- its lines come from several commits, or from upstream
+- the file is binary or new
 
 ## Examples
 
@@ -56,65 +45,45 @@ After analysis, all assigned hunks are folded into their target commits in a sin
 ```bash
 git loom absorb
 #   src/auth.rs -> a1b2c3d "Add authentication" (feature-auth)
-#   src/utils.rs -> d4e5f6a "Add utility helpers" (feature-utils)
-# Absorbed 2 hunk(s) from 2 file(s) into 2 commit(s)
-```
-
-### Absorb hunks into different commits
-
-```bash
-# src/shared.rs has changes in two separate regions,
-# each originating from a different commit
-git loom absorb
-#   src/shared.rs [hunk 1/2] -> a1b2c3d "Add login form" (feature-auth)
+#   src/shared.rs [hunk 1/2] -> a1b2c3d "Add authentication" (feature-auth)
 #   src/shared.rs [hunk 2/2] -> d4e5f6a "Add dashboard" (feature-dashboard)
-# Absorbed 2 hunk(s) from 1 file(s) into 2 commit(s)
+# ✓ Absorbed 3 hunk(s) from 2 file(s) into 2 commit(s)
 ```
 
 ### Dry run
 
 ```bash
-git loom absorb --dry-run
+git loom absorb -n
 #   src/auth.rs -> a1b2c3d "Add authentication" (feature-auth)
-#   src/shared.rs [hunk 1/2] -> d4e5f6a "Add utility helpers" (feature-utils)
-#   src/shared.rs [hunk 2/2] -- skipped (pure addition)
-# Dry run: would absorb 2 hunk(s) from 2 file(s) into 2 commit(s)
+#   src/shared.rs -- skipped (pure addition)
+# Dry run: would absorb 1 hunk(s) from 1 file(s) into 1 commit(s)
 ```
 
-### Restrict to specific files
+### Restrict to some files
 
 ```bash
 git loom absorb src/auth.rs src/utils.rs
-#   src/auth.rs -> a1b2c3d "Add authentication" (feature-auth)
-#   src/utils.rs -> d4e5f6a "Add utility helpers" (feature-utils)
-# Absorbed 2 hunk(s) from 2 file(s) into 2 commit(s)
 ```
 
-## Commits that are already upstream
+## Commits Already Upstream
 
-If a target commit's own changes are all upstream already, it has nothing left
-to apply. Loom refuses rather than let git drop it and squash the hunks into
-whatever commit sits below:
+If upstream already has everything a target commit changes, absorb refuses and leaves your changes in the working tree:
 
-```console
-$ loom absorb
+```bash
+git loom absorb
 # ✗ Commit `4783c1b` is redundant — the history below it already has its change
 #   › Nothing was rewritten. Run `loom update` if it landed upstream
 ```
 
-Your changes stay in the working tree.
-
 ## Conflicts
 
-If the rebase that folds the fixup commits hits a conflict, the operation is
-**paused**. Pre-existing staged changes are saved aside automatically.
+If the rewrite conflicts, absorb pauses:
 
 ```bash
 git loom absorb
-#   src/auth.rs -> a1b2c3d "Add authentication" (feature-auth)
 # ! Conflicts detected — resolve them with git, then run:
-#   loom continue   to complete the absorb
-#   loom abort      to cancel and restore original state
+#   › loom continue   to complete the absorb
+#   › loom abort      to cancel and restore original state
 ```
 
 ```bash
@@ -122,10 +91,8 @@ git add <resolved-files> && git loom continue
 # ✓ Absorbed 1 hunk(s) from 1 file(s) into 1 commit(s)
 ```
 
-See [`continue`](continue.md) and [`abort`](abort.md) for details.
+See [`continue`](continue.md) and [`abort`](abort.md).
 
 ## Prerequisites
 
-- Must be on an integration branch
-- Working tree must have uncommitted changes
-- Target commits must be in scope (between merge-base and HEAD)
+- On an integration branch with uncommitted changes

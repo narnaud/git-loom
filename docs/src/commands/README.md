@@ -26,7 +26,7 @@ Branches:
   merge             Merge an existing branch into integration
   unmerge           Remove a branch from integration (keeps the ref)
   switch, sw        Switch to any branch for testing (without merging)
-  worktree, wt      Manage worktrees, each with its own integration branch (new, list, drop)
+  worktree, wt      Manage worktrees, each with its own integration branch (list by default, new, drop, path)
 
 Inspection:
   status            Show the branch-aware status (default command)
@@ -47,42 +47,24 @@ Options:
   -V, --version        Print version
 ```
 
-Running `git loom` with no command is equivalent to `git loom status`.
+`git loom` with no command runs `git loom status`.
 
-All commands that accept a target (commit, branch, or file) support [short IDs](status.md) — the compact identifiers shown in the status output. You can also use full git hashes, branch names, or partial hashes.
+Wherever a command takes a commit, branch or file, you can give its [short ID](status.md#short-ids) from `git loom status`, as well as a hash, branch name or path.
 
 ## Passing Options to Git
 
-`show`, `diff`, `commit` and `add` each wrap a single git command. Anything
-after a `--` separator is handed to that command untouched:
+`show`, `diff`, `add` and `commit` each wrap one git command. Anything after a `--` separator goes to it untouched:
 
 ```bash
 git loom show -- --stat
-git loom diff osy..mqt -- --name-only
+git loom diff mqt..pkz -- --name-only
 git loom commit -m "wip" -- --no-verify
 git loom add zz -- -f
 ```
 
-`fold`, `split`, `absorb` and `reword` take one too, for the commits they make
-themselves — see [fold](fold.md#git-options), [split](split.md#git-options),
-[absorb](absorb.md#git-options) and [reword](reword.md#git-options).
+`fold`, `split`, `absorb` and `reword` accept them too, for the commits they create. The other commands take none.
 
-Before the separator loom parses strictly, so an option it doesn't define is an
-error rather than a guess — the message tells you to move it after the `--`.
-That also means a flag keeps loom's meaning on loom's side of the separator and
-git's meaning on git's: `git loom diff -a` is loom's `--all`, while
-`git loom diff -- -a` is git's `--text`.
+Before the `--`, loom accepts only its own options: an unknown one is an error that tells you to move it after the separator. A flag means loom's option on one side and git's on the other: `git loom diff -a` is loom's `--all`, `git loom diff -- -a` is git's `--text`.
 
-Forwarded arguments land after the revisions loom resolved and before any
-pathspec loom builds, so options stay options and paths stay paths. Because the
-tokens are never inspected, values may be attached or detached — `-U5`,
-`--unified=5` and `-S x` all reach git as written.
-
-When you forward arguments to `add` or `commit`, loom steps back: the git
-command runs uncaptured so its own output reaches you, and loom stops narrating
-what it can no longer vouch for. (Under `--agent` those two stay captured —
-there is nobody there to close an editor.) `show` and `diff` are always
-uncaptured; displaying is all they do.
-
-The other commands don't take a `--`: they either render their own output or
-only rebase, where there is no single git command to forward to.
+> [!WARNING]
+> `--` is expert mode: you can shoot yourself in the foot. Loom passes the options to git as written and checks nothing. An option that changes what git commits or how — `-a`, a pathspec, `-m`, `--amend`, `--dry-run` — does exactly that, even in the middle of a loom command that makes several commits, and loom carries on with whatever git did. Use it only when you know what the option does to that git command.

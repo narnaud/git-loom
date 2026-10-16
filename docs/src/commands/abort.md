@@ -1,8 +1,6 @@
 # abort
 
-Cancel a paused loom operation and restore the repository to its original state.
-Without a saved state file there is nothing to roll back, so only the rebase or
-merge git has in progress is canceled.
+Cancel a paused loom operation and put everything back as it was.
 
 ## Usage
 
@@ -10,11 +8,9 @@ merge git has in progress is canceled.
 git loom abort
 ```
 
-## When to Use It
+## What It Does
 
-When a loom operation is paused due to a conflict and you decide you don't want
-to complete it, `loom abort` cancels the operation and rolls back all changes
-made so far:
+Cancels the paused operation and restores the state from before the command: history, branches, staged changes and working-tree changes. Branches the command created are deleted.
 
 ```bash
 git loom commit -b feature-auth -m "add auth" zz
@@ -24,75 +20,22 @@ git loom abort
 # ✓ Aborted `loom commit` and restored original state
 ```
 
-## What It Does
+After aborting a `commit`, the changes you were committing are back as they were: staged ones staged, the rest unstaged.
 
-1. Loads the saved state from `.git/loom/state.json`
-2. Aborts the active rebase (if one is in progress)
-3. Applies rollback:
-   - Hard-resets HEAD to the pre-operation state
-   - Restores all branch refs to their pre-operation positions
-   - Deletes any branches that were created during the operation
-   - Re-applies pre-existing staged changes (if any were saved aside)
-   - Re-applies working-tree changes (if any were saved)
-4. Deletes the state file
-5. Reports success
+If the abort can't complete — another git process is holding the repository, for example — loom says so and keeps the paused operation, so you can run `loom abort` again.
 
-### Special case: `commit`
+> [!WARNING]
+> Never delete the paused-operation state under `.git/loom/` to get unstuck: it is what `loom abort` uses to restore your changes. If loom reports it as corrupted, move it aside and keep it — anything the command had set aside can then only be recovered from it by hand — and run `loom abort` if git still has a rebase in progress.
 
-After aborting a `commit`, the committed content is returned to the **working
-tree as unstaged changes** (via `git reset --mixed`) rather than being
-discarded. Your work is preserved; the commit is simply undone.
+## Without a Paused Loom Operation
 
-## When the Abort Itself Fails
-
-`git rebase --abort` (or `git merge --abort`) can fail, typically because
-another git process holds `.git/index.lock`. Loom then reports the failure and
-keeps the state file instead of rolling back on top of a rebase that is still
-running — rerun `loom abort` once the repository is free.
-
-A reset or a staged-patch restore in the rollback that follows behaves the same
-way: the state file stays, because it is the only record of what is left to
-undo, and the message names the half-applied rollback rather than git, which has
-finished its own abort by then. A temp branch that will not delete only warns —
-the rollback carries on and the state file goes.
-
-A saved patch that will not re-apply is written to `.git/loom/` instead, and the
-warning gives the `git apply` line that replays it. The state file is deleted
-once the abort reports success, so that file is what is left of those changes:
-loom never removes one, and they are yours to delete once you have replayed
-them.
-
-For that same reason, never delete `.git/loom/state.json` to get unstuck. Once
-it is gone, `loom abort` can only run git's own abort: a temp branch, a
-pre-rebase commit, or a saved staged patch would all be stranded. If loom
-reports the file as corrupted, move it aside rather than removing it.
-
-## Without a Saved State File
-
-If git has a rebase or merge in progress that no loom state file describes — a
-command that failed before it could save state, or one you started with raw
-git — `loom abort` cancels it anyway:
+If git has a rebase or merge in progress that loom didn't start, `loom abort` cancels it:
 
 ```bash
 git loom abort
 # ✓ Canceled the rebase git had in progress (no loom state to roll back)
 ```
 
-A merge is canceled the same way, with `git merge --abort`.
+With nothing in progress at all, it fails with `No loom operation is in progress`.
 
-There is no loom state here, so there is nothing to roll back beyond what git
-itself undoes: if a loom command had already created a commit or a temp branch,
-or set staged changes aside, before its rebase started, none of that is undone.
-
-## Error: No Operation in Progress
-
-With neither a state file nor a rebase or merge in progress:
-
-```bash
-git loom abort
-# error: No loom operation is in progress
-```
-
-## See Also
-
-- [`continue`](continue.md) — resume instead of canceling
+See also [`continue`](continue.md).

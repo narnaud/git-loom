@@ -1,35 +1,25 @@
 # Pushing for Review
 
-Your `feature-auth` branch is ready. Push it to the remote:
+`feature-auth` is ready for review. Push it:
 
 ```bash
-$ git loom push fa
+git loom push fa
+# ✓ Pushed `feature-auth` to `origin`
+# ✓ PR created: https://github.com/owner/repo/pull/42
 ```
 
-git-loom detects your remote type automatically and runs the appropriate commands:
+Loom detects the forge and opens the review there: a pull request on GitHub (with [`gh`](https://cli.github.com/)) or Azure DevOps (with [`az`](https://learn.microsoft.com/en-us/cli/azure/)), a merge request on GitLab, a review on Gerrit. Push again after changing the branch and the same review is updated. Without `gh` or `az`, loom prints a link to open the pull request yourself.
 
-- **GitHub** — pushes the branch, then checks if a PR exists. If a PR already exists, prints its URL (`PR updated: https://...`). Otherwise creates a PR via the [`gh` CLI](https://cli.github.com/) with a title and description auto-generated from the branch's commits.
-- **Azure DevOps** — pushes the branch, then checks if a PR exists. If a PR already exists, prints its URL. Otherwise creates a PR via the [`az` CLI](https://learn.microsoft.com/en-us/cli/azure/) with a title and description auto-generated from the branch's commits.
-- **Gerrit** — pushes to `refs/for/<target>` (where `<target>` is your upstream branch, e.g. `main` or `master`). Review URLs from the Gerrit remote are displayed after the push.
-- **Plain Git** — pushes with `--force-with-lease`.
+On GitHub and Azure DevOps, a branch with one commit takes its title from that commit. For a branch with several, loom asks for a title, or pass it with `--title`.
 
-If `gh` or `az` are not installed, the push still succeeds and prints a link to the forge's new pull request page, with a hint to install the CLI. Only a stacked branch on GitHub needs `gh`; without it the push is refused unless you pass `--no-pr`.
+If `feature-auth` is stacked on another branch, the branch below is pushed too, and each gets its own review targeting the one below it. A stack needs `gh` on GitHub, and Azure DevOps has no stacked pull requests: both refuse unless you pass `--no-pr`.
 
-If `feature-auth` is stacked on another branch in the same repository, the lower branch is pushed with it and each PR targets the branch below. GitHub links the PRs into a [stack](https://docs.github.com/en/pull-requests/get-started/about-stacked-prs). Fork PRs instead target upstream and are not linked; see [Stacked Branches](../commands/push.md#stacked-branches).
-
-If you just want to push without creating a PR (e.g. to back up your work):
+To push without opening a review, for a backup or work in progress:
 
 ```bash
-$ git loom push fa --no-pr
+git loom push fa --no-pr
 ```
 
-When you omit the branch argument, git-loom shows an interactive picker:
-
-```bash
-$ git loom push
-# ? Select branch to push
-# > feature-auth
-#   feature-dashboard
-```
+Without a branch argument, loom asks which one to push.
 
 See also: [push reference](../commands/push.md)

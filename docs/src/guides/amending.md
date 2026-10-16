@@ -1,10 +1,10 @@
 # Amending a Past Commit
 
-You realize the login form is missing a CSRF token. You fix `src/auth.rs` and check the status:
+The login form is missing a CSRF token. You fix `src/auth.rs`:
 
 ```
 ╭─ zz [local changes]
-│    M src/auth.rs
+│   au  M src/auth.rs
 │
 │╭─ fa [feature-auth]
 │●    pkz  81356bf add password validation
@@ -14,30 +14,23 @@ You realize the login form is missing a CSRF token. You fix `src/auth.rs` and ch
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit
 ```
 
-You want to amend this change into the original "add login form" commit (`mqt`), not create a new commit.
+The fix belongs in "add login form" (`mqt`), not in a new commit. Fold it in:
 
 ```bash
-$ git loom fold src/auth.rs mqt
+git loom fold src/auth.rs mqt
 ```
 
-This stages `src/auth.rs` and amends it into commit `mqt`. The branch topology stays the same — the commit just gains the new changes.
-
-If you've already staged the files you want to amend, you can use the single-argument form:
+`mqt` now includes the fix; `pkz` is replayed on top of it. Other ways to say what to fold:
 
 ```bash
-$ git add src/auth.rs
-$ git loom fold mqt
+git loom fold au mqt                     # the file by short ID
+git loom fold zz mqt                     # all local changes
+git add src/auth.rs && git loom fold mqt # only what is staged
 ```
 
-This folds only the staged changes — any unstaged modifications to the same files are preserved.
-
-To amend **all** working tree changes into a commit at once:
-
-```bash
-$ git loom fold zz mqt
-```
+To fold only some of a file's changes, use [`fold -p`](hunk-selection.md). To let loom find the right commit for each change, use [`absorb`](absorbing.md).
 
 > [!TIP]
-> Use `git loom status -f mqt` to see which files are in a commit before and after amending.
+> `git loom status -f mqt` lists the files in a commit.
 
 See also: [fold reference](../commands/fold.md)

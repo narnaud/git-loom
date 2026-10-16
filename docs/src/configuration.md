@@ -2,126 +2,75 @@
 
 ## Git Config Settings
 
+Set them with `git config <setting> <value>`.
+
 | Setting | Values | Default | Description |
 |---------|--------|---------|-------------|
-| `loom.remote-type` | `github`, `gitlab`, `azure`, `gerrit`, `plain` | Auto-detected, else asked; then saved | The remote type for `git loom push` |
-| `loom.push-remote` | Any remote name | Auto-detected | Override which remote to push to (e.g., `personal` for fork workflows) |
-| `loom.hideBranchPattern` | Any prefix string | `local-` | Prefix for branches hidden from `loom status` by default |
-| `loom.statusContext` | Integer ≥ 1 | `1` | Context commits shown at and before the base by `loom status` and `loom tui` |
-| `loom.pruneGoneBranches` | `true`, `false` | `false` | Let `git loom update` remove local branches whose remote branch is gone |
-| `loom.changeId` | `true`, `false` | `true` | Add a Gerrit-style `Change-Id` trailer to every commit loom creates |
+| `loom.remote-type` | `github`, `gitlab`, `azure`, `gerrit`, `plain` | Detected, else asked | How `git loom push` pushes |
+| `loom.push-remote` | A remote name | Detected | The remote `git loom push` pushes to |
+| `loom.hideBranchPattern` | A prefix | `local-` | Branches hidden from `git loom status` |
+| `loom.statusContext` | An integer ≥ 1 | `1` | Commits shown at and before the base by `status` and `tui` |
+| `loom.pruneGoneBranches` | `true`, `false` | `false` | Let `git loom update` remove merged and gone branches without asking |
+| `loom.changeId` | `true`, `false` | `true` | Add a `Change-Id` trailer to the commits loom creates |
 
 ### `loom.remote-type`
 
-When it is unset, `git loom push` auto-detects the remote type and saves it here:
-
-- **GitHub** — if the remote URL contains `github.com`
-- **GitLab** — if the remote URL contains `gitlab`
-- **Azure DevOps** — if the remote URL contains `dev.azure.com`
-- **Gerrit** — if `.git/hooks/commit-msg` contains "gerrit"
-
-When nothing is detected, it asks you to pick the forge from a menu and saves your pick. You can set or change it with:
+`git loom push` detects the forge from the remote URL (`github.com`, `gitlab`, `dev.azure.com`) or a Gerrit `commit-msg` hook. When it can't tell, it asks. Either way the result is saved here; set it yourself if detection guessed wrong:
 
 ```bash
-git config loom.remote-type github   # Force GitHub push (push + PR, stacked PRs)
-git config loom.remote-type gitlab   # Force GitLab push (merge request push options)
-git config loom.remote-type azure    # Force Azure DevOps push (push + open PR)
-git config loom.remote-type gerrit   # Force Gerrit push (refs/for/<branch>)
-git config loom.remote-type plain    # Force a plain force-with-lease push
+git config loom.remote-type gitlab
 ```
+
+See [push](commands/push.md) for what each type does.
 
 ### `loom.push-remote`
 
-By default, `git loom push` uses the integration branch's remote for pushing. One exception: if the integration branch tracks a remote named `upstream` and a remote named `origin` also exists, pushes go to `origin` automatically (the standard GitHub fork convention).
-
-For non-standard fork setups where your remotes have different names, set this explicitly:
+By default, `git loom push` pushes to the remote your integration branch tracks. On GitHub, if that remote is `upstream` and an `origin` exists, it pushes to `origin`, your fork. Set this for any other layout:
 
 ```bash
 git config loom.push-remote personal
 ```
 
-For example, with remotes:
-
-- `origin` → upstream read-only repository
-- `personal` → your fork (where you push)
-
-Now `git loom push` will push to `personal` regardless of remote names.
-
 ### `loom.hideBranchPattern`
 
-Branches whose names start with this prefix are hidden from `loom status` by default — both the branch section and its commits are suppressed. Pass `--all` to show them.
+Branches whose names start with this prefix are hidden from `git loom status`, commits included, unless you pass `--all`. Use it for local-only work such as personal configuration. Every other command still accepts them, but `push` never publishes them.
 
 ```bash
-git config loom.hideBranchPattern "local-"   # default: hide local-* branches
-git config loom.hideBranchPattern "secret-"  # hide secret-* branches instead
-git config loom.hideBranchPattern ""         # disable hiding entirely
+git config loom.hideBranchPattern "secret-"   # hide secret-* instead of local-*
+git config loom.hideBranchPattern ""          # hide nothing
 ```
-
-Hidden branches remain fully accessible to the other loom commands (`fold`, `drop`, `commit`, etc.), except `push`, which never publishes a hidden branch nor a branch stacked on one.
-
-When creating or renaming a branch to a name that matches this prefix, *git-loom* prints a warning.
 
 ### `loom.statusContext`
 
-How much history to show at and before the base: `1` (the default) shows the base alone, `3` adds the two commits before it as dimmed context lines.
+How much history to show at and before the base: `1` shows the base alone, `3` adds the two commits before it, dimmed. `git loom status -n` overrides it for one run, and `+`/`-` change it live in `git loom tui`.
 
-```bash
-git config loom.statusContext 5
-```
+### `loom.pruneGoneBranches`
 
-`-n` overrides it for one run (`git loom status -n 1`), and in `loom tui` the `+` and `-` keys change the depth live.
+When `true`, `git loom update` removes branches that were fully merged upstream, or whose remote branch was deleted, without asking — as `update -y` does.
 
 ### `loom.changeId`
 
-Every commit that `git loom commit`, `split`, or `reword` creates ends with a
-`Change-Id: I<40 hex>` trailer, in the form Gerrit's `commit-msg` hook
-writes. Git rebases copy messages verbatim, so the trailer gives a commit one
-identity that survives every `update`, `fold`, `swap`, or `split`.
+Commits created by `commit`, `split` and `reword` get a Gerrit-style `Change-Id` trailer, which gives them [short IDs](commands/status.md#short-ids) that survive rewrites. Set it to `false` to create commits without one.
 
-```bash
-git config loom.changeId false   # create commits without a Change-Id
-```
+Gerrit's own settings are honored: `gerrit.createChangeId false` also turns it off, and `gerrit.reviewUrl` switches to Gerrit's `Link:` form. A commit that already has a Change-Id, from a `commit-msg` hook for example, keeps it.
 
-Gerrit's own settings are honored too: `gerrit.createChangeId false` also
-disables generation, and with `gerrit.reviewUrl` set the trailer is written in
-Gerrit's `Link: <url>/id/I<hex>` form. Commits that already carry a Change-Id
-are never stamped twice, and a `commit-msg` hook, if installed, still runs:
-with `-m` it sees the trailer loom added; on the editor path it runs first, and
-a Change-Id it adds is kept. Without `-m`, loom adds a missing trailer by
-amending the message once after the editor, so `post-commit` and
-`post-rewrite` hooks see that amend too. That amend follows your git config
-rather than the options you passed after `--`: a commit signed through
-`commit.gpgsign` stays signed, one signed only by a forwarded `-S` loses its
-signature. Set the config, or pass `-m`.
+> [!NOTE]
+> When you write the message in your editor, loom adds the trailer by amending the commit afterwards. That amend uses your git config, not options passed after `--`: a commit signed with a forwarded `-S` loses its signature. Use `commit.gpgsign`, or `-m`.
 
 ## Environment Variables
 
 | Variable | Description |
 |----------|-------------|
-| `NO_COLOR` | Disable colored output when set (follows the [NO_COLOR](https://no-color.org/) standard) |
-| `TERM` | Colors are automatically disabled when `TERM=dumb` |
+| `NO_COLOR` | Disable colored output when set (see [no-color.org](https://no-color.org/)) |
+| `TERM` | `dumb` disables colored output |
+| `LOOM_AGENT` | Any non-empty value other than `0` turns on [agent mode](commands/agent.md#agent-mode), like `--agent` |
 
-## CLI Flags
+## Global Flags
 
-These flags are global: they go before or after the command.
+These go before or after the command.
 
 | Flag | Description |
 |------|-------------|
 | `--no-color` | Disable colored output |
-| `--theme <auto\|dark\|light>` | Set the graph color theme (default: `auto`) |
-
-### `--theme`
-
-Controls the color palette used for graph output.
-
-| Value | Behavior |
-|-------|----------|
-| `auto` | Detect the terminal background and choose dark or light automatically. Falls back to dark if detection fails or output is not a TTY. |
-| `dark` | Always use the dark theme (optimized for dark terminal backgrounds). |
-| `light` | Always use the light theme (optimized for light terminal backgrounds). |
-
-```bash
-git loom --theme light
-git loom --theme dark status
-git loom status --theme dark
-```
+| `--theme <auto\|dark\|light>` | Colors for a dark or light terminal background. `auto` (the default) detects it, and falls back to dark. |
+| `--agent` | Machine-readable output for AI agents and scripts — see [agent mode](commands/agent.md#agent-mode) |

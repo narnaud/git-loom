@@ -1,9 +1,9 @@
 # Uncommitting Changes
 
-Sometimes you want to undo a commit or pull a file out of one — maybe to re-split changes differently. Here's the starting point:
+To rework a commit, or take a file out of one, fold it into `zz`, your local changes:
 
 ```bash
-$ git loom status -f
+git loom status -f
 ```
 
 ```
@@ -18,19 +18,17 @@ $ git loom status -f
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit
 ```
 
-## Uncommitting a Commit
+## A Whole Commit
 
-You decide `pkz` ("add password validation") was premature — you want its changes back in the working tree. Fold it into `zz` (the working directory):
+"add password validation" (`pkz`) was premature:
 
 ```bash
-$ git loom fold pkz zz
+git loom fold pkz zz
 ```
-
-The commit is removed from history and its changes appear as unstaged modifications:
 
 ```
 ╭─ zz [local changes]
-│    M src/auth.rs
+│   au  M src/auth.rs
 │
 │╭─ fa [feature-auth]
 │●    mqt  bae0b72 add login form
@@ -41,19 +39,19 @@ The commit is removed from history and its changes appear as unstaged modificati
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit
 ```
 
-## Uncommitting a File
+The commit is gone and its changes are back in the working tree, unstaged.
 
-Instead of removing the whole commit, you just want to extract `templates/login.html` (index `mqt:1`) from `mqt`:
+## A Single File
+
+Instead, take only `templates/login.html` (`mqt:1`) out of `mqt`:
 
 ```bash
-$ git loom fold mqt:1 zz
+git loom fold mqt:1 zz
 ```
-
-The file is removed from the commit and appears as an untracked file in the working directory, leaving the rest of `mqt` intact:
 
 ```
 ╭─ zz [local changes]
-│    ⁕ templates/login.html
+│   lo  ⁕ templates/login.html
 │
 │╭─ fa [feature-auth]
 │●    pkz  2a660a7 add password validation
@@ -64,5 +62,7 @@ The file is removed from the commit and appears as an untracked file in the work
 │
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit
 ```
+
+The commit added the file, so it comes back untracked. For individual hunks, use `git loom fold -p mqt zz`.
 
 See also: [fold reference](../commands/fold.md)

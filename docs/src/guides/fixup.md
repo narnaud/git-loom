@@ -1,6 +1,6 @@
 # Fixing Up a Commit
 
-You have two commits on `feature-auth` and realize that `pkz` ("add password validation") should really be part of `mqt` ("add login form") — they're logically the same change.
+"add password validation" (`pkz`) is really part of "add login form" (`mqt`):
 
 ```
 │╭─ fa [feature-auth]
@@ -14,10 +14,8 @@ You have two commits on `feature-auth` and realize that `pkz` ("add password val
 Fold the newer commit into the older one:
 
 ```bash
-$ git loom fold pkz mqt
+git loom fold pkz mqt
 ```
-
-Commit `pkz` disappears from history and its changes are absorbed into `mqt`:
 
 ```
 │╭─ fa [feature-auth]
@@ -27,6 +25,6 @@ Commit `pkz` disappears from history and its changes are absorbed into `mqt`:
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit
 ```
 
-The source commit must be newer than the target. The target keeps its message.
+`pkz` is gone and its changes are in `mqt`, which keeps its message. The source must be newer than the target. To fix up only some of `pkz`'s hunks, use `git loom fold -p pkz mqt`.
 
 See also: [fold reference](../commands/fold.md)
