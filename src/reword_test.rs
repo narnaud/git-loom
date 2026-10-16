@@ -775,31 +775,6 @@ fn reword_forwards_to_the_amend() {
     assert_eq!(test_repo.get_subject(0), "Second commit");
 }
 
-/// A dry run exits 0 without amending, so the reword would report a message
-/// it never wrote.
-#[test]
-fn a_forwarded_dry_run_aborts_the_reword() {
-    let test_repo = TestRepo::new();
-    let c1 = test_repo.commit("First commit", "file1.txt");
-    let head = test_repo.commit("Second commit", "file2.txt");
-    test_repo.write_file("file1.txt", "staged edit\n");
-    test_repo.stage_files(&["file1.txt"]);
-    let before = test_repo.status_porcelain();
-
-    let err = super::reword_commit(
-        &test_repo.repo,
-        &c1.to_string(),
-        Some("Reworded".to_string()),
-        &["--dry-run"],
-    )
-    .unwrap_err();
-
-    assert!(err.to_string().contains("nothing was reworded"), "{err}");
-    assert_eq!(test_repo.head_oid(), head);
-    assert!(!crate::git::rebase_is_in_progress(test_repo.repo.path()));
-    assert_eq!(test_repo.status_porcelain(), before);
-}
-
 #[test]
 fn renaming_a_branch_rejects_the_separator() {
     let test_repo = TestRepo::new();

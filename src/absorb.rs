@@ -453,14 +453,7 @@ fn commit_fixup(
         .map(|c| repo::commit_subject(&c))
         .unwrap_or_else(|| target_oid.to_string());
     let msg = format!("fixup! {}", subject);
-    // The rebase squashes whatever sits on HEAD into the target, so a commit
-    // a forwarded argument skipped, emptied or turned into an amend of the
-    // user's own HEAD is caught here, before anything is rewritten.
-    let committed = git::rev_parse(workdir, "HEAD").and_then(|head| {
-        git::commit_captured(workdir, &msg, git_opts)?;
-        git::check_fixup_commit(workdir, &head, git_opts, "absorbed")
-    });
-    if let Err(e) = committed {
+    if let Err(e) = git::commit_captured(workdir, &msg, git_opts) {
         pre_rebase.roll_back(workdir);
         return Err(e);
     }

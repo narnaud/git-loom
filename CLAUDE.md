@@ -58,6 +58,10 @@ sequence editor by rebase tests. Removing it breaks rebase tests in an unbuilt t
 No operation, including continue/abort, may discard staged, unstaged, or
 uncommitted data.
 
+Git arguments forwarded after `--` are exempt: they are expert mode (Spec 021),
+passed verbatim, never inspected, and what git does with them is never checked.
+Do not add guards against them; breakage only they can cause is not a bug.
+
 `loom abort` first uses `git rebase --abort` (restores HEAD, `--update-refs`
 branches, and autostash), then `Rollback::apply_abort()` applies populated fields:
 

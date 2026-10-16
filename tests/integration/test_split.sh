@@ -331,17 +331,4 @@ assert_exit_ok "$CODE" "split_no_verify_ok"
 assert_eq "First part" "$(msg_at 2)" "split_no_verify_first"
 assert_eq "Hooked split" "$(msg_at 1)" "split_no_verify_second"
 
-describe "split: a forwarded --dry-run puts HEAD back"
-setup_repo_with_remote
-echo "content a" > "$WORK/da.txt"
-echo "content b" > "$WORK/db.txt"
-git -C "$WORK" add da.txt db.txt
-git -C "$WORK" commit -q -m "Dry split"
-dry_hash=$(head_hash)
-gl_capture split HEAD -m "First part" da.txt -- --dry-run
-assert_exit_fail "$CODE" "split_dry_run_fail"
-assert_contains "$OUT" "nothing was split" "split_dry_run_msg"
-assert_eq "$dry_hash" "$(head_hash)" "split_dry_run_head_back"
-assert_eq "" "$(git -C "$WORK" status --porcelain)" "split_dry_run_clean"
-
 pass

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 
 /// Amend the current commit, optionally replacing its message
 /// (`git commit --quiet [opts] --allow-empty --amend --only [-m msg]`).
@@ -10,32 +10,17 @@ use anyhow::{Result, bail};
 ///
 /// `opts` is what followed a `--` on a `reword` command line (Spec 021),
 /// placed before loom's own arguments so git's last-wins parse keeps
-/// `--amend` and `--only`. Errs when git printed instead of amending, which it
-/// can do while exiting 0.
+/// `--amend` and `--only`.
 pub fn commit_amend(workdir: &Path, message: Option<&str>, opts: &[&str]) -> Result<()> {
-    let before = if opts.is_empty() {
-        None
-    } else {
-        Some(super::rev_parse(workdir, "HEAD")?)
-    };
-
     let mut args = vec!["commit", "--quiet"];
     args.extend(opts);
     args.extend(["--allow-empty", "--amend", "--only"]);
     if let Some(msg) = message {
         args.extend(["-m", msg]);
-        super::run_git(workdir, &args)?;
+        super::run_git(workdir, &args)
     } else {
-        super::run_git_interactive(workdir, &args)?;
+        super::run_git_interactive(workdir, &args)
     }
-
-    if before.is_some_and(|head| super::rev_parse(workdir, "HEAD").is_ok_and(|now| now == head)) {
-        bail!(
-            "`git commit --amend` left the commit as it was, so nothing was reworded\n\
-             An argument after `--` kept git from committing"
-        );
-    }
-    Ok(())
 }
 
 /// Replace the current commit's message with `--no-verify`, so the
@@ -68,45 +53,12 @@ pub fn commit_amend_message_unverified(workdir: &Path, message: &str) -> Result<
 /// `opts` is what followed a `--` on a `fold` command line (Spec 021),
 /// forwarded verbatim and placed first, so git's last-wins parse keeps the
 /// `--amend` loom asked for. Captured whatever it holds, unlike
-/// [`commit_opts`]: loom reads the result below and rewrites on it, which an
-/// uncaptured run cannot report. Errs when git printed instead of committing,
-/// which it can do while exiting 0.
+/// [`commit_opts`]: it is one step of a rewrite that goes on from it.
 pub fn commit_amend_no_edit(workdir: &Path, opts: &[&str]) -> Result<()> {
-    // Taken only with forwarded arguments: without one git cannot be told to
-    // do anything but amend.
-    let before = if opts.is_empty() {
-        None
-    } else {
-        Some((
-            super::rev_parse(workdir, "HEAD")?,
-            super::rev_parse(workdir, "HEAD^{tree}")?,
-        ))
-    };
-
     let mut args = vec!["commit"];
     args.extend(opts);
     args.extend(["--amend", "--no-edit", "--allow-empty"]);
-    super::run_git(workdir, &args)?;
-
-    if let Some((head, tree)) = before {
-        // Every fold amend has something to commit, so HEAD's tree has to come
-        // out different; git printing instead of committing leaves it alone.
-        // Read from HEAD on both sides, so a `pre-commit` or `post-commit` hook
-        // that stages something of its own cannot fail an amend that happened.
-        if super::rev_parse(workdir, "HEAD^{tree}")? == tree {
-            bail!(
-                "`git commit --amend` left the commit as it was, so nothing was amended\n\
-                 Either an argument after `--` kept git from committing, or what was staged \
-                 already matched the commit"
-            );
-        }
-        // An amend replaces HEAD. Loom's own `--amend` comes last and wins, so
-        // this only catches a git that stops resolving the pair that way.
-        if super::rev_parse(workdir, "HEAD^").is_ok_and(|parent| parent == head) {
-            bail!("`git commit --amend` committed on top of the target instead of amending it");
-        }
-    }
-    Ok(())
+    super::run_git(workdir, &args)
 }
 
 /// True when `path` is gone from both the working tree and the index because
@@ -189,58 +141,11 @@ pub fn stage_from(workdir: &Path, source: &str, files: &[&str]) -> Result<()> {
 /// For a commit loom makes as one step of a longer operation (`fold`): loom
 /// reads the result itself and rewrites on it, and the rebase that follows
 /// needs the terminal.
-/// Unlike [`commit_amend_no_edit`] this does not check that git committed —
-/// what proves it differs per caller — so a caller that then rewrites history
-/// must check for itself (see [`check_fixup_commit`]).
 pub fn commit_captured(workdir: &Path, message: &str, opts: &[&str]) -> Result<()> {
     let mut args = vec!["commit"];
     args.extend(opts);
     args.extend(["-m", message]);
     super::run_git(workdir, &args)
-}
-
-/// Errs unless HEAD is now a new `fixup!` commit on `parent`, which is what a `git
-/// commit` that ran leaves behind; `opts` were forwarded to it. With forwarded
-/// arguments the commit must also hold a different tree: `--only` with no
-/// pathspec commits none of the index, and `--allow-empty` lets the result
-/// through. `done` says what the caller would have done with the commit
-/// ("folded").
-pub fn check_fixup_commit(workdir: &Path, parent: &str, opts: &[&str], done: &str) -> Result<()> {
-    if !committed_onto(workdir, parent) {
-        let blame = if opts.is_empty() {
-            ""
-        } else {
-            "\nAn argument after `--` stopped it from committing"
-        };
-        bail!("`git commit` left no new commit on HEAD, so nothing was {done}{blame}");
-    }
-    if !opts.is_empty() && committed_the_same_tree(workdir, parent) {
-        bail!(
-            "`git commit` made an empty `fixup!` commit, so nothing was {done}\n\
-             An argument after `--` kept the staged changes out of it"
-        );
-    }
-    Ok(())
-}
-
-/// Whether HEAD is now a commit made on top of `parent`. False for a root
-/// HEAD, and for a `git commit` that committed nothing or amended `parent`
-/// away.
-fn committed_onto(workdir: &Path, parent: &str) -> bool {
-    super::rev_parse(workdir, "HEAD^").is_ok_and(|first| first == parent)
-}
-
-/// Whether HEAD holds the same tree as `parent`. A git that cannot answer
-/// says yes, so the caller takes the commit back rather than rewriting history
-/// on top of it.
-fn committed_the_same_tree(workdir: &Path, parent: &str) -> bool {
-    match (
-        super::rev_parse(workdir, "HEAD^{tree}"),
-        super::rev_parse(workdir, &format!("{parent}^{{tree}}")),
-    ) {
-        (Ok(now), Ok(before)) => now == before,
-        _ => true,
-    }
 }
 
 /// Create a commit, with extra `git commit` options from the user.

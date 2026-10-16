@@ -1399,31 +1399,6 @@ fn commit_ignores_trailer_config() {
     assert!(crate::core::changeid::from_message(&msg).is_some(), "{msg}");
 }
 
-/// A forwarded option that creates no commit leaves HEAD alone: the
-/// editor-path stamping must never amend a commit loom did not create.
-#[test]
-fn commit_dry_run_does_not_amend_head() {
-    let test_repo = TestRepo::new_with_remote();
-    let head = test_repo.head_oid();
-    test_repo.write_file("a.txt", "a");
-
-    let result = test_repo.in_dir(|| {
-        super::run(
-            None,
-            true,
-            None,
-            None,
-            vec!["a.txt".to_string()],
-            vec!["--dry-run".to_string()],
-            &graph::Theme::dark(),
-        )
-    });
-    assert!(result.is_ok(), "{result:?}");
-
-    assert_eq!(test_repo.head_oid(), head);
-    assert!(!full_message(&test_repo, "HEAD").contains("Change-Id"));
-}
-
 /// A rebase that refuses to start — the target branch is checked out in another
 /// worktree — still has `commit`'s own commit to take back: it was made before
 /// the rebase existed, and the state file that holds the undo is deleted here,

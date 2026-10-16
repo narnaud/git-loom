@@ -1610,10 +1610,7 @@ fn fold_files_into_commit(
             git::stage_files(workdir, &file_refs)?;
         }
         if let Err(e) = git::commit_amend_no_edit(workdir, git_opts) {
-            // An amend that got as far as replacing HEAD and then failed leaves
-            // it on a commit the user never asked for, so this takes HEAD back
-            // too.
-            undo_commit_attempt(workdir, head_oid, staged_by_loom, staged);
+            undo_commit_attempt(workdir, staged_by_loom, staged);
             return Err(e);
         }
         staged.restore();
@@ -1631,18 +1628,7 @@ fn fold_files_into_commit(
             git::stage_files(workdir, &file_refs)?;
         }
         if let Err(e) = git::commit_captured(workdir, &message, git_opts) {
-            undo_commit_attempt(workdir, head_oid, staged_by_loom, staged);
-            return Err(e);
-        }
-
-        // Data safety: a forwarded argument git takes but loom does not know
-        // can leave no commit behind, amend HEAD in place, or commit nothing.
-        // The squash below would then feed the user's own HEAD commit into the
-        // target and lose it, or rewrite the target with nothing in it, so
-        // check what git actually did before anything is rewritten.
-        if let Err(e) = git::check_fixup_commit(workdir, &head_oid.to_string(), git_opts, "folded")
-        {
-            undo_commit_attempt(workdir, head_oid, staged_by_loom, staged);
+            undo_commit_attempt(workdir, staged_by_loom, staged);
             return Err(e);
         }
 
@@ -1701,35 +1687,10 @@ fn fold_files_into_commit(
     Ok(())
 }
 
-/// Take back a `git commit` that did not do what fold asked: whatever it did to
-/// HEAD goes first, then loom's own staging, then the user's staged patch.
-/// `staged_by_loom` is empty when the caller did not stage anything itself.
-fn undo_commit_attempt(
-    workdir: &Path,
-    head_oid: git2::Oid,
-    staged_by_loom: &[&str],
-    staged: staging::StagedAside<'_>,
-) {
-    // A `--amend` moved HEAD instead of adding to it; the reset puts the
-    // commit back and leaves what it held staged, for the two steps below. A
-    // hook that simply refused leaves HEAD where it was, and there is nothing
-    // to take back — an unreadable HEAD counts as moved, so the reset runs.
-    let head_moved = git::rev_parse(workdir, "HEAD").ok() != Some(head_oid.to_string());
-    if head_moved && let Err(e) = git::reset_soft(workdir, &head_oid.to_string()) {
-        // The commit git replaced is reachable by hash only, so name it.
-        msg::warn(&format!(
-            "could not put your commit back on HEAD: {e}\n\
-             `git reset --soft {head_oid}` restores it"
-        ));
-        // Restoring the index over the wrong HEAD would only make it worse.
-        git::save_or_warn(
-            workdir,
-            "unrestored-staged",
-            &staged.release(),
-            git::Replay::Cached,
-        );
-        return;
-    }
+/// Take back a failed `git commit`: loom's own staging first, then the user's
+/// staged patch. `staged_by_loom` is empty when the caller did not stage
+/// anything itself.
+fn undo_commit_attempt(workdir: &Path, staged_by_loom: &[&str], staged: staging::StagedAside<'_>) {
     if !staged_by_loom.is_empty() {
         let _ = git::unstage_files(workdir, staged_by_loom);
     }
@@ -2126,21 +2087,20 @@ fn fold_commit_file_to_unstaged(
         if let Err(e) = git::apply_cached_patch_reverse(workdir, &file_diff)
             .and_then(|()| git::commit_amend_no_edit(workdir, git_opts))
         {
-            // Only `path`'s entry moved, and HEAD if a forwarded option let the
-            // amend through before its check failed. Not `rollback_to_snapshot`:
-            // the unstaging left a staged new file untracked, which its
-            // `reset --hard` keeps and its replay then cannot create. Not
+            // Only `path`'s entry moved. Not `rollback_to_snapshot`: the
+            // unstaging left a staged new file untracked, which its `reset
+            // --hard` keeps and its replay then cannot create. Not
             // `stage_from`: `git restore --staged` refuses a deletion whose
             // reverse apply failed, as it is in neither HEAD nor the index.
             let literal = format!(":(literal){path}");
-            if let Err(reset_err) = git::reset_soft(workdir, &saved_head)
-                .and_then(|()| git::run_git(workdir, &["reset", "-q", &saved_head, "--", &literal]))
+            if let Err(reset_err) =
+                git::run_git(workdir, &["reset", "-q", &saved_head, "--", &literal])
             {
                 msg::warn(&format!(
                     "could not reset back to {}: {reset_err}",
                     git::short_hash(&saved_head)
                 ));
-                // Restoring over the wrong HEAD or index would only make it worse.
+                // Restoring over the wrong index would only make it worse.
                 let patch = staged_aside.release() + &path_aside.release();
                 git::save_or_warn(
                     workdir,

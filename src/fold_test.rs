@@ -1471,8 +1471,8 @@ fn fold_commit_file_to_unstaged_head_parks_only_a_conflicting_staged_edit() {
     );
 }
 
-/// When HEAD cannot be put back, restaging over it would merge the patch into
-/// the wrong base, so it is parked instead.
+/// When the index cannot be put back, restaging over it would merge the patch
+/// into the wrong base, so it is parked instead.
 #[cfg(unix)]
 #[test]
 fn fold_commit_file_to_unstaged_head_parks_staged_work_when_the_reset_fails() {
@@ -1481,11 +1481,11 @@ fn fold_commit_file_to_unstaged_head_parks_staged_work_when_the_reset_fails() {
     test_repo.commit_multi(&[("a.txt", "a2\n"), ("b.txt", "b2\n")], "Two files");
     test_repo.write_file("z.txt", "z\n");
     test_repo.stage_files(&["z.txt"]);
-    let branch = test_repo.current_branch_name();
-    // The lock outlives the hook and blocks the reset's update of the branch.
+    // An as-is commit releases its own index lock before `pre-commit`, so this
+    // one outlives the hook and blocks the reset's write of the index.
     test_repo.install_hook(
         "pre-commit",
-        &format!("touch \"$(git rev-parse --git-dir)/refs/heads/{branch}.lock\"\nexit 1\n"),
+        "touch \"$(git rev-parse --git-dir)/index.lock\"\nexit 1\n",
     );
 
     let err = super::fold_commit_file_to_unstaged(
@@ -4780,37 +4780,6 @@ fn fold_commit_file_to_commit_keeps_staging_on_success() {
 
 // ── Forwarded git arguments (Spec 021) ──────────────────────────────────
 
-/// The fixup path's last resort, reachable only through an argument loom does
-/// not know: git amended HEAD instead of committing on top of it, and the
-/// squash would have taken the user's own commit into the target.
-#[test]
-fn an_amend_that_replaced_head_is_taken_back() {
-    let t = TestRepo::new();
-    t.commit("First", "file1.txt");
-    t.commit("Second", "other.txt");
-    t.write_file("other.txt", "staged by the user");
-    t.stage_files(&["other.txt"]);
-    t.write_file("file1.txt", "folded");
-
-    let workdir = t.workdir();
-    let saved =
-        crate::core::staging::save_and_unstage_other_staged(&t.repo, &workdir, &["file1.txt"])
-            .unwrap();
-    crate::git::stage_files(&workdir, &["file1.txt"]).unwrap();
-    let head = t.head_oid();
-    crate::git::run_git(&workdir, &["commit", "--amend", "--no-edit"]).unwrap();
-    assert_ne!(t.head_oid(), head, "the amend should have moved HEAD");
-
-    super::undo_commit_attempt(&workdir, head, &["file1.txt"], saved);
-
-    assert_eq!(t.head_oid(), head);
-    assert_eq!(t.get_message(0), "Second");
-    assert_eq!(t.read_file("file1.txt"), "folded");
-    let status = t.status_porcelain();
-    assert!(status.contains(" M file1.txt"), "{status}");
-    assert!(status.contains("M  other.txt"), "{status}");
-}
-
 /// The `-p` amend happens at a rebase pause, where the forwarded arguments have
 /// to arrive too.
 #[cfg(unix)]
@@ -4942,68 +4911,6 @@ fn a_forwarded_fold_into_an_older_commit_keeps_the_commits_above_it() {
     assert_eq!(t.read_file("f1.txt"), "folded");
 }
 
-/// `--amend` on the fixup path makes git rewrite the user's own HEAD instead
-/// of committing the fixup; the squash would then have eaten that commit.
-#[test]
-fn a_forwarded_amend_on_the_fixup_path_rolls_back() {
-    let t = TestRepo::new_with_remote();
-    t.commit("Base", "base.txt");
-    let first = t.commit("First", "f1.txt");
-    t.commit("Second", "f2.txt");
-    let before = stage_a_mix(&t, "base.txt");
-    t.write_file("f1.txt", "folded");
-
-    let err = super::fold_files_into_commit(
-        &t.repo,
-        &["f1.txt".to_string()],
-        &first.to_string(),
-        false,
-        &["--amend"],
-        None,
-    )
-    .unwrap_err();
-
-    assert!(
-        err.to_string().contains("left no new commit on HEAD"),
-        "{err}"
-    );
-    assert_eq!(t.commit_messages()[..3], ["Second", "First", "Base"]);
-    assert_eq!(t.read_file("f1.txt"), "folded");
-    let status = t.status_porcelain();
-    assert!(status.contains(" M f1.txt"), "{status}");
-    assert_eq!(
-        status.lines().filter(|l| !l.contains("f1.txt")).count(),
-        before.lines().count(),
-        "the user's own staged set is back: {status}"
-    );
-}
-
-/// A dry run prints and exits 0 without committing, so the amend has to catch
-/// it before the fold reports success.
-#[test]
-fn a_forwarded_dry_run_on_the_amend_rolls_back() {
-    let t = TestRepo::new_with_remote();
-    t.commit("Base", "base.txt");
-    let head = t.commit("Only", "f1.txt");
-    let before = stage_a_mix(&t, "base.txt");
-    t.write_file("f1.txt", "folded");
-
-    let err = super::fold_files_into_commit(
-        &t.repo,
-        &["f1.txt".to_string()],
-        &head.to_string(),
-        false,
-        &["--dry-run"],
-        None,
-    )
-    .unwrap_err();
-
-    assert!(err.to_string().contains("nothing was amended"), "{err}");
-    assert_eq!(t.head_oid(), head);
-    assert_eq!(t.read_file("f1.txt"), "folded");
-    assert_eq!(t.status_porcelain(), format!("{before} M f1.txt\n"));
-}
-
 /// The fixup path's `git commit` can fail outright — a refusing `pre-commit`
 /// hook — and must hand the index back exactly as it found it.
 #[cfg(unix)]
@@ -5121,35 +5028,6 @@ fn a_forwarded_message_rewords_both_commits_of_a_move() {
     .unwrap();
 
     assert_eq!(t.commit_messages()[..3], ["hijacked", "hijacked", "Base"]);
-}
-
-/// `--only` with no pathspec commits none of the index, and `--allow-empty`
-/// lets the result through, so git makes a `fixup!` child holding nothing.
-/// Squashing that rewrites the target with nothing in it and reports success.
-#[test]
-fn an_empty_fixup_commit_is_refused_before_the_squash() {
-    let t = TestRepo::new_with_remote();
-    t.commit("Base", "base.txt");
-    let first = t.commit("First", "f1.txt");
-    t.commit("Second", "f2.txt");
-    let before = stage_a_mix(&t, "base.txt");
-    let head = t.head_oid();
-    t.write_file("f1.txt", "folded");
-
-    let err = super::fold_files_into_commit(
-        &t.repo,
-        &["f1.txt".to_string()],
-        &first.to_string(),
-        false,
-        &["--only", "--allow-empty"],
-        None,
-    )
-    .unwrap_err();
-
-    assert!(err.to_string().contains("empty `fixup!` commit"), "{err}");
-    assert_eq!(t.head_oid(), head, "nothing was rewritten");
-    assert_eq!(t.commit_messages()[..3], ["Second", "First", "Base"]);
-    assert_eq!(t.status_porcelain(), format!("{before} M f1.txt\n"));
 }
 
 /// A target the weave cannot rewrite is refused before the picker stages, so

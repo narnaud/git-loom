@@ -626,63 +626,6 @@ fn absorb_forwards_to_the_fixup_commits() {
     );
 }
 
-/// `--amend` turns the fixup into an amend of the user's HEAD commit, which
-/// the squash would then have folded into the target and lost.
-#[test]
-fn a_forwarded_amend_leaves_history_alone() {
-    let test_repo = TestRepo::new_with_remote();
-    test_repo.commit("Add file1", "file1.txt");
-    let head = test_repo.commit("Add file2", "file2.txt");
-    test_repo.write_file("file1.txt", "modified file1");
-
-    let err = test_repo
-        .in_dir(|| super::run(false, vec![], vec!["--amend".to_string()]))
-        .unwrap_err();
-
-    assert!(err.to_string().contains("nothing was absorbed"), "{err}");
-    assert_eq!(test_repo.head_oid(), head);
-    assert_eq!(test_repo.read_file("file1.txt"), "modified file1");
-    assert_eq!(test_repo.status_porcelain(), " M file1.txt\n");
-}
-
-#[test]
-fn a_forwarded_dry_run_leaves_history_alone() {
-    let test_repo = TestRepo::new_with_remote();
-    test_repo.commit("Add file1", "file1.txt");
-    let head = test_repo.commit("Add file2", "file2.txt");
-    test_repo.write_file("file1.txt", "modified file1");
-
-    let err = test_repo
-        .in_dir(|| super::run(false, vec![], vec!["--dry-run".to_string()]))
-        .unwrap_err();
-
-    assert!(err.to_string().contains("left no new commit"), "{err}");
-    assert_eq!(test_repo.head_oid(), head);
-    assert_eq!(test_repo.status_porcelain(), " M file1.txt\n");
-}
-
-#[test]
-fn an_empty_fixup_commit_leaves_history_alone() {
-    let test_repo = TestRepo::new_with_remote();
-    test_repo.commit("Add file1", "file1.txt");
-    let head = test_repo.commit("Add file2", "file2.txt");
-    test_repo.write_file("file1.txt", "modified file1");
-
-    let err = test_repo
-        .in_dir(|| {
-            super::run(
-                false,
-                vec![],
-                vec!["--only".to_string(), "--allow-empty".to_string()],
-            )
-        })
-        .unwrap_err();
-
-    assert!(err.to_string().contains("empty `fixup!` commit"), "{err}");
-    assert_eq!(test_repo.head_oid(), head);
-    assert_eq!(test_repo.status_porcelain(), " M file1.txt\n");
-}
-
 #[cfg(unix)]
 #[test]
 fn absorb_skips_the_pre_commit_hook_with_no_verify() {

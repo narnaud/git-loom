@@ -24,7 +24,7 @@ With one argument, fold the current index into that target. With two or more, th
 - `--hunks <id>` (repeated) with `--hunks-from <fingerprint>`: supply the `-p` selection by id instead of picking it, in every form. Requires `-p`, and each flag requires the other.
 - `zz`: reserved `Unstaged` target/source representing the working directory/all its changes.
 - `commit_sid:index` (for example `fa:0`): `CommitFile` shown by `git loom status -f`.
-- `-- <git args>...`: forward untouched to the `git commit` fold runs itself — the amend, or the `fixup!` commit for a non-HEAD target (for example `--no-verify`, `-q`; Spec 021). A whole-commit form takes none. Loom's own arguments come last, so a boolean git resolves last-wins (`--no-amend`, `--edit`) has no effect; a message source (`-m`, `-F`, `-c`/`-C`, `--fixup`, `--squash`) still rewords every commit fold makes — both of them on the forms that move a file or hunks between two commits, a pathspec still restricts it with `--only` semantics, and `-a`/`-i` still sweep in changes fold was not given. Before anything is rewritten, the fixup path verifies that git left a new commit on HEAD and, with forwarded arguments, that it holds a different tree; an amend carrying forwarded arguments verifies that HEAD's tree changed. Any failure takes the commit attempt back whole.
+- `-- <git args>...`: forward untouched to the `git commit` fold runs itself — the amend, or the `fixup!` commit for a non-HEAD target (for example `--no-verify`, `-q`; Spec 021). A whole-commit form takes none. Loom's own arguments come last, so a boolean git resolves last-wins (`--no-amend`, `--edit`) has no effect; a message source (`-m`, `-F`, `-c`/`-C`, `--fixup`, `--squash`) still rewords every commit fold makes — both of them on the forms that move a file or hunks between two commits, a pathspec still restricts it with `--only` semantics, and `-a`/`-i` still sweep in changes fold was not given. Loom never checks what git did with them (expert mode, Spec 021).
 
 ## Resolution and dispatch
 
@@ -67,10 +67,6 @@ Errors are verbatim; `⏎` marks a line break within a message.
 | Single source already directly above/below target | ``Commit `<hash>` is already directly above `<hash>` `` (or `below`) |
 | Several sources already in place | ``Commits are already in place above `<hash>` `` (or `below`) |
 | `--` arguments on a whole-commit form | ``<operation> runs no `git commit`, so it takes no arguments after `--` `` |
-| Forwarded argument left no fixup commit | ``` `git commit` left no new commit on HEAD, so nothing was folded⏎An argument after `--` stopped it from committing ``` (second line only with forwarded arguments) |
-| Forwarded argument left the fixup commit empty | ``` `git commit` made an empty `fixup!` commit, so nothing was folded⏎An argument after `--` kept the staged changes out of it ``` |
-| Amend with `--` arguments changed nothing | ``` `git commit --amend` left the commit as it was, so nothing was amended⏎Either an argument after `--` kept git from committing, or what was staged already matched the commit ``` |
-| Amend committed on top instead (git stopped resolving `--amend` last-wins) | ``` `git commit --amend` committed on top of the target instead of amending it ``` |
 
 ## File/current-change amendments
 

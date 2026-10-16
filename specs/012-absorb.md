@@ -40,9 +40,8 @@ git-loom absorb [--dry-run] [files...] [-- <git args>...]
 
 - `[files...]`: Optional list of file paths to restrict absorption to.
   If omitted, all tracked files with uncommitted changes are analyzed.
-- `-- <git args>...`: forwarded to the `git commit` of every `fixup!` commit;
-  each must be a new commit on HEAD, and non-empty with forwarded arguments,
-  or the attempt rolls back before the rebase (Spec 021).
+- `-- <git args>...`: forwarded to the `git commit` of every `fixup!` commit,
+  unchecked (expert mode, Spec 021).
 
 ## Algorithm
 

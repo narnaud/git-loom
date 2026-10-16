@@ -225,12 +225,6 @@ gl_capture reword "$hooked_hash" -m "Reworded" -- --no-verify
 assert_exit_ok "$CODE" "reword_no_verify_ok"
 assert_eq "Reworded" "$(msg_at 1)" "reword_no_verify_message"
 
-describe "reword: a forwarded --dry-run aborts the reword"
-gl_capture reword HEAD -m "Never" -- --dry-run
-assert_exit_fail "$CODE" "reword_dry_run_fail"
-assert_contains "$OUT" "nothing was reworded" "reword_dry_run_msg"
-assert_eq "Above reword" "$(head_msg)" "reword_dry_run_message_kept"
-
 describe "reword: renaming a branch takes no arguments after --"
 git -C "$WORK" branch rename-me
 gl_capture reword rename-me -m renamed -- --no-verify

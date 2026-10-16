@@ -27,6 +27,21 @@ buys:
 A separator has none of those problems, and it is the same convention git
 itself uses. The cost is one extra `--`.
 
+## Expert Mode
+
+The separator is for someone who knows what they are asking git to do. Loom
+forwards the tokens and never checks what git did with them. An argument that
+makes git print instead of commit (`--dry-run`, a status format), amend instead
+of commit, commit something other than what loom staged (`-a`, `-i`, `--only`,
+a pathspec), or reword (`-m`, `-F`, `-c`/`-C`) leaves loom going on from
+whatever git did, history rewrite included. Data Safety covers loom's own
+arguments, not what a forwarded one makes git do: a forwarded `--amend` on a
+fold into an older commit squashes the user's HEAD commit into the target.
+
+Loom owns only two things here: its own arguments come last, so a boolean git
+resolves last-wins keeps loom's value, and a form that runs no git command for
+the arguments to reach rejects the separator rather than drop them.
+
 ## Which Commands
 
 | Command | Underlying git command |
@@ -119,7 +134,7 @@ pager and colors along with everything else.
 `fold`, `split`, `absorb` and `reword` do not step back either, for a different
 reason: each commit is one step of a rewrite that goes on from what git did
 (below), so loom keeps the run to itself. A forwarded `--dry-run` therefore
-prints into the trace log and ends in an error rather than on the terminal.
+prints into the trace log, and loom goes on as if git had committed.
 Where loom opens the editor itself — `split` or `reword` without `-m` — that
 commit runs uncaptured as it always does.
 
@@ -148,40 +163,7 @@ working tree's copy of that path rather than the index's. `-a`/`--all` and
 given; on a non-HEAD target that buries them in a rewritten historical commit.
 Fold's own unstaging feeds them: the user's other staged files are moved out of
 the index and left in the working tree for the duration, which is exactly where
-`-a` picks them up.
-These are the price of forwarding verbatim, and the reason `--` is for someone
-who knows what they are asking git to do.
-
-What loom does not leave to the user is a commit that never happened.
-`--dry-run` and the status formats make git print and exit 0 without
-committing, which would leave fold rewriting history around nothing, so both
-commit paths check what git actually did before anything is rewritten (Data
-Safety):
-
-- The fixup commit, on two counts. Unless HEAD is now a new commit whose parent
-  is the HEAD it was made on, nothing is squashed and the index goes back —
-  *"`git commit` left no new commit on HEAD, so nothing was folded"*. Without it
-  a forwarded `--amend` squashes the user's own HEAD commit into the target and
-  loses it. That parent alone does not prove the commit holds anything: `--only`
-  with no pathspec commits none of the index and `--allow-empty` lets the result
-  through, so the tree is compared as well — *"`git commit` made an empty
-  `fixup!` commit, so nothing was folded"*. Squashing that rewrites the target
-  with nothing in it and reports the fold as done.
-- Every amend that carries forwarded arguments. A fold amend normally has
-  something to commit, so HEAD's tree has to come out different — *"`git commit
-  --amend` left the commit as it was, so nothing was amended"*. The message
-  names both causes rather than blaming the arguments: staging a change and
-  then putting the file back reaches the same amend with nothing in it, and
-  without `--` that case passes silently. The tree is read from
-  HEAD on both sides, because what a hook stages is the commit's business: an
-  index the amend should have emptied fails on a `post-commit` hook, and a tree
-  written from the index beforehand fails on a `pre-commit` one. Not HEAD's
-  hash either, which an amend that changes nothing within the same second
-  reproduces. Without forwarded arguments the check does not run: git cannot be
-  told to do anything but amend then.
-
-Either way the commit attempt is taken back whole — HEAD, loom's own staging,
-and the user's other staged files — before the error is reported.
+`-a` picks them up. These are the price of forwarding verbatim (Expert Mode).
 
 **What changes:** nothing.
 
@@ -190,29 +172,17 @@ and the user's other staged files — before the error is reported.
 ### Other Commands That Commit
 
 `split`, `absorb` and `reword` follow fold: everything is forwarded verbatim and
-placed before loom's own arguments, nothing is inspected, and what loom checks
-is the commit git made, before anything is rewritten. A failed check takes the
-attempt back whole and reports the error (Data Safety).
+placed before loom's own arguments, and nothing is inspected or checked (Expert
+Mode).
 
 - `split` forwards to both commits, and a forwarded message source reaches
-  both. With forwarded arguments the result must be the commit split in two:
-  two commits on the original parent, neither empty, that add up to the
-  original's tree — *"`git commit` did not leave the commit split in two, so
-  nothing was split"*. That catches `--dry-run`, `--amend`, and `-a`, `-i` or a
-  pathspec that commits the working tree's copy. On HEAD the commit is put
-  back with a mixed reset; elsewhere the rebase is aborted (Spec 013).
-- `absorb` forwards to every `fixup!` commit, and checks each one as fold
-  checks its own: *"`git commit` left no new commit on HEAD, so nothing was
-  absorbed"*, and with forwarded arguments *"`git commit` made an empty
-  `fixup!` commit, so nothing was absorbed"*. `-a` and `-i` sweep the changes
+  both.
+- `absorb` forwards to every `fixup!` commit. `-a` and `-i` sweep the changes
   absorb skipped into the first fixup, and so into its target.
 - `reword` forwards to the amend of a commit target; a branch target runs no
   `git commit` and rejects the separator — *"renaming a branch runs no `git
-  commit`, so it takes no arguments after `--`"*. With forwarded arguments the
-  amend must leave HEAD on a different commit — *"`git commit --amend` left the
-  commit as it was, so nothing was reworded"* — and the rebase is aborted
-  otherwise. The working tree is autostashed at that pause, so `-a` has
-  nothing to sweep.
+  commit`, so it takes no arguments after `--`"*. The working tree is
+  autostashed at that pause, so `-a` has nothing to sweep.
 
 **What changes:** nothing.
 

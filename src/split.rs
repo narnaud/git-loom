@@ -353,7 +353,7 @@ fn perform_head_split(
     msg2: &str,
     git_opts: &[&str],
 ) -> Result<(String, String)> {
-    split_head_or_undo(workdir, git_opts, |original| {
+    split_head_or_undo(workdir, |original| {
         let selected_refs: Vec<&str> = selected.iter().map(|s| s.as_str()).collect();
         git::stage_from(workdir, original, &selected_refs)?;
         commit_or_editor(repo, workdir, msg1, git_opts)?;
@@ -367,23 +367,15 @@ fn perform_head_split(
 /// Reset HEAD to its parent, let `make_commits` commit the two halves of the
 /// former HEAD (passed as `original`), and return their hashes.
 ///
-/// Any failure puts HEAD and the index back on `original` (Spec 013). With
-/// forwarded `git_opts` (Spec 021) the result must also be the commit split in
-/// two, since `git commit` can exit 0 without committing, amend, or sweep in
-/// more.
+/// Any failure puts HEAD and the index back on `original` (Spec 013).
 fn split_head_or_undo(
     workdir: &std::path::Path,
-    git_opts: &[&str],
     make_commits: impl FnOnce(&str) -> Result<()>,
 ) -> Result<(String, String)> {
     let original = git::rev_parse(workdir, "HEAD")?;
-    let base = git::rev_parse(workdir, "HEAD~1")?;
-    git::reset_mixed(workdir, &base)?;
+    git::reset_mixed(workdir, "HEAD~1")?;
 
     let result = make_commits(&original).and_then(|()| {
-        if !git_opts.is_empty() {
-            check_split_in_two(workdir, &base, &original)?;
-        }
         Ok((
             git::rev_parse(workdir, "HEAD~1")?,
             git::rev_parse(workdir, "HEAD")?,
@@ -398,23 +390,6 @@ fn split_head_or_undo(
         ));
     }
     result
-}
-
-/// Errs unless HEAD and its parent are two non-empty commits on `base` that
-/// add up to `original`'s tree.
-fn check_split_in_two(workdir: &std::path::Path, base: &str, original: &str) -> Result<()> {
-    let tree = |rev: &str| git::rev_parse(workdir, &format!("{rev}^{{tree}}"));
-    let in_two = git::rev_parse(workdir, "HEAD~2").is_ok_and(|b| b == base)
-        && tree(base)? != tree("HEAD~1")?
-        && tree("HEAD~1")? != tree("HEAD")?
-        && tree("HEAD")? == tree(original)?;
-    if !in_two {
-        bail!(
-            "`git commit` did not leave the commit split in two, so nothing was split\n\
-             An argument after `--` changed what it committed"
-        );
-    }
-    Ok(())
 }
 
 /// Perform the hunk-based split operation.
@@ -454,7 +429,7 @@ fn perform_head_split_by_hunks(
     msg2: &str,
     git_opts: &[&str],
 ) -> Result<(String, String)> {
-    split_head_or_undo(workdir, git_opts, |original| {
+    split_head_or_undo(workdir, |original| {
         let mut selected_patch = String::new();
         for file in selections {
             let selected: Vec<_> = file
