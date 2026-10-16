@@ -2233,3 +2233,31 @@ fn ensure_todo_edits_wants_an_edit_line_for_the_target() {
     assert!(check("edit \n", oid).is_err());
     assert!(check(&format!("edit {other} # other\n"), oid).is_err());
 }
+
+#[test]
+fn from_repo_refuses_an_octopus_merge() {
+    let (t, int1) = crate::core::test_helpers::repo_with_octopus_merge();
+
+    let err = Weave::from_repo(&t.repo).unwrap_err().to_string();
+
+    assert!(err.contains("octopus"), "{err}");
+    let int1 = int1.to_string();
+    let reset = format!("git reset --keep {}", git::short_hash(&int1));
+    assert!(err.contains(&reset), "{err}");
+}
+
+#[test]
+fn from_repo_refuses_an_octopus_merge_below_head() {
+    let (t, _) = crate::core::test_helpers::repo_with_octopus_merge();
+    crate::git::run_git(&t.workdir(), &["commit", "--allow-empty", "-m", "int2"]).unwrap();
+    let base = t.find_remote_branch_target("origin/main").to_string();
+
+    let err = Weave::from_repo(&t.repo).unwrap_err().to_string();
+
+    assert!(err.contains("octopus"), "{err}");
+    let rebase = format!(
+        "git rebase -i --rebase-merges --update-refs {}",
+        git::short_hash(&base)
+    );
+    assert!(err.contains(&rebase), "{err}");
+}

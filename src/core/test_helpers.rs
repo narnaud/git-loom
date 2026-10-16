@@ -1001,6 +1001,33 @@ pub fn repo_with_merge_above_no_upstream() -> (TestRepo, git2::Oid) {
     (t, target)
 }
 
+/// `int1` on `integration`, then an octopus merge of `feat1` and `feat2`, both
+/// forked from the base. Returns the repo and `int1`.
+pub fn repo_with_octopus_merge() -> (TestRepo, git2::Oid) {
+    let t = TestRepo::new_with_remote();
+    let base = t.head_oid().to_string();
+    let int1 = t.commit("int1", "int1.txt");
+    for name in ["feat1", "feat2"] {
+        t.create_branch_at(name, &base);
+        t.switch_branch(name);
+        t.commit(name, &format!("{name}.txt"));
+    }
+    t.switch_branch("integration");
+    crate::git::run_git(
+        &t.workdir(),
+        &[
+            "merge",
+            "--no-ff",
+            "-m",
+            "Merge feat1 and feat2",
+            "feat1",
+            "feat2",
+        ],
+    )
+    .unwrap();
+    (t, int1)
+}
+
 // ── In-memory status graphs ──
 
 /// Drop ANSI escapes so rendered output can be compared as plain text.

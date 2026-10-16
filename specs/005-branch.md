@@ -40,8 +40,9 @@ For `branch`:
 
 1. obtain and validate the name;
 2. resolve `--on`, or find the upstream merge-base;
-3. create the branch at that full commit hash;
-4. weave when required below.
+3. when weaving is required, refuse a weave that cannot be built (Spec 004);
+4. create the branch at that full commit hash;
+5. weave when required below.
 
 Status ownership walks from a branch tip to the next branch boundary or base. Creating a ref between commits splits ownership; a ref at the base owns none and displays as an empty section (Spec 001).
 

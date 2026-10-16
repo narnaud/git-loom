@@ -46,6 +46,16 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
 
     let commit_hash = resolve_commit(&repo, &info, target.as_deref())?;
 
+    let weave = match &info {
+        Some(info) if should_weave(info, &repo, &commit_hash)? => {
+            // Before the branch exists, so a weave that cannot be built leaves
+            // nothing to take back (Spec 005).
+            Weave::from_repo_with_info(&repo, info)?;
+            true
+        }
+        _ => false,
+    };
+
     git::branch_create(workdir, &name, &commit_hash)?;
 
     repo::warn_if_hidden(&repo, &name);
@@ -55,10 +65,7 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
         git::short_hash(&commit_hash)
     ));
 
-    // Check if weaving is needed (only possible when repo info is available)
-    if let Some(ref info) = info
-        && should_weave(info, &repo, &commit_hash)?
-    {
+    if weave {
         // Use from_repo (not from_repo_with_info) because the branch list
         // is stale — the new branch was just created after info was gathered.
         let mut graph = Weave::from_repo(&repo)?;

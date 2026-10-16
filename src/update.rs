@@ -112,7 +112,7 @@ pub fn run(skip_confirm: bool) -> Result<()> {
     // `git rebase --rebase-merges` preserves merge topology literally, which can
     // place new upstream commits inside a feature branch instead of on the base
     // line; the weave's todo `reset onto` for every branch section, so branches
-    // land on the new upstream tip. No topology means a plain rebase.
+    // land on the new upstream tip.
     let (todo, merged_branches) = match Weave::from_repo(&repo) {
         Ok(mut graph) => {
             // Drop branch-section commits already in the new upstream, so their
@@ -143,7 +143,17 @@ pub fn run(skip_confirm: bool) -> Result<()> {
             merged.dedup();
             (Some(graph.to_todo()), merged)
         }
-        Err(_) => (None, Vec::new()),
+        // Git's own rebase still updates (an octopus merge, Spec 010). The
+        // cause line only: the builder's remedy is for a refused rewrite.
+        Err(e) => {
+            let cause = e.to_string();
+            msg::warn(&format!(
+                "{}\nUpdating with git's own rebase instead: branches already \
+                 merged upstream are not offered for removal",
+                cause.lines().next().unwrap_or_default()
+            ));
+            (None, Vec::new())
+        }
     };
 
     // Save rollback state before the rebase

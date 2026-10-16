@@ -34,6 +34,7 @@ The base-to-HEAD first-parent line contains regular commits (optionally carrying
 Walk first parents from HEAD to the base:
 
 - For a merge, follow its second parent to collect branch commits, match refs by tip, and create a section plus merge entry.
+- Refuse a merge with more than two parents (octopus): a section holds one branch, so rebuilding it would drop the others.
 - For a regular commit, create an integration entry and attach any branch ref at that commit as non-woven.
 - Skip empty branches whose tip is the base.
 

@@ -1462,3 +1462,40 @@ fn commit_rolls_back_when_the_rebase_refuses_to_start() {
         "the state file goes with the rollback"
     );
 }
+
+#[test]
+fn commit_refuses_an_octopus_merge_before_committing() {
+    let (t, _) = crate::core::test_helpers::repo_with_octopus_merge();
+    t.write_file("new.txt", "content");
+    t.stage_files(&["new.txt"]);
+    let head_before = t.head_oid();
+    let status_before = t.status_porcelain();
+
+    let err = t
+        .in_dir(|| {
+            run(
+                Some("feature-new".to_string()),
+                Some("Add file".to_string()),
+                vec![],
+            )
+        })
+        .unwrap_err()
+        .to_string();
+
+    assert!(err.contains("octopus"), "{err}");
+    assert_eq!(t.head_oid(), head_before, "{err}");
+    assert_eq!(t.status_porcelain(), status_before, "{err}");
+    assert!(!t.branch_exists("feature-new"), "{err}");
+}
+
+#[test]
+fn loose_commit_works_over_an_octopus_merge() {
+    let (t, _) = crate::core::test_helpers::repo_with_octopus_merge();
+    t.write_file("new.txt", "content");
+    let octopus = t.head_oid();
+
+    t.in_dir(|| run_integration("Loose", vec!["new.txt".to_string()]))
+        .unwrap();
+
+    assert_eq!(t.head_commit().parent_id(0).unwrap(), octopus);
+}

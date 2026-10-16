@@ -67,6 +67,8 @@ Resolve `-b` with `resolve_arg(..., [Branch])` (Spec 002):
 
 Every `-b` refusal comes before staging, so it leaves the index untouched; a new branch is created only once the commit exists, so a failed `git commit` (a hook, an empty editor message) leaves none behind; if creating it fails (`feature/x` next to `feature`), the commit is undone with its changes left staged.
 
+In branch-targeted mode, a weave that cannot be built (Spec 004) is refused before the branch prompt and staging.
+
 Without `-b`/`-l` when loose-mode name matching does not apply, show a picker of woven branches plus “create new branch.” If none exist, prompt directly to create one.
 
 A new empty target MUST fork from the base, even when other sections exist, so branches remain parallel rather than stacking on integration merges.

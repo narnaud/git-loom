@@ -950,3 +950,17 @@ fn reword_on_an_integration_branch_reports_why_the_weave_cannot_be_built() {
     assert!(!crate::git::rebase_is_in_progress(t.repo.path()), "{err}");
     assert_eq!(t.status_porcelain(), status_before, "{err}");
 }
+
+#[test]
+fn reword_refuses_an_octopus_merge() {
+    // The weave rebuilt the merge from `feat1` alone, dropping `feat2` (#450).
+    let (t, int1) = crate::core::test_helpers::repo_with_octopus_merge();
+    let head_before = t.head_oid();
+
+    let err = super::reword_commit(&t.repo, &int1.to_string(), Some("New".to_string()), &[])
+        .unwrap_err()
+        .to_string();
+
+    assert!(err.contains("octopus"), "{err}");
+    assert_eq!(t.head_oid(), head_before, "{err}");
+}

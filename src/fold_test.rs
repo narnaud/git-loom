@@ -5120,3 +5120,24 @@ fn fold_relative_to_a_redundant_commit_does_not_offer_to_drop_it() {
     assert!(err.contains("is redundant"), "{err}");
     assert!(!err.contains("loom drop"), "{err}");
 }
+
+#[test]
+fn fold_picked_hunks_refuses_an_octopus_merge_before_staging() {
+    let (t, int1) = crate::core::test_helpers::repo_with_octopus_merge();
+    t.write_file("int1.txt", "edited\n");
+    let workdir = t.workdir();
+    let mut picked = crate::core::staging::collect_file_entries(&t.repo, &workdir, None).unwrap();
+    for hunk in picked.iter_mut().flat_map(|f| f.hunks.iter_mut()) {
+        hunk.selected = true;
+    }
+    let stamp = crate::core::staging::binary_stamp(&workdir, &picked);
+    let status_before = t.status_porcelain();
+
+    let err = t
+        .in_dir(|| super::run_picked(&picked, &stamp, &int1.to_string()))
+        .unwrap_err()
+        .to_string();
+
+    assert!(err.contains("octopus"), "{err}");
+    assert_eq!(t.status_porcelain(), status_before, "{err}");
+}

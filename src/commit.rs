@@ -86,6 +86,12 @@ pub fn run(
         || (branch.is_none()
             && info.branch_name == repo::upstream_local_branch(&info.upstream.label));
 
+    // The graph that drives the rebase is built only once the commit is on
+    // HEAD: one that cannot be built is refused before the branch prompt or staging.
+    if !loose {
+        Weave::from_repo_with_info(&repo, &info)?;
+    }
+
     // Ask for the branch before `-p` stages anything: the branch prompt fires
     // after staging, and answering it re-runs the command, which without `-p`
     // stages whole files and undoes the picking.

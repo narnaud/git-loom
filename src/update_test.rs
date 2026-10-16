@@ -1664,3 +1664,29 @@ fn a_failed_fetch_under_the_tui_hints_at_credentials() {
     let outside_tui = test_repo.in_dir(|| super::run(false)).unwrap_err();
     assert!(!outside_tui.to_string().contains("credentials"));
 }
+
+#[test]
+fn update_rebases_an_octopus_merge_onto_upstream() {
+    // Git's default `--rebase-merges` kept `int1` and `feat2` on their old base
+    // once upstream held `feat1`, and merged upstream into the octopus (#450).
+    let (t, _) = crate::core::test_helpers::repo_with_octopus_merge();
+    t.push_branch_to_remote_main("feat1");
+    let upstream = t.add_remote_commits(&["Upstream change"]);
+
+    t.in_dir(|| super::run(false)).unwrap();
+
+    let head = t.head_commit();
+    assert!(
+        t.repo
+            .graph_descendant_of(head.parent_id(0).unwrap(), upstream)
+            .unwrap()
+    );
+    assert!(
+        t.repo
+            .graph_descendant_of(t.get_branch_target("feat2"), upstream)
+            .unwrap()
+    );
+    for file in ["int1.txt", "feat1.txt", "feat2.txt"] {
+        assert!(t.workdir().join(file).exists(), "{file}");
+    }
+}

@@ -102,13 +102,15 @@ git-loom update [--yes]
 - Branches without tracking configuration are not affected by gone-upstream
   cleanup
 
-### Fallback (no integration topology)
+### Fallback (weave cannot be built)
 
-When the current branch has upstream tracking but no weave topology (e.g. a
-plain branch with no woven feature branches), loom falls back to a standard
-`git rebase --autostash --update-refs --rebase-merges`. This handles
-non-integration branches that still benefit from `loom update` for fetching
-and submodule sync.
+A branch without woven branches still builds a weave. When the weave cannot be
+built (an octopus merge, Spec 004), loom warns with the cause and falls back to
+`git rebase --autostash --update-refs --rebase-merges=rebase-cousins`, which
+puts every branch on the new upstream as the weave does (Git's default keeps a
+branch forked below a merge-base that moved on its old base). Git still skips
+commits already upstream, but branches already merged upstream are not
+offered for removal.
 
 ## Upstream Commit Filtering
 
@@ -330,13 +332,6 @@ starts. This avoids both conflicts and empty commits.
 Patch-ID matching is batched into a single pipeline (`git log -p | git patch-id
 --stable` and `git diff-tree -p --stdin | git patch-id --stable`) regardless
 of the number of commits, keeping performance constant.
-
-### Fallback to Plain Rebase
-
-When the weave model cannot be constructed (e.g. the branch has upstream
-tracking but no integration topology), loom falls back to a standard git
-rebase. This ensures `loom update` works on any branch with upstream tracking,
-not just fully initialized integration branches.
 
 ### Full Upstream Synchronization
 

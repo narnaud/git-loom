@@ -789,6 +789,12 @@ pub fn run_picked(picked: &[FileEntry], stamp: &[Option<git2::Oid>], target: &st
     else {
         bail!("'{}' did not resolve to a commit", target);
     };
+    // Before staging, as `run_patch_fold` does: a target the weave cannot
+    // rewrite would be refused with the picked hunks left staged.
+    let target_oid = git2::Oid::from_str(&commit_hash)?;
+    if repo::head_oid(&repo)? != target_oid {
+        Weave::from_repo(&repo)?.require_commit(target_oid)?;
+    }
     if !staging::still_listed(&repo, workdir, picked, stamp)? {
         bail!(
             "The local changes moved since the hunks were picked\n\

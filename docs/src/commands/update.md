@@ -24,6 +24,8 @@ git loom update [-y]
 4. **Updates submodules**, if any.
 5. **Offers to remove** local branches that were fully merged upstream, or whose remote branch was deleted. Set [`loom.pruneGoneBranches`](../configuration.md#loomprunegonebranches) to always remove them without asking.
 
+An integration branch holding an octopus merge (several branches merged at once) is still updated, by git's own rebase, with a warning: branches already merged upstream are not offered for removal.
+
 ## Examples
 
 ```bash

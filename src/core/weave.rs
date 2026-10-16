@@ -1311,7 +1311,8 @@ pub fn base_oid(repo: &Repository, info: &repo::RepoInfo) -> Result<Oid> {
 
 /// Walk the first-parent line from `head` to `stop` (exclusive), oldest-first,
 /// merges included. `merge_parent` always names the branch side, even when an
-/// upstream merge has its parents the other way round.
+/// upstream merge has its parents the other way round. Refuses an octopus
+/// merge: a section holds one branch.
 fn walk_first_parent_line(
     repo: &Repository,
     head: Oid,
@@ -1329,9 +1330,42 @@ fn walk_first_parent_line(
 
         let message = repo::commit_subject(&commit);
 
-        let is_merge = commit.parent_count() > 1;
+        let parent_count = commit.parent_count();
+        let is_merge = parent_count > 1;
 
         if is_merge {
+            // One section per merge: an octopus would be rebuilt from its first
+            // branch alone, its other branches silently dropped (#450).
+            if parent_count > 2 {
+                // Its branches count as woven while it stands, so `loom merge`
+                // refuses them: it has to go through git first. Hashes rather
+                // than `HEAD^`, which cmd.exe takes for an escape.
+                // `--keep` resets the index: a partly staged file would lose
+                // its staged side.
+                let undo = if current == head {
+                    let first = commit.parent_id(0)?.to_string();
+                    format!(
+                        "With nothing staged, undo it with `git reset --keep {}`, \
+                         then merge each branch with `loom merge <branch>`",
+                        git::short_hash(&first)
+                    )
+                } else {
+                    format!(
+                        "Rebuild it as one merge per branch: in \
+                         `git rebase -i --rebase-merges --update-refs {}`, split its \
+                         `merge -C` line into one `merge` line per branch",
+                        git::short_hash(&stop.to_string())
+                    )
+                };
+                let current = current.to_string();
+                bail!(
+                    "Merge `{}` is an octopus ({} parents), and loom only rebuilds \
+                     two-parent merges on the integration line\n{}",
+                    git::short_hash(&current),
+                    parent_count,
+                    undo
+                );
+            }
             let p0 = commit.parent_id(0)?;
             let p1 = commit.parent_id(1)?;
 

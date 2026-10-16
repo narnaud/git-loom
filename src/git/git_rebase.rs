@@ -52,7 +52,9 @@ pub fn rebase_outcome(git_dir: &Path, result: Result<()>) -> Result<RebaseOutcom
 }
 
 /// Run a plain `git rebase` onto `upstream`; see [`rebase_outcome`] for the
-/// result.
+/// result. `rebase-cousins` puts every branch on `upstream`, as the weave
+/// does: by default, a branch forked below a merge-base that moved (upstream
+/// took one of its siblings) keeps its old base.
 pub fn rebase(git_dir: &Path, workdir: &Path, upstream: &str) -> Result<RebaseOutcome> {
     super::snapshot_mtimes(workdir, Some(upstream));
     rebase_outcome(
@@ -63,7 +65,7 @@ pub fn rebase(git_dir: &Path, workdir: &Path, upstream: &str) -> Result<RebaseOu
                 "rebase",
                 "--autostash",
                 "--update-refs",
-                "--rebase-merges",
+                "--rebase-merges=rebase-cousins",
                 upstream,
             ],
         ),

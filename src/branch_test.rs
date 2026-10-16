@@ -290,3 +290,28 @@ fn branch_from_loose_commits_below_a_merge_merges_on_top() {
     assert_eq!(merge_ra.parent_id(1).unwrap(), r1);
     assert_eq!(merge_ra.parent_id(0).unwrap().to_string(), base);
 }
+
+#[test]
+fn branch_refuses_an_octopus_merge_before_creating_the_branch() {
+    let (t, int1) = crate::core::test_helpers::repo_with_octopus_merge();
+    let head_before = t.head_oid();
+
+    let err = t
+        .in_dir(|| super::run(Some("foo".to_string()), Some(int1.to_string())))
+        .unwrap_err()
+        .to_string();
+
+    assert!(err.contains("octopus"), "{err}");
+    assert!(!t.branch_exists("foo"), "{err}");
+    assert_eq!(t.head_oid(), head_before, "{err}");
+}
+
+#[test]
+fn branch_at_the_base_works_over_an_octopus_merge() {
+    let (t, _) = crate::core::test_helpers::repo_with_octopus_merge();
+
+    t.in_dir(|| super::run(Some("foo".to_string()), None))
+        .unwrap();
+
+    assert!(t.branch_exists("foo"));
+}
