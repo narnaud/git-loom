@@ -26,9 +26,9 @@ pub(crate) struct HunkEntry {
 pub(crate) struct FileEntry {
     pub path: String,
     pub hunks: Vec<HunkEntry>,
-    /// Index (staged) status character: ' ', 'A', 'M', 'D', 'R', or '?'.
+    /// Index (staged) status character: ' ', 'A', 'M', 'D', or '?'.
     pub index_status: char,
-    /// Worktree (unstaged) status character: ' ', 'M', 'D', 'R', '?', or '!'.
+    /// Worktree (unstaged) status character: ' ', 'M', 'D', '?', or '!'.
     pub worktree_status: char,
     /// Whether this file is binary (no hunk-level patching possible).
     pub binary: bool,

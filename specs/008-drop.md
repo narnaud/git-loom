@@ -93,7 +93,7 @@ Prompt unless `-y`; affect no commits, refs, or other files.
 
 | Target/status | Prompt | Operation | Success |
 | --- | --- | --- | --- |
-| Tracked `M`, `D`, or `R` | `Discard changes to '<path>'?` | `git restore --staged --worktree <path>` | `Restored '<path>'` |
+| Tracked `M` or `D` | `Discard changes to '<path>'?` | `git restore --staged --worktree <path>` | `Restored '<path>'` |
 | Staged new file (`A`) | `Delete '<path>'?` | `git rm --force <path>` (index and disk) | `Deleted '<path>'` |
 | Untracked (`??`) | `Delete '<path>'?` | Delete from disk | `Deleted '<path>'` |
 | Directory with tracked changes | `Discard all changes in '<path>'?` | `git restore --staged --worktree -- <path>`, then `git clean -fd -- <path>` | `Discarded all changes in '<path>'` |
