@@ -71,9 +71,12 @@ fn make_info() -> RepoInfo {
 
 fn snapshot_of(info: RepoInfo) -> Snapshot {
     let ids = IdAllocator::new(info.collect_entities());
+    // A directory that does not exist, so the diff `App::new` primes fails to
+    // spawn instead of running `git` in the process cwd (#447).
+    let nowhere = PathBuf::from("tui-test-fixture-has-no-workdir");
     Snapshot {
-        workdir: PathBuf::from("."),
-        git_dir: PathBuf::from("."),
+        workdir: nowhere.clone(),
+        git_dir: nowhere,
         cwd_prefix: String::new(),
         info,
         ids,
