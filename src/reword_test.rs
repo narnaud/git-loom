@@ -819,3 +819,134 @@ fn reword_skips_the_commit_msg_hook_with_no_verify() {
     reword(&test_repo, c1, &["--no-verify"]).unwrap();
     assert_eq!(test_repo.get_subject(1), "Reworded");
 }
+
+#[test]
+fn reword_without_upstream_refuses_to_replay_a_merge() {
+    // The linear todo used to `pick` the merge, which git rejects, and the user
+    // only saw "rebase stopped" (#441).
+    let (t, target) = crate::core::test_helpers::repo_with_merge_above_no_upstream();
+    t.write_file("a.txt", "staged edit\n");
+    t.stage_files(&["a.txt"]);
+    let status_before = t.status_porcelain();
+    let head_before = t.head_oid();
+
+    let err = super::reword_commit(&t.repo, &target.to_string(), Some("New".to_string()), &[])
+        .unwrap_err()
+        .to_string();
+
+    assert!(err.contains("Cannot replay merge"), "{err}");
+    assert_eq!(t.head_oid(), head_before, "{err}");
+    assert!(!crate::git::rebase_is_in_progress(t.repo.path()), "{err}");
+    assert_eq!(t.status_porcelain(), status_before, "{err}");
+}
+
+#[test]
+fn reword_without_upstream_rewrites_above_a_merge() {
+    let (t, _) = crate::core::test_helpers::repo_with_merge_above_no_upstream();
+    let merge = t.head_oid();
+    // Through git: the merge left the fixture's cached index stale.
+    t.write_file("top.txt", "top\n");
+    t.stage_files(&["top.txt"]);
+    t.commit_staged("Top");
+    let top = t.head_oid();
+
+    super::reword_commit(
+        &t.repo,
+        &top.to_string(),
+        Some("Top, reworded".to_string()),
+        &[],
+    )
+    .unwrap();
+
+    assert_eq!(t.get_subject(0), "Top, reworded");
+    assert_eq!(t.get_oid(1), merge);
+}
+
+#[test]
+fn reword_without_upstream_reports_a_target_off_head() {
+    let (t, target) = crate::core::test_helpers::repo_with_merge_above_no_upstream();
+    let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+    let parent = t.find_commit(target);
+    let tree = parent.tree().unwrap();
+    let off_head = t
+        .repo
+        .commit(None, &sig, &sig, "Off HEAD", &tree, &[&parent])
+        .unwrap();
+    let head_before = t.head_oid();
+
+    let err = super::reword_commit(&t.repo, &off_head.to_string(), Some("New".to_string()), &[])
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        err.contains("is not one of the commits loom rewrites"),
+        "{err}"
+    );
+    assert_eq!(t.head_oid(), head_before, "{err}");
+}
+
+#[test]
+fn reword_on_a_detached_head_rewrites_linearly() {
+    // Spec 003: rewording by hash works in any Git repository.
+    let t = TestRepo::new_with_remote();
+    let c1 = t.commit("First", "first.txt");
+    t.commit("Second", "second.txt");
+    t.set_detached_head(t.head_oid());
+
+    super::reword_commit(&t.repo, &c1.to_string(), Some("New".to_string()), &[]).unwrap();
+
+    assert_eq!(t.get_subject(1), "New");
+}
+
+#[test]
+fn reword_with_an_upstream_gone_rewrites_linearly() {
+    let t = TestRepo::new_with_remote();
+    let c1 = t.commit("First", "first.txt");
+    t.commit("Second", "second.txt");
+    t.repo
+        .find_reference("refs/remotes/origin/main")
+        .unwrap()
+        .delete()
+        .unwrap();
+
+    super::reword_commit(&t.repo, &c1.to_string(), Some("New".to_string()), &[]).unwrap();
+
+    assert_eq!(t.get_subject(1), "New");
+    assert!(t.is_on_branch());
+}
+
+#[test]
+fn reword_on_an_integration_branch_reports_why_the_weave_cannot_be_built() {
+    // On an integration branch the linear todo hid why the weave failed (#441).
+    let t = TestRepo::new_with_remote();
+    let c1 = t.commit("First", "first.txt");
+    t.commit("Second", "second.txt");
+    let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+    let empty_tree = t.repo.treebuilder(None).unwrap().write().unwrap();
+    let empty_tree = t.repo.find_tree(empty_tree).unwrap();
+    let unrelated = t
+        .repo
+        .commit(None, &sig, &sig, "Unrelated", &empty_tree, &[])
+        .unwrap();
+    t.repo
+        .reference(
+            "refs/remotes/origin/main",
+            unrelated,
+            true,
+            "unrelated upstream",
+        )
+        .unwrap();
+    t.write_file("first.txt", "staged edit\n");
+    t.stage_files(&["first.txt"]);
+    let status_before = t.status_porcelain();
+    let head_before = t.head_oid();
+
+    let err = super::reword_commit(&t.repo, &c1.to_string(), Some("New".to_string()), &[])
+        .unwrap_err()
+        .to_string();
+
+    assert!(err.contains("shares no history"), "{err}");
+    assert_eq!(t.head_oid(), head_before, "{err}");
+    assert!(!crate::git::rebase_is_in_progress(t.repo.path()), "{err}");
+    assert_eq!(t.status_porcelain(), status_before, "{err}");
+}

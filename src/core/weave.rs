@@ -1432,27 +1432,28 @@ struct BranchCommitEntry {
 }
 
 /// Start an interactive rebase that pauses at `commit_oid` (`edit`), using the
-/// weave when there is one and a minimal linear todo otherwise.
+/// weave on an integration branch and a linear todo outside one (Spec 004).
 pub fn start_edit_rebase(repo: &Repository, workdir: &Path, commit_oid: Oid) -> Result<()> {
-    if let Ok(mut graph) = Weave::from_repo(repo) {
-        if !graph.edit_commit(commit_oid) {
-            return Err(not_in_the_weave(commit_oid));
-        }
-        let todo = graph.to_todo();
-        return run_rebase_expecting_edit(
-            workdir,
-            Some(&graph.base_oid.to_string()),
-            &todo,
-            commit_oid,
-            &[],
-        );
+    if !repo::has_integration_context(repo) {
+        return build_and_run_linear_edit(repo, workdir, commit_oid);
     }
-
-    build_and_run_linear_edit(repo, workdir, commit_oid)
+    let mut graph = git::before_rebase_starts(Weave::from_repo(repo))?;
+    if !graph.edit_commit(commit_oid) {
+        return git::before_rebase_starts(Err(not_in_the_weave(commit_oid)));
+    }
+    let todo = graph.to_todo();
+    run_rebase_expecting_edit(
+        workdir,
+        Some(&graph.base_oid.to_string()),
+        &todo,
+        commit_oid,
+        &[],
+    )
 }
 
 /// Build a linear todo from HEAD to the target's parent (or root) and rebase.
-/// For repos with no upstream, where `Weave::from_repo` does not work.
+/// For HEAD outside an integration branch, where `Weave::from_repo` does not
+/// work. Refuses a merge in that range: a linear todo cannot rebuild one.
 fn build_and_run_linear_edit(repo: &Repository, workdir: &Path, commit_oid: Oid) -> Result<()> {
     let head_oid = repo::head_oid(repo)?;
     let commit = repo.find_commit(commit_oid)?;
@@ -1465,6 +1466,12 @@ fn build_and_run_linear_edit(repo: &Repository, workdir: &Path, commit_oid: Oid)
     };
 
     let stop = upstream.as_ref().and_then(|s| Oid::from_str(s).ok());
+
+    // Before the walk: off HEAD's history, it would blame a merge unrelated to
+    // the target.
+    if head_oid != commit_oid && !repo.graph_descendant_of(head_oid, commit_oid)? {
+        return git::before_rebase_starts(Err(not_in_the_weave(commit_oid)));
+    }
 
     let mut entries = Vec::new();
     let mut current = head_oid;
@@ -1479,6 +1486,13 @@ fn build_and_run_linear_edit(repo: &Repository, workdir: &Path, commit_oid: Oid)
         }
 
         let c = repo.find_commit(current)?;
+        if c.parent_count() > 1 {
+            return git::before_rebase_starts(Err(anyhow::anyhow!(
+                "Cannot replay merge `{}` outside an integration branch — nothing was \
+                 rewritten",
+                git::short_hash(&current.to_string())
+            )));
+        }
         let msg = repo::commit_subject(&c);
         let cmd = if current == commit_oid {
             "edit"

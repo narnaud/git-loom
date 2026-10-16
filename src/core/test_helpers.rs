@@ -986,6 +986,21 @@ fn weave_over_upstream(t: &TestRepo) {
     t.merge_no_ff("alpha");
 }
 
+/// `target` (two files) — `After` — a merge of `feature`, forked at `target`,
+/// on a branch with no upstream. Returns the repo and `target`.
+pub fn repo_with_merge_above_no_upstream() -> (TestRepo, git2::Oid) {
+    let t = TestRepo::new();
+    let base = t.current_branch_name();
+    let target = t.commit_multi(&[("a.txt", "a\n"), ("b.txt", "b\n")], "Target");
+    t.create_branch_at("feature", &target.to_string());
+    t.switch_branch("feature");
+    t.commit("Feature", "feature.txt");
+    t.switch_branch(&base);
+    t.commit("After", "after.txt");
+    t.merge_no_ff("feature");
+    (t, target)
+}
+
 // ── In-memory status graphs ──
 
 /// Drop ANSI escapes so rendered output can be compared as plain text.

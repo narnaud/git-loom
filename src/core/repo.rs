@@ -814,7 +814,16 @@ fn gather(repo: &Repository, opts: GatherOpts) -> Result<RepoInfo> {
         .target()
         .context("Upstream does not point to a commit")?;
 
-    let merge_base_oid = repo.merge_base(head_oid, upstream_oid)?;
+    let merge_base_oid = match repo.merge_base(head_oid, upstream_oid) {
+        Err(e) if e.code() == git2::ErrorCode::NotFound => bail!(
+            "Branch '{}' shares no history with its upstream '{}'\n\
+             Set the right one with: git branch --set-upstream-to=<upstream> {}",
+            branch_name,
+            upstream_name,
+            branch_name
+        ),
+        result => result?,
+    };
 
     let commits = walk_commits(repo, head_oid, merge_base_oid, opts.commit_files)?;
     let commit_set: std::collections::HashSet<git2::Oid> = commits.iter().map(|c| c.oid).collect();

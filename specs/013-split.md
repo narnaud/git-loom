@@ -261,4 +261,4 @@ resolved whatever caused the conflict.
 
 Same approach as `reword` and `fold`: Weave-based rebase with an `edit`
 command, manual commit manipulation, then `continue`. Falls back to a linear
-todo for non-integration repos.
+todo outside an integration branch, which refuses to replay a merge (Spec 004).

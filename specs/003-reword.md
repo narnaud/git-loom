@@ -24,7 +24,7 @@ Files are rejected. A branch name always means branch rename; use its tip hash o
 
 Change the target message and replay descendants with native interactive rebase. This MUST:
 
-- work for any existing commit, including a root commit;
+- work for every target its path accepts (Prerequisites), including a root commit outside an integration branch;
 - preserve commit contents, messages of other commits, topology (including merges), and empty commits;
 - update rewritten descendant hashes and affected branch refs;
 - leave branches outside the ancestry chain unchanged;
@@ -58,6 +58,8 @@ git-loom reword abc1234                         # Git editor
 
 ## Prerequisites
 
-- Any Git repository and an existing target are sufficient for Git-reference commit rewording.
+- On an integration branch, the weave must build and hold the target (Spec 004).
+- Outside one, any Git repository works for a Git-reference target, but the replay is linear: the target must be in HEAD's history with no merge between it and HEAD (Spec 004).
+- A merge commit is never a target (Spec 002).
 - Branch rename requires an existing local branch.
 - Any short-ID target requires a current branch with upstream tracking and successful shared graph gathering (Spec 002).

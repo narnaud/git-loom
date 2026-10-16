@@ -111,6 +111,34 @@ fn split_non_head_commit() {
     assert_eq!(test_repo.get_subject(2), "First part");
 }
 
+#[test]
+fn split_without_upstream_refuses_to_replay_a_merge() {
+    let (t, target) = crate::core::test_helpers::repo_with_merge_above_no_upstream();
+    t.write_file("a.txt", "staged\n");
+    t.stage_files(&["a.txt"]);
+    t.write_file("b.txt", "unstaged\n");
+    let workdir = t.workdir();
+    let head_before = t.head_oid();
+    let staged_before = crate::git::diff_cached(&workdir).unwrap();
+
+    let err = super::split_commit_with_selection(
+        &t.repo,
+        &target.to_string(),
+        vec!["a.txt".to_string()],
+        "First part".to_string(),
+        &[],
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(err.contains("Cannot replay merge"), "{err}");
+    assert_eq!(t.head_oid(), head_before, "{err}");
+    assert!(!crate::git::rebase_is_in_progress(t.repo.path()), "{err}");
+    assert_eq!(crate::git::diff_cached(&workdir).unwrap(), staged_before);
+    assert_eq!(t.read_file("a.txt"), "staged\n");
+    assert_eq!(t.read_file("b.txt"), "unstaged\n");
+}
+
 // ── Validation error tests ───────────────────────────────────────────
 
 #[test]

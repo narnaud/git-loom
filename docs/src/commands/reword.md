@@ -34,7 +34,7 @@ git loom reword mqt -- --reset-author
 
 ### Commit
 
-Replaces the message and replays the commits above it. Content and branches are unchanged, and so is the short ID of a commit loom created. Any local commit can be reworded; without an upstream, any commit at all, the root included.
+Replaces the message and replays the commits above it. Content and branches are unchanged, and so is the short ID of a commit loom created. On an integration branch, any commit `loom status` shows can be reworded; outside one, any commit in HEAD's history with no merge between it and HEAD, the root included. A merge commit cannot be reworded.
 
 ### Branch
 

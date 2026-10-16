@@ -37,7 +37,7 @@ Walk first parents from HEAD to the base:
 - For a regular commit, create an integration entry and attach any branch ref at that commit as non-woven.
 - Skip empty branches whose tip is the base.
 
-Building requires an upstream-configured integration branch. Reword alone may fall back to a simpler linear rewrite outside this context.
+Building requires an upstream-configured integration branch. Outside one (detached HEAD, or no upstream that resolves) reword and split fall back to a linear rewrite, which refuses before rewriting anything when it would have to replay a merge. On one, reword and split report every build error.
 
 ## Mutations
 
