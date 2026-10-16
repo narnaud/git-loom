@@ -23,7 +23,7 @@ commit content and messages are preserved; unrelated branches are unaffected.
 Successful immediate completion prints:
 
 ```text
-Swapped commits '<a>' and '<b>'
+Swapped commits `<a>` and `<b>`
 ```
 
 The displayed values are the command's resolved display identifiers.
@@ -53,7 +53,7 @@ to restore the original state. `LoomState.context` must contain string fields
 commits. Successful completion through `after_continue` prints:
 
 ```text
-Swapped '<a>' and '<b>'
+Swapped commits `<a>` and `<b>`
 ```
 
 See Spec 014 for the normative continue/abort and data-restoration contract.
