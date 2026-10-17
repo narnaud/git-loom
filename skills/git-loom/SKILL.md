@@ -186,7 +186,10 @@ only updates `refs/heads/`.
 2. Edit conflicts and stage with raw `git add <files>`. While paused,
    `git loom add` and all loom commands except `continue`, `abort`, `diff`,
    `show`, and `trace` are blocked.
-3. Run `git loom continue --agent`; repeat if it pauses again.
+3. Run `git loom continue --agent`; repeat if it pauses again. A staged
+   resolution identical to HEAD's tree drops the commit being replayed, and
+   `continue` still reports `ok` — during a rebase `git checkout --ours` is
+   HEAD's side — so check that `git diff --cached --quiet` exits 1 first.
 4. Or run `git loom abort --agent`, which restores the original state,
    including staged and working-tree changes.
 

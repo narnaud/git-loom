@@ -69,6 +69,7 @@ You can also resolve with the [TUI](../commands/tui.md#conflicts), which opens o
 ## When Things Go Off Script
 
 - **You finished the rebase with git**: if you ran `git rebase --continue` to the end, `git loom continue` still completes the loom command.
+- **Your resolution left a commit with no changes**: git drops that commit, and the command still reports success as if it had survived. `git reflog` still has it.
 - **Changes that can't be put back**: if git couldn't replay its stash, your changes wait in `git stash list`. If your staged changes no longer apply, loom saves them as a patch and prints the `git apply` command that restores them.
 - **Loom says an operation is paused but no rebase is in progress**: run `git loom continue` if you finished it yourself, or `git loom abort` to discard it. Never delete the paused-operation state by hand: it is what abort uses to restore your changes.
 
