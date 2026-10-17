@@ -212,7 +212,7 @@ These operations pause on rebase conflict and save the listed `LoomState.context
 | Commit to worktree | `op: "CommitToUnstaged"`; commit hash and captured diff |
 | Single commit next to a commit | `op: "CommitRelative"`; commit hash, target hash, `above` flag, parked branches |
 
-`loom continue` dispatches `after_continue`, removes `_loom-track`, restores pre-existing staged changes from `LoomState.rollback`, and prints the operation's success message. `loom abort` restores original history, staged state, and working-tree state (Spec 014). The post-continue unapplied-patch exception is defined above.
+`loom continue` dispatches `after_continue`, removes `_loom-track`, restores pre-existing staged changes from `LoomState.rollback`, and prints the operation's success message. `loom abort` restores original history, staged state, and working-tree state (Spec 014). The post-continue unapplied-patch exception is defined above. A resolution that empties the fixup itself folds nothing: `loom continue` puts its change back in the working tree, or parks it, and reports `Folded nothing` in place of success (Spec 014).
 
 Staged files set aside so they cannot join the fold MUST come back on every
 failure path, including the ones reached before `state.json` exists, where no

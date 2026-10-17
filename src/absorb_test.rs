@@ -1,5 +1,27 @@
 use crate::core::test_helpers::TestRepo;
 
+#[test]
+fn commits_left_out_counts_targets_whose_every_fixup_was_skipped() {
+    let pairs = |list: &[(&str, &str)]| -> Vec<(String, String)> {
+        list.iter()
+            .map(|(f, t)| (f.to_string(), t.to_string()))
+            .collect()
+    };
+    let fixups = pairs(&[("f1aaaa", "t1"), ("f2bbbb", "t1"), ("f3cccc", "t2")]);
+    let skipped = |list: &[&str]| -> Vec<String> { list.iter().map(|s| s.to_string()).collect() };
+
+    assert_eq!(super::commits_left_out(&fixups, &skipped(&["f1aaaa"])), 0);
+    assert_eq!(
+        super::commits_left_out(&fixups, &skipped(&["f1aaaa", "f2bbbb"])),
+        1
+    );
+    // `stopped-sha` may be abbreviated.
+    assert_eq!(
+        super::commits_left_out(&fixups, &skipped(&["f1a", "f2b", "f3c"])),
+        2
+    );
+}
+
 // ── Integration tests ────────────────────────────────────────────────
 
 #[test]
@@ -448,6 +470,7 @@ fn absorb_abort_preserves_working_state() {
         context: serde_json::json!({ "dry_run": false }),
         protect: Vec::new(),
         targets: Vec::new(),
+        skipped_fixups: Vec::new(),
     };
     crate::core::transaction::save(&git_dir, &state).unwrap();
 

@@ -77,6 +77,7 @@ fn drop_refuses_paused_operation() {
         rollback: Rollback::default(),
         protect: Vec::new(),
         targets: Vec::new(),
+        skipped_fixups: Vec::new(),
         context: serde_json::Value::Null,
     };
     transaction::save(&git_dir, &state).unwrap();

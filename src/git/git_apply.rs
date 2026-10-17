@@ -562,6 +562,26 @@ pub fn save_patch_aside(workdir: &Path, name: &str, patch: &str) -> Result<PathB
     )
 }
 
+/// Where an earlier [`save_patch_aside`] under `name` already holds `patch`
+/// byte for byte, so a retried restore names that copy instead of parking
+/// another.
+pub fn find_saved_patch(workdir: &Path, name: &str, patch: &str) -> Option<PathBuf> {
+    let dir = super::git_path(workdir, "loom").ok()?;
+    let bytes = super::raw_text::encode(patch);
+    let prefix = format!("{name}-");
+    std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .and_then(|n| n.strip_prefix(&prefix)?.strip_suffix(".patch"))
+                .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+                && std::fs::read(path).is_ok_and(|saved| saved == bytes)
+        })
+}
+
 /// How to replay a parked patch by hand.
 #[derive(Clone, Copy, Debug)]
 pub enum Replay {
@@ -579,7 +599,7 @@ pub enum Replay {
 }
 
 impl Replay {
-    fn command(self, path: &Path) -> String {
+    pub fn command(self, path: &Path) -> String {
         let path = path.display();
         match self {
             Replay::Worktree => format!("git apply {path}"),
@@ -603,18 +623,26 @@ impl Replay {
 /// [`Replay`] tells the halves apart: the staged snapshot is a HEAD → index
 /// diff, so replaying it into the working tree instead would apply it twice
 /// over.
-pub fn save_or_warn(workdir: &Path, name: &str, patch: &str, replay: Replay) {
+///
+/// Returns whether the patch is safe: empty, or saved.
+pub fn save_or_warn(workdir: &Path, name: &str, patch: &str, replay: Replay) -> bool {
     if patch.is_empty() {
-        return;
+        return true;
     }
     match save_patch_aside(workdir, name, patch) {
-        Ok(path) => msg::warn(&format!(
-            "those changes are saved as a patch — replay them with `{}`",
-            replay.command(&path)
-        )),
-        Err(e) => msg::warn(&format!(
-            "the patch of those changes could not be saved either ({e})"
-        )),
+        Ok(path) => {
+            msg::warn(&format!(
+                "those changes are saved as a patch — replay them with `{}`",
+                replay.command(&path)
+            ));
+            true
+        }
+        Err(e) => {
+            msg::warn(&format!(
+                "the patch of those changes could not be saved either ({e})"
+            ));
+            false
+        }
     }
 }
 

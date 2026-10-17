@@ -162,6 +162,7 @@ pub fn reword_commit(
             context: serde_json::to_value(&ctx)?,
             protect: Vec::new(),
             targets: Vec::new(),
+            skipped_fixups: Vec::new(),
         },
     )?;
 

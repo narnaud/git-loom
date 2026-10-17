@@ -190,6 +190,11 @@ only updates `refs/heads/`.
    resolution identical to HEAD's tree drops the commit being replayed, and
    `continue` still reports `ok` — during a rebase `git checkout --ours` is
    HEAD's side — so check that `git diff --cached --quiet` exits 1 first.
+   Exceptions: a `fold`/`absorb` target is kept as an empty commit, and a
+   folded change resolved away returns to the working tree; the messages say
+   what was not folded. Both need the stop as git left it: resolve with
+   `git checkout HEAD -- <file>` plus `git add`, never `git reset --hard` or a
+   commit of your own.
 4. Or run `git loom abort --agent`, which restores the original state,
    including staged and working-tree changes.
 

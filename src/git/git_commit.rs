@@ -61,6 +61,16 @@ pub fn commit_amend_no_edit(workdir: &Path, opts: &[&str]) -> Result<()> {
     super::run_git(workdir, &args)
 }
 
+/// Commit the index as it is under `source`'s message, author and date
+/// (`git commit --allow-empty -C <source>`): keeps a pick a resolution emptied
+/// as an empty commit, so the step that lands on it still can (Spec 014).
+pub fn commit_empty_copy_of(workdir: &Path, source: &str) -> Result<()> {
+    super::run_git(
+        workdir,
+        &["commit", "--quiet", "--allow-empty", "-C", source],
+    )
+}
+
 /// True when `path` is gone from both the working tree and the index because
 /// its deletion is already staged.
 ///

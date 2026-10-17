@@ -524,6 +524,7 @@ fn fold_commit_relative(
         // because a move relative to a commit that vanished is meaningless.
         protect: vec![commit_hash.to_string()],
         targets: vec![target_hash.to_string()],
+        skipped_fixups: Vec::new(),
     };
     transaction::save(&git_dir, &state)?;
 
@@ -1769,6 +1770,7 @@ fn squash_fixup_into_commit(
         context: fold_ctx,
         protect: Vec::new(),
         targets: vec![commit_hash],
+        skipped_fixups: Vec::new(),
     };
     transaction::save(git_dir, &loom_state)?;
 
@@ -1824,6 +1826,7 @@ fn fold_commit_into_commit(repo: &Repository, source_hash: &str, target_hash: &s
         context: fold_ctx,
         protect: Vec::new(),
         targets: vec![target_hash.to_string()],
+        skipped_fixups: Vec::new(),
     };
     transaction::save(&git_dir, &loom_state)?;
 
@@ -1884,6 +1887,7 @@ fn fold_commit_to_branch(repo: &Repository, commit_hash: &str, branch_name: &str
         // still name the moved commit rather than the tip it landed on.
         protect: vec![commit_hash.to_string()],
         targets: Vec::new(),
+        skipped_fixups: Vec::new(),
     };
     transaction::save(&git_dir, &state)?;
 
@@ -2535,6 +2539,7 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
             context: fold_ctx,
             protect: Vec::new(),
             targets: Vec::new(),
+            skipped_fixups: Vec::new(),
         };
         transaction::save(&git_dir, &loom_state)?;
 
@@ -2613,6 +2618,7 @@ pub fn after_continue(
     workdir: &Path,
     rollback: &Rollback,
     context: &serde_json::Value,
+    skipped_fixups: &[String],
 ) -> Result<()> {
     let variant: FoldVariant =
         serde_json::from_value(context.clone()).context("Failed to parse fold resume context")?;
@@ -2632,11 +2638,18 @@ pub fn after_continue(
         } => {
             let new_hash = git::rev_parse(workdir, TRACK_BRANCH)?;
             let _ = git::branch_delete(workdir, TRACK_BRANCH);
-            msg::success(&format!(
-                "Folded {} file(s) into {}",
-                files_count,
-                repo::describe_rewritten(workdir, &original_commit_hash, &new_hash)
-            ));
+            if skipped_fixups.is_empty() {
+                msg::success(&format!(
+                    "Folded {} file(s) into {}",
+                    files_count,
+                    repo::describe_rewritten(workdir, &original_commit_hash, &new_hash)
+                ));
+            } else {
+                msg::warn(&format!(
+                    "Folded nothing into {} — your resolution kept it unchanged",
+                    repo::describe_commit(workdir, &new_hash)
+                ));
+            }
         }
         FoldVariant::CommitIntoCommit {
             source_hash,
@@ -2644,11 +2657,20 @@ pub fn after_continue(
         } => {
             let new_hash = git::rev_parse(workdir, TRACK_BRANCH)?;
             let _ = git::branch_delete(workdir, TRACK_BRANCH);
-            msg::success(&format!(
-                "Folded `{}` into {}",
-                git::short_hash(&source_hash),
-                repo::describe_rewritten(workdir, &target_hash, &new_hash)
-            ));
+            if skipped_fixups.is_empty() {
+                msg::success(&format!(
+                    "Folded `{}` into {}",
+                    git::short_hash(&source_hash),
+                    repo::describe_rewritten(workdir, &target_hash, &new_hash)
+                ));
+            } else {
+                msg::warn(&format!(
+                    "Folded nothing of `{}` into {} — your resolution kept it unchanged, \
+                     and the source commit is gone from history",
+                    git::short_hash(&source_hash),
+                    repo::describe_commit(workdir, &new_hash)
+                ));
+            }
         }
         FoldVariant::CommitToBranch {
             commit_hash,

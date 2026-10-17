@@ -58,6 +58,9 @@ The state file contains:
   `loom continue` replays without the protection the command started with.
 - `targets`: Protected commits the operation lands on (a fold or absorb
   target); the refusal does not offer `loom drop` for them.
+- `skipped_fixups`: Fixup commits the user's resolution emptied, which
+  `--continue` skipped (see *`loom continue`*); their change goes back to the
+  working tree once the rebase is over.
 - `context`: Command-specific resume data (serialized as JSON)
 
 Patches, here and parked, are kept byte for byte: a byte that is not UTF-8 is
@@ -80,7 +83,8 @@ already resolved leaves nothing to ask about. It follows the user's setting and
 stages nothing itself: without `rerere.autoUpdate` the replay reaches the
 working tree only, and the stop is a conflict like any other. Nor does it carry
 a resolution that leaves HEAD's tree unchanged: `--continue` would then drop the
-commit silently, even under `--empty=stop`, past the protection of Spec 004.
+commit silently, even under `--empty=stop`, past the protection of Spec 004 — or
+skip the fixup it was, losing its change.
 Loom keeps the stops it has continued past, each one the `AUTO_MERGE` id
 together with the step it belongs to — two steps can conflict into the same
 tree — so a step failing for another reason — a hook turning the commit down —
@@ -228,6 +232,19 @@ loom continue
 1. Loads `.git/loom/state.json`. If the file does not exist, falls back to the
    stateless path below.
 2. If a rebase is still in progress (`MERGE_HEAD` or `rebase-merge/` exists):
+   - First looks at a staged resolution that leaves HEAD's tree unchanged — no
+     unmerged path, the step not yet committed over — which `--continue` would
+     drop or skip (see *Why a Rebase Stops*). The step is the one `stopped-sha`
+     names. `rebase-merge/amend` marks a fixup and names the HEAD it was to
+     amend; a HEAD that moved is a commit made at the stop, which git takes as
+     the fixup done by hand. A pick's stop keeps no such record, so `AUTO_MERGE`
+     stands in, and a commit at the stop or a `git reset` without a pathspec
+     takes it away. A pick in `targets` is committed empty first, under its
+     own message and authorship (`git commit --allow-empty -C`), so the step
+     that lands on it still can, and the user is told. A fixup is recorded in
+     `skipped_fixups`. Any other emptied pick, and a step whose signal is gone
+     — including a rebase the user finished with git — is left to git: dropped
+     or skipped as before, and the command reports as if it survived.
    - Runs `git rebase --continue`.
    - If `--continue` encounters another conflict: stays paused, keeps the state
      file, reports that the operation is still paused, exits successfully.
@@ -236,15 +253,20 @@ loom continue
      the rollback is applied, the state file goes, and the refusal is reported as an error.
      Where the rollback takes that commit out of reach, the message MUST NOT
      offer `loom drop` for it.
-   - If `--continue` succeeds: moves to dispatch. A resolution that empties the
-     stopped commit is dropped there (see *Why a Rebase Stops*); loom does not
-     detect this, and the command reports as if the commit survived.
+   - If `--continue` succeeds: moves to dispatch.
 3. A merge in progress runs `git merge --continue` instead, then moves to
    dispatch the same way.
 4. With neither in progress, assumes the user already ran `git rebase
    --continue` manually and moves to dispatch.
-5. Dispatches to the command-specific `after_continue` handler, which may pause
-   again (`merge`, whose set-aside work conflicts with it): the state stays.
+5. Applies each commit in `skipped_fixups` to the working tree three-way, or
+   parks it as `unfolded-<n>.patch` and names it; one whose diff cannot be
+   read, or that can be neither applied nor parked, fails the continue with
+   the state kept, so the retry still names it.
+   Then dispatches to the
+   command-specific `after_continue` handler, which may pause again (`merge`,
+   whose set-aside work conflicts with it): the state stays. `fold` and
+   `absorb` report what a skipped fixup left unfolded in place of their
+   success line.
 6. Deletes the state file only after dispatch succeeds and is done.
 
 ## `loom abort`

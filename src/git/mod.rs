@@ -11,8 +11,9 @@ pub mod raw_text;
 pub use git_apply::{
     Replay, apply_cached_patch, apply_cached_patch_reverse, apply_patch, apply_patch_reverse,
     apply_patch_to_worktree, apply_patch_with_index, apply_patch_with_index_reverse,
-    patch_is_applied, replay_patch_three_way, restore_loom_unstaged, restore_or_park_after_abort,
-    restore_staged_after_rebase, restore_staged_patch, save_or_warn, save_patch_aside,
+    find_saved_patch, patch_is_applied, replay_patch_three_way, restore_loom_unstaged,
+    restore_or_park_after_abort, restore_staged_after_rebase, restore_staged_patch, save_or_warn,
+    save_patch_aside,
 };
 pub use git_branch::{
     branch_create, branch_delete, branch_force_create, branch_rename, branch_switch,
@@ -20,8 +21,8 @@ pub use git_branch::{
 };
 pub use git_commit::{
     commit_amend, commit_amend_message_unverified, commit_amend_no_edit, commit_captured,
-    commit_opts, reset_hard, reset_mixed, reset_soft, stage_all, stage_all_opts, stage_files,
-    stage_files_opts, stage_from, stage_path,
+    commit_empty_copy_of, commit_opts, reset_hard, reset_mixed, reset_soft, stage_all,
+    stage_all_opts, stage_files, stage_files_opts, stage_from, stage_path,
 };
 pub use git_diff::{
     diff_cached, diff_cached_display, diff_cached_file, diff_cached_file_is_binary,
@@ -36,12 +37,12 @@ pub use git_mtime::{discard_mtimes, restore_mtimes, snapshot_mtimes};
 #[cfg(test)]
 pub use git_rebase::rebase_onto;
 pub use git_rebase::{
-    AfterStop, Protected, REPLAYS_EMPTY, RebaseOutcome, StopId, abort_after_failure, auto_merge_id,
-    before_rebase_starts, carry_past_known_stops, continue_rebase, continue_rebase_expecting_edit,
-    continue_rerere_stops, finished_without_stopping, has_unmerged_paths, rebase, rebase_abort,
-    rebase_abort_then_cleanup, rebase_is_in_progress, rebase_is_over, rebase_never_started,
-    rebase_outcome, rebase_progress, replayed_empty_hash, stop_id, unmerged_paths,
-    verify_paused_at,
+    AfterStop, EmptiedStop, Protected, REPLAYS_EMPTY, RebaseOutcome, StopId, abort_after_failure,
+    auto_merge_id, before_rebase_starts, carry_past_known_stops, continue_rebase,
+    continue_rebase_expecting_edit, continue_rerere_stops, emptied_stop, finished_without_stopping,
+    has_unmerged_paths, rebase, rebase_abort, rebase_abort_then_cleanup, rebase_is_in_progress,
+    rebase_is_over, rebase_never_started, rebase_outcome, rebase_progress, replayed_empty_hash,
+    shas_match, stop_id, unmerged_paths, verify_paused_at,
 };
 pub use git_worktree::{Worktree, ensure_not_checked_out_elsewhere, list_worktrees};
 
@@ -506,6 +507,12 @@ pub fn current_branch(workdir: &Path) -> Result<String> {
 /// Resolve a git ref to its full commit hash (`git rev-parse <ref>`, trimmed).
 pub fn rev_parse(workdir: &Path, reference: &str) -> Result<String> {
     let out = run_git_stdout(workdir, &["rev-parse", reference])?;
+    Ok(out.trim().to_string())
+}
+
+/// A commit's subject line (`git show -s --format=%s <rev>`, trimmed).
+pub fn commit_subject(workdir: &Path, rev: &str) -> Result<String> {
+    let out = run_git_stdout(workdir, &["show", "-s", "--format=%s", rev])?;
     Ok(out.trim().to_string())
 }
 

@@ -30,7 +30,7 @@ git add src/shared.rs && git loom continue
 # ✓ Created commit `mqt` (a1b2c3d) on branch `feature-auth`
 ```
 
-If your resolution leaves a commit with no changes, git drops it, and the command still reports success as if the commit had survived: `commit` names the commit below as the one it created. `git reflog` still has the dropped commit.
+If your resolution leaves a commit with no changes, git drops it, and the command still reports success as if the commit had survived: `commit` names the commit below as the one it created. `git reflog` still has the dropped commit. A change you were folding or absorbing is not lost this way: see [When Things Go Off Script](../guides/conflict-resolution.md#when-things-go-off-script).
 
 If you already finished the rebase yourself with `git rebase --continue`, `loom continue` still completes the loom command.
 

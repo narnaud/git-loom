@@ -183,7 +183,7 @@ fn has_local_changes(workdir: &Path) -> bool {
 /// unambiguous, so a shared prefix is the same commit. (`git::short_hash`'s
 /// fixed 7 is for display and never reaches here.)
 /// Sliced as bytes, which cannot land mid-character.
-fn shas_match(a: &str, b: &str) -> bool {
+pub fn shas_match(a: &str, b: &str) -> bool {
     let shortest = a.len().min(b.len());
     shortest > 0 && a.as_bytes()[..shortest] == b.as_bytes()[..shortest]
 }
@@ -375,13 +375,70 @@ fn rerere_continue_loop(
 /// drop the commit on `--continue`, even under `--empty=stop`, so a protected
 /// commit (Spec 004) could vanish unseen. Anything git cannot answer says yes.
 fn resolves_to_head(workdir: &Path) -> bool {
-    match (
-        super::write_tree(workdir),
-        super::rev_parse(workdir, "HEAD^{tree}"),
-    ) {
-        (Ok(index), Ok(head)) => index == head,
-        _ => true,
+    index_tree_is_head(workdir).unwrap_or(true)
+}
+
+/// Whether the index writes the same tree HEAD has. The index must hold no
+/// unmerged entry, or `write-tree` refuses.
+fn index_tree_is_head(workdir: &Path) -> Result<bool> {
+    Ok(super::write_tree(workdir)? == super::rev_parse(workdir, "HEAD^{tree}")?)
+}
+
+/// The step a staged resolution has emptied, which `git rebase --continue`
+/// is about to drop or skip (Spec 014).
+#[derive(Debug, PartialEq, Eq)]
+pub enum EmptiedStop {
+    /// The pick of a commit in `targets`, which git would drop: the original
+    /// commit, as `stopped-sha` names it.
+    Target(String),
+    /// A `fixup` git would skip, losing its change: the fixup commit.
+    Fixup(String),
+}
+
+/// Classify the stop a resolution left with HEAD's tree unchanged, `None`
+/// when the stop is not that: still unmerged, a resolution that changes
+/// something, a step already committed over, or a pick outside `targets`,
+/// which is the user's to drop (Spec 014).
+///
+/// `rebase-merge/amend` is what git writes for a fixup it means to amend into
+/// HEAD, naming that HEAD: one that moved is a commit the user made at the
+/// stop, which git takes as the fixup done by hand. Git writes it at a clean
+/// `edit` stop as well, where nothing is emptied, so the step itself is read
+/// from `done`. A pick's stop keeps no such record, so `AUTO_MERGE` stands in
+/// — a commit at the stop removes it, but so does a `git reset` without a
+/// pathspec, after which the drop goes unseen (Spec 014).
+pub fn emptied_stop(workdir: &Path, git_dir: &Path, targets: &[String]) -> Option<EmptiedStop> {
+    if has_unmerged_paths(workdir) || !index_tree_is_head(workdir).unwrap_or(false) {
+        return None;
     }
+    let sha = stopped_sha(git_dir)?;
+    if let Ok(amend) = std::fs::read_to_string(git_dir.join("rebase-merge").join("amend")) {
+        if !stopped_on_a_fixup(git_dir) {
+            return None;
+        }
+        let head = super::rev_parse(workdir, "HEAD").ok()?;
+        return shas_match(amend.trim(), &head).then_some(EmptiedStop::Fixup(sha));
+    }
+    auto_merge_id(workdir)?;
+    targets
+        .iter()
+        .any(|target| shas_match(target, &sha))
+        .then_some(EmptiedStop::Target(sha))
+}
+
+/// Whether the step the rebase stopped on — the last line of
+/// `rebase-merge/done` — is a `fixup` or `squash`, in either spelling.
+fn stopped_on_a_fixup(git_dir: &Path) -> bool {
+    std::fs::read_to_string(git_dir.join("rebase-merge").join("done"))
+        .ok()
+        .and_then(|done| {
+            done.lines()
+                .map(str::trim)
+                .rfind(|line| !line.is_empty() && !line.starts_with('#'))
+                .and_then(|line| line.split_whitespace().next())
+                .map(|command| matches!(command, "fixup" | "f" | "squash" | "s"))
+        })
+        .unwrap_or(false)
 }
 
 /// Whether `rerere.autoUpdate` is on: then git stages each resolution it

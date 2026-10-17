@@ -346,6 +346,11 @@ rebase stops), absorb creates fixup commits at HEAD and uses
 - It handles multiple target commits naturally (one fixup commit per target)
 - It follows the same pattern as `fold commit+commit`
 
+A conflict pauses the rebase (Spec 014). A target the resolution empties is
+kept as an empty commit, so its fixup still lands on it; a fixup the
+resolution empties is skipped, its change goes back to the working tree, and
+the result counts it as kept out rather than absorbed.
+
 ### Automatic Working Tree Preservation
 
 Hunks and files that cannot be absorbed remain as uncommitted changes in the
