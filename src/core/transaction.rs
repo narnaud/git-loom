@@ -22,6 +22,11 @@ pub struct LoomState {
     /// the refusal does not offer to drop them (see [`git::Protected`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub targets: Vec<String>,
+    /// Fixup commits whose squash the user's resolution skipped: once the
+    /// rebase is over, each one's change goes back to the working tree, and
+    /// the command says what was not folded (Spec 014).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped_fixups: Vec<String>,
     /// Command-specific resume context (opaque JSON).
     pub context: serde_json::Value,
 }
@@ -461,7 +466,7 @@ pub fn abort_run() -> Result<()> {
 /// otherwise dispatch to the command's `after_continue`, deleting the state
 /// only once that succeeds.
 pub fn continue_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
-    let Some(state) = load(git_dir)? else {
+    let Some(mut state) = load(git_dir)? else {
         return continue_without_state(workdir, git_dir);
     };
 
@@ -470,6 +475,7 @@ pub fn continue_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
     let stop_before = git::stop_id(workdir, git_dir);
     let auto_merge_before = stop_before.as_ref().map(git::StopId::auto_merge);
     if git::rebase_is_in_progress(git_dir) {
+        keep_emptied_step(workdir, git_dir, &mut state)?;
         // A stop on a commit the new history already contains is not a conflict
         // to resolve (`skip_empty_stops` establishes that before skipping
         // anything). A resumable owner has already made its own rewrite by the
@@ -516,8 +522,104 @@ pub fn continue_cmd(workdir: &Path, git_dir: &Path) -> Result<()> {
     // else: no rebase or merge is in progress — the user already ran
     // `git rebase --continue` manually, so move straight to dispatch.
 
+    restore_skipped_fixups(workdir, &state.skipped_fixups)?;
     if dispatch_after_continue(workdir, git_dir, &state)? {
         delete(git_dir)?;
+    }
+    Ok(())
+}
+
+/// Act on a resolution that leaves the stopped step with nothing, before
+/// git's `--continue` drops or skips it (Spec 014). A target is committed
+/// empty under its own message and authorship, so the step that lands on it
+/// still can; a fixup is recorded, so its change goes back to the working
+/// tree once the rebase is over.
+fn keep_emptied_step(workdir: &Path, git_dir: &Path, state: &mut LoomState) -> Result<()> {
+    match git::emptied_stop(workdir, git_dir, &state.targets) {
+        Some(git::EmptiedStop::Target(sha)) => {
+            let name = crate::core::repo::describe_commit(workdir, &sha);
+            git::commit_empty_copy_of(workdir, &sha).with_context(|| {
+                format!(
+                    "Could not keep {name} as an empty commit\n\
+                     Run `loom abort`, or commit it yourself with \
+                     `git commit --allow-empty -C {}` and run `loom continue` again",
+                    git::short_hash(&sha)
+                )
+            })?;
+            crate::core::msg::warn(&format!(
+                "Kept {name} as an empty commit — your resolution left it with no changes of its own"
+            ));
+        }
+        // Not reported here: the change is still in the fixup commit, and the
+        // restore says what became of it. A `--continue` that failed brings
+        // the same stop back here, hence the guard.
+        Some(git::EmptiedStop::Fixup(sha)) if !state.skipped_fixups.contains(&sha) => {
+            state.skipped_fixups.push(sha);
+            save(git_dir, state)?;
+        }
+        Some(git::EmptiedStop::Fixup(_)) | None => {}
+    }
+    Ok(())
+}
+
+/// Put the change of every fixup the user's resolution skipped back in the
+/// working tree, or park it: once the rebase is over the fixup commit is all
+/// that holds it (Spec 014).
+///
+/// Before the command's own `after_continue`: a failed apply checks files out
+/// of the index, which must not yet hold what that handler restores. The
+/// entries stay in the state for that handler's message, so a `loom continue`
+/// retried after it failed comes back here: a change the tree already holds
+/// is left as it is rather than applied twice, and one already parked is named
+/// again rather than parked twice. A change that cannot be read,
+/// or neither put back nor parked, fails the continue: the state keeps its
+/// hash for the retry.
+fn restore_skipped_fixups(workdir: &Path, fixups: &[String]) -> Result<()> {
+    for sha in fixups {
+        let short = git::short_hash(sha);
+        // A fixup loom made is titled `fixup! <target subject>`; `fold
+        // <commit> <commit>` squashes the source commit itself.
+        let subject = git::commit_subject(workdir, sha).ok();
+        let (what, kept) = match subject.as_deref().and_then(|s| s.strip_prefix("fixup! ")) {
+            Some(target) => (format!("The change meant for `{target}`"), "the commit"),
+            None => (format!("The change of `{short}`"), "its target"),
+        };
+        let patch = git::diff_commit(workdir, sha).with_context(|| {
+            format!(
+                "{what} could not be read back from `{short}`\n\
+                 Fix what keeps git from reading it, then run `loom continue` again"
+            )
+        })?;
+        let back = || {
+            crate::core::msg::warn(&format!(
+                "{what} is back in your working tree — your resolution kept {kept} unchanged"
+            ));
+        };
+        if git::patch_is_applied(workdir, &patch) {
+            back();
+            continue;
+        }
+        if let Some(path) = git::find_saved_patch(workdir, "unfolded", &patch) {
+            crate::core::msg::warn(&format!(
+                "{what} is already saved as a patch — replay it with `{}`",
+                git::Replay::Worktree.command(&path)
+            ));
+            continue;
+        }
+        match git::apply_patch_to_worktree(workdir, &patch) {
+            Ok(()) => back(),
+            Err(e) => {
+                crate::core::msg::warn(&format!(
+                    "{what} could not be put back in your working tree: {e}"
+                ));
+                if !git::save_or_warn(workdir, "unfolded", &patch, git::Replay::Worktree) {
+                    bail!(
+                        "{what} could not be saved from `{short}`\n\
+                         Fix what keeps loom from saving its patch, then run `loom continue` again"
+                    );
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -740,9 +842,19 @@ fn dispatch_after_continue(workdir: &Path, git_dir: &Path, state: &LoomState) ->
     match state.command.as_str() {
         "update" => crate::update::after_continue(workdir, &state.rollback, &state.context),
         "commit" => crate::commit::after_continue(workdir, &state.rollback, &state.context),
-        "absorb" => crate::absorb::after_continue(workdir, &state.rollback, &state.context),
+        "absorb" => crate::absorb::after_continue(
+            workdir,
+            &state.rollback,
+            &state.context,
+            &state.skipped_fixups,
+        ),
         "drop" => crate::drop::after_continue(workdir, &state.rollback, &state.context),
-        "fold" => crate::fold::after_continue(workdir, &state.rollback, &state.context),
+        "fold" => crate::fold::after_continue(
+            workdir,
+            &state.rollback,
+            &state.context,
+            &state.skipped_fixups,
+        ),
         "reword" => crate::reword::after_continue(workdir, &state.rollback, &state.context),
         "swap" => crate::swap::after_continue(workdir, &state.rollback, &state.context),
         other => bail!("Unknown command '{}' in loom state file", other),
@@ -767,6 +879,7 @@ mod tests {
             context: serde_json::json!({ "branch_name": "feature" }),
             protect: vec!["def456".to_string()],
             targets: vec!["fed789".to_string()],
+            skipped_fixups: Vec::new(),
         };
 
         let json = serde_json::to_string_pretty(&state).unwrap();
@@ -823,6 +936,7 @@ mod tests {
                 context: serde_json::Value::Null,
                 protect,
                 targets: Vec::new(),
+                skipped_fixups: Vec::new(),
             },
         )
         .unwrap();
@@ -870,6 +984,7 @@ mod tests {
                 context: serde_json::Value::Null,
                 protect: Vec::new(),
                 targets,
+                skipped_fixups: Vec::new(),
             },
         )
         .unwrap();
@@ -921,6 +1036,7 @@ mod tests {
                 context: serde_json::Value::Null,
                 protect,
                 targets: Vec::new(),
+                skipped_fixups: Vec::new(),
             },
         )
         .unwrap();
@@ -968,6 +1084,7 @@ mod tests {
                 context: serde_json::Value::Null,
                 protect,
                 targets: Vec::new(),
+                skipped_fixups: Vec::new(),
             },
         )
         .unwrap();
@@ -996,6 +1113,7 @@ mod tests {
             context: serde_json::Value::Null,
             protect: Vec::new(),
             targets: Vec::new(),
+            skipped_fixups: Vec::new(),
         };
         save(&git_dir, &state).unwrap();
 
@@ -1032,6 +1150,7 @@ mod tests {
             context: serde_json::Value::Null,
             protect: Vec::new(),
             targets: Vec::new(),
+            skipped_fixups: Vec::new(),
         };
         save(&git_dir, &state).unwrap();
 
@@ -1058,6 +1177,7 @@ mod tests {
             context: serde_json::Value::Null,
             protect: Vec::new(),
             targets: Vec::new(),
+            skipped_fixups: Vec::new(),
         };
         save(&git_dir, &state).unwrap();
 
@@ -1314,6 +1434,7 @@ mod tests {
             context: serde_json::Value::Null,
             protect: Vec::new(),
             targets: Vec::new(),
+            skipped_fixups: Vec::new(),
         };
         save(dir.path(), &state).unwrap();
         assert_eq!(
@@ -1339,6 +1460,7 @@ mod tests {
             context: serde_json::Value::Null,
             protect: Vec::new(),
             targets: Vec::new(),
+            skipped_fixups: Vec::new(),
         };
 
         save(dir.path(), &make("update")).unwrap();
@@ -1376,6 +1498,7 @@ mod tests {
                 context: serde_json::Value::Null,
                 protect: Vec::new(),
                 targets: Vec::new(),
+                skipped_fixups: Vec::new(),
             },
         )
         .unwrap();
@@ -1434,6 +1557,7 @@ mod tests {
                 context: serde_json::Value::Null,
                 protect: Vec::new(),
                 targets: Vec::new(),
+                skipped_fixups: Vec::new(),
             },
         )
         .unwrap();
@@ -1488,6 +1612,7 @@ mod tests {
                 context: serde_json::Value::Null,
                 protect: Vec::new(),
                 targets: Vec::new(),
+                skipped_fixups: Vec::new(),
             },
         )
         .unwrap();
@@ -1502,5 +1627,404 @@ mod tests {
             state_path(&git_dir).exists(),
             "the state must survive a rebase that is still in progress"
         );
+    }
+
+    /// Commit `f.txt` holding `content`, returning the hash.
+    fn commit_f(t: &crate::core::test_helpers::TestRepo, content: &str, message: &str) -> String {
+        t.write_file("f.txt", content);
+        t.stage_files(&["f.txt"]);
+        t.commit_staged(message);
+        t.head_oid().to_string()
+    }
+
+    /// Resolve the conflict on `f.txt` as HEAD's side, which empties the step.
+    fn resolve_as_head(workdir: &Path) {
+        git::run_git(workdir, &["checkout", "HEAD", "--", "f.txt"]).unwrap();
+    }
+
+    fn subjects(workdir: &Path) -> Vec<String> {
+        git::run_git_stdout(workdir, &["log", "--format=%s"])
+            .unwrap()
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Run a todo that puts `moved` under `target`: both conflict in turn, the
+    /// second on the target itself. Returns the two hashes.
+    fn start_reorder_rebase(t: &crate::core::test_helpers::TestRepo) -> (String, String) {
+        let base = commit_f(t, "base\n", "base");
+        let target = commit_f(t, "s\n", "target");
+        let moved = commit_f(t, "t\n", "moved");
+        let todo = format!("label onto\n\nreset onto\npick {moved}\npick {target}\n");
+        assert_eq!(
+            crate::core::weave::run_rebase(&t.workdir(), Some(&base), &todo).unwrap(),
+            git::RebaseOutcome::Stopped
+        );
+        (target, moved)
+    }
+
+    /// #484: a resolution that empties a target would make `--continue` drop
+    /// it, and a fixup behind it would then land on the commit below.
+    #[test]
+    fn continue_keeps_an_emptied_target_as_an_empty_commit() {
+        let t = crate::core::test_helpers::TestRepo::new();
+        let workdir = t.workdir();
+        let git_dir = t.repo.path().to_path_buf();
+        let (target, moved) = start_reorder_rebase(&t);
+        save(
+            &git_dir,
+            &LoomState {
+                command: "drop".to_string(),
+                rollback: Rollback::default(),
+                protect: Vec::new(),
+                targets: vec![target.clone()],
+                skipped_fixups: Vec::new(),
+                context: serde_json::json!({ "commit_hash": moved }),
+            },
+        )
+        .unwrap();
+
+        t.write_file("f.txt", "t\n");
+        git::run_git(&workdir, &["add", "f.txt"]).unwrap();
+        continue_cmd(&workdir, &git_dir).unwrap();
+        assert!(
+            git::rebase_is_in_progress(&git_dir),
+            "the target's own pick conflicts next"
+        );
+
+        resolve_as_head(&workdir);
+        continue_cmd(&workdir, &git_dir).unwrap();
+
+        assert!(!git::rebase_is_in_progress(&git_dir));
+        assert!(!state_path(&git_dir).exists());
+        assert_eq!(&subjects(&workdir)[..3], ["target", "moved", "base"]);
+        assert_eq!(
+            git::rev_parse(&workdir, "HEAD^{tree}").unwrap(),
+            git::rev_parse(&workdir, "HEAD~1^{tree}").unwrap(),
+            "kept with no changes of its own"
+        );
+        let identity = |rev: &str| {
+            git::run_git_stdout(&workdir, &["show", "-s", "--format=%an <%ae> %at%n%B", rev])
+                .unwrap()
+        };
+        assert_eq!(identity("HEAD"), identity(&target));
+    }
+
+    /// A pick outside `targets` that a resolution empties is the user's to
+    /// drop (#451), `protect` or not.
+    #[test]
+    fn continue_lets_an_emptied_protected_commit_go() {
+        let t = crate::core::test_helpers::TestRepo::new();
+        let workdir = t.workdir();
+        let git_dir = t.repo.path().to_path_buf();
+        let (target, moved) = start_reorder_rebase(&t);
+        save(
+            &git_dir,
+            &LoomState {
+                command: "drop".to_string(),
+                rollback: Rollback::default(),
+                protect: vec![target],
+                targets: Vec::new(),
+                skipped_fixups: Vec::new(),
+                context: serde_json::json!({ "commit_hash": moved }),
+            },
+        )
+        .unwrap();
+
+        t.write_file("f.txt", "t\n");
+        git::run_git(&workdir, &["add", "f.txt"]).unwrap();
+        continue_cmd(&workdir, &git_dir).unwrap();
+        resolve_as_head(&workdir);
+        continue_cmd(&workdir, &git_dir).unwrap();
+
+        assert!(!git::rebase_is_in_progress(&git_dir));
+        assert_eq!(&subjects(&workdir)[..2], ["moved", "base"]);
+    }
+
+    /// Start a fold whose fixup conflicts: its diff is `m` → `f`, replayed
+    /// onto the target's `t`. `above` replays cleanly once the fixup is gone.
+    /// With `source` it is a `fold <commit> <commit>`, whose fixup line is
+    /// the source commit itself.
+    fn start_fixup_rebase(
+        t: &crate::core::test_helpers::TestRepo,
+        rest: &dyn Fn(&str) -> String,
+        source: bool,
+    ) -> (String, String) {
+        let base = commit_f(t, "base\n", "base");
+        let target = commit_f(t, "t\n", "target");
+        let above = commit_f(t, "m\n", "above");
+        let fixup = commit_f(t, "f\n", if source { "source" } else { "fixup! target" });
+        let todo = format!(
+            "label onto\n\nreset onto\npick {target}\nfixup {fixup}\npick {above}\n{}",
+            rest(&fixup)
+        );
+        assert_eq!(
+            crate::core::weave::run_rebase(&t.workdir(), Some(&base), &todo).unwrap(),
+            git::RebaseOutcome::Stopped
+        );
+        t.create_branch_at("_loom-track", &target);
+        save(
+            t.repo.path(),
+            &LoomState {
+                command: "fold".to_string(),
+                rollback: Rollback {
+                    delete_branches: vec!["_loom-track".to_string()],
+                    ..Default::default()
+                },
+                protect: Vec::new(),
+                targets: vec![target.clone()],
+                skipped_fixups: Vec::new(),
+                context: if source {
+                    serde_json::json!({
+                        "op": "CommitIntoCommit",
+                        "source_hash": fixup,
+                        "target_hash": target,
+                    })
+                } else {
+                    serde_json::json!({
+                        "op": "FilesIntoCommit",
+                        "original_commit_hash": target,
+                        "files_count": 1,
+                    })
+                },
+            },
+        )
+        .unwrap();
+        (target, fixup)
+    }
+
+    /// #483: a resolution that empties a fixup makes `--continue` skip it, and
+    /// that fixup commit was the only place the change lived.
+    #[test]
+    fn continue_puts_a_skipped_fixups_change_back_in_the_worktree() {
+        let t = crate::core::test_helpers::TestRepo::new();
+        let workdir = t.workdir();
+        let git_dir = t.repo.path().to_path_buf();
+        start_fixup_rebase(&t, &|_| String::new(), false);
+
+        resolve_as_head(&workdir);
+        continue_cmd(&workdir, &git_dir).unwrap();
+
+        assert!(!git::rebase_is_in_progress(&git_dir));
+        assert!(!state_path(&git_dir).exists());
+        assert_eq!(
+            git::run_git_stdout(&workdir, &["show", "HEAD:f.txt"]).unwrap(),
+            "m\n",
+            "the fixup folded nothing, and `above` replayed over it"
+        );
+        assert_eq!(t.read_file("f.txt"), "f\n");
+        assert_eq!(git::diff_cached(&workdir).unwrap(), "", "back unstaged");
+        assert!(!t.branch_exists("_loom-track"));
+    }
+
+    /// The record of a skipped fixup has to outlive the stops after it, and a
+    /// change that no longer applies is parked rather than dropped.
+    #[test]
+    fn a_skipped_fixup_survives_a_later_stop_and_is_parked_when_it_will_not_apply() {
+        let t = crate::core::test_helpers::TestRepo::new();
+        let workdir = t.workdir();
+        let git_dir = t.repo.path().to_path_buf();
+        // `later` changes `f` → `y`, which conflicts on the `m` left once the
+        // fixup is skipped.
+        let (_, fixup) = start_fixup_rebase(
+            &t,
+            &|_| {
+                let later = commit_f(&t, "y\n", "later");
+                format!("pick {later}\n")
+            },
+            false,
+        );
+
+        resolve_as_head(&workdir);
+        continue_cmd(&workdir, &git_dir).unwrap();
+        assert!(git::rebase_is_in_progress(&git_dir), "`later` conflicts");
+        assert_eq!(load(&git_dir).unwrap().unwrap().skipped_fixups, [fixup]);
+
+        t.write_file("f.txt", "y\n");
+        git::run_git(&workdir, &["add", "f.txt"]).unwrap();
+        continue_cmd(&workdir, &git_dir).unwrap();
+
+        assert!(!state_path(&git_dir).exists());
+        assert_eq!(
+            t.read_file("f.txt"),
+            "y\n",
+            "a change that will not apply leaves the tree alone"
+        );
+        let parked =
+            std::fs::read_to_string(git_dir.join("loom").join("unfolded-0.patch")).unwrap();
+        assert!(parked.contains("\n+f\n"), "{parked}");
+    }
+
+    /// A `loom continue` retried after its handler failed restores again
+    /// (Spec 014, *State Deleted Only After Success*): a change the tree
+    /// already holds must be left alone, not applied twice or parked as a
+    /// duplicate.
+    #[test]
+    fn a_retried_continue_does_not_restore_a_skipped_fixup_twice() {
+        let t = crate::core::test_helpers::TestRepo::new();
+        let workdir = t.workdir();
+        let git_dir = t.repo.path().to_path_buf();
+        let (target, fixup) = start_fixup_rebase(&t, &|_| String::new(), false);
+        resolve_as_head(&workdir);
+        continue_cmd(&workdir, &git_dir).unwrap();
+        assert_eq!(t.read_file("f.txt"), "f\n");
+
+        // The state as the handler left it before its failure.
+        t.create_branch_at("_loom-track", &target);
+        save(
+            &git_dir,
+            &LoomState {
+                command: "fold".to_string(),
+                rollback: Rollback::default(),
+                protect: Vec::new(),
+                targets: vec![target.clone()],
+                skipped_fixups: vec![fixup],
+                context: serde_json::json!({
+                    "op": "FilesIntoCommit",
+                    "original_commit_hash": target,
+                    "files_count": 1,
+                }),
+            },
+        )
+        .unwrap();
+        continue_cmd(&workdir, &git_dir).unwrap();
+
+        assert_eq!(t.read_file("f.txt"), "f\n");
+        assert!(!state_path(&git_dir).exists());
+        assert!(
+            !git_dir.join("loom").join("unfolded-0.patch").exists(),
+            "nothing to park: the change is already there"
+        );
+    }
+
+    /// A retried `loom continue` meets a change it parked last time: naming
+    /// that patch again, not parking a duplicate.
+    #[test]
+    fn a_retried_continue_does_not_park_a_skipped_fixup_twice() {
+        let t = crate::core::test_helpers::TestRepo::new();
+        let workdir = t.workdir();
+        let git_dir = t.repo.path().to_path_buf();
+        // `later` conflicts on the `m` left once the fixup is skipped, so the
+        // change is parked.
+        let (target, fixup) = start_fixup_rebase(
+            &t,
+            &|_| {
+                let later = commit_f(&t, "y\n", "later");
+                format!("pick {later}\n")
+            },
+            false,
+        );
+        resolve_as_head(&workdir);
+        continue_cmd(&workdir, &git_dir).unwrap();
+        t.write_file("f.txt", "y\n");
+        git::run_git(&workdir, &["add", "f.txt"]).unwrap();
+        continue_cmd(&workdir, &git_dir).unwrap();
+        let loom_dir = git_dir.join("loom");
+        assert!(loom_dir.join("unfolded-0.patch").exists());
+
+        // The state as the handler left it before its failure.
+        t.create_branch_at("_loom-track", &target);
+        save(
+            &git_dir,
+            &LoomState {
+                command: "fold".to_string(),
+                rollback: Rollback::default(),
+                protect: Vec::new(),
+                targets: vec![target.clone()],
+                skipped_fixups: vec![fixup],
+                context: serde_json::json!({
+                    "op": "FilesIntoCommit",
+                    "original_commit_hash": target,
+                    "files_count": 1,
+                }),
+            },
+        )
+        .unwrap();
+        continue_cmd(&workdir, &git_dir).unwrap();
+
+        assert!(!state_path(&git_dir).exists());
+        assert!(!loom_dir.join("unfolded-1.patch").exists(), "parked once");
+        assert_eq!(t.read_file("f.txt"), "y\n");
+    }
+
+    /// `fold <commit> <commit>` squashes the source commit itself: skipped,
+    /// the source is gone from history and its change comes back the same
+    /// way a fixup's does.
+    #[test]
+    fn continue_puts_a_skipped_source_commits_change_back_in_the_worktree() {
+        let t = crate::core::test_helpers::TestRepo::new();
+        let workdir = t.workdir();
+        let git_dir = t.repo.path().to_path_buf();
+        start_fixup_rebase(&t, &|_| String::new(), true);
+
+        resolve_as_head(&workdir);
+        continue_cmd(&workdir, &git_dir).unwrap();
+
+        assert!(!state_path(&git_dir).exists());
+        assert_eq!(&subjects(&workdir)[..2], ["above", "target"]);
+        assert_eq!(t.read_file("f.txt"), "f\n");
+        assert_eq!(git::diff_cached(&workdir).unwrap(), "");
+    }
+
+    /// A skipped fixup that will neither apply nor park lives only in its
+    /// commit, so the continue fails before dispatch deletes the state.
+    #[test]
+    fn continue_keeps_the_state_when_a_skipped_fixup_cannot_be_parked() {
+        let t = crate::core::test_helpers::TestRepo::new();
+        let workdir = t.workdir();
+        let git_dir = t.repo.path().to_path_buf();
+        // `later` conflicts on the `m` left once the fixup is skipped, so the
+        // change will not apply over it.
+        let (_, fixup) = start_fixup_rebase(
+            &t,
+            &|_| {
+                let later = commit_f(&t, "y\n", "later");
+                format!("pick {later}\n")
+            },
+            false,
+        );
+        resolve_as_head(&workdir);
+        continue_cmd(&workdir, &git_dir).unwrap();
+        t.write_file("f.txt", "y\n");
+        git::run_git(&workdir, &["add", "f.txt"]).unwrap();
+        // Every name the park would take is already in use.
+        for n in 0..1000 {
+            std::fs::write(git_dir.join("loom").join(format!("unfolded-{n}.patch")), "").unwrap();
+        }
+
+        let err = continue_cmd(&workdir, &git_dir).unwrap_err().to_string();
+
+        assert!(err.contains("could not be saved"), "{err}");
+        assert!(!git::rebase_is_in_progress(&git_dir));
+        assert_eq!(load(&git_dir).unwrap().unwrap().skipped_fixups, [fixup]);
+    }
+
+    /// A skipped fixup whose diff cannot be read has nothing to park, so the
+    /// continue fails before dispatch: deleting the state would take the only
+    /// pointer to that change with it.
+    #[test]
+    fn continue_keeps_the_state_when_a_skipped_fixup_cannot_be_read() {
+        let t = crate::core::test_helpers::TestRepo::new();
+        t.commit("only", "a.txt");
+        let workdir = t.workdir();
+        let git_dir = t.repo.path().to_path_buf();
+        save(
+            &git_dir,
+            &LoomState {
+                command: "drop".to_string(),
+                rollback: Rollback::default(),
+                protect: Vec::new(),
+                targets: Vec::new(),
+                skipped_fixups: vec!["0".repeat(40)],
+                context: serde_json::json!({ "commit_hash": "abc" }),
+            },
+        )
+        .unwrap();
+
+        let err = continue_cmd(&workdir, &git_dir).unwrap_err().to_string();
+
+        assert!(err.contains("could not be read back"), "{err}");
+        assert!(state_path(&git_dir).exists());
     }
 }

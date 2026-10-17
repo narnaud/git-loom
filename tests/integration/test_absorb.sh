@@ -156,10 +156,72 @@ assert_head_parent_count 2   "topo_abs_merge_preserved"
 assert_branch_exists "g-topo-abs" "topo_abs_branch_exists"
 
 # ── CONTINUE / ABORT ──────────────────────────────────────────────────────────
-# Note: absorb attributes each hunk to the last commit that touched the lines,
-# so subsequent commits never conflict with the amended version.  We therefore
-# test the continue/abort machinery directly via a synthetic state file rather
-# than through a real rebase conflict.
+# Absorb attributes each hunk to the last commit that touched its lines, so a
+# fixup conflicts only on a line adjacent to a later commit's change (see the
+# last test here). The machinery itself is driven through a synthetic state
+# file.
+
+describe "absorb: a resolution that keeps a target unchanged skips its fixup, change back in worktree"
+setup_repo_with_remote
+printf 'a
+b
+c
+d
+e
+f
+g
+h
+' > "$WORK/f.txt"; echo x > "$WORK/g.txt"
+git -C "$WORK" add f.txt g.txt; git -C "$WORK" commit -q -m "A: create f and g"
+printf 'a2
+b
+c
+d
+e
+f
+g
+h
+' > "$WORK/f.txt"; echo x2 > "$WORK/g.txt"
+git -C "$WORK" commit -q -am "B: tweak f line 1 and g"
+# Line 2 belongs to A and sits under B's change to line 1: A's fixup conflicts on A.
+printf 'a2
+b2
+c
+d
+e
+f
+g
+h
+' > "$WORK/f.txt"; echo x3 > "$WORK/g.txt"
+gl_capture absorb
+assert_state_file "absorb_empty_fixup_state"
+git -C "$WORK" checkout HEAD -- f.txt
+gl_capture continue
+assert_exit_ok "$CODE" "absorb_empty_fixup_ok"
+assert_no_state_file "absorb_empty_fixup_state_removed"
+assert_contains "$OUT" "Absorbed into 1 of 2 commit(s)" "absorb_empty_fixup_msg"
+assert_contains "$OUT" "back in your working tree" "absorb_empty_fixup_restored_msg"
+assert_not_contains "$OUT" "Absorbed 2 hunk" "absorb_empty_fixup_no_success"
+assert_eq "$(git -C "$WORK" show HEAD~1:f.txt | sed -n 2p)" "b" "absorb_empty_fixup_a_unchanged"
+assert_eq "$(git -C "$WORK" show HEAD:g.txt)" "x3" "absorb_empty_fixup_b_absorbed"
+assert_eq "$(sed -n 2p "$WORK/f.txt")" "b2" "absorb_empty_fixup_worktree"
+
+describe "absorb: a commit that keeps one of its two fixups still counts as absorbed into"
+setup_repo_with_remote
+printf 'a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\n' > "$WORK/f.txt"; echo x > "$WORK/g.txt"; echo k > "$WORK/k.txt"
+git -C "$WORK" add f.txt g.txt k.txt; git -C "$WORK" commit -q -m "A: create f, g and k"
+printf 'a2\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl2\n' > "$WORK/f.txt"; echo x2 > "$WORK/g.txt"
+git -C "$WORK" commit -q -am "B: tweak f lines 1 and 12, and g"
+# A gets a whole-file fixup (k.txt) and a hunk fixup (f.txt line 2); only the second conflicts.
+printf 'a2\nb2\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl3\n' > "$WORK/f.txt"; echo x3 > "$WORK/g.txt"; echo k2 > "$WORK/k.txt"
+gl_capture absorb
+assert_state_file "absorb_two_fixups_state"
+git -C "$WORK" checkout HEAD -- f.txt
+gl_capture continue
+assert_exit_ok "$CODE" "absorb_two_fixups_ok"
+assert_contains "$OUT" "Absorbed into 2 of 2 commit(s)" "absorb_two_fixups_msg"
+assert_eq "$(git -C "$WORK" show HEAD~1:k.txt)" "k2" "absorb_two_fixups_a_absorbed"
+assert_eq "$(sed -n 2p "$WORK/f.txt")" "b2" "absorb_two_fixups_worktree"
 
 describe "absorb: continue with no active rebase dispatches after_continue"
 setup_repo_with_remote

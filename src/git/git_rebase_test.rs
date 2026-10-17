@@ -972,3 +972,130 @@ fn unmerged_paths_is_empty_without_a_conflict() {
     assert!(super::unmerged_paths(&test_repo.workdir()).is_empty());
     assert!(!super::has_unmerged_paths(&test_repo.workdir()));
 }
+
+/// Only a resolution to HEAD's side on a pick in `targets` is one for loom to
+/// keep: still unmerged, a resolution that changes something, a commit made
+/// by hand at the stop, and a pick outside `targets` are all left to git.
+#[test]
+fn emptied_stop_names_a_target_pick_resolved_to_head() {
+    let test_repo = TestRepo::new();
+    let workdir = test_repo.workdir();
+    let git_dir = test_repo.repo.path().to_path_buf();
+
+    let (onto, base) = conflicting_base(&test_repo);
+    replay_conflict(&test_repo, &onto, &base, "topic");
+    let topic = crate::git::rev_parse(&workdir, "REBASE_HEAD").unwrap();
+    let targets = vec![topic.clone()];
+
+    assert_eq!(super::emptied_stop(&workdir, &git_dir, &targets), None);
+
+    test_repo.write_file("f.txt", "resolved\n");
+    crate::git::run_git(&workdir, &["add", "f.txt"]).unwrap();
+    assert_eq!(super::emptied_stop(&workdir, &git_dir, &targets), None);
+
+    crate::git::run_git(&workdir, &["checkout", "HEAD", "--", "f.txt"]).unwrap();
+    assert_eq!(super::emptied_stop(&workdir, &git_dir, &[]), None);
+    assert_eq!(
+        super::emptied_stop(&workdir, &git_dir, &targets),
+        Some(super::EmptiedStop::Target(topic.clone()))
+    );
+
+    crate::git::commit_empty_copy_of(&workdir, &topic).unwrap();
+    assert_eq!(super::emptied_stop(&workdir, &git_dir, &targets), None);
+
+    super::rebase_abort(&workdir).unwrap();
+}
+
+/// A pick's stop has no record of the HEAD it was on, so `AUTO_MERGE` is what
+/// tells it from one committed over — and `git reset` without a pathspec
+/// takes it away too. The drop then goes unseen, as the docs say (Spec 014).
+#[test]
+fn emptied_stop_loses_a_pick_to_a_reset_without_pathspec() {
+    let test_repo = TestRepo::new();
+    let workdir = test_repo.workdir();
+    let git_dir = test_repo.repo.path().to_path_buf();
+
+    let (onto, base) = conflicting_base(&test_repo);
+    replay_conflict(&test_repo, &onto, &base, "topic");
+    let targets = vec![crate::git::rev_parse(&workdir, "REBASE_HEAD").unwrap()];
+    crate::git::run_git(&workdir, &["reset", "--hard"]).unwrap();
+
+    assert_eq!(super::auto_merge_id(&workdir), None);
+    assert_eq!(super::emptied_stop(&workdir, &git_dir, &targets), None);
+
+    super::rebase_abort(&workdir).unwrap();
+}
+
+/// `rebase-merge/amend` is what tells a fixup's stop from a pick's, and names
+/// the HEAD to amend: the fixup is reported whether or not its target is in
+/// `targets`, and whether or not `AUTO_MERGE` survived the resolution, until
+/// a commit made at the stop moves HEAD.
+#[test]
+fn emptied_stop_names_a_fixup_resolved_to_head() {
+    let test_repo = TestRepo::new();
+    let workdir = test_repo.workdir();
+    let git_dir = test_repo.repo.path().to_path_buf();
+    let commit_f = |content: &str, message: &str| {
+        test_repo.write_file("f.txt", content);
+        test_repo.stage_files(&["f.txt"]);
+        test_repo.commit_staged(message);
+        test_repo.head_oid().to_string()
+    };
+    let base = commit_f("base\n", "base");
+    let target = commit_f("t\n", "target");
+    commit_f("m\n", "above");
+    let fixup = commit_f("f\n", "fixup! target");
+
+    // The fixup's diff is `m` → `f`, which conflicts on `t`.
+    let todo = format!("label onto\n\nreset onto\npick {target}\nfixup {fixup}\n");
+    assert_eq!(
+        weave::run_rebase(&workdir, Some(&base), &todo).unwrap(),
+        super::RebaseOutcome::Stopped
+    );
+    crate::git::run_git(&workdir, &["checkout", "HEAD", "--", "f.txt"]).unwrap();
+    assert_eq!(
+        super::emptied_stop(&workdir, &git_dir, &[]),
+        Some(super::EmptiedStop::Fixup(fixup.clone()))
+    );
+
+    crate::git::run_git(&workdir, &["reset", "--hard"]).unwrap();
+    assert_eq!(super::auto_merge_id(&workdir), None);
+    assert_eq!(
+        super::emptied_stop(&workdir, &git_dir, &[]),
+        Some(super::EmptiedStop::Fixup(fixup))
+    );
+
+    crate::git::run_git(&workdir, &["commit", "--allow-empty", "-m", "by hand"]).unwrap();
+    assert_eq!(super::emptied_stop(&workdir, &git_dir, &[]), None);
+
+    super::rebase_abort(&workdir).unwrap();
+}
+
+/// Git writes `rebase-merge/amend` at a clean `edit` stop too, with the index
+/// at HEAD: nothing is emptied there, and taking it for a skipped fixup would
+/// later apply the edited commit's own diff to the working tree.
+#[test]
+fn emptied_stop_ignores_a_clean_edit_stop() {
+    let test_repo = TestRepo::new();
+    let base = test_repo.commit("base", "base.txt");
+    let edited = test_repo.commit("first", "a.txt");
+    let workdir = test_repo.workdir();
+    let git_dir = test_repo.repo.path().to_path_buf();
+
+    let todo = format!("label onto\n\nreset onto\nedit {edited}\n");
+    assert_eq!(
+        weave::run_rebase(&workdir, Some(&base.to_string()), &todo).unwrap(),
+        super::RebaseOutcome::Paused
+    );
+    assert!(
+        git_dir.join("rebase-merge").join("amend").exists(),
+        "the record this stop shares with a fixup's"
+    );
+
+    assert_eq!(
+        super::emptied_stop(&workdir, &git_dir, &[edited.to_string()]),
+        None
+    );
+
+    super::rebase_abort(&workdir).unwrap();
+}
