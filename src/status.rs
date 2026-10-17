@@ -44,7 +44,7 @@ pub fn run(
     let sections = graph::build_sections(info);
 
     if let Some(stacks) = stacks {
-        agent_mode::set_graph(status_json::build(
+        agent_mode::set_graph(&status_json::build(
             &sections,
             &branch_name,
             &stacks,

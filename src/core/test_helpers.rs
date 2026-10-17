@@ -1094,12 +1094,8 @@ pub fn base_info() -> RepoInfo {
     }
 }
 
-/// The JSON graph the way `status::run` builds it, with nothing hidden.
-pub fn status_graph(info: RepoInfo) -> status_json::StatusGraph {
-    status_graph_in(info, "")
-}
-
-/// [`status_graph`] run from the `cwd_prefix` subdirectory.
+/// The JSON graph the way `status::run` builds it from the `cwd_prefix`
+/// subdirectory, with nothing hidden.
 pub fn status_graph_in(info: RepoInfo, cwd_prefix: &str) -> status_json::StatusGraph {
     let ids = IdAllocator::new(info.collect_entities());
     let branch = info.branch_name.clone();

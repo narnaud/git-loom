@@ -469,7 +469,7 @@ pub fn run(branch: Option<String>, no_pr: bool, force: bool, title: Option<Strin
         }
     };
     pushed.map_err(|err| push_hint(err, &branch_name, no_pr, force))?;
-    agent_mode::set_push(report);
+    agent_mode::set_push(&report);
     Ok(())
 }
 

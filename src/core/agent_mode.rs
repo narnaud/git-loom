@@ -11,9 +11,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::Serialize;
-
-use crate::core::push_json::PushReport;
-use crate::core::status_json::StatusGraph;
+use serde_json::value::RawValue;
 
 static ENABLED: AtomicBool = AtomicBool::new(false);
 /// Success/warning lines collected for the final `ok` response.
@@ -21,9 +19,9 @@ static MESSAGES: Mutex<Vec<String>> = Mutex::new(Vec::new());
 /// Response stored by a prompt site or a conflict pause, emitted by `finish`.
 static PENDING: Mutex<Option<AgentResponse>> = Mutex::new(None);
 /// The status graph, stored by `loom status` and emitted by `finish`.
-static GRAPH: Mutex<Option<StatusGraph>> = Mutex::new(None);
+static GRAPH: Mutex<Option<Box<RawValue>>> = Mutex::new(None);
 /// What `loom push` did, stored by it and emitted by `finish`.
-static PUSH: Mutex<Option<PushReport>> = Mutex::new(None);
+static PUSH: Mutex<Option<Box<RawValue>>> = Mutex::new(None);
 
 /// Enable or disable agent mode. Called once from `main()` before dispatch.
 pub fn set(enabled: bool) {
@@ -87,10 +85,10 @@ pub enum AgentResponse {
         messages: Vec<String>,
         /// The status graph; `loom status` only (spec 019).
         #[serde(skip_serializing_if = "Option::is_none")]
-        graph: Option<Box<StatusGraph>>,
+        graph: Option<Box<RawValue>>,
         /// What was pushed and each PR's state; `loom push` only (spec 019).
         #[serde(skip_serializing_if = "Option::is_none")]
-        push: Option<Box<PushReport>>,
+        push: Option<Box<RawValue>>,
     },
     NeedsInput {
         kind: InputKind,
@@ -149,19 +147,26 @@ pub fn record_message(message: &str) {
 /// Store the status graph for the final `ok` response (spec 019).
 ///
 /// No-op when agent mode is off.
-pub fn set_graph(graph: StatusGraph) {
+pub fn set_graph(graph: &impl Serialize) {
     if enabled() {
-        *GRAPH.lock().unwrap() = Some(graph);
+        *GRAPH.lock().unwrap() = Some(raw_json(graph));
     }
 }
 
 /// Store the push report for the final `ok` response (spec 019).
 ///
 /// No-op when agent mode is off.
-pub fn set_push(report: PushReport) {
+pub fn set_push(report: &impl Serialize) {
     if enabled() {
-        *PUSH.lock().unwrap() = Some(report);
+        *PUSH.lock().unwrap() = Some(raw_json(report));
     }
+}
+
+/// `payload` serialized now, for `finish` to embed verbatim. Keeps this module
+/// free of the payload types, which `git` would otherwise reach through it; a
+/// `serde_json::Value` would re-sort the keys.
+fn raw_json(payload: &impl Serialize) -> Box<RawValue> {
+    serde_json::value::to_raw_value(payload).expect("agent payload serialization cannot fail")
 }
 
 /// Store a `needs_input` response and return the marker error to propagate.
@@ -232,8 +237,8 @@ pub fn note_paused(message: &str, hint: &str) {
 pub fn finish(result: &anyhow::Result<()>) -> i32 {
     let pending = PENDING.lock().unwrap().take();
     let collected = std::mem::take(&mut *MESSAGES.lock().unwrap());
-    let graph = GRAPH.lock().unwrap().take().map(Box::new);
-    let push = PUSH.lock().unwrap().take().map(Box::new);
+    let graph = GRAPH.lock().unwrap().take();
+    let push = PUSH.lock().unwrap().take();
     let response = match result {
         // Only a conflict pause overrides success; a leftover `needs_*`
         // response here means its marker error was swallowed and the command
@@ -294,18 +299,30 @@ mod tests {
         assert_eq!(r.to_json(), r#"{"status":"ok"}"#);
     }
 
+    // Payloads must come out as their types serialize them: a
+    // `serde_json::Value` would re-sort these keys.
     #[test]
-    fn ok_carries_the_status_graph_after_messages() {
+    fn ok_embeds_the_payloads_verbatim_after_messages() {
+        #[derive(Serialize)]
+        struct Payload {
+            zeta: u8,
+            alpha: &'static str,
+        }
         let r = AgentResponse::Ok {
             messages: vec!["Done".to_string()],
-            graph: Some(Box::new(crate::core::test_helpers::status_graph(
-                crate::core::test_helpers::base_info(),
-            ))),
-            push: None,
+            graph: Some(raw_json(&Payload {
+                zeta: 1,
+                alpha: "a",
+            })),
+            push: Some(raw_json(&Payload {
+                zeta: 2,
+                alpha: "b",
+            })),
         };
-        let json = r.to_json();
-        assert!(json.starts_with(r#"{"status":"ok","messages":["Done"],"graph":{"#));
-        assert!(!json.contains('\n'));
+        assert_eq!(
+            r.to_json(),
+            r#"{"status":"ok","messages":["Done"],"graph":{"zeta":1,"alpha":"a"},"push":{"zeta":2,"alpha":"b"}}"#
+        );
         assert_eq!(r.exit_code(), 0);
     }
 
