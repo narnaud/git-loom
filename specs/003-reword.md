@@ -44,6 +44,8 @@ On replay conflict, retain the amended message and pause with exactly this guida
 
 `loom continue` completes the reword. `loom abort` restores the original message, HEAD, and all branch refs (Spec 014). Outside a paused conflict, the operation is atomic and MUST NOT leave an incidental rebase state. A target whose replay is dropped MUST refuse and restore, naming the commit (Spec 004).
 
+The resume state is saved before the rebase starts, not when it pauses: without `-m` the editor runs inside the paused rebase, and a loom killed while it is open MUST leave `loom abort` the staged changes to put back (Spec 014). `loom continue` after such a kill finishes the rebase with the message as it was, and says so.
+
 ## Branch target
 
 Rename through `git branch -m`. With `-m`, rename non-interactively; without it, prompt as described above. Confirming the unchanged name is a no-op. The target branch must exist.

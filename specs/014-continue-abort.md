@@ -468,13 +468,21 @@ message.
 
 ```json
 {
-  "display": "<short hash of the commit before the rebase>",
-  "new_hash": "<hash the commit now has>"
+  "original": "<hash of the commit before the rebase>",
+  "new_hash": "<hash the commit has once amended, else null>"
 }
 ```
 
+The state is saved before the rebase starts (Spec 003): without `-m` the
+editor runs inside the paused rebase, so a loom killed while it is open has
+already left `loom abort` the staged patch. `new_hash` is written once the
+amend is made. A state file older than the field names holds `display` and
+`new_display`, read the same way.
+
 After continue: restores pre-existing staged changes, prints the reword success
-message.
+message. Without `new_hash`, loom died before recording the amend: when the
+original commit is still in HEAD's history the message is reported as
+unchanged, otherwise as updated, without the new hash.
 
 A `reword` conflicts only in its final phase. The rebase pauses at the target
 with an `edit`, the amend happens, and `git rebase --continue` then replays
