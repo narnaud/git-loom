@@ -680,14 +680,16 @@ fn reword_mints_a_change_id_for_a_commit_without_one() {
     assert_eq!(test_repo.get_message(0), "Still plain");
 }
 
-/// A state file written when the field was `new_display` still resumes.
+/// A state file written when the fields were `display` and `new_display`
+/// still resumes.
 #[test]
-fn after_continue_reads_a_state_file_with_the_old_field_name() {
+fn after_continue_reads_a_state_file_with_the_old_field_names() {
     let test_repo = TestRepo::new();
     let context = serde_json::json!({ "display": "abc1234", "new_display": "def5678" });
 
     let ctx: super::RewordContext = serde_json::from_value(context.clone()).unwrap();
-    assert_eq!(ctx.new_hash, "def5678");
+    assert_eq!(ctx.original, "abc1234");
+    assert_eq!(ctx.new_hash.as_deref(), Some("def5678"));
     let rollback = crate::core::transaction::Rollback::default();
     super::after_continue(&test_repo.workdir(), &rollback, &context).unwrap();
 }
@@ -963,4 +965,95 @@ fn reword_refuses_an_octopus_merge() {
 
     assert!(err.contains("octopus"), "{err}");
     assert_eq!(t.head_oid(), head_before, "{err}");
+}
+
+// ── Killed while the editor is open (#440) ──────────────────────────────
+
+/// The editor runs inside the paused rebase, so the state `loom abort` needs
+/// has to be on disk before it opens.
+#[test]
+fn reword_saves_its_state_before_the_editor_opens() {
+    let t = TestRepo::new();
+    let c1 = t.commit("First", "first.txt");
+    t.commit("Second", "second.txt");
+    t.write_file("first.txt", "staged edit\n");
+    t.stage_files(&["first.txt"]);
+    let staged = crate::git::diff_cached(&t.workdir()).unwrap();
+
+    // An editor that keeps a copy of whatever state file exists when it opens.
+    let copy = t.repo.path().join("seen-by-editor.json");
+    let as_sh = |p: &std::path::Path| p.to_str().unwrap().replace('\\', "/");
+    t.set_config(
+        "core.editor",
+        &format!(
+            "sh -c 'cp \"{}\" \"{}\"; echo edited > \"$1\"' --",
+            as_sh(&state_path(&t)),
+            as_sh(&copy)
+        ),
+    );
+
+    super::reword_commit(&t.repo, &c1.to_string(), None, &[]).unwrap();
+
+    let seen: crate::core::transaction::LoomState =
+        serde_json::from_slice(&std::fs::read(&copy).unwrap()).unwrap();
+    assert_eq!(seen.command, "reword");
+    assert_eq!(seen.rollback.saved_staged_patch, staged);
+    assert_eq!(t.get_subject(1), "edited");
+    assert!(!state_path(&t).exists());
+}
+
+/// What a loom killed in the editor leaves: the state written before the
+/// rebase, with no `new_hash`, and the rebase paused at its `edit`.
+fn reword_killed_in_the_editor(t: &TestRepo, target: git2::Oid) {
+    let workdir = t.workdir();
+    let git_dir = t.repo.path().to_path_buf();
+    let ctx = super::RewordContext {
+        original: target.to_string(),
+        new_hash: None,
+    };
+    super::save_state(&git_dir, &crate::git::diff_cached(&workdir).unwrap(), &ctx).unwrap();
+    crate::core::weave::start_edit_rebase(&t.repo, &workdir, target).unwrap();
+    assert!(crate::git::rebase_is_in_progress(&git_dir));
+}
+
+/// The issue's repro: the staged change must come back staged.
+#[test]
+fn abort_after_a_reword_killed_in_the_editor_restores_the_index() {
+    let t = TestRepo::new();
+    let c1 = t.commit("First", "first.txt");
+    t.commit("Second", "second.txt");
+    t.write_file("first.txt", "staged edit\n");
+    t.stage_files(&["first.txt"]);
+    let before = t.status_porcelain();
+    let head = t.head_oid();
+    reword_killed_in_the_editor(&t, c1);
+
+    crate::core::transaction::abort_cmd(&t.workdir(), t.repo.path()).unwrap();
+
+    assert!(!crate::git::rebase_is_in_progress(t.repo.path()));
+    assert!(!state_path(&t).exists());
+    assert_eq!(t.head_oid(), head);
+    assert_eq!(t.status_porcelain(), before);
+}
+
+/// Nothing was amended, so the continue replays the history as it was and
+/// the index comes back as the user had it.
+#[test]
+fn continue_after_a_reword_killed_in_the_editor_keeps_the_message() {
+    let t = TestRepo::new();
+    let c1 = t.commit("First", "first.txt");
+    t.commit("Second", "second.txt");
+    t.write_file("first.txt", "staged edit\n");
+    t.stage_files(&["first.txt"]);
+    let before = t.status_porcelain();
+    let head = t.head_oid();
+    reword_killed_in_the_editor(&t, c1);
+
+    crate::core::transaction::continue_cmd(&t.workdir(), t.repo.path()).unwrap();
+
+    assert!(!crate::git::rebase_is_in_progress(t.repo.path()));
+    assert!(!state_path(&t).exists());
+    assert_eq!(t.head_oid(), head, "nothing was amended, so nothing moved");
+    assert_eq!(t.get_subject(1), "First");
+    assert_eq!(t.status_porcelain(), before);
 }

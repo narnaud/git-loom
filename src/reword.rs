@@ -14,15 +14,18 @@ use crate::core::transaction::{self, LoomState, Rollback};
 use crate::core::weave;
 use crate::git;
 
-/// Resume context for a `reword` paused by a conflict.
+/// Resume context for a `reword`, saved before its rebase starts (Spec 014).
 #[derive(Serialize, Deserialize)]
 struct RewordContext {
-    /// Short hash of the reworded commit, as it was before the rebase.
-    display: String,
-    /// Hash the reworded commit now has; the alias reads state files that
-    /// store it abbreviated, which names the commit just as well.
+    /// The reworded commit as it was before the rebase; older state files
+    /// hold it abbreviated, which names it just as well.
+    #[serde(alias = "display")]
+    original: String,
+    /// Hash the reworded commit has once amended, `None` until then: a loom
+    /// killed while the editor is open leaves the state without it. The alias
+    /// reads state files that store it abbreviated.
     #[serde(alias = "new_display")]
-    new_hash: String,
+    new_hash: Option<String>,
 }
 
 /// Reword a commit message or rename a branch. `git_args` reach the amend of
@@ -78,10 +81,13 @@ pub fn run(target: String, message: Option<String>, git_args: Vec<String>) -> Re
 /// Reword a commit message using Weave-based interactive rebase.
 ///
 /// Approach:
-/// 1. Build todo (via Weave or linear walk), mark target as `edit`
-/// 2. Run rebase (pauses at the target commit)
+/// 1. Save the resume state: without `-m` the editor opens inside the paused
+///    rebase, and a loom killed there must already have left `loom abort` the
+///    index to put back (Spec 014)
+/// 2. Build todo (via Weave or linear walk), mark target as `edit`, run the
+///    rebase (pauses at the target commit)
 /// 3. git commit [opts] --allow-empty --amend --only [-m "message"]
-/// 4. git rebase --continue
+/// 4. Record the amended hash, then git rebase --continue
 ///
 /// Step 4 can conflict: rewriting the target changes the SHAs above it, so any
 /// merge commit in the way has to be rebuilt, and a merge that was resolved by
@@ -116,55 +122,30 @@ pub fn reword_commit(
         None => None,
     };
 
+    let git_dir = repo.path().to_path_buf();
     // Restored whichever way the rebase ends (Spec 014).
     let saved_staged = git::diff_cached(workdir)?;
+    let mut ctx = RewordContext {
+        original: commit_oid.to_string(),
+        new_hash: None,
+    };
+    save_state(&git_dir, &saved_staged, &ctx)?;
+    // From here a failure aborts the rebase and removes the state, or leaves
+    // both for `loom abort` when the abort fails.
+    let discard = |e| transaction::discard_state_after(workdir, &git_dir, &saved_staged, e);
 
-    // Step 1: Start interactive rebase with edit at target
-    // No state file exists yet, so a rebase still running after a failed abort
-    // leaves nobody to put the staging back: it is parked instead.
-    weave::start_edit_rebase(repo, workdir, commit_oid)
-        .inspect_err(|e| git::restore_or_park_after_abort(workdir, &saved_staged, e))?;
+    weave::start_edit_rebase(repo, workdir, commit_oid).map_err(discard)?;
 
-    // Step 2: Amend the commit message
-    let amend =
-        git::commit_amend(workdir, message.as_deref(), git_opts).and_then(|()| match message {
+    // HEAD is the amended commit only until the rebase moves on.
+    let new_hash = git::commit_amend(workdir, message.as_deref(), git_opts)
+        .and_then(|()| match message {
             Some(_) => Ok(()),
             None => changeid::ensure_on_head(repo, workdir, keep.as_deref()),
-        });
-    if let Err(e) = amend {
-        // Outside the cleanup closure, for the reason given on step 1: a failed
-        // abort skips it, and there is still no state file.
-        let e = git::rebase_abort_then_cleanup(workdir, e, || {});
-        git::restore_or_park_after_abort(workdir, &saved_staged, &e);
-        return Err(e);
-    }
-
-    // Capture the new hash right after amending (before rebase --continue moves HEAD)
-    let new_hash = repo.head()?.peel_to_commit()?.id().to_string();
-
-    // Step 3: Save resume state, then continue the rebase.
-    let ctx = RewordContext {
-        display: git::short_hash(commit_hash).to_string(),
-        new_hash,
-    };
-    let git_dir = repo.path().to_path_buf();
-    transaction::save(
-        &git_dir,
-        &LoomState {
-            command: "reword".to_string(),
-            // Nothing else to undo: `git rebase --abort` discards the amend
-            // along with the rebase, and reword creates no commits or branches
-            // of its own.
-            rollback: Rollback {
-                saved_staged_patch: saved_staged.clone(),
-                ..Default::default()
-            },
-            context: serde_json::to_value(&ctx)?,
-            protect: Vec::new(),
-            targets: Vec::new(),
-            skipped_fixups: Vec::new(),
-        },
-    )?;
+        })
+        .and_then(|()| Ok(repo.head()?.peel_to_commit()?.id().to_string()))
+        .map_err(discard)?;
+    ctx.new_hash = Some(new_hash);
+    save_state(&git_dir, &saved_staged, &ctx).map_err(discard)?;
 
     // The rebase runs with `--empty=stop`, so a commit above the target whose
     // changes are already in the base halts it: drop it and carry on, the way
@@ -202,6 +183,27 @@ pub fn reword_commit(
     Ok(())
 }
 
+/// Write the state `loom abort` and `loom continue` act on.
+fn save_state(git_dir: &Path, saved_staged: &str, ctx: &RewordContext) -> Result<()> {
+    transaction::save(
+        git_dir,
+        &LoomState {
+            command: "reword".to_string(),
+            // Nothing else to undo: `git rebase --abort` discards the amend
+            // along with the rebase, and reword creates no commits or branches
+            // of its own.
+            rollback: Rollback {
+                saved_staged_patch: saved_staged.to_string(),
+                ..Default::default()
+            },
+            context: serde_json::to_value(ctx)?,
+            protect: Vec::new(),
+            targets: Vec::new(),
+            skipped_fixups: Vec::new(),
+        },
+    )
+}
+
 /// Resume a `reword` after a conflict has been resolved.
 pub fn after_continue(
     workdir: &Path,
@@ -215,11 +217,24 @@ pub fn after_continue(
     Ok(())
 }
 
+/// Report the reword once its rebase is over. Without `new_hash`, loom died
+/// before recording the amend, so whether it happened is read from the
+/// history: the original still there means the message is as it was.
 fn report_reworded(workdir: &Path, ctx: &RewordContext) {
-    msg::success(&format!(
-        "Updated commit message for {}",
-        repo::describe_rewritten(workdir, &ctx.display, &ctx.new_hash)
-    ));
+    match &ctx.new_hash {
+        Some(new_hash) => msg::success(&format!(
+            "Updated commit message for {}",
+            repo::describe_rewritten(workdir, &ctx.original, new_hash)
+        )),
+        None if git::reaches_from_head(workdir, &ctx.original) => msg::warn(&format!(
+            "Nothing to finish: the reword of {} was interrupted before its message was changed",
+            repo::describe_commit(workdir, &ctx.original)
+        )),
+        None => msg::success(&format!(
+            "Updated commit message for `{}`",
+            git::short_hash(&ctx.original)
+        )),
+    }
 }
 
 /// Rename a branch using git branch -m.
