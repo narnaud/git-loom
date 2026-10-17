@@ -33,7 +33,7 @@ Pushes the branch safely: the push is refused if the remote branch has commits y
 | GitHub | `github.com` in the remote URL | Created or updated | One PR per branch, linked into a GitHub stack | [`gh`](https://cli.github.com) |
 | GitLab | `gitlab` in the remote URL | Merge request created or updated | One MR per branch | — |
 | Azure DevOps | `dev.azure.com` in the remote URL | Created or updated | Refused (use `--no-pr`) | [`az`](https://learn.microsoft.com/en-us/cli/azure/) |
-| Gerrit | Gerrit's `commit-msg` hook | Review pushed to `refs/for/<upstream>` | Gerrit chains the reviews | — |
+| Gerrit | An `ssh://` URL on port 29418, or Gerrit's `commit-msg` hook | Review pushed to `refs/for/<upstream>` | Gerrit chains the reviews | — |
 | Plain Git | Your choice | — | Branches pushed | — |
 
 When the forge isn't detected (a GitLab server whose URL lacks `gitlab`, for instance), loom asks once and saves your answer in [`loom.remote-type`](../configuration.md#loomremote-type). Forgejo, Gitea and Bitbucket work as plain Git; the link their server prints after a push is shown.

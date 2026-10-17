@@ -633,6 +633,9 @@ fn auto_detect_remote_type(repo: &Repository, upstream_label: &str) -> Option<&'
         if url.contains("dev.azure.com") {
             return Some("azure");
         }
+        if on_gerrit_ssh_port(url) {
+            return Some("gerrit");
+        }
     }
 
     // Use repo.commondir() so this works in worktrees (where hooks are shared)
@@ -745,11 +748,24 @@ fn on_github_com(repo: &Repository, remote: &str) -> bool {
     else {
         return false;
     };
-    let rest = url.split_once("://").map_or(url.as_str(), |(_, rest)| rest);
-    let authority = rest.split('/').next().unwrap_or("");
-    let host_port = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
-    let host = host_port.split(':').next().unwrap_or("");
+    let host = host_port(&url).split(':').next().unwrap_or("");
     host.eq_ignore_ascii_case("github.com")
+}
+
+/// Whether `url` is an `ssh://` URL on 29418, the port Gerrit serves SSH on.
+fn on_gerrit_ssh_port(url: &str) -> bool {
+    url.starts_with("ssh://")
+        && host_port(url)
+            .rsplit_once(':')
+            .is_some_and(|(_, port)| port == "29418")
+}
+
+/// The `host[:port]` of a remote URL, without scheme, user or path; for an
+/// scp-style `[user@]host:path`, `host:` and the path's first segment.
+fn host_port(url: &str) -> &str {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let authority = rest.split('/').next().unwrap_or("");
+    authority.rsplit_once('@').map_or(authority, |(_, h)| h)
 }
 
 /// Extract the target branch from an upstream label like "origin/main" → "main".

@@ -107,6 +107,27 @@ fn detect_remote_type_gerrit_by_hook() {
 }
 
 #[test]
+fn detect_remote_type_gerrit_by_ssh_port() {
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    for (url, gerrit) in [
+        ("ssh://jane@review.example.com:29418/proj", true),
+        ("ssh://review.example.com:29418/proj", true),
+        ("ssh://git@example.com:22/proj", false),
+        ("git@example.com:29418/proj", false),
+    ] {
+        test_repo.repo.remote_set_url("origin", url).unwrap();
+        let detected = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
+        assert_eq!(
+            matches!(detected, super::RemoteType::Gerrit { .. }),
+            gerrit,
+            "{}",
+            url
+        );
+    }
+}
+
+#[test]
 fn detect_remote_type_plain_by_config() {
     let test_repo = TestRepo::new_with_remote();
     let workdir = test_repo.workdir();

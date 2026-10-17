@@ -15,7 +15,7 @@ Set them with `git config <setting> <value>`.
 
 ### `loom.remote-type`
 
-`git loom push` detects the forge from the remote URL (`github.com`, `gitlab`, `dev.azure.com`) or a Gerrit `commit-msg` hook. When it can't tell, it asks. Either way the result is saved here; set it yourself if detection guessed wrong:
+`git loom push` detects the forge from the remote URL (`github.com`, `gitlab`, `dev.azure.com`, an `ssh://` URL on Gerrit's port 29418) or a Gerrit `commit-msg` hook. When it can't tell, it asks. Either way the result is saved here; set it yourself if detection guessed wrong:
 
 ```bash
 git config loom.remote-type gitlab

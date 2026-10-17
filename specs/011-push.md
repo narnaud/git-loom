@@ -220,6 +220,7 @@ The remote type is settled once per repository, first match wins:
    - remote URL contains `github.com` → GitHub
    - remote URL contains `gitlab` → GitLab
    - remote URL contains `dev.azure.com` → Azure DevOps
+   - remote URL is `ssh://` on port 29418, Gerrit's SSH port → Gerrit
    - `.git/hooks/commit-msg` contains "gerrit" (case-insensitive) → Gerrit
 3. **Menu**: nothing detected, so the user picks from every type (GitHub,
    GitLab, Azure DevOps, Gerrit, Plain Git), in the CLI or as a `loom tui`
