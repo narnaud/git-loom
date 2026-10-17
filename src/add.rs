@@ -5,6 +5,7 @@ use crate::core::repo::{self, Target, TargetKind};
 use crate::core::staging;
 use crate::core::{graph, msg};
 use crate::git;
+use crate::tui::hunk_selector;
 
 /// Stage files into the index using short IDs, filenames, or `zz` for all.
 /// With `--patch`, opens an interactive hunk selector TUI.
@@ -86,7 +87,7 @@ fn run_patch(files: Vec<String>, hunks: HunkArgs, theme: &graph::Theme) -> Resul
         filter.as_deref(),
         &picker,
         staging::LeftOut::Unstaged,
-        theme,
+        hunk_selector::selector(theme),
     )?;
     if picked.is_none() {
         return Err(msg::cancelled());

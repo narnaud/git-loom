@@ -9,6 +9,7 @@ use ratatui::{
     widgets::{ListItem, Paragraph},
 };
 
+use crate::core::graph;
 use crate::core::hunks::FileEntry;
 use crate::tui::shell::{KeyResult, PaneId, Shell, ShellApp, ShellConfig};
 use crate::tui::theme::TuiTheme;
@@ -514,6 +515,14 @@ pub fn run_hunk_selector(files: Vec<FileEntry>, theme: TuiTheme) -> Result<Optio
 
     let (app, verdict) = Shell::new(HunkSelectorApp::new(files, theme)).run()?;
     Ok(confirmed(app, verdict))
+}
+
+/// `run_hunk_selector` as the `select` that `core::staging` pickers take.
+pub fn selector(
+    theme: &graph::Theme,
+) -> impl FnOnce(Vec<FileEntry>) -> Result<Option<Vec<FileEntry>>> + use<> {
+    let theme = TuiTheme::from_graph_theme(theme);
+    move |files| run_hunk_selector(files, theme)
 }
 
 /// Backstop for agent mode: every `-p` path answers with a hunk listing before

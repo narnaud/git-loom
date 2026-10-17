@@ -14,6 +14,7 @@ use crate::core::staging::{self, StagedAside};
 use crate::core::transaction::{self, LoomState, Rollback};
 use crate::core::weave::{self, RebaseOutcome, Weave};
 use crate::git;
+use crate::tui::hunk_selector;
 
 #[derive(Serialize, Deserialize)]
 struct CommitContext {
@@ -333,7 +334,7 @@ fn resolve_staging_patch<'a>(
         filter.as_deref(),
         picker,
         staging::LeftOut::KeptStaged,
-        theme,
+        hunk_selector::selector(theme),
     )?
     else {
         return Err(msg::cancelled());

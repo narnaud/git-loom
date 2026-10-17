@@ -13,6 +13,7 @@ use crate::core::staging;
 use crate::core::transaction::{self, LoomState, Rollback};
 use crate::core::weave::{self, EmptiedRefs, Position, RebaseOutcome, Weave};
 use crate::git;
+use crate::tui::hunk_selector;
 
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "op")]
@@ -760,7 +761,7 @@ fn run_patch_fold(
         filter.as_deref(),
         &picker,
         staging::LeftOut::KeptStaged,
-        theme,
+        hunk_selector::selector(theme),
     )? {
         Some(picked) => picked,
         None => return Err(msg::cancelled()),
@@ -1010,8 +1011,14 @@ fn run_patch_fold_commit_to_commit(
         bail!("Source commit must be newer than target commit");
     }
 
-    let selections = staging::run_commit_hunk_picker(workdir, source_hash, &[], picker, theme)?
-        .ok_or_else(msg::cancelled)?;
+    let selections = staging::run_commit_hunk_picker(
+        workdir,
+        source_hash,
+        &[],
+        picker,
+        hunk_selector::selector(theme),
+    )?
+    .ok_or_else(msg::cancelled)?;
 
     let (new_source_hash, new_target_hash) = fold_selected_hunks_to_commit(
         repo,
@@ -1244,8 +1251,14 @@ fn run_patch_fold_commit_to_unstaged(
     git_opts: &[&str],
     theme: &graph::Theme,
 ) -> Result<()> {
-    let selections = staging::run_commit_hunk_picker(workdir, commit_hash, &[], picker, theme)?
-        .ok_or_else(msg::cancelled)?;
+    let selections = staging::run_commit_hunk_picker(
+        workdir,
+        commit_hash,
+        &[],
+        picker,
+        hunk_selector::selector(theme),
+    )?
+    .ok_or_else(msg::cancelled)?;
 
     if !selections
         .iter()

@@ -8,9 +8,8 @@ use crate::core::diff::{self, parse_hunk_start};
 use crate::core::hunk_select::{self, Picker};
 use crate::core::hunks::{FileEntry, HunkEntry, HunkOrigin};
 use crate::core::repo;
-use crate::core::{agent_mode, graph, msg};
+use crate::core::{agent_mode, msg};
 use crate::git;
-use crate::tui::theme::TuiTheme;
 
 /// What becomes of staged work a pick leaves out (Spec 019).
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -35,14 +34,15 @@ pub(crate) struct Picked<'a> {
 /// Returns what the picker staged, or `None` if it was cancelled. Never a path
 /// the picker did not show (Spec 007).
 /// With `picker.hunks` the selection is applied without rendering; in agent
-/// mode without it, the hunks are listed as data instead (spec 019).
+/// mode without it, the hunks are listed as data instead (spec 019). Otherwise
+/// `select` picks interactively.
 pub fn run_hunk_picker<'a>(
     repo: &Repository,
     workdir: &'a Path,
     filter: Option<&[String]>,
     picker: &Picker,
     left_out: LeftOut,
-    theme: &graph::Theme,
+    select: impl FnOnce(Vec<FileEntry>) -> Result<Option<Vec<FileEntry>>>,
 ) -> Result<Option<Picked<'a>>> {
     let mut entries = collect_file_entries(repo, workdir, filter)?;
 
@@ -65,10 +65,7 @@ pub fn run_hunk_picker<'a>(
         return Err(hunk_select::respond(&source, entries, picker));
     }
 
-    let tui_theme = TuiTheme::from_graph_theme(theme);
-    let result = crate::tui::hunk_selector::run_hunk_selector(entries, tui_theme)?;
-
-    match result {
+    match select(entries)? {
         None => Ok(None),
         Some(selected_files) => stage_selection(workdir, &selected_files, left_out).map(Some),
     }
@@ -617,13 +614,14 @@ fn collect_unstaged_hunks(
 /// Shows the diff of `oid` vs its parent. All hunks start unselected (no-op).
 /// Returns `Some(files)` with the selections on confirm, `None` on cancel.
 /// With `picker.hunks` the selection is applied without rendering; in agent
-/// mode without it, the hunks are listed as data instead (spec 019).
+/// mode without it, the hunks are listed as data instead (spec 019). Otherwise
+/// `select` picks interactively.
 pub fn run_commit_hunk_picker(
     workdir: &Path,
     oid: &str,
     files: &[String],
     picker: &Picker,
-    theme: &graph::Theme,
+    select: impl FnOnce(Vec<FileEntry>) -> Result<Option<Vec<FileEntry>>>,
 ) -> Result<Option<Vec<FileEntry>>> {
     let mut entries = collect_commit_hunks(workdir, oid, files)?;
 
@@ -656,8 +654,7 @@ pub fn run_commit_hunk_picker(
         return Err(hunk_select::respond(oid, entries, picker));
     }
 
-    let tui_theme = TuiTheme::from_graph_theme(theme);
-    crate::tui::hunk_selector::run_hunk_selector(entries, tui_theme)
+    select(entries)
 }
 
 /// Collect file entries from a commit's diff (`git diff <oid>^..<oid>`).

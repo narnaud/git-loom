@@ -7,6 +7,7 @@ use crate::core::repo::{self, Target, TargetKind};
 use crate::core::weave;
 use crate::core::{agent_mode, changeid, diff, graph, msg, staging};
 use crate::git;
+use crate::tui::hunk_selector;
 
 const COMMAND: &str = "split";
 
@@ -142,9 +143,14 @@ fn split_commit(
 
     if let Some(picker) = picker {
         let oid_str = commit_oid.to_string();
-        let selections =
-            staging::run_commit_hunk_picker(workdir, &oid_str, &files, &picker, theme)?
-                .ok_or_else(msg::cancelled)?;
+        let selections = staging::run_commit_hunk_picker(
+            workdir,
+            &oid_str,
+            &files,
+            &picker,
+            hunk_selector::selector(theme),
+        )?
+        .ok_or_else(msg::cancelled)?;
 
         let has_selected = selections
             .iter()

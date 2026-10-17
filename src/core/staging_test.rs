@@ -1,8 +1,9 @@
 use super::{
-    binary_stamp, collect_file_entries, filter_paths, put_index_back, save_and_unstage_staged,
-    selected_paths,
+    LeftOut, binary_stamp, collect_file_entries, filter_paths, put_index_back,
+    run_commit_hunk_picker, run_hunk_picker, save_and_unstage_staged, selected_paths,
 };
 use crate::core::diff::DiffHunk;
+use crate::core::hunk_select::{self, HunkArgs, Picker};
 use crate::core::hunks::{FileEntry, HunkEntry, HunkOrigin};
 use crate::core::repo;
 use crate::core::test_helpers::TestRepo;
@@ -157,6 +158,79 @@ fn only_the_picked_files_are_folded_and_order_is_kept() {
         selected_paths(&entries),
         vec!["a.rs".to_string(), "c.rs".to_string()]
     );
+}
+
+fn interactive_picker() -> Picker {
+    hunk_select::worktree_picker(HunkArgs::default(), "loom add".to_string(), None, &[])
+}
+
+#[test]
+fn what_the_selector_picks_is_staged() {
+    let test_repo = repo_with_changes();
+    let workdir = test_repo.workdir();
+    let picked = test_repo
+        .in_dir(|| {
+            run_hunk_picker(
+                &test_repo.repo,
+                &workdir,
+                None,
+                &interactive_picker(),
+                LeftOut::Unstaged,
+                |mut files| {
+                    let a = files.iter_mut().find(|f| f.path == "a.rs").unwrap();
+                    a.hunks.iter_mut().for_each(|h| h.selected = true);
+                    Ok(Some(files))
+                },
+            )
+        })
+        .unwrap()
+        .expect("the selector confirmed");
+
+    assert_eq!(picked.paths, vec!["a.rs".to_string()]);
+    let status = test_repo.status_porcelain();
+    assert!(status.contains("M  a.rs"), "{status}");
+    assert!(status.contains(" M dir/b.rs"), "{status}");
+}
+
+#[test]
+fn a_cancelled_selector_leaves_the_index_alone() {
+    let test_repo = repo_with_changes();
+    test_repo.stage_files(&["dir/b.rs"]);
+    let before = test_repo.status_porcelain();
+
+    let workdir = test_repo.workdir();
+    let picked = test_repo
+        .in_dir(|| {
+            run_hunk_picker(
+                &test_repo.repo,
+                &workdir,
+                None,
+                &interactive_picker(),
+                LeftOut::KeptStaged,
+                |_| Ok(None),
+            )
+        })
+        .unwrap();
+
+    assert!(picked.is_none());
+    assert_eq!(test_repo.status_porcelain(), before);
+}
+
+#[test]
+fn the_commit_selector_is_offered_the_commit_hunks_unselected() {
+    let test_repo = repo_with_changes();
+    let head = test_repo.head_oid().to_string();
+    let workdir = test_repo.workdir();
+
+    let offered = run_commit_hunk_picker(&workdir, &head, &[], &interactive_picker(), |files| {
+        Ok(Some(files))
+    })
+    .unwrap()
+    .expect("the selector confirmed");
+
+    let paths: Vec<&str> = offered.iter().map(|f| f.path.as_str()).collect();
+    assert_eq!(paths, ["a.rs", "dir/b.rs"]);
+    assert!(offered.iter().flat_map(|f| &f.hunks).all(|h| !h.selected));
 }
 
 /// The guard is what every `?` between the unstaging and the end of an
