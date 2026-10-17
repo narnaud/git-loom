@@ -141,34 +141,16 @@ pub fn ensure_branch_not_exists(repo: &Repository, name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Default prefix for branches hidden from status display.
-pub(crate) const DEFAULT_HIDE_PATTERN: &str = "local-";
-
-/// Read the hidden branch prefix from git config `loom.hideBranchPattern`.
-pub fn hide_branch_pattern(repo: &Repository) -> Option<String> {
-    repo.config()
-        .ok()?
-        .get_string("loom.hideBranchPattern")
-        .ok()
-}
-
-/// Emit a warning if `name` starts with the configured hidden branch prefix.
-/// Despite the config key name `loom.hideBranchPattern`, this performs
-/// prefix matching, not glob matching.
-pub fn warn_if_hidden(repo: &Repository, name: &str) {
-    let pattern = hide_branch_pattern(repo).unwrap_or_else(|| DEFAULT_HIDE_PATTERN.to_string());
-    if !pattern.is_empty() && name.starts_with(&pattern) {
-        msg::warn(&format!(
-            "Branch `{}` is hidden from status by default. Use `--all` to show it.",
-            name
-        ));
-    }
+/// The context depth to display: the argument, else git config
+/// `loom.statusContext`, else 1.
+pub fn resolve_context(repo: &Repository, arg: Option<usize>) -> usize {
+    arg.or_else(|| status_context(repo)).unwrap_or(1)
 }
 
 /// Read the default status context depth from git config `loom.statusContext`
 /// (spec 001): the number of commits shown at and before the base. Values
 /// below 1 and unparsable ones are ignored, leaving the built-in default.
-pub fn status_context(repo: &Repository) -> Option<usize> {
+fn status_context(repo: &Repository) -> Option<usize> {
     let depth = repo.config().ok()?.get_i32("loom.statusContext").ok()?;
     usize::try_from(depth).ok().filter(|n| *n >= 1)
 }
@@ -772,6 +754,18 @@ pub fn gather_repo_info(repo: &Repository, show_files: bool, context: usize) -> 
             working_changes: true,
         },
     )
+}
+
+/// [`gather_repo_info`] and the short IDs `loom status` shows, allocated from
+/// the full graph so that hiding branches afterwards never shifts an ID.
+pub fn gather_status(
+    repo: &Repository,
+    show_files: bool,
+    context: usize,
+) -> Result<(RepoInfo, crate::core::shortid::IdAllocator)> {
+    let info = gather_repo_info(repo, show_files, context)?;
+    let ids = crate::core::shortid::IdAllocator::new(info.collect_entities());
+    Ok((info, ids))
 }
 
 /// Like [`gather_repo_info`], but skips the working tree scan — `working_changes`

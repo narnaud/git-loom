@@ -1,9 +1,9 @@
 use anyhow::{Result, bail};
 
 use crate::core::graph;
+use crate::core::hidden;
 use crate::core::repo::{self, Target};
 use crate::git;
-use crate::status;
 
 /// Show the diff and metadata for a commit (like `git show`), using short IDs.
 ///
@@ -33,7 +33,7 @@ fn show_revs(repo: &git2::Repository, target: Option<String>) -> Result<Vec<Stri
         if !repo::has_integration_context(repo) {
             return Ok(vec!["HEAD".to_string()]);
         }
-        return Ok(match status::top_commit(repo)? {
+        return Ok(match hidden::top_commit(repo)? {
             Some(oid) => vec![oid.to_string()],
             None => vec!["HEAD".to_string()],
         });
@@ -69,7 +69,7 @@ fn branch_revs(repo: &git2::Repository, branch: &str) -> Result<Vec<String>> {
     let mut info = repo::gather_commit_graph(repo)?;
 
     let commits = if branch == info.branch_name {
-        status::apply_hidden_branches(repo, &mut info);
+        hidden::apply_hidden_branches(repo, &mut info);
         graph::loose_commits(&info)
     } else if info.branches.iter().any(|b| b.name == branch) {
         graph::commits_in_branch(&info, branch)

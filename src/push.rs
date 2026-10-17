@@ -9,13 +9,13 @@ use git2::Repository;
 
 use crate::core::agent_mode;
 use crate::core::graph;
+use crate::core::hidden;
 use crate::core::msg;
 use crate::core::push_json::{PrReport, PrState, PushReport};
 use crate::core::repo;
 use crate::core::repo::RemoteStatus;
 use crate::core::trace_log;
 use crate::git;
-use crate::status;
 
 /// Remote type detected for the push operation.
 #[derive(Debug, PartialEq, Eq)]
@@ -386,7 +386,7 @@ pub fn run(branch: Option<String>, no_pr: bool, force: bool, title: Option<Strin
     let repo = repo::open_repo()?;
     let workdir = repo::require_workdir(&repo, "push")?.to_path_buf();
     let mut info = repo::gather_repo_info(&repo, false, 1)?;
-    let hide_pattern = status::hide_pattern(&repo);
+    let hide_pattern = hidden::hide_pattern(&repo);
 
     if info.branches.is_empty() {
         bail!("No woven branches to push\nCreate a branch with `git loom branch` first");
@@ -394,7 +394,7 @@ pub fn run(branch: Option<String>, no_pr: bool, force: bool, title: Option<Strin
     if info
         .branches
         .iter()
-        .all(|b| status::is_hidden(&b.name, &hide_pattern))
+        .all(|b| hidden::is_hidden(&b.name, &hide_pattern))
     {
         bail!(
             "Every woven branch is hidden by `loom.hideBranchPattern` (`{}`)\n\
@@ -412,7 +412,7 @@ pub fn run(branch: Option<String>, no_pr: bool, force: bool, title: Option<Strin
     // visible branch stacked above one goes with it: its parent link is gone,
     // so it is neither re-pushed nor hinted — and `refuse_hidden` above turns
     // down a direct push of it too, that being a push of the hidden commits.
-    status::apply_hidden_branches(&repo, &mut info);
+    hidden::apply_hidden_branches(&repo, &mut info);
 
     let remote_type = resolve_remote_type(&repo, &workdir, &info.upstream.label)?;
     let remote_name = resolve_push_remote(&repo, &workdir, &info.upstream.label, &remote_type);
@@ -561,7 +561,7 @@ fn refuse_hidden(info: &repo::RepoInfo, branch: &str, hide_pattern: &str) -> Res
 fn hidden_downstack(info: &repo::RepoInfo, branch: &str, hide_pattern: &str) -> Vec<String> {
     graph::downstack(info, branch)
         .into_iter()
-        .filter(|b| status::is_hidden(b, hide_pattern))
+        .filter(|b| hidden::is_hidden(b, hide_pattern))
         .collect()
 }
 
@@ -569,7 +569,7 @@ fn pick_branch(info: &repo::RepoInfo, hide_pattern: &str) -> Result<String> {
     let items: Vec<String> = info
         .branches
         .iter()
-        .filter(|b| !status::is_hidden(&b.name, hide_pattern))
+        .filter(|b| !hidden::is_hidden(&b.name, hide_pattern))
         .map(|b| b.name.clone())
         .collect();
     msg::select(

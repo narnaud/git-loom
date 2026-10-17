@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, bail};
 use git2::Repository;
 
+use crate::core::hidden;
 use crate::core::msg;
 use crate::core::repo;
 use crate::core::weave::{self, Weave};
@@ -58,7 +59,7 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
 
     git::branch_create(workdir, &name, &commit_hash)?;
 
-    repo::warn_if_hidden(&repo, &name);
+    hidden::warn_if_hidden(&repo, &name);
     msg::success(&format!(
         "Created branch `{}` at `{}`",
         name,

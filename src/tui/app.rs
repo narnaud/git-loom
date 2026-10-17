@@ -26,6 +26,7 @@ use ratatui::{
 };
 
 use crate::core::graph::{self, Section};
+use crate::core::hidden;
 use crate::core::hunk_select::{self, HunkArgs};
 use crate::core::hunks::FileEntry;
 use crate::core::msg;
@@ -852,7 +853,7 @@ pub fn run(theme: graph::Theme) -> Result<()> {
 
     let tui_theme = TuiTheme::from_graph_theme(&theme);
     let repo = repo::open_repo()?;
-    let context = crate::status::resolve_context(&repo, None);
+    let context = repo::resolve_context(&repo, None);
     let workdir = repo::require_workdir(&repo, "display status")?.to_path_buf();
     let git_dir = repo.path().to_path_buf();
     // `Paused::load` reads an unreadable state as none: say so before the
@@ -923,10 +924,8 @@ fn load_snapshot(context: usize) -> Result<Snapshot> {
     let git_dir = repo.path().to_path_buf();
     let cwd_prefix = repo::cwd_relative_to_repo(&repo).unwrap_or_default();
 
-    let mut info = repo::gather_repo_info(&repo, true, context)?;
-    // Collect entities before filtering so short IDs stay stable.
-    let ids = IdAllocator::new(info.collect_entities());
-    crate::status::apply_hidden_branches(&repo, &mut info);
+    let (mut info, ids) = repo::gather_status(&repo, true, context)?;
+    hidden::apply_hidden_branches(&repo, &mut info);
 
     Ok(Snapshot {
         workdir,

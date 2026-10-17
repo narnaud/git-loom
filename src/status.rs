@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 
-use crate::core::{agent_mode, graph, msg, repo, shortid, status_json};
+use crate::core::{agent_mode, graph, hidden, msg, repo, shortid, status_json};
 
 pub fn run(
     file_filter: Option<Vec<String>>,
@@ -16,18 +16,15 @@ pub fn run(
     let cwd_prefix = repo::cwd_relative_to_repo(&repo).unwrap_or_default();
     let opts = graph::default_render_opts(theme, cwd_prefix);
     let show_files = file_filter.is_some();
-    let mut info = repo::gather_repo_info(&repo, show_files, resolve_context(&repo, context))?;
-
-    // Collect entities from the full info BEFORE filtering so that short IDs
-    // are stable regardless of which branches are hidden.
-    let ids = shortid::IdAllocator::new(info.collect_entities());
+    let (mut info, ids) =
+        repo::gather_status(&repo, show_files, repo::resolve_context(&repo, context))?;
 
     // Before hiding: it cuts the edge to a hidden branch, which `push` still
     // walks and refuses.
     let stacks = agent_mode::enabled().then(|| stack_edges(&repo, &info, show_all));
 
     if !show_all {
-        apply_hidden_branches(&repo, &mut info);
+        hidden::apply_hidden_branches(&repo, &mut info);
     }
 
     // When specific commits are requested, clear files from non-matching commits.
@@ -67,11 +64,11 @@ fn stack_edges(
     info: &repo::RepoInfo,
     show_all: bool,
 ) -> HashMap<String, status_json::StackEdge> {
-    let pattern = hide_pattern(repo);
+    let pattern = hidden::hide_pattern(repo);
     graph::stack_parents(info)
         .into_iter()
         .map(|(branch, below)| {
-            let below_hidden = is_hidden(&below, &pattern);
+            let below_hidden = hidden::is_hidden(&below, &pattern);
             let edge = status_json::StackEdge {
                 below: (show_all || !below_hidden).then_some(below),
                 below_hidden,
@@ -79,49 +76,6 @@ fn stack_edges(
             (branch, edge)
         })
         .collect()
-}
-
-/// The context depth to display: the argument, else git config
-/// `loom.statusContext`, else 1.
-pub fn resolve_context(repo: &git2::Repository, arg: Option<usize>) -> usize {
-    arg.or_else(|| repo::status_context(repo)).unwrap_or(1)
-}
-
-/// Drop the branches hidden by the `loom.hideBranchPattern` prefix from `info`,
-/// as `loom status` does: both the branches and the commits they own are
-/// removed, so neither shows up anywhere in the graph.
-pub fn apply_hidden_branches(repo: &git2::Repository, info: &mut repo::RepoInfo) {
-    let pattern = hide_pattern(repo);
-    if !pattern.is_empty() {
-        hide_branches(info, &pattern);
-    }
-}
-
-/// The branch-name prefix `loom.hideBranchPattern` hides, defaulting to
-/// `local-`; empty when hiding is disabled.
-pub fn hide_pattern(repo: &git2::Repository) -> String {
-    repo::hide_branch_pattern(repo).unwrap_or_else(|| repo::DEFAULT_HIDE_PATTERN.to_string())
-}
-
-/// True when `name` matches the hidden-branch prefix `pattern`.
-pub fn is_hidden(name: &str, pattern: &str) -> bool {
-    !pattern.is_empty() && name.starts_with(pattern)
-}
-
-/// OIDs of the commits on the integration line of `loom status`, newest first:
-/// those belonging to no feature branch, skipping merge commits and hidden
-/// branches.
-pub fn loose_commits(repo: &git2::Repository) -> Result<Vec<git2::Oid>> {
-    let mut info = repo::gather_commit_graph(repo)?;
-    apply_hidden_branches(repo, &mut info);
-    Ok(graph::loose_commits(&info))
-}
-
-/// OID of the commit shown at the top of `loom status`: the tip of the
-/// integration line. Returns None when the integration branch has no commits
-/// of its own above the merge-base.
-pub fn top_commit(repo: &git2::Repository) -> Result<Option<git2::Oid>> {
-    Ok(loose_commits(repo)?.first().copied())
 }
 
 /// Resolve a list of user-supplied IDs to a set of commit OIDs whose files
@@ -162,62 +116,6 @@ fn resolve_commit_filter(
     }
 
     filter_oids
-}
-
-/// Remove branches matching `pattern` (prefix match) and their owned commits
-/// from `info` so they are fully invisible in the status display.
-fn hide_branches(info: &mut repo::RepoInfo, pattern: &str) {
-    let hidden_tips: HashSet<git2::Oid> = info
-        .branches
-        .iter()
-        .filter(|b| b.name.starts_with(pattern))
-        .map(|b| b.tip_oid)
-        .collect();
-
-    if hidden_tips.is_empty() {
-        return;
-    }
-
-    let all_tips: HashSet<git2::Oid> = info.branches.iter().map(|b| b.tip_oid).collect();
-
-    // Visible branch tip OIDs: when a hidden branch is co-located with a visible
-    // branch (same tip OID), we must not steal the shared commit.
-    let visible_tips: HashSet<git2::Oid> = info
-        .branches
-        .iter()
-        .filter(|b| !b.name.starts_with(pattern))
-        .map(|b| b.tip_oid)
-        .collect();
-
-    let commit_map: HashMap<git2::Oid, Option<git2::Oid>> =
-        info.commits.iter().map(|c| (c.oid, c.parent_oid)).collect();
-
-    // Walk from each hidden branch tip, collecting commits it owns.
-    // Stop at another branch's tip (stacked-branch boundary), a visible branch
-    // tip (co-located case), or out-of-range.
-    let mut hidden_commits: HashSet<git2::Oid> = HashSet::new();
-    for &tip in &hidden_tips {
-        let mut current = Some(tip);
-        let mut is_tip = true;
-        while let Some(oid) = current {
-            if !commit_map.contains_key(&oid) {
-                break; // outside our commit range
-            }
-            // A visible branch owns this commit (co-located or stacked below).
-            if visible_tips.contains(&oid) {
-                break;
-            }
-            if !is_tip && all_tips.contains(&oid) {
-                break; // reached another branch's tip
-            }
-            is_tip = false;
-            hidden_commits.insert(oid);
-            current = commit_map.get(&oid).and_then(|p| *p);
-        }
-    }
-
-    info.branches.retain(|b| !b.name.starts_with(pattern));
-    info.commits.retain(|c| !hidden_commits.contains(&c.oid));
 }
 
 #[cfg(test)]

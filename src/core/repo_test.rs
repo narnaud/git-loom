@@ -924,3 +924,32 @@ fn describe_rewritten_leads_with_the_persistent_id() {
         format!("`1234567` (now `{}`)", &plain.to_string()[..7])
     );
 }
+
+/// Re-open so the `git config` write is visible to git2.
+fn reopen(test_repo: &TestRepo) -> git2::Repository {
+    git2::Repository::open(test_repo.workdir()).unwrap()
+}
+
+#[test]
+fn context_depth_falls_back_from_argument_to_config() {
+    let test_repo = TestRepo::new_with_remote();
+    assert_eq!(repo::resolve_context(&test_repo.repo, None), 1);
+    assert_eq!(repo::resolve_context(&test_repo.repo, Some(3)), 3);
+
+    test_repo.set_config("loom.statusContext", "5");
+    assert_eq!(repo::resolve_context(&reopen(&test_repo), None), 5);
+    assert_eq!(repo::resolve_context(&reopen(&test_repo), Some(2)), 2);
+}
+
+#[test]
+fn unusable_context_config_keeps_the_default() {
+    let test_repo = TestRepo::new_with_remote();
+    for value in ["0", "-2", "many"] {
+        test_repo.set_config("loom.statusContext", value);
+        assert_eq!(
+            repo::resolve_context(&reopen(&test_repo), None),
+            1,
+            "{value}"
+        );
+    }
+}

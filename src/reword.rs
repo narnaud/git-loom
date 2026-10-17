@@ -8,6 +8,7 @@ use crate::core::repo::{self, Target};
 
 use crate::core::agent_mode;
 use crate::core::changeid;
+use crate::core::hidden;
 use crate::core::msg;
 use crate::core::transaction::{self, LoomState, Rollback};
 use crate::core::weave;
@@ -226,7 +227,7 @@ pub fn reword_branch(repo: &Repository, old_name: &str, new_name: &str) -> Resul
 
     git::branch_rename(workdir, old_name, new_name)?;
 
-    repo::warn_if_hidden(repo, new_name);
+    hidden::warn_if_hidden(repo, new_name);
     msg::success(&format!("Renamed branch `{}` to `{}`", old_name, new_name));
     Ok(())
 }
