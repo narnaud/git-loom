@@ -254,6 +254,7 @@ pub fn run(
         // a replay that came out empty would report the tip it was appended to.
         protect: vec![head_oid.to_string()],
         targets: Vec::new(),
+        skipped_fixups: Vec::new(),
     };
     transaction::save(&git_dir, &state)?;
     // The state file owns the patch from here: the `Completed` arm puts it

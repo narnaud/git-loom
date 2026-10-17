@@ -155,3 +155,19 @@ fn commit_amend_no_edit_takes_an_argument_that_does_commit() {
     assert_eq!(test_repo.get_message(0), "First commit");
     assert_eq!(test_repo.status_porcelain().trim(), "");
 }
+
+/// A rebase pick runs neither hook, so keeping an emptied target must not
+/// either: a hook that rejects it would fail `loom continue` (Spec 014).
+#[cfg(unix)]
+#[test]
+fn commit_empty_copy_of_skips_pre_commit_and_commit_msg_hooks() {
+    let test_repo = TestRepo::new();
+    let source = test_repo.commit("First commit", "file1.txt").to_string();
+    test_repo.install_hook("pre-commit", "exit 1\n");
+    test_repo.install_hook("commit-msg", "exit 1\n");
+
+    git::commit_empty_copy_of(test_repo.workdir().as_path(), &source).unwrap();
+
+    assert_eq!(test_repo.get_message(0), "First commit");
+    assert_eq!(test_repo.get_message(1), "First commit");
+}

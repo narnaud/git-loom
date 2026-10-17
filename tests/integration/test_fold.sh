@@ -1118,3 +1118,66 @@ assert_eq "$old_head" "$(head_hash)" "fold_abort_head_restored"
 assert_log_contains "C1" "fold_abort_c1_preserved"
 
 pass
+
+describe "fold files: a resolution that keeps the target unchanged folds nothing, change back in worktree"
+setup_repo_with_remote
+printf "base\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "Add shared"
+target=$(head_hash)
+printf "from U\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "Change to U"
+printf "folded\n" > "$WORK/shared.txt"
+gl_capture fold shared.txt "$target"
+assert_state_file "fold_files_empty_state"
+assert_contains "$OUT" "loom continue" "fold_files_empty_hint"
+# HEAD's side is the target's own content, which leaves the fixup nothing to add.
+git -C "$WORK" checkout HEAD -- shared.txt
+gl_capture continue
+assert_exit_ok "$CODE" "fold_files_empty_ok"
+assert_no_state_file "fold_files_empty_state_removed"
+assert_contains "$OUT" "Folded nothing into" "fold_files_empty_msg"
+assert_contains "$OUT" "back in your working tree" "fold_files_empty_restored_msg"
+assert_not_contains "$OUT" "Folded 1 file" "fold_files_empty_no_success"
+assert_eq "$(git -C "$WORK" show HEAD~1:shared.txt)" "base" "fold_files_empty_target_unchanged"
+assert_file_content "shared.txt" "folded" "fold_files_empty_worktree"
+assert_eq "$(git -C "$WORK" diff --cached --name-only)" "" "fold_files_empty_index_clean"
+assert_branch_not_exists "_loom-track" "fold_files_empty_track_gone"
+
+describe "move --below: a resolution that empties the anchor keeps it as an empty commit"
+setup_repo_with_remote
+printf "s\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "version-s"
+anchor=$(head_hash)
+printf "t\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "Commit T"
+moved=$(head_hash)
+gl_capture fold "$moved" --below "$anchor"
+assert_state_file "move_below_empty_state"
+printf "t\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt
+gl_capture continue
+assert_state_file "move_below_empty_second_stop"
+# The anchor's change is already below it now: HEAD's side leaves it with nothing.
+git -C "$WORK" checkout HEAD -- shared.txt
+gl_capture continue
+assert_exit_ok "$CODE" "move_below_empty_ok"
+assert_contains "$OUT" "as an empty commit" "move_below_empty_kept_msg"
+assert_contains "$OUT" "below" "move_below_empty_moved_msg"
+assert_no_state_file "move_below_empty_state_removed"
+assert_head_msg "version-s" "move_below_empty_anchor_kept"
+assert_msg_at 1 "Commit T" "move_below_empty_moved_below"
+assert_eq "$(git -C "$WORK" rev-parse 'HEAD^{tree}')" "$(git -C "$WORK" rev-parse 'HEAD~1^{tree}')" "move_below_empty_anchor_empty"
+
+describe "fold commit: a resolution that keeps the target unchanged folds nothing, source change back in worktree"
+setup_repo_with_remote
+printf "base\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "Add shared"
+target=$(head_hash)
+printf "from U\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "Change to U"
+printf "from S\n" > "$WORK/shared.txt"; git -C "$WORK" add shared.txt; git -C "$WORK" commit -q -m "Source"
+source=$(head_hash)
+gl_capture fold "$source" "$target"
+assert_state_file "fold_commit_empty_state"
+git -C "$WORK" checkout HEAD -- shared.txt
+gl_capture continue
+assert_exit_ok "$CODE" "fold_commit_empty_ok"
+assert_no_state_file "fold_commit_empty_state_removed"
+assert_contains "$OUT" "Folded nothing of" "fold_commit_empty_msg"
+assert_contains "$OUT" "The change of" "fold_commit_empty_restored_msg"
+assert_eq "$(git -C "$WORK" show HEAD~1:shared.txt)" "base" "fold_commit_empty_target_unchanged"
+assert_log_not_contains "Source" "fold_commit_empty_source_gone"
+assert_file_content "shared.txt" "from S" "fold_commit_empty_worktree"

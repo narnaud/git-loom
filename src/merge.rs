@@ -150,6 +150,7 @@ fn begin(
         })?,
         protect: Vec::new(),
         targets: Vec::new(),
+        skipped_fixups: Vec::new(),
     };
     transaction::save(git_dir, &state)?;
     git::snapshot_mtimes(workdir, Some("HEAD"));

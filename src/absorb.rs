@@ -40,6 +40,10 @@ struct AbsorbContext {
     num_hunks: usize,
     num_files: usize,
     num_commits: usize,
+    /// Each fixup's full hash and its target's, so `loom continue` counts the
+    /// commits that took nothing; empty in a state saved before it existed.
+    #[serde(default)]
+    fixup_targets: Vec<(String, String)>,
 }
 
 enum HunkAnalysis {
@@ -343,6 +347,10 @@ fn apply_plan(
         num_hunks: plan.num_hunks,
         num_files: plan.num_files,
         num_commits: plan.num_commits,
+        fixup_targets: fixup_pairs
+            .iter()
+            .map(|(fixup, target)| (fixup.to_string(), target.to_string()))
+            .collect(),
     };
     let state = LoomState {
         command: "absorb".to_string(),
@@ -357,6 +365,7 @@ fn apply_plan(
         context: serde_json::to_value(&ctx)?,
         protect: Vec::new(),
         targets,
+        skipped_fixups: Vec::new(),
     };
     transaction::save(git_dir, &state)?;
 
@@ -374,6 +383,8 @@ fn apply_plan(
                 plan.num_hunks,
                 plan.num_files,
                 plan.num_commits,
+                0,
+                0,
             )?;
         }
         RebaseOutcome::Stopped => {
@@ -482,28 +493,51 @@ pub fn after_continue(
     workdir: &Path,
     rollback: &Rollback,
     context: &serde_json::Value,
+    skipped_fixups: &[String],
 ) -> Result<()> {
     let ctx: AbsorbContext =
         serde_json::from_value(context.clone()).context("Failed to parse absorb resume context")?;
     git::restore_staged_after_rebase(workdir, &rollback.saved_staged_patch);
+    let left_out = if ctx.fixup_targets.is_empty() {
+        skipped_fixups.len()
+    } else {
+        commits_left_out(&ctx.fixup_targets, skipped_fixups)
+    };
     post_absorb(
         workdir,
         ctx.skipped_patch.as_deref(),
         ctx.num_hunks,
         ctx.num_files,
         ctx.num_commits,
+        skipped_fixups.len(),
+        left_out,
     )
+}
+
+/// Targets every fixup of which was skipped: a commit with a whole-file and a
+/// hunk fixup took a change if either landed.
+fn commits_left_out(fixup_targets: &[(String, String)], skipped_fixups: &[String]) -> usize {
+    let mut landed: HashMap<&str, bool> = HashMap::new();
+    for (fixup, target) in fixup_targets {
+        let skipped = skipped_fixups.iter().any(|s| git::shas_match(s, fixup));
+        *landed.entry(target).or_default() |= !skipped;
+    }
+    landed.values().filter(|landed| !**landed).count()
 }
 
 /// Post-rebase work: re-apply the skipped patch and print the success message.
 /// The staged patch goes back before the state file does, so both callers
-/// restore it themselves.
+/// restore it themselves. `kept_out` fixups were skipped by the user's
+/// resolution (Spec 014), leaving `left_out` of the commits with nothing, so
+/// the count line would overstate what landed.
 fn post_absorb(
     workdir: &Path,
     skipped_patch: Option<&str>,
     num_hunks: usize,
     num_files: usize,
     num_commits: usize,
+    kept_out: usize,
+    left_out: usize,
 ) -> Result<()> {
     if let Some(patch) = skipped_patch
         && let Err(e) = git::apply_patch(workdir, patch)
@@ -511,10 +545,22 @@ fn post_absorb(
         msg::warn(&format!("could not re-apply skipped changes: {e}"));
     }
 
-    msg::success(&format!(
-        "Absorbed {} hunk(s) from {} file(s) into {} commit(s)",
-        num_hunks, num_files, num_commits
-    ));
+    if kept_out == 0 {
+        msg::success(&format!(
+            "Absorbed {} hunk(s) from {} file(s) into {} commit(s)",
+            num_hunks, num_files, num_commits
+        ));
+    } else {
+        let absorbed = num_commits.saturating_sub(left_out);
+        msg::warn(&if absorbed == 0 {
+            format!("Absorbed nothing — your resolution kept {kept_out} change(s) out")
+        } else {
+            format!(
+                "Absorbed into {absorbed} of {num_commits} commit(s) — your resolution kept \
+                 {kept_out} change(s) out"
+            )
+        });
+    }
 
     Ok(())
 }

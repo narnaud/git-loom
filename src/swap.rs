@@ -57,6 +57,7 @@ fn swap_two_commits(repo: &Repository, hash_a: String, hash_b: String) -> Result
         // success message names both.
         protect: vec![hash_a.clone(), hash_b.clone()],
         targets: Vec::new(),
+        skipped_fixups: Vec::new(),
     };
     transaction::save(&git_dir, &state)?;
 
