@@ -710,7 +710,7 @@ fn extract_remote_name(upstream_label: &str) -> String {
 
 /// Extract `owner/repo` from a git remote URL for `gh --repo`, or `None` when
 /// the remote is missing or the URL is unrecognised.
-fn extract_gh_repo(repo: &Repository, remote: &str) -> Option<String> {
+pub(crate) fn extract_gh_repo(repo: &Repository, remote: &str) -> Option<String> {
     let remote = repo.find_remote(remote).ok()?;
     let url = remote.url().ok()?;
 
@@ -728,19 +728,17 @@ fn extract_gh_repo(repo: &Repository, remote: &str) -> Option<String> {
         }
     }
 
-    // HTTPS: https://github.com/owner/repo.git
-    if let Some(path) = url
-        .strip_prefix("https://github.com/")
-        .or_else(|| url.strip_prefix("http://github.com/"))
-    {
-        return Some(path.trim_end_matches(".git").to_string());
-    }
-
-    None
+    // Any scheme on github.com, with or without a user or port:
+    // https://github.com/owner/repo.git, ssh://git@github.com:22/owner/repo
+    let (_, rest) = url.split_once("://")?;
+    let (_, path) = rest.split_once('/')?;
+    let host = host_port(url).split(':').next()?;
+    host.eq_ignore_ascii_case("github.com")
+        .then(|| path.trim_end_matches(".git").to_string())
 }
 
 /// Whether `remote`'s URL points at github.com itself.
-fn on_github_com(repo: &Repository, remote: &str) -> bool {
+pub(crate) fn on_github_com(repo: &Repository, remote: &str) -> bool {
     let Some(url) = repo
         .find_remote(remote)
         .ok()
@@ -766,6 +764,27 @@ fn host_port(url: &str) -> &str {
     let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
     let authority = rest.split('/').next().unwrap_or("");
     authority.rsplit_once('@').map_or(authority, |(_, h)| h)
+}
+
+/// The repository `origin_repo` (`owner/repo` on github.com) is a fork of,
+/// as `(owner/repo, default branch)`; `None` when it is none or `gh` cannot
+/// tell.
+pub(crate) fn github_fork_parent(workdir: &Path, origin_repo: &str) -> Option<(String, String)> {
+    let gh = Gh::new(workdir, origin_repo.split('/').next());
+    let parent = run_gh(
+        &gh,
+        &[
+            "api",
+            "--hostname",
+            "github.com",
+            &format!("repos/{}", origin_repo),
+            "--jq",
+            r#".parent | select(.) | "\(.full_name) \(.default_branch)""#,
+        ],
+        None,
+    )?;
+    let (name, branch) = parent.trim().split_once(' ')?;
+    Some((name.to_string(), branch.to_string()))
 }
 
 /// Extract the target branch from an upstream label like "origin/main" → "main".

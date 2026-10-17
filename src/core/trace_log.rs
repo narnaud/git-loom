@@ -51,14 +51,19 @@ pub fn init(git_dir: &Path, command_line: &str, append: bool) {
     });
 }
 
-/// Log a command execution; a no-op when the logger is not initialized.
+/// Log a command execution; a no-op when the logger is not initialized. URL
+/// credentials in `args` are left out: bug reports quote the log.
 pub fn log_command(program: &str, args: &str, duration_ms: u128, success: bool, stderr: &str) {
     LOGGER.with(|cell| {
         let mut logger = cell.borrow_mut();
         if let Some(ref mut l) = *logger {
             l.entries.push(LogEntry {
                 program: program.to_string(),
-                args: args.to_string(),
+                args: args
+                    .split(' ')
+                    .map(without_credentials)
+                    .collect::<Vec<_>>()
+                    .join(" "),
                 duration_ms,
                 success,
                 stderr: stderr.to_string(),
@@ -66,6 +71,23 @@ pub fn log_command(program: &str, args: &str, duration_ms: u128, success: bool, 
             });
         }
     });
+}
+
+/// `url` for display or the log, without the user and password of an
+/// `http(s)://` URL: either can be a token. A github.com URL carries
+/// credentials no other way.
+pub fn without_credentials(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return url.to_string();
+    };
+    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
+        return url.to_string();
+    }
+    let authority = rest.find('/').map_or(rest, |slash| &rest[..slash]);
+    match authority.rfind('@') {
+        Some(at) => format!("{}://{}", scheme, &rest[at + 1..]),
+        None => url.to_string(),
+    }
 }
 
 /// Attach an annotation to the most recent log entry, e.g. generated rebase

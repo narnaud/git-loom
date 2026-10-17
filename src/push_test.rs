@@ -605,6 +605,28 @@ fn extract_gh_repo_https() {
 }
 
 #[test]
+fn extract_gh_repo_any_scheme_user_or_port_on_github_com() {
+    let test_repo = TestRepo::new_with_remote();
+    for (url, expected) in [
+        ("ssh://git@github.com/owner/repo.git", Some("owner/repo")),
+        ("ssh://git@GitHub.com:22/owner/repo", Some("owner/repo")),
+        (
+            "https://user:token@github.com/owner/repo.git",
+            Some("owner/repo"),
+        ),
+        ("https://ghe.corp/owner/repo.git", None),
+    ] {
+        test_repo.repo.remote_set_url("origin", url).unwrap();
+        assert_eq!(
+            super::extract_gh_repo(&test_repo.repo, "origin").as_deref(),
+            expected,
+            "{}",
+            url
+        );
+    }
+}
+
+#[test]
 fn extract_gh_repo_bare_alias() {
     let test_repo = TestRepo::new_with_remote();
     test_repo

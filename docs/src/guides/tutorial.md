@@ -11,6 +11,8 @@ git checkout main
 git loom init
 ```
 
+A fresh clone works the same. If it is a GitHub fork, `init` offers to track the original repository as `upstream` (see [init](../commands/init.md)).
+
 Run `git loom status` (or just `git loom`) to see where you are:
 
 ```

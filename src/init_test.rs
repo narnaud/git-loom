@@ -171,7 +171,7 @@ fn init_no_upstream_remote_uses_origin_on_github() {
         .remote_set_url("origin", "https://github.com/user/repo.git")
         .unwrap();
 
-    let result = test_repo.in_dir(|| super::run(None));
+    let result = test_repo.in_dir(|| super::run_with(None, |_, _| None));
     assert!(result.is_ok(), "init failed: {:?}", result.err());
 
     // Should still track origin/main since there's no "upstream" remote
@@ -258,4 +258,171 @@ fn init_in_worktree_tracks_main_worktree_upstream() {
         worktree_head_and_upstream(&path),
         ("integration-foo".to_string(), "origin/release".to_string())
     );
+}
+
+#[test]
+fn init_refused_by_local_changes_says_what_to_do() {
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    test_repo.switch_branch("main");
+    let initial = test_repo.head_oid();
+    test_repo.commit("Upstream", "f.txt");
+    crate::git::run_git(&workdir, &["push", "-q", "origin", "main"]).unwrap();
+    test_repo.fetch_remote();
+    test_repo.reset_hard(initial);
+    test_repo.write_file("f.txt", "mine");
+
+    let err = test_repo
+        .in_dir(|| super::run(Some("mine".to_string())))
+        .unwrap_err();
+
+    assert!(err.to_string().contains("commit or stash them"), "{}", err);
+    assert_eq!(test_repo.read_file("f.txt"), "mine");
+}
+
+// ── GitHub fork ──────────────────────────────────────────────────────────
+
+fn no_lookup(_: &std::path::Path, _: &str) -> Option<(String, String)> {
+    panic!("gh must not be asked")
+}
+
+fn fork_lookup(_: &std::path::Path, origin: &str) -> Option<(String, String)> {
+    assert_eq!(origin, "me/fork");
+    Some(("them/proj".to_string(), "trunk".to_string()))
+}
+
+fn fork(url: &str) -> super::Fork {
+    super::Fork {
+        parent: "them/proj".to_string(),
+        default_branch: "main".to_string(),
+        url: url.to_string(),
+    }
+}
+
+#[test]
+fn fork_of_origin_keeps_origins_url_form() {
+    let test_repo = TestRepo::new_with_remote();
+    for (origin, parent) in [
+        ("git@github.com:me/fork.git", "git@github.com:them/proj.git"),
+        ("https://github.com/me/fork", "https://github.com/them/proj"),
+        (
+            "ssh://git@github.com/me/fork.git",
+            "ssh://git@github.com/them/proj.git",
+        ),
+    ] {
+        test_repo.repo.remote_set_url("origin", origin).unwrap();
+        assert_eq!(
+            super::fork_of_origin(&test_repo.repo, &test_repo.workdir(), fork_lookup),
+            Some(super::Fork {
+                default_branch: "trunk".to_string(),
+                ..fork(parent)
+            }),
+            "{}",
+            origin
+        );
+    }
+}
+
+#[test]
+fn fork_of_origin_skips_a_repo_with_an_upstream_remote() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo
+        .repo
+        .remote_set_url("origin", "https://github.com/me/fork.git")
+        .unwrap();
+    test_repo
+        .repo
+        .remote("upstream", "https://github.com/someone/else.git")
+        .unwrap();
+
+    let found = super::fork_of_origin(&test_repo.repo, &test_repo.workdir(), no_lookup);
+    assert_eq!(found, None);
+}
+
+#[test]
+fn fork_of_origin_skips_an_origin_off_github() {
+    let test_repo = TestRepo::new_with_remote();
+
+    let found = super::fork_of_origin(&test_repo.repo, &test_repo.workdir(), no_lookup);
+    assert_eq!(found, None);
+}
+
+#[test]
+fn fork_of_origin_skips_a_parent_another_remote_names() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo
+        .repo
+        .remote_set_url("origin", "https://github.com/me/fork.git")
+        .unwrap();
+    test_repo
+        .repo
+        .remote("them", "git@github.com:Them/Proj.git")
+        .unwrap();
+    for url in [
+        "git@github.com:Them/Proj.git",
+        "ssh://git@github.com/Them/Proj.git",
+    ] {
+        test_repo.repo.remote_set_url("them", url).unwrap();
+
+        let found = super::fork_of_origin(&test_repo.repo, &test_repo.workdir(), fork_lookup);
+        assert_eq!(found, None, "{}", url);
+    }
+}
+
+#[test]
+fn fork_of_origin_offers_a_parent_only_another_host_names() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo
+        .repo
+        .remote_set_url("origin", "https://github.com/me/fork.git")
+        .unwrap();
+    test_repo
+        .repo
+        .remote("mirror", "git@gitlab.com:them/proj.git")
+        .unwrap();
+
+    let found = super::fork_of_origin(&test_repo.repo, &test_repo.workdir(), fork_lookup);
+    assert_eq!(found.map(|f| f.parent), Some("them/proj".to_string()));
+}
+
+// `init` keeps the `Repository` it opened across the git subprocesses that add
+// `upstream`, so detection must see them through that same handle.
+#[test]
+fn add_upstream_is_seen_by_the_open_repository() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo
+        .repo
+        .remote_set_url("origin", "https://github.com/me/fork.git")
+        .unwrap();
+    let parent = test_repo.remote_path().unwrap();
+
+    super::add_upstream(&test_repo.workdir(), &fork(&parent.display().to_string())).unwrap();
+
+    assert_eq!(
+        super::detect_upstream(&test_repo.repo, None).unwrap(),
+        "upstream/main"
+    );
+    let config = |key| {
+        crate::git::run_git_stdout(&test_repo.workdir(), &["config", "--get", key])
+            .unwrap()
+            .trim()
+            .to_string()
+    };
+    assert_eq!(config("remote.upstream.gh-resolved"), "base");
+}
+
+#[test]
+fn add_upstream_leaves_no_remote_when_the_fetch_fails() {
+    let test_repo = TestRepo::new_with_remote();
+    let missing = test_repo.workdir().join("missing.git");
+
+    let err = super::add_upstream(&test_repo.workdir(), &fork(&missing.display().to_string()))
+        .unwrap_err();
+
+    assert!(
+        err.to_string().contains("Could not fetch `them/proj`"),
+        "{}",
+        err
+    );
+    assert!(test_repo.repo.find_remote("upstream").is_err());
 }

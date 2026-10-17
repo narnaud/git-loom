@@ -44,16 +44,13 @@ git-loom init [name]
 1. **Name resolution**: Use the provided name or the default name
 2. **Validation**: Name is trimmed, checked for emptiness, validated against
    git's naming rules, and checked for duplicates
-3. **Upstream detection**: The upstream tracking ref is determined:
-   - If the current branch has an upstream (e.g., `main` tracks `origin/main`),
-     use that upstream
-   - Otherwise, scan remotes for common default branches (`main`, `master`,
-     `develop`)
-   - If exactly one candidate is found, use it automatically
-   - If multiple candidates exist, prompt the user to choose
-   - If no candidates are found, error with guidance to add a remote
-4. **Creation**: The branch is created at the upstream tip, tracking is
-   configured, and HEAD is switched to it in one atomic operation.
+3. **Fork offer**: on a GitHub fork, offer its parent as `upstream`
+   (see [GitHub Fork](#github-fork))
+4. **Upstream detection**: see [Upstream Detection](#upstream-detection)
+5. **Creation**: The branch is created at the upstream tip, tracking is
+   configured, and HEAD is switched to it in one atomic operation. When
+   `git switch` refuses to overwrite local changes, the error says to commit
+   or stash them and re-run.
 
 ## Upstream Detection
 
@@ -61,22 +58,48 @@ git-loom init [name]
 
 The upstream is resolved in priority order:
 
-1. **Current branch's upstream** — If you're on `main` tracking `origin/main`,
+1. **GitHub `upstream` remote** — When a remote is on GitHub and one is named
+   `upstream` (the fork workflow), its `HEAD`, else its `main`, `master` or
+   `develop`.
+
+2. **Current branch's upstream** — If you're on `main` tracking `origin/main`,
    the new integration branch will also track `origin/main`. This is the most
    common case.
 
-2. **Main worktree's upstream** — In a linked worktree, the upstream of the
+3. **Main worktree's upstream** — In a linked worktree, the upstream of the
    branch checked out in the main worktree, when the current branch has none.
 
-3. **Remote scan** — If the current branch has no upstream (e.g., a detached
+4. **Remote scan** — If the current branch has no upstream (e.g., a detached
    HEAD or a branch without tracking), git-loom scans all remotes for branches
    named `main`, `master`, or `develop`.
 
-4. **Interactive prompt** — If multiple candidates are found (e.g., both
+5. **Interactive prompt** — If multiple candidates are found (e.g., both
    `origin/main` and `upstream/main`), the user is prompted to select one.
 
-5. **Error** — If no remote tracking branches are found at all, an error
+6. **Error** — If no remote tracking branches are found at all, an error
    message guides the user to set up a remote.
+
+### GitHub Fork
+
+Before detection, when `origin` is on github.com and no remote is named
+`upstream` or points at the repository `origin` forks on github.com, init
+asks `gh` (`gh api repos/<origin>`) for that parent. Without `gh`, a login, or
+a parent, nothing happens.
+
+- **Terminal**: asks whether to track the parent as remote `upstream`. Yes
+  fetches the parent into `refs/remotes/upstream/` from `origin`'s URL with
+  `owner/repo` swapped for the parent's (same protocol and credentials), then
+  adds it as `upstream`, points `upstream/HEAD` at the parent's default branch,
+  and sets `remote.upstream.gh-resolved=base` as `gh repo clone` does;
+  detection then tracks it (strategy 1). Fetching before adding means a failed
+  or interrupted fetch leaves no `upstream`, so a re-run asks again; a failed
+  one fails init before any branch exists.
+- **Agent mode, or stdin not a terminal**: no question, the offer being
+  optional. A warning names the parent and the commands that track it after
+  the fact.
+
+The question and the warning show the URL without an `http(s)` URL's user and
+password, either of which can be a token; git still gets the URL as is.
 
 ## Prerequisites
 

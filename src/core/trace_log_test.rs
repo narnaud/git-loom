@@ -29,6 +29,57 @@ fn init_and_finalize_creates_log_file() {
 }
 
 #[test]
+fn without_credentials_drops_only_http_userinfo() {
+    for (url, shown) in [
+        (
+            "https://me:ghp_x@github.com/them/proj.git",
+            "https://github.com/them/proj.git",
+        ),
+        (
+            "http://ghp_x@github.com/them/proj",
+            "http://github.com/them/proj",
+        ),
+        (
+            "https://github.com/them/proj",
+            "https://github.com/them/proj",
+        ),
+        (
+            "ssh://git@github.com/them/proj.git",
+            "ssh://git@github.com/them/proj.git",
+        ),
+        (
+            "git@github.com:them/proj.git",
+            "git@github.com:them/proj.git",
+        ),
+    ] {
+        assert_eq!(super::without_credentials(url), shown, "{}", url);
+    }
+}
+
+/// `loom init` fetches a fork's parent at a URL holding `origin`'s token.
+#[test]
+fn a_logged_url_leaves_its_credentials_out() {
+    let (_dir, git_dir) = setup_git_dir();
+
+    super::init(&git_dir, "git loom init", false);
+    super::log_command(
+        "git",
+        "fetch --no-progress https://me:ghp_x@github.com/them/proj.git +refs/heads/*:refs/remotes/upstream/*",
+        5,
+        true,
+        "",
+    );
+    let content = fs::read_to_string(super::finalize().unwrap()).unwrap();
+
+    assert!(!content.contains("ghp_x"), "{content}");
+    assert!(
+        content
+            .contains("[git] fetch --no-progress https://github.com/them/proj.git +refs/heads/*"),
+        "{content}"
+    );
+}
+
+#[test]
 fn finalize_noop_when_not_initialized() {
     // Ensure no panic and returns None when logger was never initialized
     let result = super::finalize();

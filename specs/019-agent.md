@@ -296,6 +296,7 @@ mentions the skipped action in `messages`).
 | `branch` name prompt (no name) | pre-flight | `needs_input` (text); hint: `loom branch <name>` |
 | `merge` / `unmerge` / `switch` pickers | pre-flight | `needs_input` (select) listing candidates; hint: `loom merge <branch>` etc. |
 | `init` upstream picker (several candidates) | pre-flight | `needs_input` (select) listing the remote branches |
+| `init` GitHub fork offer (Spec 009) | pre-flight | not asked, the offer being optional: `init` tracks what it would anyway, and `messages` names the parent and the commands that track it |
 
 ### Hunk selection
 

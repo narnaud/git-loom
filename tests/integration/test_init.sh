@@ -119,4 +119,45 @@ assert_eq "$(current_branch)" "integration-foo" "worktree_default_name_head"
 assert_eq "$(branch_upstream integration-foo)" "$(branch_upstream integration)" "worktree_same_upstream"
 WORK="$MAIN"
 
+# ── GITHUB FORK (gh shim) ─────────────────────────────────────────────────────
+# The shim is a shell script on PATH; Rust's Command cannot spawn one on
+# Windows, so this scenario only runs elsewhere.
+
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]]; then
+    skipped "github fork scenario (Rust cannot spawn the shell gh shim on Windows)"
+    pass
+fi
+
+unset GH_TOKEN GITHUB_TOKEN
+
+# Repo whose origin is `me/fork` on GitHub, with a fake `gh` on PATH that
+# names `them/proj` as its parent.
+setup_fork_for_init() {
+    setup_repo_for_init
+    git -C "$WORK" remote set-url origin https://github.com/me/fork.git
+    mkdir -p "$TMPROOT/shim"
+    cat > "$TMPROOT/shim/gh" <<'SHIM'
+#!/usr/bin/env bash
+[[ "$1" == api && "$*" == *" repos/me/fork "* ]] || exit 1
+echo "them/proj trunk"
+SHIM
+    chmod +x "$TMPROOT/shim/gh"
+}
+
+describe "without a terminal, a GitHub fork gets a note naming its parent"
+setup_fork_for_init
+OUT=$(PATH="$TMPROOT/shim:$PATH" gl init </dev/null 2>&1) && CODE=$? || CODE=$?
+assert_exit_ok "$CODE" "fork_note"
+assert_contains "$OUT" "origin is a fork of them/proj" "fork_note_parent"
+assert_contains "$OUT" "git remote add -f upstream https://github.com/them/proj.git" "fork_note_url"
+assert_eq "$(branch_upstream integration)" "origin/$(default_base_branch)" "fork_note_tracks_origin"
+
+describe "in agent mode, a GitHub fork is a note in messages"
+setup_fork_for_init
+PATH="$TMPROOT/shim:$PATH" gl_capture_json --agent init </dev/null
+assert_exit_ok "$CODE" "fork_agent"
+assert_contains "$(json_line)" '"status":"ok"' "fork_agent_ok"
+assert_contains "$(json_line)" 'is a fork of `them/proj`' "fork_agent_note"
+assert_eq "$(branch_upstream integration)" "origin/$(default_base_branch)" "fork_agent_tracks_origin"
+
 pass
