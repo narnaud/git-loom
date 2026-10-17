@@ -12,39 +12,9 @@ use ratatui::{
 
 use crate::core::ui::{Answer, Level, PromptKind};
 use crate::tui::theme::TuiTheme;
+use crate::tui::widgets::common::{centered, highlight_backticks};
 use crate::tui::widgets::diff_pane::DiffPane;
 use crate::tui::widgets::menu::{Menu, MenuItem, MenuOutcome};
-
-/// Centered rect of at most `width`×`height` inside `area`.
-pub(crate) fn centered(area: Rect, width: u16, height: u16) -> Rect {
-    let width = width.min(area.width);
-    let height = height.min(area.height);
-    Rect {
-        x: area.x + (area.width - width) / 2,
-        y: area.y + (area.height - height) / 2,
-        width,
-        height,
-    }
-}
-
-/// Style `text` with backtick-quoted words highlighted, like the CLI's yellow.
-pub(crate) fn highlight_backticks(text: &str, base: Style, theme: &TuiTheme) -> Vec<Span<'static>> {
-    let mut spans = Vec::new();
-    let mut rest = text;
-    while let Some(start) = rest.find('`') {
-        let after = &rest[start + 1..];
-        let Some(end) = after.find('`') else { break };
-        if start > 0 {
-            spans.push(Span::styled(rest[..start].to_string(), base));
-        }
-        spans.push(Span::styled(after[..end].to_string(), theme.highlight));
-        rest = &after[end + 1..];
-    }
-    if !rest.is_empty() {
-        spans.push(Span::styled(rest.to_string(), base));
-    }
-    spans
-}
 
 /// The `✓`/`!`/`✗` line for a message and its `›` hint continuations, as the
 /// CLI prints them; a `Plain` message is its lines as they are.

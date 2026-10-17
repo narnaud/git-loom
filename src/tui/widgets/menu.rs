@@ -13,7 +13,7 @@ use ratatui::{
 };
 
 use crate::tui::theme::TuiTheme;
-use crate::tui::widgets::popup::{centered, highlight_backticks};
+use crate::tui::widgets::common::{centered, highlight_backticks};
 
 /// Default width, like lazygit's menus; narrower terminals shrink it.
 const WIDTH: u16 = 80;

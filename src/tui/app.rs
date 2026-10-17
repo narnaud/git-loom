@@ -43,7 +43,7 @@ use crate::tui::status_tree::{
     commit_file_key, working_file_key,
 };
 use crate::tui::theme::TuiTheme;
-use crate::tui::widgets::common::{colorize_diff, pane_block};
+use crate::tui::widgets::common::{colorize_diff, highlight_backticks, pane_block};
 use crate::tui::widgets::diff_pane::DiffPane;
 use crate::tui::widgets::list_pane::ListPane;
 use crate::tui::widgets::popup::{self, LogEntry, Notice, Prompt, PromptOutcome, TextField};
@@ -3425,7 +3425,7 @@ impl<'a> App<'a> {
         };
         let theme = self.theme;
         let mut items = vec![
-            ListItem::new(Line::from(popup::highlight_backticks(
+            ListItem::new(Line::from(highlight_backticks(
                 paused.headline,
                 theme.warn,
                 theme,
