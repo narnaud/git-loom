@@ -12,6 +12,7 @@ use anyhow::{Result, bail};
 
 use crate::core::shortid::{Entity, IdAllocator};
 use crate::git;
+use crate::git::git_worktree::{dir_name, name_of};
 
 /// A registered worktree whose directory exists.
 #[derive(Debug)]
@@ -51,21 +52,6 @@ pub fn entries(workdir: &Path) -> Result<Vec<Entry>> {
             branch: w.branch,
         })
         .collect())
-}
-
-/// A linked worktree's name: its directory name `dir` minus `<main_dir>-`, or
-/// the whole of `dir` when it does not start that way.
-pub fn name_of(dir: &str, main_dir: &str) -> String {
-    dir.strip_prefix(&format!("{main_dir}-"))
-        .filter(|rest| !rest.is_empty())
-        .unwrap_or(dir)
-        .to_string()
-}
-
-pub fn dir_name(path: &Path) -> String {
-    path.file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default()
 }
 
 fn canonical(path: &Path) -> PathBuf {

@@ -895,6 +895,8 @@ impl Snapshot {
             branch_name: String::new(),
             upstream: repo::UpstreamInfo {
                 label: String::new(),
+                remote: String::new(),
+                branch: String::new(),
                 tip_oid: git2::Oid::ZERO_SHA1,
                 merge_base_oid: git2::Oid::ZERO_SHA1,
                 base_short_id: String::new(),
@@ -4243,8 +4245,8 @@ fn working_file_diff(workdir: &std::path::Path, file: &FileChange) -> String {
 
 /// A trace log as `loom trace` colors it.
 fn trace_lines(content: &str, theme: &TuiTheme) -> Vec<Line<'static>> {
-    use crate::trace::TraceLine;
-    crate::trace::classify_log(content)
+    use crate::core::trace_log::{self, TraceLine};
+    trace_log::classify_log(content)
         .into_iter()
         .map(|line| match line {
             TraceLine::Blank => Line::from(""),

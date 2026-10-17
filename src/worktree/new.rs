@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 
 use crate::core::{msg, repo};
-use crate::git;
+use crate::git::{self, git_worktree};
 
 /// Create the worktree `<dir>-<name>` beside the main worktree `<dir>`, on a
 /// new `integration-<name>` tracking the main worktree branch's upstream.
@@ -46,7 +46,7 @@ pub fn run(name: String) -> Result<()> {
     let path = PathBuf::from(format!(
         "{}/{}-{}",
         parent.display(),
-        super::dir_name(&main.path),
+        git_worktree::dir_name(&main.path),
         name
     ));
     if path.exists() {
@@ -58,10 +58,10 @@ pub fn run(name: String) -> Result<()> {
     let upstream = match main
         .branch
         .as_deref()
-        .and_then(|b| crate::init::branch_upstream(&repo, b))
+        .and_then(|b| repo::branch_upstream(&repo, b))
     {
         Some(upstream) => upstream,
-        None => crate::init::detect_upstream(&repo, main.branch.as_deref())?,
+        None => repo::detect_upstream(&repo, main.branch.as_deref())?,
     };
 
     let path_arg = path.display().to_string();

@@ -162,6 +162,30 @@ assert_exit_ok "$CODE" "nopr_ok"
 assert_eq "$(remote_oid a)" "$(branch_oid a)" "nopr_a_oid"
 assert_eq "$(remote_oid b)" "$(branch_oid b)" "nopr_b_oid"
 
+describe "a remote whose name holds a / is pushed to"
+build_stack
+git -C "$WORK" remote rename origin team/fork
+gl_capture push x
+assert_exit_ok "$CODE" "slash_remote_ok"
+assert_contains "$OUT" 'Pushed x to team/fork' "slash_remote_msg"
+remote_has x || fail "slash_remote: x should be on the remote"
+
+describe "a local upstream pushes to loom.push-remote, which it needs"
+build_stack
+git -C "$WORK" branch -q -u "$BASE_BRANCH" integration
+gl_capture_json --agent push
+assert_eq "1" "$CODE" "local_upstream_refused_before_picking"
+assert_contains "$(json_line)" "loom.push-remote" "local_upstream_refused_before_picking_msg"
+gl_capture push x
+assert_exit_fail "$CODE" "local_upstream_refused"
+assert_contains "$OUT" "loom.push-remote" "local_upstream_refused_msg"
+remote_has x && fail "local_upstream: x should not be on the remote yet"
+git -C "$WORK" config loom.push-remote origin
+gl_capture push x
+assert_exit_ok "$CODE" "local_upstream_ok"
+assert_contains "$OUT" 'Pushed x to origin' "local_upstream_msg"
+remote_has x || fail "local_upstream: x should be on the remote"
+
 # ── GITLAB (push options checked in the trace of the push) ────────────────────
 
 # Let the bare remote accept push options; the trace of the push records the

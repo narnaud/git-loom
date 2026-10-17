@@ -417,6 +417,40 @@ fn branch_at_upstream_is_detected() {
     );
 }
 
+/// Cutting the label `team/fork/main` at its first `/` gave remote `team` and
+/// branch `fork/main` (#442).
+#[test]
+fn a_remote_name_with_a_slash_is_read_from_the_config() {
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    crate::git::run_git(&workdir, &["remote", "rename", "origin", "team/fork"]).unwrap();
+    test_repo.commit_empty("Ahead");
+
+    let info = gather_repo_info(&test_repo.repo, false, 1).unwrap();
+    assert_eq!(info.upstream.label, "team/fork/main");
+    assert_eq!(info.upstream.remote, "team/fork");
+    assert_eq!(info.upstream.branch, "main");
+}
+
+/// A local upstream's label has no `/`, so its local branch went unrecognized
+/// and was listed as woven (#442).
+#[test]
+fn a_local_upstream_is_not_listed_as_a_woven_branch() {
+    let test_repo = TestRepo::new_with_remote();
+    crate::git::run_git(
+        &test_repo.workdir(),
+        &["branch", "-u", "main", "integration"],
+    )
+    .unwrap();
+    test_repo.commit_empty("Ahead");
+
+    let info = gather_repo_info(&test_repo.repo, false, 1).unwrap();
+    assert_eq!(info.upstream.remote, ".");
+    assert_eq!(info.upstream.branch, "main");
+    let branch_names: Vec<&str> = info.branches.iter().map(|b| b.name.as_str()).collect();
+    assert!(!branch_names.contains(&"main"), "{branch_names:?}");
+}
+
 // ── Tests for target resolution ────────────────────────────────────────
 
 #[test]

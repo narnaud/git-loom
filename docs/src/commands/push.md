@@ -90,7 +90,7 @@ Check what is on the remote first: `-f` overwrites it, for every branch of the s
 
 ## Push Remote
 
-Loom pushes to the remote your integration branch tracks. On GitHub, if that remote is `upstream` and an `origin` exists, it pushes to `origin`, your fork. Set [`loom.push-remote`](../configuration.md#loompush-remote) for any other layout.
+Loom pushes to the remote your integration branch tracks. On GitHub, if that remote is `upstream` and an `origin` exists, it pushes to `origin`, your fork. Set [`loom.push-remote`](../configuration.md#loompush-remote) for any other layout, and when your integration branch tracks a local branch, which is on no remote.
 
 With several GitHub accounts logged in to `gh`, loom uses the one that owns the push remote. Setting `GH_TOKEN` or `GITHUB_TOKEN` overrides that.
 

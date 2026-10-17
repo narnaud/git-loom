@@ -4,6 +4,7 @@ use anyhow::{Context, Result, bail};
 use git2::BranchType;
 use serde::{Deserialize, Serialize};
 
+use crate::core::remote;
 use crate::core::repo;
 
 use crate::core::agent_mode;
@@ -52,13 +53,7 @@ pub fn run(skip_confirm: bool) -> Result<()> {
         .to_string();
 
     let head_refname = head.name().context("HEAD ref name is not valid UTF-8")?;
-    let upstream_remote = repo
-        .branch_upstream_remote(head_refname)
-        .context("Failed to resolve the upstream remote")?;
-    let upstream_remote = upstream_remote
-        .as_str()
-        .context("Upstream remote name is not valid UTF-8")?
-        .to_string();
+    let (upstream_remote, upstream_branch) = repo::upstream_remote_and_branch(&repo, head_refname)?;
 
     // Fetch with tags, force-update, and prune deleted remote branches. The
     // remote is named explicitly so `--tags` makes the tag refspec explicit and
@@ -104,7 +99,7 @@ pub fn run(skip_confirm: bool) -> Result<()> {
         }
     }
 
-    fetch_push_remote(&repo, &workdir, &upstream_name);
+    fetch_push_remote(&repo, &workdir, &upstream_remote, &upstream_branch);
 
     let repo = git2::Repository::discover(&workdir)?;
 
@@ -137,8 +132,7 @@ pub fn run(skip_confirm: bool) -> Result<()> {
             merged.extend(filtered_out);
             // A woven branch started from a local `main` holds its tip, so both
             // tests can find it; it stays loom's to keep (Spec 010).
-            let upstream_local = repo::upstream_local_branch(&upstream_name);
-            merged.retain(|name| *name != upstream_local);
+            merged.retain(|name| *name != upstream_branch);
             merged.sort();
             merged.dedup();
             (Some(graph.to_todo()), merged)
@@ -225,8 +219,14 @@ pub fn run(skip_confirm: bool) -> Result<()> {
 /// the authoritative one. `--no-prune-tags` says so explicitly — a user-level
 /// `fetch.pruneTags = true` would delete every tag missing from the fork, and
 /// the next update's `--tags` fetch would re-add them all.
-fn fetch_push_remote(repo: &git2::Repository, workdir: &Path, upstream_name: &str) {
-    let Some(remote) = crate::push::fork_push_remote(repo, workdir, upstream_name) else {
+fn fetch_push_remote(
+    repo: &git2::Repository,
+    workdir: &Path,
+    upstream_remote: &str,
+    upstream_branch: &str,
+) {
+    let Some(remote) = remote::fork_push_remote(repo, workdir, upstream_remote, upstream_branch)
+    else {
         return;
     };
 

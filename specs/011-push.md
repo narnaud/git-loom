@@ -244,6 +244,12 @@ Detection priority (first match wins):
 2. **GitHub fork convention**: if the integration remote is named `upstream` and `origin` exists, push to `origin`
 3. **Fallback**: integration branch's remote
 
+The integration remote and the upstream target branch are the integration
+branch's `branch.<name>.remote` and `.merge`, never cut from the upstream's
+name: a remote name can hold a `/`. A local upstream (remote `.`) is on no
+remote, so `loom.push-remote` stands in for the integration remote, remote
+type detection included; without it push refuses before asking anything.
+
 This allows fork workflows where the integration branch tracks the upstream repository but branches are pushed to a personal fork. For non-standard remote names, set `loom.push-remote` explicitly.
 
 ## PR Messages

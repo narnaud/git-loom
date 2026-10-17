@@ -2,14 +2,6 @@ use std::path::PathBuf;
 
 use crate::core::test_helpers::TestRepo;
 
-#[test]
-fn name_of_strips_main_dir_prefix() {
-    assert_eq!(super::name_of("work-foo", "work"), "foo");
-    assert_eq!(super::name_of("work-foo-bar", "work"), "foo-bar");
-    assert_eq!(super::name_of("other", "work"), "other");
-    assert_eq!(super::name_of("work-", "work"), "work-");
-}
-
 fn with_foo_worktree() -> (TestRepo, PathBuf) {
     let test_repo = TestRepo::new_with_remote();
     let path = test_repo.add_worktree("work-foo", &["-b", "integration-foo", "origin/main"]);

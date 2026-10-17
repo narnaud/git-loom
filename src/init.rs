@@ -2,21 +2,20 @@ use std::io::IsTerminal;
 use std::path::Path;
 
 use anyhow::{Result, bail};
-use git2::{BranchType, Repository};
+use git2::Repository;
 
 use crate::core::agent_mode;
 use crate::core::msg;
+use crate::core::remote;
 use crate::core::repo;
-use crate::git;
-use crate::push;
-use crate::worktree;
+use crate::git::{self, git_worktree};
 
 /// Initialize a new integration branch tracking a remote upstream.
 ///
 /// Creates the branch at the upstream tip and switches to it; the default name
 /// depends on the worktree (see [`default_name`]).
 pub fn run(name: Option<String>) -> Result<()> {
-    run_with(name, push::github_fork_parent)
+    run_with(name, remote::github_fork_parent)
 }
 
 /// [`run`] with the GitHub fork lookup given, so tests never reach `gh`.
@@ -45,7 +44,7 @@ fn run_with(
         offer_fork_upstream(workdir, &fork)?;
     }
 
-    let upstream = detect_upstream(&repo, main.as_ref().and_then(|m| m.branch.as_deref()))?;
+    let upstream = repo::detect_upstream(&repo, main.as_ref().and_then(|m| m.branch.as_deref()))?;
 
     // `git switch` refuses to overwrite local changes; an upstream far ahead of
     // HEAD, such as a fork's parent, makes that likely.
@@ -77,23 +76,23 @@ struct Fork {
 }
 
 /// The repository a github.com `origin` forks, when no remote names it yet:
-/// none is called `upstream` (which [`detect_upstream`] would track) and none
+/// none is called `upstream` (which [`repo::detect_upstream`] would track) and none
 /// points at it under another name.
 fn fork_of_origin(
     repo: &Repository,
     workdir: &Path,
     lookup: impl Fn(&Path, &str) -> Option<(String, String)>,
 ) -> Option<Fork> {
-    if repo.find_remote("upstream").is_ok() || !push::on_github_com(repo, "origin") {
+    if repo.find_remote("upstream").is_ok() || !remote::on_github_com(repo, "origin") {
         return None;
     }
-    let origin_repo = push::extract_gh_repo(repo, "origin")?;
+    let origin_repo = remote::extract_gh_repo(repo, "origin")?;
     let (parent, default_branch) = lookup(workdir, &origin_repo)?;
     let remotes = repo.remotes().ok()?;
     // `extract_gh_repo` reads `owner/repo` off an scp-style URL on any host.
-    if remotes.iter().flatten().flatten().any(|remote| {
-        push::on_github_com(repo, remote)
-            && push::extract_gh_repo(repo, remote).is_some_and(|r| r.eq_ignore_ascii_case(&parent))
+    if remotes.iter().flatten().flatten().any(|name| {
+        remote::on_github_com(repo, name)
+            && remote::extract_gh_repo(repo, name).is_some_and(|r| r.eq_ignore_ascii_case(&parent))
     }) {
         return None;
     }
@@ -112,7 +111,7 @@ fn fork_of_origin(
     })
 }
 
-/// Offer to add `fork` as remote `upstream`, which [`detect_upstream`] then
+/// Offer to add `fork` as remote `upstream`, which [`repo::detect_upstream`] then
 /// tracks. Where nobody can answer (agent mode, no terminal) the offer is a
 /// note instead: it is optional, so it must not stop the `init`.
 fn offer_fork_upstream(workdir: &Path, fork: &Fork) -> Result<()> {
@@ -184,146 +183,11 @@ fn default_name(workdir: &Path, main: Option<&git::Worktree>) -> String {
     let Some(main) = main else {
         return "integration".to_string();
     };
-    let name = worktree::name_of(
-        &worktree::dir_name(workdir),
-        &worktree::dir_name(&main.path),
+    let name = git_worktree::name_of(
+        &git_worktree::dir_name(workdir),
+        &git_worktree::dir_name(&main.path),
     );
     format!("integration-{}", name)
-}
-
-/// Detect the upstream tracking ref to use for the new integration branch.
-///
-/// Strategy:
-/// 1. On GitHub repos with an "upstream" remote (fork workflow), use it.
-/// 2. If the current branch has an upstream, use it (e.g., "origin/main").
-/// 3. The upstream of `main_branch`, the main worktree's branch.
-/// 4. Otherwise, check each remote's HEAD symref (e.g., refs/remotes/origin/HEAD).
-/// 5. Fall back to scanning for common branch names (main, master, develop).
-/// 6. If exactly one candidate, use it. If multiple, prompt the user.
-pub fn detect_upstream(repo: &Repository, main_branch: Option<&str>) -> Result<String> {
-    // On GitHub repos with a fork workflow, prefer the "upstream" remote
-    if let Some(upstream) = try_github_upstream(repo) {
-        return Ok(upstream);
-    }
-
-    // Try the current branch's upstream first
-    if let Ok(head) = repo.head()
-        && head.is_branch()
-        && let Ok(branch_name) = head.shorthand()
-        && let Ok(local_branch) = repo.find_branch(branch_name, BranchType::Local)
-        && let Ok(upstream) = local_branch.upstream()
-        && let Ok(Some(upstream_name)) = upstream.name()
-    {
-        return Ok(upstream_name.to_string());
-    }
-
-    if let Some(branch) = main_branch
-        && let Some(upstream) = branch_upstream(repo, branch)
-    {
-        return Ok(upstream);
-    }
-
-    // No upstream on current branch — gather remote candidates
-    let candidates = gather_remote_candidates(repo)?;
-
-    match candidates.len() {
-        0 => bail!(
-            "No remote tracking branches found\n\
-             Set up a remote with: `git remote add origin <url>`"
-        ),
-        1 => Ok(candidates[0].clone()),
-        _ => {
-            // Prompt the user to pick
-            msg::select(
-                "Which remote branch should this integration track?",
-                candidates,
-                "no flag selects the upstream — ask the user, run `git remote set-head <remote> -a`, then re-run: loom init",
-            )
-        }
-    }
-}
-
-pub fn branch_upstream(repo: &Repository, branch: &str) -> Option<String> {
-    let local = repo.find_branch(branch, BranchType::Local).ok()?;
-    let upstream = local.upstream().ok()?;
-    upstream.name().ok().flatten().map(str::to_string)
-}
-
-/// On GitHub repositories with an "upstream" remote, find its default branch.
-///
-/// In the fork workflow, "origin" is the user's fork and "upstream" is the
-/// original repository. The integration branch should track the original repo.
-fn try_github_upstream(repo: &Repository) -> Option<String> {
-    // Check if any remote URL points to GitHub
-    let remotes = repo.remotes().ok()?;
-    let is_github = remotes.iter().flatten().flatten().any(|name| {
-        repo.find_remote(name)
-            .ok()
-            .and_then(|r| r.url().ok().map(|u| u.contains("github.com")))
-            .unwrap_or(false)
-    });
-    if !is_github {
-        return None;
-    }
-
-    // Check if there's an "upstream" remote
-    repo.find_remote("upstream").ok()?;
-
-    // Find the upstream remote's default branch via HEAD symref
-    let head_ref = "refs/remotes/upstream/HEAD";
-    if let Ok(reference) = repo.find_reference(head_ref)
-        && let Ok(resolved) = reference.resolve()
-        && let Ok(name) = resolved.shorthand()
-    {
-        return Some(name.to_string());
-    }
-
-    // Fall back to common branch names
-    for branch_name in &["main", "master", "develop"] {
-        let ref_name = format!("upstream/{}", branch_name);
-        if repo.find_branch(&ref_name, BranchType::Remote).is_ok() {
-            return Some(ref_name);
-        }
-    }
-
-    None
-}
-
-/// Gather candidate remote tracking branches.
-///
-/// For each remote, first checks the remote's HEAD symref (e.g., refs/remotes/origin/HEAD)
-/// which points to the remote's default branch. Falls back to scanning for common
-/// branch names (main, master, develop) if the HEAD symref is not available.
-fn gather_remote_candidates(repo: &Repository) -> Result<Vec<String>> {
-    let mut candidates = Vec::new();
-
-    let remotes = repo.remotes()?;
-    for remote_name in remotes.iter() {
-        let Ok(Some(remote_name)) = remote_name else {
-            continue;
-        };
-
-        // Try the remote's HEAD symref first (e.g., refs/remotes/origin/HEAD → origin/main)
-        let head_ref = format!("refs/remotes/{}/HEAD", remote_name);
-        if let Ok(reference) = repo.find_reference(&head_ref)
-            && let Ok(resolved) = reference.resolve()
-            && let Ok(name) = resolved.shorthand()
-        {
-            candidates.push(name.to_string());
-            continue;
-        }
-
-        // Fall back to common default branch names
-        for branch_name in &["main", "master", "develop"] {
-            let ref_name = format!("{}/{}", remote_name, branch_name);
-            if repo.find_branch(&ref_name, BranchType::Remote).is_ok() {
-                candidates.push(ref_name);
-                break; // Use the first match per remote
-            }
-        }
-    }
-
-    Ok(candidates)
 }
 
 #[cfg(test)]

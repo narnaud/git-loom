@@ -44,6 +44,8 @@ fn context_commit(short_hash: &str) -> ContextCommit {
 fn upstream() -> UpstreamInfo {
     UpstreamInfo {
         label: "origin/main".to_string(),
+        remote: "origin".to_string(),
+        branch: "main".to_string(),
         tip_oid: oid('9'),
         merge_base_oid: oid('9'),
         base_short_id: "9999999".to_string(),

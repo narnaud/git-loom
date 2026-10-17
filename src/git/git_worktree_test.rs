@@ -7,6 +7,14 @@ use crate::core::weave::Weave;
 use crate::git::{self, RebaseOutcome};
 
 #[test]
+fn name_of_strips_main_dir_prefix() {
+    assert_eq!(super::name_of("work-foo", "work"), "foo");
+    assert_eq!(super::name_of("work-foo-bar", "work"), "foo-bar");
+    assert_eq!(super::name_of("other", "work"), "other");
+    assert_eq!(super::name_of("work-", "work"), "work-");
+}
+
+#[test]
 fn parse_worktree_list_filters_special_worktrees() {
     let porcelain = "\
 worktree /repo

@@ -1,4 +1,4 @@
-//! Worktree ref safety.
+//! Worktree listing and naming, and worktree ref safety.
 //!
 //! A weave rebase moves branch refs two ways: the explicit `update-ref` todo
 //! lines move the feature branches, and completing the rebase moves HEAD's own
@@ -38,6 +38,22 @@ pub struct WorktreeCheckout {
 pub fn list_worktrees(workdir: &Path) -> Result<Vec<Worktree>> {
     let stdout = super::run_git_stdout(workdir, &["worktree", "list", "--porcelain"])?;
     Ok(parse_worktrees(&stdout))
+}
+
+/// A linked worktree's name: its directory name `dir` minus `<main_dir>-`, or
+/// the whole of `dir` when it does not start that way.
+pub fn name_of(dir: &str, main_dir: &str) -> String {
+    dir.strip_prefix(&format!("{main_dir}-"))
+        .filter(|rest| !rest.is_empty())
+        .unwrap_or(dir)
+        .to_string()
+}
+
+/// The last component of `path`, as worktree names are read off it.
+pub fn dir_name(path: &Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 /// List all worktrees that have a local branch checked out.
