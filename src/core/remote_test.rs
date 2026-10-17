@@ -1,27 +1,5 @@
 use crate::core::test_helpers::TestRepo;
 
-// ── extract_remote_name tests ────────────────────────────────────────────
-
-#[test]
-fn extract_remote_name_parses_correctly() {
-    assert_eq!(super::extract_remote_name("origin/main"), "origin");
-    assert_eq!(super::extract_remote_name("upstream/develop"), "upstream");
-    assert_eq!(super::extract_remote_name("origin"), "origin");
-}
-
-// ── extract_target_branch tests ──────────────────────────────────────────
-
-#[test]
-fn extract_target_branch_parses_correctly() {
-    assert_eq!(super::extract_target_branch("origin/main"), "main");
-    assert_eq!(super::extract_target_branch("upstream/develop"), "develop");
-    assert_eq!(
-        super::extract_target_branch("origin/release/v1"),
-        "release/v1"
-    );
-    assert_eq!(super::extract_target_branch("origin"), "main");
-}
-
 // ── detect_remote_type tests ─────────────────────────────────────────────
 
 #[test]
@@ -30,7 +8,7 @@ fn detect_remote_type_plain_by_default() {
     let workdir = test_repo.workdir();
     test_repo.commit("C1", "c1.txt");
 
-    let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
+    let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin", "main");
     assert_eq!(result, super::RemoteType::Plain);
 }
 
@@ -42,7 +20,7 @@ fn detect_remote_type_gerrit_by_config() {
 
     test_repo.set_config("loom.remote-type", "gerrit");
 
-    let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
+    let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin", "main");
     assert_eq!(
         result,
         super::RemoteType::Gerrit {
@@ -59,7 +37,7 @@ fn detect_remote_type_github_by_config() {
 
     test_repo.set_config("loom.remote-type", "github");
 
-    let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
+    let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin", "main");
     assert_eq!(result, super::RemoteType::GitHub);
 }
 
@@ -73,7 +51,7 @@ fn detect_remote_type_config_overrides_url() {
     // explicit config should take priority
     test_repo.set_config("loom.remote-type", "gerrit");
 
-    let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
+    let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin", "main");
     assert_eq!(
         result,
         super::RemoteType::Gerrit {
@@ -97,7 +75,7 @@ fn detect_remote_type_gerrit_by_hook() {
     )
     .unwrap();
 
-    let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
+    let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin", "main");
     assert_eq!(
         result,
         super::RemoteType::Gerrit {
@@ -117,7 +95,7 @@ fn detect_remote_type_gerrit_by_ssh_port() {
         ("git@example.com:29418/proj", false),
     ] {
         test_repo.repo.remote_set_url("origin", url).unwrap();
-        let detected = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
+        let detected = super::detect_remote_type(&test_repo.repo, &workdir, "origin", "main");
         assert_eq!(
             matches!(detected, super::RemoteType::Gerrit { .. }),
             gerrit,
@@ -137,14 +115,14 @@ fn detect_remote_type_plain_by_config() {
     // without warning about an unknown value
     test_repo.set_config("loom.remote-type", "plain");
 
-    let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
+    let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin", "main");
     assert_eq!(result, super::RemoteType::Plain);
 }
 
 #[test]
 fn remote_types_round_trip_through_their_config_value() {
     for (value, _) in super::REMOTE_TYPES {
-        let remote_type = super::parse_remote_type(value, "origin/main").unwrap();
+        let remote_type = super::parse_remote_type(value, "main").unwrap();
         assert_eq!(remote_type.config_value(), value);
     }
 }
@@ -177,7 +155,7 @@ fn resolve_remote_type_under_tui(
         let worker = scope.spawn(|| {
             ui::install(tx);
             let repo = git2::Repository::open(&workdir).unwrap();
-            let result = super::resolve_remote_type(&repo, &workdir, "origin/main");
+            let result = super::resolve_remote_type(&repo, &workdir, "origin", "main");
             ui::uninstall();
             result
         });
@@ -265,7 +243,7 @@ fn resolve_remote_type_saves_nothing_when_the_menu_is_cancelled() {
         let worker = scope.spawn(|| {
             ui::install(tx);
             let repo = git2::Repository::open(&workdir).unwrap();
-            let result = super::resolve_remote_type(&repo, &workdir, "origin/main");
+            let result = super::resolve_remote_type(&repo, &workdir, "origin", "main");
             ui::uninstall();
             result
         });
@@ -299,7 +277,7 @@ fn resolve_push_remote_github_fork_uses_origin() {
     let result = super::resolve_push_remote(
         &test_repo.repo,
         &test_repo.workdir(),
-        "upstream/main",
+        "upstream",
         &super::RemoteType::GitHub,
     );
     assert_eq!(result, "origin");
@@ -312,7 +290,7 @@ fn resolve_push_remote_github_origin_stays_origin() {
     let result = super::resolve_push_remote(
         &test_repo.repo,
         &test_repo.workdir(),
-        "origin/main",
+        "origin",
         &super::RemoteType::GitHub,
     );
     assert_eq!(result, "origin");
@@ -331,10 +309,50 @@ fn resolve_push_remote_plain_upstream_stays_upstream() {
     let result = super::resolve_push_remote(
         &test_repo.repo,
         &test_repo.workdir(),
-        "upstream/main",
+        "upstream",
         &super::RemoteType::Plain,
     );
     assert_eq!(result, "upstream");
+}
+
+/// A local upstream's `.` was taken for a remote and handed to `git push`
+/// (#442).
+#[test]
+fn a_local_upstream_without_a_push_remote_is_refused() {
+    let test_repo = TestRepo::new_with_remote();
+    let err = super::integration_remote(&test_repo.repo, &test_repo.workdir(), ".").unwrap_err();
+    assert!(err.to_string().contains("loom.push-remote"), "{err}");
+}
+
+#[test]
+fn a_push_remote_naming_no_remote_is_named_in_the_refusal() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.set_config("loom.push-remote", "missing");
+    let err = super::integration_remote(&test_repo.repo, &test_repo.workdir(), ".").unwrap_err();
+    assert!(
+        err.to_string().contains("`missing`, which names no remote"),
+        "{err}"
+    );
+}
+
+#[test]
+fn the_push_remote_stands_for_a_local_upstream() {
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    test_repo.set_config("loom.push-remote", "origin");
+
+    assert_eq!(
+        super::integration_remote(&test_repo.repo, &workdir, ".").unwrap(),
+        "origin"
+    );
+    assert_eq!(
+        super::fork_push_remote(&test_repo.repo, &workdir, ".", "main").as_deref(),
+        Some("origin")
+    );
+    assert_eq!(
+        super::fork_push_remote(&test_repo.repo, &workdir, "origin", "main"),
+        None
+    );
 }
 
 #[test]
@@ -345,7 +363,7 @@ fn detect_remote_type_azure_by_config() {
 
     test_repo.set_config("loom.remote-type", "azure");
 
-    let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
+    let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin", "main");
     assert_eq!(result, super::RemoteType::AzureDevOps);
 }
 
@@ -381,7 +399,7 @@ fn detect_remote_type_gerrit_in_worktree() {
     );
 
     // detect_remote_type should still find the Gerrit hook via repo.path()
-    let result = super::detect_remote_type(&wt_repo, &wt_path, "origin/main");
+    let result = super::detect_remote_type(&wt_repo, &wt_path, "origin", "main");
     assert_eq!(
         result,
         super::RemoteType::Gerrit {
@@ -399,7 +417,7 @@ fn detect_remote_type_gitlab_by_config() {
 
     test_repo.set_config("loom.remote-type", "gitlab");
 
-    let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
+    let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin", "main");
     assert_eq!(result, super::RemoteType::GitLab);
 }
 
@@ -414,7 +432,7 @@ fn detect_remote_type_gitlab_by_url() {
         .remote_set_url("origin", "git@gitlab.com:group/repo.git")
         .unwrap();
 
-    let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
+    let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin", "main");
     assert_eq!(result, super::RemoteType::GitLab);
 }
 
@@ -432,7 +450,7 @@ fn detect_remote_type_azure_by_url() {
         )
         .unwrap();
 
-    let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin/main");
+    let result = super::detect_remote_type(&test_repo.repo, &workdir, "origin", "main");
     assert_eq!(result, super::RemoteType::AzureDevOps);
 }
 

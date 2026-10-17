@@ -175,6 +175,30 @@ pub fn upstream_local_branch(upstream_ref: &str) -> String {
         .join("/")
 }
 
+/// The remote (`.` for a local branch) and the branch name there that the
+/// branch `refname` tracks, from `branch.<name>.remote` and `.merge`: a remote
+/// name can hold a `/`, so the upstream's shorthand cannot be cut into them.
+pub fn upstream_remote_and_branch(repo: &Repository, refname: &str) -> Result<(String, String)> {
+    let remote = repo
+        .branch_upstream_remote(refname)
+        .context("Failed to resolve the upstream remote")?;
+    let remote = remote
+        .as_str()
+        .context("Upstream remote name is not valid UTF-8")?
+        .to_string();
+    let merge = repo
+        .branch_upstream_merge(refname)
+        .context("Failed to resolve the upstream branch")?;
+    let merge = merge
+        .as_str()
+        .context("Upstream branch name is not valid UTF-8")?;
+    let branch = merge
+        .strip_prefix("refs/heads/")
+        .unwrap_or(merge)
+        .to_string();
+    Ok((remote, branch))
+}
+
 /// Detect the upstream tracking ref to use for the new integration branch.
 ///
 /// Strategy:
@@ -697,6 +721,11 @@ pub fn cwd_relative_path(repo_path: &str, cwd_prefix: &str) -> String {
 pub struct UpstreamInfo {
     /// Full name of the upstream ref (e.g. "origin/main").
     pub label: String,
+    /// The remote it is on: `.` for a local branch. See
+    /// [`upstream_remote_and_branch`].
+    pub remote: String,
+    /// Its branch name on `remote` (e.g. "main").
+    pub branch: String,
     pub tip_oid: git2::Oid,
     pub merge_base_oid: git2::Oid,
     /// Short hash of the merge-base commit.
@@ -937,6 +966,8 @@ fn gather(repo: &Repository, opts: GatherOpts) -> Result<RepoInfo> {
         .name()?
         .context("Upstream branch name is not valid UTF-8")?
         .to_string();
+    let head_refname = head.name().context("HEAD ref name is not valid UTF-8")?;
+    let (upstream_remote, upstream_branch) = upstream_remote_and_branch(repo, head_refname)?;
 
     let upstream_oid = upstream
         .get()
@@ -962,6 +993,7 @@ fn gather(repo: &Repository, opts: GatherOpts) -> Result<RepoInfo> {
         merge_base_oid,
         &branch_name,
         &upstream_name,
+        &upstream_branch,
     )?;
     let working_changes = if opts.working_changes {
         get_working_changes(repo)?
@@ -988,6 +1020,8 @@ fn gather(repo: &Repository, opts: GatherOpts) -> Result<RepoInfo> {
         branch_name,
         upstream: UpstreamInfo {
             label: upstream_name,
+            remote: upstream_remote,
+            branch: upstream_branch,
             tip_oid: upstream_oid,
             merge_base_oid,
             base_short_id,
@@ -1210,6 +1244,7 @@ fn find_branches_in_range(
     merge_base_oid: git2::Oid,
     current_branch: &str,
     upstream_name: &str,
+    upstream_branch: &str,
 ) -> Result<Vec<BranchInfo>> {
     let mut branches = Vec::new();
     for branch_result in repo.branches(Some(BranchType::Local))? {
@@ -1233,7 +1268,7 @@ fn find_branches_in_range(
             // Skip the upstream's local counterpart sitting at merge-base
             // (e.g. local "main" when upstream is "origin/main", even if it
             // tracks a different remote)
-            if tip_oid == merge_base_oid && name == upstream_local_branch(upstream_name) {
+            if tip_oid == merge_base_oid && name == upstream_branch {
                 continue;
             }
             if commit_set.contains(&tip_oid) || tip_oid == merge_base_oid {

@@ -1366,6 +1366,75 @@ fn update_keeps_main_inside_a_section() {
     }
 }
 
+/// Same shape on a remote named `team/fork`: cut at its first `/`, the
+/// upstream's branch read `fork/main`, so `main` was deleted (#442).
+#[test]
+fn update_keeps_main_inside_a_section_on_a_remote_with_a_slash() {
+    let test_repo = TestRepo::new_with_remote();
+
+    let x_oid = test_repo.add_remote_commits(&["X"]);
+    test_repo.fetch_remote();
+    test_repo
+        .repo
+        .branch("main", &test_repo.find_commit(x_oid), true)
+        .unwrap();
+
+    test_repo.create_branch_at_commit("story", x_oid);
+    test_repo.switch_branch("story");
+    test_repo.commit("S1", "s1.txt");
+    test_repo.switch_branch("integration");
+    test_repo.merge_no_ff("story");
+
+    test_repo.add_remote_commits(&["Y"]);
+    crate::git::run_git(
+        &test_repo.workdir(),
+        &["remote", "rename", "origin", "team/fork"],
+    )
+    .unwrap();
+
+    let result = test_repo.in_dir(|| super::run(true));
+    assert!(result.is_ok(), "update failed: {:?}", result.err());
+
+    for name in ["main", "story"] {
+        assert!(test_repo.branch_exists(name), "{name} must survive update");
+    }
+}
+
+/// An integration branch tracking a local `main`: the upstream's label has no
+/// `/`, so its branch read empty and `main` itself was deleted (#442).
+///
+/// ```text
+/// integration: Initial ── merge
+///                │          │
+///                X(main) ── S1(story)
+/// ```
+#[test]
+fn update_keeps_a_local_upstream_inside_a_section() {
+    let test_repo = TestRepo::new_with_remote();
+
+    test_repo.switch_branch("main");
+    let x_oid = test_repo.commit("X", "x.txt");
+    test_repo.switch_branch("integration");
+    crate::git::run_git(
+        &test_repo.workdir(),
+        &["branch", "-u", "main", "integration"],
+    )
+    .unwrap();
+
+    test_repo.create_branch_at_commit("story", x_oid);
+    test_repo.switch_branch("story");
+    test_repo.commit("S1", "s1.txt");
+    test_repo.switch_branch("integration");
+    test_repo.merge_no_ff("story");
+
+    let result = test_repo.in_dir(|| super::run(true));
+    assert!(result.is_ok(), "update failed: {:?}", result.err());
+
+    for name in ["main", "story"] {
+        assert!(test_repo.branch_exists(name), "{name} must survive update");
+    }
+}
+
 /// Same shape, but X is a local `main` commit (untracked, so the weave makes
 /// it a section) that the upstream cherry-picks: the filtered-out path, not
 /// ancestry, empties `main`.

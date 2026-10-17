@@ -25,7 +25,7 @@ See [push](commands/push.md) for what each type does.
 
 ### `loom.push-remote`
 
-By default, `git loom push` pushes to the remote your integration branch tracks. On GitHub, if that remote is `upstream` and an `origin` exists, it pushes to `origin`, your fork. Set this for any other layout:
+By default, `git loom push` pushes to the remote your integration branch tracks. On GitHub, if that remote is `upstream` and an `origin` exists, it pushes to `origin`, your fork. Set this for any other layout, and when your integration branch tracks a local branch, which is on no remote:
 
 ```bash
 git config loom.push-remote personal

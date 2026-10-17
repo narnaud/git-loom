@@ -618,6 +618,33 @@ fn commit_loose_when_no_branch_and_at_remote() {
     assert_eq!(parent.id(), base_oid);
 }
 
+/// Cut at its first `/`, `team/fork/main` named `fork/main` as the upstream's
+/// branch, so `main` was not taken for the branch it tracks (#442).
+#[test]
+fn commit_loose_when_at_a_remote_whose_name_holds_a_slash() {
+    let test_repo = TestRepo::new_on_main_with_remote();
+    crate::git::run_git(
+        &test_repo.workdir(),
+        &["remote", "rename", "origin", "team/fork"],
+    )
+    .unwrap();
+    let base_oid = test_repo.find_remote_branch_target("team/fork/main");
+
+    test_repo.write_file("loose.txt", "content");
+    let result = test_repo.in_dir(|| {
+        run(
+            None,
+            Some("Loose commit".to_string()),
+            vec!["loose.txt".to_string()],
+        )
+    });
+    assert!(result.is_ok(), "loose commit failed: {:?}", result);
+
+    let head = test_repo.head_commit();
+    assert_eq!(head.parent_count(), 1);
+    assert_eq!(head.parent(0).unwrap().id(), base_oid);
+}
+
 #[test]
 fn commit_loose_works_with_existing_local_commits() {
     // Loose commits should work even when local commits already exist

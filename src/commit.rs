@@ -83,9 +83,7 @@ pub fn run(
 
     // A loose commit lands on the integration branch itself: no rebase, no
     // state file, so nothing below it needs the index snapshot.
-    let loose = loose
-        || (branch.is_none()
-            && info.branch_name == repo::upstream_local_branch(&info.upstream.label));
+    let loose = loose || (branch.is_none() && info.branch_name == info.upstream.branch);
 
     // The graph that drives the rebase is built only once the commit is on
     // HEAD: one that cannot be built is refused before the branch prompt or staging.

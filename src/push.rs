@@ -13,8 +13,8 @@ use crate::core::hidden;
 use crate::core::msg;
 use crate::core::push_json::{PrReport, PrState, PushReport};
 use crate::core::remote::{
-    Gh, RemoteType, extract_gh_repo, extract_remote_name, extract_target_branch, on_github_com,
-    resolve_push_remote, resolve_remote_type, run_gh,
+    Gh, RemoteType, extract_gh_repo, integration_remote, on_github_com, resolve_push_remote,
+    resolve_remote_type, run_gh,
 };
 use crate::core::repo;
 use crate::core::repo::RemoteStatus;
@@ -384,6 +384,10 @@ pub fn run(branch: Option<String>, no_pr: bool, force: bool, title: Option<Strin
         );
     }
 
+    // Before the picker: a local upstream without a push remote is refused
+    // without asking anything.
+    let integration = integration_remote(&repo, &workdir, &info.upstream.remote)?;
+
     let branch_name = match branch {
         Some(b) => resolve_branch(&repo, &info, &b)?,
         None => pick_branch(&info, &hide_pattern)?,
@@ -395,11 +399,11 @@ pub fn run(branch: Option<String>, no_pr: bool, force: bool, title: Option<Strin
     // down a direct push of it too, that being a push of the hidden commits.
     hidden::apply_hidden_branches(&repo, &mut info);
 
-    let remote_type = resolve_remote_type(&repo, &workdir, &info.upstream.label)?;
-    let remote_name = resolve_push_remote(&repo, &workdir, &info.upstream.label, &remote_type);
+    let target_branch = &info.upstream.branch;
+    let remote_type = resolve_remote_type(&repo, &workdir, &integration, target_branch)?;
+    let remote_name = resolve_push_remote(&repo, &workdir, &integration, &remote_type);
 
-    let target_branch = extract_target_branch(&info.upstream.label);
-    let plan = plan_push(&info, &branch_name, &target_branch);
+    let plan = plan_push(&info, &branch_name, target_branch);
 
     // Probed before the push, so an unsupported stack is refused untouched.
     let has_cli = !no_pr
@@ -1236,10 +1240,11 @@ fn push_github(ctx: &PrContext, has_gh: bool, report: &mut PushReport) -> Result
 
     // Fork workflow: the upstream branch's remote is the PR base, the push
     // remote holds the head. Non-fork: both are the same.
-    let integration_remote = extract_remote_name(&info.upstream.label);
-    let target = extract_gh_repo(repo, &integration_remote)
+    let integration_remote = &info.upstream.remote;
+    let target = extract_gh_repo(repo, integration_remote)
         .map(|r| (integration_remote.as_str(), r))
-        // Integration remote missing: fall back to the push remote.
+        // Integration remote missing, or `.` for a local upstream: fall back
+        // to the push remote.
         .or_else(|| extract_gh_repo(repo, remote).map(|r| (remote, r)));
     // The form is built on github.com only; an Enterprise host or SSH alias
     // keeps the server's own links instead.

@@ -6,10 +6,10 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
 use git2::Repository;
 
-use crate::core::{msg, repo, trace_log};
+use crate::core::{msg, trace_log};
 use crate::git;
 
 /// Remote type detected for the push operation.
@@ -44,13 +44,13 @@ const REMOTE_TYPES: [(&str, &str); 5] = [
     ("plain", "Plain Git"),
 ];
 
-fn parse_remote_type(value: &str, upstream_label: &str) -> Option<RemoteType> {
+fn parse_remote_type(value: &str, target_branch: &str) -> Option<RemoteType> {
     Some(match value {
         "github" => RemoteType::GitHub,
         "gitlab" => RemoteType::GitLab,
         "azure" => RemoteType::AzureDevOps,
         "gerrit" => RemoteType::Gerrit {
-            target_branch: extract_target_branch(upstream_label),
+            target_branch: target_branch.to_string(),
         },
         "plain" => RemoteType::Plain,
         _ => return None,
@@ -59,10 +59,10 @@ fn parse_remote_type(value: &str, upstream_label: &str) -> Option<RemoteType> {
 
 /// The remote type `loom.remote-type` names; an unknown value is warned about
 /// and treated as unset.
-fn configured_remote_type(workdir: &Path, upstream_label: &str) -> Option<RemoteType> {
+fn configured_remote_type(workdir: &Path, target_branch: &str) -> Option<RemoteType> {
     let value = git::run_git_stdout(workdir, &["config", "--get", "loom.remote-type"]).ok()?;
     let value = value.trim();
-    let remote_type = parse_remote_type(&value.to_lowercase(), upstream_label);
+    let remote_type = parse_remote_type(&value.to_lowercase(), target_branch);
     if remote_type.is_none() {
         msg::warn(&format!(
             "Unknown loom.remote-type '{}' — falling back to auto-detection.\n\
@@ -73,11 +73,10 @@ fn configured_remote_type(workdir: &Path, upstream_label: &str) -> Option<Remote
     remote_type
 }
 
-/// Guess the remote type from the remote URL, then from a Gerrit
+/// Guess the remote type from `remote`'s URL, then from a Gerrit
 /// `commit-msg` hook; `None` when neither tells.
-fn auto_detect_remote_type(repo: &Repository, upstream_label: &str) -> Option<&'static str> {
-    let remote_name = extract_remote_name(upstream_label);
-    if let Ok(remote) = repo.find_remote(&remote_name)
+fn auto_detect_remote_type(repo: &Repository, remote: &str) -> Option<&'static str> {
+    if let Ok(remote) = repo.find_remote(remote)
         && let Ok(url) = remote.url()
     {
         if url.contains("github.com") {
@@ -106,11 +105,16 @@ fn auto_detect_remote_type(repo: &Repository, upstream_label: &str) -> Option<&'
 
 /// The remote type without asking or saving anything: config, then
 /// auto-detection, then Plain. For callers that cannot prompt.
-fn detect_remote_type(repo: &Repository, workdir: &Path, upstream_label: &str) -> RemoteType {
-    configured_remote_type(workdir, upstream_label)
+fn detect_remote_type(
+    repo: &Repository,
+    workdir: &Path,
+    remote: &str,
+    target_branch: &str,
+) -> RemoteType {
+    configured_remote_type(workdir, target_branch)
         .or_else(|| {
-            auto_detect_remote_type(repo, upstream_label)
-                .and_then(|value| parse_remote_type(value, upstream_label))
+            auto_detect_remote_type(repo, remote)
+                .and_then(|value| parse_remote_type(value, target_branch))
         })
         .unwrap_or(RemoteType::Plain)
 }
@@ -122,25 +126,26 @@ fn detect_remote_type(repo: &Repository, workdir: &Path, upstream_label: &str) -
 pub fn resolve_remote_type(
     repo: &Repository,
     workdir: &Path,
-    upstream_label: &str,
+    remote: &str,
+    target_branch: &str,
 ) -> Result<RemoteType> {
-    if let Some(remote_type) = configured_remote_type(workdir, upstream_label) {
+    if let Some(remote_type) = configured_remote_type(workdir, target_branch) {
         return Ok(remote_type);
     }
-    let value = match auto_detect_remote_type(repo, upstream_label) {
+    let value = match auto_detect_remote_type(repo, remote) {
         Some(value) => value,
-        None => ask_remote_type(upstream_label)?,
+        None => ask_remote_type(remote)?,
     };
     git::run_git(workdir, &["config", "loom.remote-type", value])?;
-    Ok(parse_remote_type(value, upstream_label).expect("a known remote type"))
+    Ok(parse_remote_type(value, target_branch).expect("a known remote type"))
 }
 
-/// Ask which kind of server the upstream remote is, offering every type.
-fn ask_remote_type(upstream_label: &str) -> Result<&'static str> {
+/// Ask which kind of server `remote` is, offering every type.
+fn ask_remote_type(remote: &str) -> Result<&'static str> {
     let picked = msg::select(
         &format!(
             "Which kind of remote is `{}`? (saved as `loom.remote-type`)",
-            extract_remote_name(upstream_label)
+            remote
         ),
         REMOTE_TYPES
             .iter()
@@ -153,15 +158,6 @@ fn ask_remote_type(upstream_label: &str) -> Result<&'static str> {
         .find(|(_, name)| *name == picked)
         .map(|(value, _)| *value)
         .ok_or_else(|| anyhow!("Unknown remote type `{}`", picked))
-}
-
-/// Extract the remote name from an upstream label like "origin/main" → "origin".
-pub fn extract_remote_name(upstream_label: &str) -> String {
-    upstream_label
-        .split('/')
-        .next()
-        .unwrap_or("origin")
-        .to_string()
 }
 
 /// Extract `owner/repo` from a git remote URL for `gh --repo`, or `None` when
@@ -243,52 +239,77 @@ pub fn github_fork_parent(workdir: &Path, origin_repo: &str) -> Option<(String, 
     Some((name.to_string(), branch.to_string()))
 }
 
-/// Extract the target branch from an upstream label like "origin/main" → "main".
-pub fn extract_target_branch(upstream_label: &str) -> String {
-    let branch = repo::upstream_local_branch(upstream_label);
-    if branch.is_empty() {
-        "main".to_string()
-    } else {
-        branch
+/// `loom.push-remote`, when set.
+fn push_remote_setting(workdir: &Path) -> Option<String> {
+    let value = git::run_git_stdout(workdir, &["config", "--get", "loom.push-remote"]).ok()?;
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_string())
+}
+
+/// `loom.push-remote`, when it names an existing remote.
+fn configured_push_remote(repo: &Repository, workdir: &Path) -> Option<String> {
+    push_remote_setting(workdir).filter(|remote| repo.find_remote(remote).is_ok())
+}
+
+/// The remote standing for `remote`, the one the integration branch tracks:
+/// itself, or `loom.push-remote` when that is `.`, a local branch being on no
+/// remote at all.
+pub fn integration_remote(repo: &Repository, workdir: &Path, remote: &str) -> Result<String> {
+    if remote != "." {
+        return Ok(remote.to_string());
+    }
+    match push_remote_setting(workdir) {
+        Some(push_remote) if repo.find_remote(&push_remote).is_ok() => Ok(push_remote),
+        Some(push_remote) => bail!(
+            "`loom.push-remote` is `{}`, which names no remote\n\
+             The integration branch tracks a local branch, so it needs one: \
+             `git config loom.push-remote <remote>`",
+            push_remote
+        ),
+        None => bail!(
+            "The integration branch tracks a local branch, so there is no remote to push to\n\
+             Set one with: `git config loom.push-remote <remote>`"
+        ),
     }
 }
 
 /// The remote `loom push` sends to: `loom.push-remote` if set, else `origin`
-/// when the integration branch tracks `upstream` (GitHub fork convention),
-/// else the integration branch's own remote.
+/// when `remote`, the integration remote, is `upstream` (GitHub fork
+/// convention), else `remote`.
 pub fn resolve_push_remote(
     repo: &Repository,
     workdir: &Path,
-    upstream_label: &str,
+    remote: &str,
     remote_type: &RemoteType,
 ) -> String {
-    if let Ok(push_remote) = git::run_git_stdout(workdir, &["config", "--get", "loom.push-remote"])
-    {
-        let remote = push_remote.trim();
-        if !remote.is_empty() && repo.find_remote(remote).is_ok() {
-            return remote.to_string();
-        }
+    if let Some(push_remote) = configured_push_remote(repo, workdir) {
+        return push_remote;
     }
-
-    let remote_name = extract_remote_name(upstream_label);
     if *remote_type == RemoteType::GitHub
-        && remote_name == "upstream"
+        && remote == "upstream"
         && repo.find_remote("origin").is_ok()
     {
         "origin".to_string()
     } else {
-        remote_name
+        remote.to_string()
     }
 }
 
-/// The remote `loom push` sends feature branches to, when it differs from the
-/// remote the integration branch tracks — i.e. a fork workflow.
+/// The remote `loom push` sends feature branches to, when it differs from
+/// `remote`, the one the integration branch tracks — i.e. a fork workflow, or
+/// a local upstream with `loom.push-remote`.
 ///
 /// Returns `None` for the common single-remote setup, where both are the same.
-pub fn fork_push_remote(repo: &Repository, workdir: &Path, upstream_label: &str) -> Option<String> {
-    let remote_type = detect_remote_type(repo, workdir, upstream_label);
-    let push_remote = resolve_push_remote(repo, workdir, upstream_label, &remote_type);
-    (push_remote != extract_remote_name(upstream_label)).then_some(push_remote)
+pub fn fork_push_remote(
+    repo: &Repository,
+    workdir: &Path,
+    remote: &str,
+    target_branch: &str,
+) -> Option<String> {
+    let integration = integration_remote(repo, workdir, remote).ok()?;
+    let remote_type = detect_remote_type(repo, workdir, &integration, target_branch);
+    let push_remote = resolve_push_remote(repo, workdir, &integration, &remote_type);
+    (push_remote != remote).then_some(push_remote)
 }
 
 /// The `gh` CLI in `workdir`, acting as the account that owns the head

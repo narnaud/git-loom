@@ -895,6 +895,8 @@ impl Snapshot {
             branch_name: String::new(),
             upstream: repo::UpstreamInfo {
                 label: String::new(),
+                remote: String::new(),
+                branch: String::new(),
                 tip_oid: git2::Oid::ZERO_SHA1,
                 merge_base_oid: git2::Oid::ZERO_SHA1,
                 base_short_id: String::new(),

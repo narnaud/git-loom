@@ -386,6 +386,8 @@ fn stack_info(
         branch_name: "integration".to_string(),
         upstream: UpstreamInfo {
             label: "origin/main".to_string(),
+            remote: "origin".to_string(),
+            branch: "main".to_string(),
             tip_oid: oid(0xAA),
             merge_base_oid: oid(0xAA),
             base_short_id: "aaa0000".to_string(),

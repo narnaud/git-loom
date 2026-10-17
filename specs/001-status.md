@@ -63,7 +63,10 @@ With more than five untracked files on a TTY, render a terminal-width multi-colu
 A feature branch is any local branch whose tip is in `upstream..HEAD` (including HEAD) or equals the base. Exclude:
 
 - the current integration branch;
-- branches tracking the same upstream remote as the integration branch.
+- branches tracking the same upstream remote as the integration branch;
+- the branch named after the upstream's branch (`branch.<name>.merge`: `main`
+  for `origin/main`, or a local upstream `main` itself) when it sits at the
+  base.
 
 Each section has a bracketed header (`│╭─ [name]`), owned commits (`│●`), and `├╯`. A branch at the base is an empty header/close section. Empty sections sit below the loose commits and above the branches that own commits. If several branches share a tip, render multiple headers over one commit set: alphabetically last on top with `│╭─`, then `│├─`.
 
