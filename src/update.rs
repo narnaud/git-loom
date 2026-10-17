@@ -4,6 +4,7 @@ use anyhow::{Context, Result, bail};
 use git2::BranchType;
 use serde::{Deserialize, Serialize};
 
+use crate::core::remote;
 use crate::core::repo;
 
 use crate::core::agent_mode;
@@ -226,7 +227,7 @@ pub fn run(skip_confirm: bool) -> Result<()> {
 /// `fetch.pruneTags = true` would delete every tag missing from the fork, and
 /// the next update's `--tags` fetch would re-add them all.
 fn fetch_push_remote(repo: &git2::Repository, workdir: &Path, upstream_name: &str) {
-    let Some(remote) = crate::push::fork_push_remote(repo, workdir, upstream_name) else {
+    let Some(remote) = remote::fork_push_remote(repo, workdir, upstream_name) else {
         return;
     };
 

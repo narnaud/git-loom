@@ -7,6 +7,7 @@ pub mod hunk_select;
 pub mod hunks;
 pub mod msg;
 pub mod push_json;
+pub mod remote;
 pub mod repo;
 pub mod shortid;
 pub mod staging;

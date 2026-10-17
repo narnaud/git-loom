@@ -399,7 +399,7 @@ fn add_upstream_is_seen_by_the_open_repository() {
     super::add_upstream(&test_repo.workdir(), &fork(&parent.display().to_string())).unwrap();
 
     assert_eq!(
-        super::detect_upstream(&test_repo.repo, None).unwrap(),
+        crate::core::repo::detect_upstream(&test_repo.repo, None).unwrap(),
         "upstream/main"
     );
     let config = |key| {

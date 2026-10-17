@@ -6,7 +6,7 @@ integration branch and rewrites/manages them without leaving that branch.
 ## Code Map
 
 - `src/main.rs`: clap CLI/dispatch; command modules are `src/<command>.rs`.
-- `src/core/`: graph, short IDs, repository, transaction, agent mode, TUI
+- `src/core/`: graph, short IDs, repository, remotes, transaction, agent mode, TUI
   mode (`ui.rs`: `msg` prompts/messages redirected to `loom tui`), weave.
 - `src/git/`: low-level Git operations.
 - `src/tui/`: status tree, shell, hunk selector, widgets, theme.
