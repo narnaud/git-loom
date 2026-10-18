@@ -904,7 +904,10 @@ pub(crate) struct WorktreeSnapshot {
 }
 
 impl WorktreeSnapshot {
+    /// Refuses a file removed from the index but kept on disk: the rollback's
+    /// reset would overwrite it, and neither patch holds its content.
     pub fn take(workdir: &Path) -> Result<Self> {
+        git::refuse_staged_deletions_on_disk(workdir)?;
         Ok(Self {
             worktree: git::diff_head(workdir)?,
             staged: git::diff_cached(workdir)?,

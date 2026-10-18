@@ -102,6 +102,14 @@ the index back on both paths (Spec 014). The non-resumable
 abort that left the rebase on disk, and an index left unmerged by a replay git
 could not finish are the exceptions — that index was never loom's to touch.
 
+A staged deletion whose path is still on disk (`git rm --cached`) is refused
+in pre-flight: git's autostash refuses to reset over the file and leaves
+`rebase-merge/autostash` behind, a hard reset overwrites it, and no saved
+patch holds its content. A command that unstages before its rebase (`commit`,
+`split`, fold's file and `-p` paths) never meets it: unstaged, the file is a
+tracked modification. `merge` refuses it the same way (Spec 005), and so does
+the snapshot a rollback hard-resets to.
+
 The replay and the autostash also rewrite files whose bytes end up unchanged;
 their mtimes are recorded before the rebase and put back after it (Spec 023).
 

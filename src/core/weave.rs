@@ -1761,6 +1761,9 @@ fn run_rebase_with_empty(
         // against moving a branch checked out in another worktree, so do it
         // here, before anything is rewritten.
         git::ensure_not_checked_out_elsewhere(workdir, &rewritten_branches(workdir, todo_content))?;
+        // The autostash would refuse to reset over it and leave the rebase
+        // half-made (Spec 004).
+        git::refuse_staged_deletions_on_disk(workdir)?;
 
         // Resolve the git dir up front: both exits below need it, and failing
         // afterwards would strand a resumable command's state file with its

@@ -147,3 +147,41 @@ fn a_pager_quit_is_not_a_failure() {
     assert!(!pager_quit_early(status("exit 1")));
     assert!(!pager_quit_early(status("kill -TERM $$")));
 }
+
+/// Only a staged deletion whose path is still on disk is refused: the one a
+/// reset overwrites. A submodule's checkout is a directory on disk too, but
+/// nothing sets its gitlink aside.
+#[test]
+fn only_a_staged_deletion_still_on_disk_is_refused() {
+    use crate::core::test_helpers::TestRepo;
+
+    let t = TestRepo::new();
+    t.commit("gone", "gone.txt");
+    t.commit("kept", "kept.txt");
+    t.add_submodule("sub");
+    t.commit_staged("Add sub");
+    let workdir = t.workdir();
+    super::run_git(&workdir, &["rm", "-q", "gone.txt"]).unwrap();
+    super::remove_from_index(&workdir, "sub").unwrap();
+    assert!(
+        super::staged_deletions_on_disk(&workdir)
+            .unwrap()
+            .is_empty()
+    );
+    super::refuse_staged_deletions_on_disk(&workdir).unwrap();
+
+    super::run_git(&workdir, &["rm", "-q", "--cached", "kept.txt"]).unwrap();
+
+    assert_eq!(
+        super::staged_deletions_on_disk(&workdir).unwrap(),
+        ["kept.txt"]
+    );
+    let err = super::refuse_staged_deletions_on_disk(&workdir)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("`kept.txt`"), "{err}");
+    assert!(
+        !err.contains("`gone.txt`") && !err.contains("`sub`"),
+        "{err}"
+    );
+}

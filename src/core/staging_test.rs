@@ -464,3 +464,21 @@ fn rollback_to_snapshot_parks_only_the_half_that_fails_to_apply() {
     );
     assert!(!loom_dir.join("unrestored-staged-1.patch").exists());
 }
+
+/// The rollback's reset would overwrite the file, and neither patch holds its
+/// content: the snapshot refuses it, before the operation touches anything.
+#[test]
+fn a_snapshot_refuses_a_file_removed_from_the_index_but_kept_on_disk() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("A commit", "foo.txt");
+    let workdir = test_repo.workdir();
+    crate::git::run_git(&workdir, &["rm", "-q", "--cached", "foo.txt"]).unwrap();
+    test_repo.write_file("foo.txt", "my local edits\n");
+
+    let err = super::WorktreeSnapshot::take(&workdir)
+        .err()
+        .expect("refused")
+        .to_string();
+
+    assert!(err.contains("`foo.txt`"), "{err}");
+}

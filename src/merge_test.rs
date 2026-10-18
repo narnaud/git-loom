@@ -1289,3 +1289,33 @@ fn merge_accepts_branch_already_upstream_in_other_worktree() {
     let result = test_repo.in_dir(|| super::run(Some("feature-a".to_string()), false));
     assert!(result.is_ok(), "merge failed: {:?}", result.err());
 }
+
+/// The set-aside reset would overwrite the file and the replay then delete it,
+/// with its content in neither patch: refused up front, like a staged
+/// submodule pointer, before anything is touched.
+#[test]
+fn merge_refuses_a_file_removed_from_the_index_but_kept_on_disk() {
+    let test_repo = TestRepo::new_with_remote();
+    let base = test_repo.find_remote_branch_target("origin/main");
+    test_repo.create_branch_at("feature-a", &base.to_string());
+    test_repo.switch_branch("feature-a");
+    test_repo.commit("A1", "a1.txt");
+    test_repo.switch_branch("integration");
+    test_repo.commit("Add foo", "foo.txt");
+    crate::git::run_git(&test_repo.workdir(), &["rm", "-q", "--cached", "foo.txt"]).unwrap();
+    test_repo.write_file("foo.txt", "my local edits\n");
+    let status = test_repo.status_porcelain();
+    assert_eq!(status, "D  foo.txt\n?? foo.txt\n");
+    let head = test_repo.head_oid();
+
+    let err = test_repo
+        .in_dir(|| super::run(Some("feature-a".to_string()), false))
+        .unwrap_err()
+        .to_string();
+
+    assert!(err.contains("`foo.txt`"), "{err}");
+    assert_eq!(test_repo.head_oid(), head);
+    assert!(!state_exists(&test_repo));
+    assert_eq!(test_repo.status_porcelain(), status);
+    assert_eq!(test_repo.read_file("foo.txt"), "my local edits\n");
+}
