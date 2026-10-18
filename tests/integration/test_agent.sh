@@ -30,11 +30,6 @@ assert_exit_ok "$CODE" "agent_install_refresh"
 assert_contains "$OUT" "Updated Claude skill" "agent_install_updated"
 grep -q "name: git-loom" "$SKILL_FILE" || fail "agent_install_refreshed_content"
 
-echo "stale" > "$SKILL_FILE"
-gl_capture agent init --dir "$SKILLS_BASE"
-assert_exit_ok "$CODE" "agent_init_alias_ok"
-assert_contains "$OUT" "Updated Claude skill" "agent_init_alias_updated"
-
 describe "agent install: works while an operation is paused"
 mkdir -p "$WORK/.git/loom"
 echo '{"command":"update","rollback":{},"context":null}' > "$WORK/.git/loom/state.json"

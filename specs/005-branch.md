@@ -12,7 +12,7 @@
 git-loom branch [name] [--on <branch|commit>]
 ```
 
-If `[name]` is absent, prompt interactively. `--on` accepts a commit hash/revision, commit or branch short ID, or branch name; without it, use the upstream merge-base. `-t, --target` are hidden aliases (pre-#371 spelling). A second positional (Git's start point) is refused with a hint naming `--on <it>`, or, when `--on` is also given, a hint to drop it.
+If `[name]` is absent, prompt interactively. `--on` accepts a commit hash/revision, commit or branch short ID, or branch name; without it, use the upstream merge-base. A second positional (Git's start point) is refused with a hint naming `--on <it>`, or, when `--on` is also given, a hint to drop it.
 
 Creation MUST trim and reject empty/whitespace names, validate Git branch-name rules (including no spaces, control characters, or `..`), and reject existing local names before calling `git branch`.
 

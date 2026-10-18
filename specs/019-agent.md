@@ -48,9 +48,8 @@ git-loom agent install [<agent>] [--project]
   `skills/git-loom/SKILL.md` suffix is still appended. Used by tests.
   Conflicts with `--project`.
 
-`init`, its former name, is a hidden alias. It needs no repository (unless
-`--project` is given), works while a loom operation is paused, and is never
-trace-logged.
+`agent install` needs no repository (unless `--project` is given), works while
+a loom operation is paused, and is never trace-logged.
 
 ### Agent mode
 

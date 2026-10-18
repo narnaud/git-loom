@@ -223,12 +223,11 @@ enum Command {
         #[arg(short = 'b', long = "branch")]
         branch: Option<String>,
         /// Make a loose commit on the integration branch, skipping the branch prompt
-        // `-i`/`--integration` are the pre-#373 spelling, kept hidden.
+        // `-i` is the pre-#373 spelling, kept hidden and undocumented on purpose.
         #[arg(
             short = 'l',
             long = "loose",
             short_alias = 'i',
-            alias = "integration",
             conflicts_with = "branch"
         )]
         loose: bool,
@@ -362,13 +361,7 @@ enum Command {
         /// branch: the new branch ends at it and takes it and the commits below
         /// it, and that branch stacks on the new one. A loose commit, or a branch
         /// whose tip is one: the loose commits up to it become the new branch.
-        // `-t`/`--target` are the pre-#371 spelling, kept hidden.
-        #[arg(
-            long = "on",
-            short_alias = 't',
-            alias = "target",
-            value_name = "BRANCH|COMMIT"
-        )]
+        #[arg(long = "on", value_name = "BRANCH|COMMIT")]
         on: Option<String>,
     },
 
@@ -479,8 +472,6 @@ struct AgentCmd {
 #[derive(Subcommand)]
 enum AgentAction {
     /// Install the loom skill for an AI agent
-    // `init` is its former name, hidden so old scripts keep working.
-    #[command(alias = "init")]
     Install {
         /// AI agent to install the skill for
         // Named `kind`, not `agent`: the global `--agent` flag already owns

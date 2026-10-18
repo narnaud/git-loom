@@ -162,28 +162,11 @@ fn commit_rejects_loose_with_branch() {
     assert!(parse(&["commit", "-i", "-b", "feature-a", "-m", "m"]).is_err());
 }
 
-/// `-t`/`--target` predate `--on` (#371) and stay as hidden aliases.
+/// `-i` predates `-l`/`--loose` (#373) and stays as a hidden alias.
 #[test]
-fn branch_accepts_hidden_target_alias() {
+fn commit_accepts_hidden_i_alias() {
     let parse = |args: &[&str]| Cli::try_parse_from(["git-loom"].iter().chain(args).copied());
-    for flag in ["-t", "--target", "--on"] {
-        match parse(&["branch", "b", flag, "a"]).unwrap().command {
-            Some(Command::Branch {
-                on, start_point, ..
-            }) => {
-                assert_eq!(on.as_deref(), Some("a"), "{flag}");
-                assert_eq!(start_point, None, "{flag}");
-            }
-            _ => panic!("{flag}: not a branch"),
-        }
-    }
-}
-
-/// `-i`/`--integration` predate `-l`/`--loose` (#373) and stay as hidden aliases.
-#[test]
-fn commit_accepts_hidden_integration_alias() {
-    let parse = |args: &[&str]| Cli::try_parse_from(["git-loom"].iter().chain(args).copied());
-    for flag in ["-i", "--integration", "--loose"] {
+    for flag in ["-i", "--loose"] {
         match parse(&["commit", flag, "-m", "m"]).unwrap().command {
             Some(Command::Commit { loose, .. }) => assert!(loose, "{flag}"),
             _ => panic!("{flag}: not a commit"),

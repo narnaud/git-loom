@@ -12,7 +12,7 @@ git-loom commit [-b <branch> | -l] -m <message> -p [files...] --hunks <id>... --
 | Input | Meaning |
 | --- | --- |
 | `-b, --branch <branch>` | Existing woven branch name/short ID, or new branch name. |
-| `-l, --loose` | Loose commit directly on integration; mutually exclusive with `-b`. `-i, --integration` are hidden aliases (pre-#373 spelling). |
+| `-l, --loose` | Loose commit directly on integration; mutually exclusive with `-b`. |
 | `-m, --message <message>` | Message; without it open the Git editor. |
 | `-p, --patch` | Select hunks to stage (picker defined by Spec 007), interactively or with `--hunks`. |
 | `--hunks <id>` (repeated), `--hunks-from <fingerprint>` | Supply the `-p` selection by id; the ids are the whole selection, so a staged hunk left out is kept out of the commit and stays staged (Spec 019). Requires `-p`, and each flag requires the other. |
