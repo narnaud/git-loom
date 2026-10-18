@@ -260,3 +260,30 @@ fn swap_leaves_a_conflicted_autostash_pop_alone() {
         .join("unrestored-staged-0.patch");
     assert!(parked.exists(), "the staged side is parked as well");
 }
+
+/// Git's autostash refuses to reset over a file removed from the index but
+/// kept on disk, and leaves the rebase half-made: refused before it starts,
+/// with nothing to undo.
+#[test]
+fn swap_refuses_a_file_removed_from_the_index_but_kept_on_disk() {
+    let t = TestRepo::new_with_remote();
+    t.commit("Add foo", "foo.txt");
+    let c1 = t.commit("First", "first.txt");
+    let c2 = t.commit("Second", "second.txt");
+    let head = t.head_oid();
+    crate::git::run_git(&t.workdir(), &["rm", "-q", "--cached", "foo.txt"]).unwrap();
+    t.write_file("foo.txt", "my local edits\n");
+    let before = t.status_porcelain();
+    assert_eq!(before, "D  foo.txt\n?? foo.txt\n");
+
+    let err = super::swap_two_commits(&t.repo, c1.to_string(), c2.to_string())
+        .unwrap_err()
+        .to_string();
+
+    assert!(err.contains("`foo.txt`"), "{err}");
+    assert!(!crate::git::rebase_is_in_progress(t.repo.path()));
+    assert!(!t.repo.path().join("loom/state.json").exists());
+    assert_eq!(t.head_oid(), head);
+    assert_eq!(t.status_porcelain(), before);
+    assert_eq!(t.read_file("foo.txt"), "my local edits\n");
+}

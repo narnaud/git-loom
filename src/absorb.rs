@@ -260,6 +260,8 @@ fn apply_plan(
     plan: AbsorbPlan,
     git_opts: &[&str],
 ) -> Result<()> {
+    // The rollback's reset would overwrite it, with its content in no patch.
+    git::refuse_staged_deletions_on_disk(workdir)?;
     let saved_head = repo::head_oid(repo)?.to_string();
     let saved_refs = repo::snapshot_branch_refs(repo)?;
 

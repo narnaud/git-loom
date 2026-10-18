@@ -56,6 +56,8 @@ pub fn rebase_outcome(git_dir: &Path, result: Result<()>) -> Result<RebaseOutcom
 /// does: by default, a branch forked below a merge-base that moved (upstream
 /// took one of its siblings) keeps its old base.
 pub fn rebase(git_dir: &Path, workdir: &Path, upstream: &str) -> Result<RebaseOutcome> {
+    // Tagged: the caller's undo must know this refusal rewrote nothing.
+    super::before_rebase_starts(super::refuse_staged_deletions_on_disk(workdir))?;
     super::snapshot_mtimes(workdir, Some(upstream));
     rebase_outcome(
         git_dir,

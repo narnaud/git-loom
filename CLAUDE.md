@@ -110,6 +110,11 @@ caller, and on that arm goes before `transaction::delete` so a failed delete
 leaves the index as the user had it — with one exception (Spec 014).
 `weave::run_rebase_or_abort` does it for its own callers (Specs 004 and 014).
 
+A staged deletion whose file is still on disk (`git rm --cached`) is refused
+before any reset or autostash (`git::refuse_staged_deletions_on_disk`): the
+autostash refuses to reset over it, a hard reset overwrites it, and no saved
+patch holds its content (Spec 004).
+
 A `weave::run_rebase_protecting` caller that can pause must also record its
 protected commits in `LoomState.protect`, and the ones it lands on (a fold or
 absorb target) in `LoomState.targets`, as full object names; `loom continue`

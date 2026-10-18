@@ -213,6 +213,24 @@ assert_no_state_file               "merge_abort_state_removed"
 assert_eq "$old_head" "$(head_hash)" "merge_abort_head_restored"
 assert_head_parent_count 1         "merge_abort_not_merged"
 
+describe "merge: a file removed from the index but kept on disk is refused, nothing touched"
+setup_repo_with_remote
+commit_file "Add foo" "foo.txt"
+create_feature_branch "g-kept-on-disk"
+switch_to g-kept-on-disk
+commit_file "Feature work" "fw.txt"
+switch_to integration
+git -C "$WORK" rm -q --cached foo.txt
+echo "my local edits" > "$WORK/foo.txt"
+old_head=$(head_hash)
+gl_capture merge g-kept-on-disk
+assert_exit_fail "$CODE"                "merge_kept_refused"
+assert_contains "$OUT" "foo.txt"        "merge_kept_names_file"
+assert_eq "$old_head" "$(head_hash)"    "merge_kept_head"
+assert_no_state_file                    "merge_kept_no_state"
+assert_file_content "foo.txt" "my local edits" "merge_kept_content"
+assert_eq "$(git -C "$WORK" status --porcelain)" "$(printf 'D  foo.txt\n?? foo.txt')" "merge_kept_status"
+
 # ── UNMERGE ───────────────────────────────────────────────────────────────────
 
 describe "unmerge removes commits from integration, preserves branch ref"

@@ -263,4 +263,22 @@ assert_contains "$OUT" "Aborted"  "abort_msg"
 assert_no_state_file   "abort_state_removed"
 assert_eq "$old_head" "$(head_hash)" "abort_head_restored"
 
+describe "swap: a file removed from the index but kept on disk is refused, nothing touched"
+setup_repo_with_remote
+commit_file "Add foo" "foo.txt"
+commit_file "First" "first.txt"
+hash_first=$(head_hash)
+commit_file "Second" "second.txt"
+hash_second=$(head_hash)
+git -C "$WORK" rm -q --cached foo.txt
+echo "my local edits" > "$WORK/foo.txt"
+gl_capture swap "$hash_first" "$hash_second"
+assert_exit_fail "$CODE"                "swap_kept_refused"
+assert_contains "$OUT" "foo.txt"        "swap_kept_names_file"
+assert_no_rebase_in_progress            "swap_kept_no_rebase"
+assert_no_state_file                    "swap_kept_no_state"
+assert_eq "$hash_second" "$(head_hash)" "swap_kept_head"
+assert_file_content "foo.txt" "my local edits" "swap_kept_content"
+assert_eq "$(git -C "$WORK" status --porcelain)" "$(printf 'D  foo.txt\n?? foo.txt')" "swap_kept_status"
+
 pass

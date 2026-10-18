@@ -281,8 +281,11 @@ fn keep_own_binaries(workdir: &Path) {
 
 /// Refuse up front what the replay over the merge could not take back as a
 /// conflict: a change of the user's to a file `branch` deletes, or a deletion
-/// of a file it changes (`git apply --3way` refuses either outright).
+/// of a file it changes (`git apply --3way` refuses either outright) — and
+/// what the set-aside itself would destroy: a file removed from the index
+/// but kept on disk, which the reset overwrites with neither patch holding it.
 fn refuse_unreplayable(workdir: &Path, branch: &str) -> Result<()> {
+    git::refuse_staged_deletions_on_disk(workdir)?;
     let names = |args: &[&str]| -> Result<HashSet<String>> {
         Ok(git::run_git_stdout(workdir, args)?
             .lines()

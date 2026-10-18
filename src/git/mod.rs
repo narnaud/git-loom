@@ -341,6 +341,69 @@ pub fn unstage_files(workdir: &Path, files: &[&str]) -> Result<()> {
     run_git(workdir, &args)
 }
 
+/// Staged deletions whose path is still on disk (`git rm --cached`), submodules
+/// left out. No patch loom saves holds that file's content: the staged one
+/// records the deletion and `git diff HEAD` lists the path as deleted. A hard
+/// reset overwrites the file, and the autostash's internal reset refuses it
+/// and leaves `rebase-merge/autostash` behind (Spec 004).
+pub fn staged_deletions_on_disk(workdir: &Path) -> Result<Vec<String>> {
+    // `--raw` for the mode: a submodule's checkout is a directory on disk, and
+    // nothing here sets its gitlink aside. `--no-renames` so the deleted half
+    // of a rename is listed as the deletion it is in the index.
+    let out = run_git_stdout(
+        workdir,
+        &[
+            "diff",
+            "--cached",
+            "--raw",
+            "-z",
+            "--no-renames",
+            "--diff-filter=D",
+        ],
+    )?;
+    let mut paths = Vec::new();
+    // Records are `:<srcmode> <dstmode> <srcsha> <dstsha> D` then the path.
+    let mut fields = out.split('\0').filter(|f| !f.is_empty());
+    while let Some(field) = fields.next() {
+        let Some(meta) = field.strip_prefix(':') else {
+            continue;
+        };
+        let Some(path) = fields.next() else { break };
+        if meta.starts_with("160000 ") {
+            continue;
+        }
+        // `symlink_metadata`: a broken symlink is on disk too.
+        if workdir.join(path).symlink_metadata().is_ok() {
+            paths.push(path.to_string());
+        }
+    }
+    Ok(paths)
+}
+
+/// Refuse while [`staged_deletions_on_disk`] finds any, naming them. Like a
+/// staged submodule pointer, it is a change nothing could bring back, so every
+/// caller that resets or stashes refuses it before touching anything.
+pub fn refuse_staged_deletions_on_disk(workdir: &Path) -> Result<()> {
+    let paths = staged_deletions_on_disk(workdir)?;
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let list = paths
+        .iter()
+        .map(|p| format!("`{p}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let (verb, it) = if paths.len() == 1 {
+        ("is", "it")
+    } else {
+        ("are", "them")
+    };
+    bail!(
+        "{list} {verb} removed from the index but still on disk, which a reset would overwrite\n\
+         Commit the removal, or stash {it} with `git stash -u`, then retry"
+    )
+}
+
 /// Restore tracked files in the working tree to their HEAD state
 /// (`git checkout HEAD -- <files>`).
 pub fn restore_files_to_head(workdir: &Path, files: &[&str]) -> Result<()> {

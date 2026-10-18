@@ -1011,6 +1011,9 @@ fn run_patch_fold_commit_to_commit(
     if !repo.graph_descendant_of(source_oid, target_oid)? {
         bail!("Source commit must be newer than target commit");
     }
+    // Before the picker: the snapshot below refuses it anyway, but not
+    // before the hunks were picked for nothing.
+    git::refuse_staged_deletions_on_disk(workdir)?;
 
     let selections = staging::run_commit_hunk_picker(
         workdir,
@@ -1252,6 +1255,8 @@ fn run_patch_fold_commit_to_unstaged(
     git_opts: &[&str],
     theme: &graph::Theme,
 ) -> Result<()> {
+    // Before the picker, as in `run_patch_fold_commit_to_commit`.
+    git::refuse_staged_deletions_on_disk(workdir)?;
     let selections = staging::run_commit_hunk_picker(
         workdir,
         commit_hash,

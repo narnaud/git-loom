@@ -26,7 +26,7 @@ git loom merge [<branch>] [--all]
 
 Merges the branch so it gets its own section in `git loom status`. Merging a remote branch first creates a local branch tracking it.
 
-A branch can be woven into only one integration branch at a time. `merge` refuses a branch already woven here or into another [worktree](worktree.md)'s integration branch, as well as a branch with nothing to merge. It also refuses while the working tree has unresolved conflicts or a staged submodule change, and when the branch deletes a file you changed or changes one you deleted, since your change could not be put back over it.
+A branch can be woven into only one integration branch at a time. `merge` refuses a branch already woven here or into another [worktree](worktree.md)'s integration branch, as well as a branch with nothing to merge. It also refuses while the working tree has unresolved conflicts, a staged submodule change, or a file removed from the index with `git rm --cached` but kept on disk, and when the branch deletes a file you changed or changes one you deleted, since your change could not be put back over it.
 
 The merge is one transaction: your staged and unstaged changes are set aside, the branch is merged, then your changes are put back on top — staged ones staged again where possible.
 
