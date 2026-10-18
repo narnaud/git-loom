@@ -400,7 +400,7 @@ pub fn refuse_staged_deletions_on_disk(workdir: &Path) -> Result<()> {
     };
     bail!(
         "{list} {verb} removed from the index but still on disk, which a reset would overwrite\n\
-         Commit the removal, or stash {it} with `git stash -u`, then retry"
+         Commit the removal, or move {it} out of the repository, then retry and move {it} back after"
     )
 }
 
