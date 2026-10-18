@@ -26,7 +26,7 @@ Download the archive for your platform from the [Releases](https://github.com/na
 
 ## From Source
 
-Requires Rust 1.90 or later.
+Requires Rust 1.88 or later.
 
 ```bash
 git clone https://github.com/narnaud/git-loom.git

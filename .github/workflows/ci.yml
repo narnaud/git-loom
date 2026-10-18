@@ -46,6 +46,18 @@ jobs:
       - if: runner.os == 'Linux'
         run: bash test-integration.sh
 
+  msrv:
+    name: Check (rust-version)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Cargo.toml's `rust-version`: a dependency update needing a newer
+      # compiler fails here instead of in a user's `cargo install`.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.88"
+      - run: cargo check --locked --all-targets
+
   oldest-git:
     name: Test (oldest git)
     runs-on: ubuntu-latest

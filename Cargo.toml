@@ -2,7 +2,7 @@
 name = "git-loom"
 version = "0.27.0"
 edition = "2024"
-rust-version = "1.90"
+rust-version = "1.88"
 description = "A Git CLI tool that weaves together multiple feature branches into integration branches"
 license = "MIT"
 repository = "https://github.com/narnaud/git-loom"
