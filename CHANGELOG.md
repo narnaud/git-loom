@@ -10,75 +10,75 @@
 
 ### Features ✨
 
-* **branch:** rename -t/--target to --on ([350d261](https://github.com/narnaud/git-loom/commit/350d261630e271125b777bf3d522915f64fdae08)), closes [#371](https://github.com/narnaud/git-loom/issues/371)
-* **cli:** drop the pre-1.0 aliases --target, --integration and agent init ([45f8ae9](https://github.com/narnaud/git-loom/commit/45f8ae9291441ebd0907fce12e0e6f0565084631))
-* **config:** spell loom.remoteType and loom.pushRemote in camelCase ([48e3f1c](https://github.com/narnaud/git-loom/commit/48e3f1ce2fb9419d9b37e64cb6bae585fe2a6681))
-* **init:** offer a GitHub fork's parent as upstream ([b4b8a91](https://github.com/narnaud/git-loom/commit/b4b8a914b6d3a6b88919c7736ceebf93f10749ef))
-* **merge:** list remote branches under their own heading in the TUI ([9cc2591](https://github.com/narnaud/git-loom/commit/9cc2591ae97347d74afc65d7338dd99df0294702))
-* **merge:** merge over uncommitted changes ([787acb5](https://github.com/narnaud/git-loom/commit/787acb5191d03a83cd795e6a1ada065fe02d1505)), closes [#421](https://github.com/narnaud/git-loom/issues/421)
-* **push:** detect Gerrit by its SSH port ([39df75e](https://github.com/narnaud/git-loom/commit/39df75ee241fd4ab38096042cbf67828f985a1dd))
-* **tui:** merge and unmerge branches with M and U ([eea7708](https://github.com/narnaud/git-loom/commit/eea770829ec1551416d95269d66c02bce8a185fe)), closes [#397](https://github.com/narnaud/git-loom/issues/397)
-* **tui:** tint the rows a pending fold or commit takes ([736fdfe](https://github.com/narnaud/git-loom/commit/736fdfe596e2ae4255ee4e244d887673e42ab486))
-* **tui:** title whole-file entries `Whole file` in the hunk selector ([96e45d1](https://github.com/narnaud/git-loom/commit/96e45d149b6f86499ebc0a53abf5536ac2450316))
+* **branch:** rename -t/--target to --on ([350d261](https://github.com/narnaud/git-loom/commit/350d261630e271125b777bf3d522915f64fdae08)) by @narnaud, closes [#371](https://github.com/narnaud/git-loom/issues/371)
+* **cli:** drop the pre-1.0 aliases --target, --integration and agent init ([45f8ae9](https://github.com/narnaud/git-loom/commit/45f8ae9291441ebd0907fce12e0e6f0565084631)) by @narnaud
+* **config:** spell loom.remoteType and loom.pushRemote in camelCase ([48e3f1c](https://github.com/narnaud/git-loom/commit/48e3f1ce2fb9419d9b37e64cb6bae585fe2a6681)) by @narnaud
+* **init:** offer a GitHub fork's parent as upstream ([b4b8a91](https://github.com/narnaud/git-loom/commit/b4b8a914b6d3a6b88919c7736ceebf93f10749ef)) by @narnaud
+* **merge:** list remote branches under their own heading in the TUI ([9cc2591](https://github.com/narnaud/git-loom/commit/9cc2591ae97347d74afc65d7338dd99df0294702)) by @narnaud
+* **merge:** merge over uncommitted changes ([787acb5](https://github.com/narnaud/git-loom/commit/787acb5191d03a83cd795e6a1ada065fe02d1505)) by @narnaud, closes [#421](https://github.com/narnaud/git-loom/issues/421)
+* **push:** detect Gerrit by its SSH port ([39df75e](https://github.com/narnaud/git-loom/commit/39df75ee241fd4ab38096042cbf67828f985a1dd)) by @narnaud
+* **tui:** merge and unmerge branches with M and U ([eea7708](https://github.com/narnaud/git-loom/commit/eea770829ec1551416d95269d66c02bce8a185fe)) by @narnaud, closes [#397](https://github.com/narnaud/git-loom/issues/397)
+* **tui:** tint the rows a pending fold or commit takes ([736fdfe](https://github.com/narnaud/git-loom/commit/736fdfe596e2ae4255ee4e244d887673e42ab486)) by @narnaud
+* **tui:** title whole-file entries `Whole file` in the hunk selector ([96e45d1](https://github.com/narnaud/git-loom/commit/96e45d149b6f86499ebc0a53abf5536ac2450316)) by @narnaud
 
 
 ### Bug Fixes 🐞
 
-* **commit:** create a new -b branch only once the commit exists ([946b707](https://github.com/narnaud/git-loom/commit/946b70710925a2be67c1770bff69ff7a8f5230f7)), closes [#430](https://github.com/narnaud/git-loom/issues/430)
-* **continue:** keep an emptied target, hand back a skipped fixup's change ([e54d781](https://github.com/narnaud/git-loom/commit/e54d7812b6816585d44a33da661684330ebe8cf8))
-* **git:** keep saved patches byte for byte ([df33563](https://github.com/narnaud/git-loom/commit/df33563e97f2ee4f9152b6419c11cdc90bba3a16))
-* **hunks:** keep the \r of CRLF lines ([a725ae7](https://github.com/narnaud/git-loom/commit/a725ae77a299e14886bf05269356269f77cf300d))
-* **merge,unmerge:** refuse what they would get wrong ([f692a4d](https://github.com/narnaud/git-loom/commit/f692a4df06409037527c88a2c3093818e247c913))
-* **push:** show Gerrit's links and set the upstream on a wip/ push ([a4326be](https://github.com/narnaud/git-loom/commit/a4326be7a45a18b76e3c2ac1e71681956a6136ea)), closes [#443](https://github.com/narnaud/git-loom/issues/443)
-* read the upstream's remote and branch from the branch config ([6d957f4](https://github.com/narnaud/git-loom/commit/6d957f47767abe05ef6d99c3b5b9c139ad3b5409)), closes [#442](https://github.com/narnaud/git-loom/issues/442) [#456](https://github.com/narnaud/git-loom/issues/456)
-* **reword:** save the state before the editor opens inside the rebase ([fd7ae4a](https://github.com/narnaud/git-loom/commit/fd7ae4aade586ae64210cabf445e8b5a75308af2))
-* **reword:** take the linear todo only outside an integration branch ([ee39d43](https://github.com/narnaud/git-loom/commit/ee39d43ed2b876227f6fb9a4ae9606cf4a1f5bfc)), closes [#441](https://github.com/narnaud/git-loom/issues/441)
-* **tui:** keep the menu inside a terminal narrower than 20 columns ([2b59ef7](https://github.com/narnaud/git-loom/commit/2b59ef743812d56157dd08427c2d5d992b747e7e)), closes [#446](https://github.com/narnaud/git-loom/issues/446)
-* **tui:** refuse every non-navigation key while placing ([4bb666f](https://github.com/narnaud/git-loom/commit/4bb666f5ff0b9abbee16c2cd5683f68719a628c3)), closes [#388](https://github.com/narnaud/git-loom/issues/388)
-* **update:** keep branches whose upstream a fetch did not prune ([b58e2e6](https://github.com/narnaud/git-loom/commit/b58e2e6f329960f47311e4ced0ad3064190351e9)), closes [#383](https://github.com/narnaud/git-loom/issues/383)
-* **update:** never remove the upstream's local branch as merged ([dd25936](https://github.com/narnaud/git-loom/commit/dd259363d9002f8c26f3b330b2241957ac785f81))
-* **weave:** refuse an octopus merge on the integration line ([c4c22fc](https://github.com/narnaud/git-loom/commit/c4c22fcfce26dcb3f433c503b52e1e81c67c1141)), closes [#450](https://github.com/narnaud/git-loom/issues/450)
+* **commit:** create a new -b branch only once the commit exists ([946b707](https://github.com/narnaud/git-loom/commit/946b70710925a2be67c1770bff69ff7a8f5230f7)) by @narnaud, closes [#430](https://github.com/narnaud/git-loom/issues/430)
+* **continue:** keep an emptied target, hand back a skipped fixup's change ([e54d781](https://github.com/narnaud/git-loom/commit/e54d7812b6816585d44a33da661684330ebe8cf8)) by @narnaud
+* **git:** keep saved patches byte for byte ([df33563](https://github.com/narnaud/git-loom/commit/df33563e97f2ee4f9152b6419c11cdc90bba3a16)) by @narnaud
+* **hunks:** keep the \r of CRLF lines ([a725ae7](https://github.com/narnaud/git-loom/commit/a725ae77a299e14886bf05269356269f77cf300d)) by @narnaud
+* **merge,unmerge:** refuse what they would get wrong ([f692a4d](https://github.com/narnaud/git-loom/commit/f692a4df06409037527c88a2c3093818e247c913)) by @narnaud
+* **push:** show Gerrit's links and set the upstream on a wip/ push ([a4326be](https://github.com/narnaud/git-loom/commit/a4326be7a45a18b76e3c2ac1e71681956a6136ea)) by @narnaud, closes [#443](https://github.com/narnaud/git-loom/issues/443)
+* read the upstream's remote and branch from the branch config ([6d957f4](https://github.com/narnaud/git-loom/commit/6d957f47767abe05ef6d99c3b5b9c139ad3b5409)) by @narnaud, closes [#442](https://github.com/narnaud/git-loom/issues/442) [#456](https://github.com/narnaud/git-loom/issues/456)
+* **reword:** save the state before the editor opens inside the rebase ([fd7ae4a](https://github.com/narnaud/git-loom/commit/fd7ae4aade586ae64210cabf445e8b5a75308af2)) by @narnaud
+* **reword:** take the linear todo only outside an integration branch ([ee39d43](https://github.com/narnaud/git-loom/commit/ee39d43ed2b876227f6fb9a4ae9606cf4a1f5bfc)) by @narnaud, closes [#441](https://github.com/narnaud/git-loom/issues/441)
+* **tui:** keep the menu inside a terminal narrower than 20 columns ([2b59ef7](https://github.com/narnaud/git-loom/commit/2b59ef743812d56157dd08427c2d5d992b747e7e)) by @narnaud, closes [#446](https://github.com/narnaud/git-loom/issues/446)
+* **tui:** refuse every non-navigation key while placing ([4bb666f](https://github.com/narnaud/git-loom/commit/4bb666f5ff0b9abbee16c2cd5683f68719a628c3)) by @narnaud, closes [#388](https://github.com/narnaud/git-loom/issues/388)
+* **update:** keep branches whose upstream a fetch did not prune ([b58e2e6](https://github.com/narnaud/git-loom/commit/b58e2e6f329960f47311e4ced0ad3064190351e9)) by @narnaud, closes [#383](https://github.com/narnaud/git-loom/issues/383)
+* **update:** never remove the upstream's local branch as merged ([dd25936](https://github.com/narnaud/git-loom/commit/dd259363d9002f8c26f3b330b2241957ac785f81)) by @narnaud
+* **weave:** refuse an octopus merge on the integration line ([c4c22fc](https://github.com/narnaud/git-loom/commit/c4c22fcfce26dcb3f433c503b52e1e81c67c1141)) by @narnaud, closes [#450](https://github.com/narnaud/git-loom/issues/450)
 
 
 ### Documentation
 
-* add demo videos and the scripts that render them ([ee205b5](https://github.com/narnaud/git-loom/commit/ee205b5aac43bf61b5d77be8714be767354141b3))
-* **continue:** a resolution that empties a commit drops it ([b094b4a](https://github.com/narnaud/git-loom/commit/b094b4a5d5aa2c30a6ee6f975607aca1e579bb85))
-* **continue:** say what every command reports after an emptied resolution ([a540123](https://github.com/narnaud/git-loom/commit/a5401234905600bdae51b36c69a507e547ca5b24))
-* **demo:** open the CLI video on init, pin status on the left ([6d6f96c](https://github.com/narnaud/git-loom/commit/6d6f96cbb04947cc3860581d6d4071522492f195))
-* **demo:** show the TUI's main actions at a faster pace ([b650ed2](https://github.com/narnaud/git-loom/commit/b650ed2b9312680dd2d95b1d806fe00ada221fc0))
-* **readme:** drop the early-development note ([9e16b1b](https://github.com/narnaud/git-loom/commit/9e16b1ba714bb9b8d76e2ac879c21e44734be206))
-* show the demo videos in the introduction, link them from the README ([ff48003](https://github.com/narnaud/git-loom/commit/ff48003a60c4e515f11bd9fc29231c695ee23b70))
-* **skill:** tell agents that raw git does not take short IDs ([c153e51](https://github.com/narnaud/git-loom/commit/c153e51f508983577bfc89ab2eb78e0af574f795))
-* **skill:** warn that a directory path takes its untracked files ([d8554a0](https://github.com/narnaud/git-loom/commit/d8554a03460b6f7ed0ab64921e3ae4b0f1b628c7))
-* **spec:** drop a cancelled pick's hunk read unread ([e9a758c](https://github.com/narnaud/git-loom/commit/e9a758c6fddefced653a17748a1d079a300353f6))
-* **spec:** show swap's real success message ([ee4f88d](https://github.com/narnaud/git-loom/commit/ee4f88de58a84292c178eafdc7b79b7841a584f1)), closes [#444](https://github.com/narnaud/git-loom/issues/444)
-* stop promising the rename status R ([4061369](https://github.com/narnaud/git-loom/commit/406136985d4dbf46de7edcb41f795ddd3d843072)), closes [#448](https://github.com/narnaud/git-loom/issues/448)
-* trim the docs to user-facing behavior, add an AI agent tutorial ([0603dca](https://github.com/narnaud/git-loom/commit/0603dca598953215d63d45460936f43c9cc75704))
+* add demo videos and the scripts that render them ([ee205b5](https://github.com/narnaud/git-loom/commit/ee205b5aac43bf61b5d77be8714be767354141b3)) by @narnaud
+* **continue:** a resolution that empties a commit drops it ([b094b4a](https://github.com/narnaud/git-loom/commit/b094b4a5d5aa2c30a6ee6f975607aca1e579bb85)) by @narnaud
+* **continue:** say what every command reports after an emptied resolution ([a540123](https://github.com/narnaud/git-loom/commit/a5401234905600bdae51b36c69a507e547ca5b24)) by @narnaud
+* **demo:** open the CLI video on init, pin status on the left ([6d6f96c](https://github.com/narnaud/git-loom/commit/6d6f96cbb04947cc3860581d6d4071522492f195)) by @narnaud
+* **demo:** show the TUI's main actions at a faster pace ([b650ed2](https://github.com/narnaud/git-loom/commit/b650ed2b9312680dd2d95b1d806fe00ada221fc0)) by @narnaud
+* **readme:** drop the early-development note ([9e16b1b](https://github.com/narnaud/git-loom/commit/9e16b1ba714bb9b8d76e2ac879c21e44734be206)) by @narnaud
+* show the demo videos in the introduction, link them from the README ([ff48003](https://github.com/narnaud/git-loom/commit/ff48003a60c4e515f11bd9fc29231c695ee23b70)) by @narnaud
+* **skill:** tell agents that raw git does not take short IDs ([c153e51](https://github.com/narnaud/git-loom/commit/c153e51f508983577bfc89ab2eb78e0af574f795)) by @dfaure-kdab
+* **skill:** warn that a directory path takes its untracked files ([d8554a0](https://github.com/narnaud/git-loom/commit/d8554a03460b6f7ed0ab64921e3ae4b0f1b628c7)) by @dfaure-kdab
+* **spec:** drop a cancelled pick's hunk read unread ([e9a758c](https://github.com/narnaud/git-loom/commit/e9a758c6fddefced653a17748a1d079a300353f6)) by @narnaud
+* **spec:** show swap's real success message ([ee4f88d](https://github.com/narnaud/git-loom/commit/ee4f88de58a84292c178eafdc7b79b7841a584f1)) by @narnaud, closes [#444](https://github.com/narnaud/git-loom/issues/444)
+* stop promising the rename status R ([4061369](https://github.com/narnaud/git-loom/commit/406136985d4dbf46de7edcb41f795ddd3d843072)) by @narnaud, closes [#448](https://github.com/narnaud/git-loom/issues/448)
+* trim the docs to user-facing behavior, add an AI agent tutorial ([0603dca](https://github.com/narnaud/git-loom/commit/0603dca598953215d63d45460936f43c9cc75704)) by @narnaud
 
 
 ### Changes
 
-* **agent:** store the status and push payloads as raw JSON ([ef4fec8](https://github.com/narnaud/git-loom/commit/ef4fec8bf9d27ef0e48d368c15a4429307a946ae)), closes [#453](https://github.com/narnaud/git-loom/issues/453)
-* **core:** move hidden-branch policy out of the status command ([bd5e9ef](https://github.com/narnaud/git-loom/commit/bd5e9ef1816987a3091637b2f7fbd016a7ffd878)), closes [#387](https://github.com/narnaud/git-loom/issues/387)
-* **git-args:** stop checking what forwarded arguments make git do ([5858b1d](https://github.com/narnaud/git-loom/commit/5858b1dcc29ba0083dfea732d2c19f24c483e293))
-* move library code that commands borrowed from each other into core ([3f455d0](https://github.com/narnaud/git-loom/commit/3f455d0a624e6648d23d4920be0c102171adac82))
-* **staging:** take the hunk selector as a parameter ([e411132](https://github.com/narnaud/git-loom/commit/e41113250f4a1113b1c160823390d0d451ceed57)), closes [#455](https://github.com/narnaud/git-loom/issues/455)
-* **trace:** move the logger out of the trace command module ([c960d91](https://github.com/narnaud/git-loom/commit/c960d912a8c89c0e9382d4e58b16bfecf48e088c)), closes [#394](https://github.com/narnaud/git-loom/issues/394)
-* **tui:** move centered and highlight_backticks to widgets::common ([096584d](https://github.com/narnaud/git-loom/commit/096584d1716c8485f1eb6f194151d7c766b697ae)), closes [#454](https://github.com/narnaud/git-loom/issues/454)
+* **agent:** store the status and push payloads as raw JSON ([ef4fec8](https://github.com/narnaud/git-loom/commit/ef4fec8bf9d27ef0e48d368c15a4429307a946ae)) by @narnaud, closes [#453](https://github.com/narnaud/git-loom/issues/453)
+* **core:** move hidden-branch policy out of the status command ([bd5e9ef](https://github.com/narnaud/git-loom/commit/bd5e9ef1816987a3091637b2f7fbd016a7ffd878)) by @narnaud, closes [#387](https://github.com/narnaud/git-loom/issues/387)
+* **git-args:** stop checking what forwarded arguments make git do ([5858b1d](https://github.com/narnaud/git-loom/commit/5858b1dcc29ba0083dfea732d2c19f24c483e293)) by @narnaud
+* move library code that commands borrowed from each other into core ([3f455d0](https://github.com/narnaud/git-loom/commit/3f455d0a624e6648d23d4920be0c102171adac82)) by @narnaud
+* **staging:** take the hunk selector as a parameter ([e411132](https://github.com/narnaud/git-loom/commit/e41113250f4a1113b1c160823390d0d451ceed57)) by @narnaud, closes [#455](https://github.com/narnaud/git-loom/issues/455)
+* **trace:** move the logger out of the trace command module ([c960d91](https://github.com/narnaud/git-loom/commit/c960d912a8c89c0e9382d4e58b16bfecf48e088c)) by @narnaud, closes [#394](https://github.com/narnaud/git-loom/issues/394)
+* **tui:** move centered and highlight_backticks to widgets::common ([096584d](https://github.com/narnaud/git-loom/commit/096584d1716c8485f1eb6f194151d7c766b697ae)) by @narnaud, closes [#454](https://github.com/narnaud/git-loom/issues/454)
 
 
 ### Tests
 
-* **commit:** drain stdin in the fake gpg so signing never races git ([1e3bf9d](https://github.com/narnaud/git-loom/commit/1e3bf9de9564bb069abc9f60793768593ca89710))
-* **tui:** keep the fixture's diff out of the process cwd ([5901cbd](https://github.com/narnaud/git-loom/commit/5901cbdc04930b471eb55b8b415237d8b864e699)), closes [#447](https://github.com/narnaud/git-loom/issues/447)
+* **commit:** drain stdin in the fake gpg so signing never races git ([1e3bf9d](https://github.com/narnaud/git-loom/commit/1e3bf9de9564bb069abc9f60793768593ca89710)) by @narnaud
+* **tui:** keep the fixture's diff out of the process cwd ([5901cbd](https://github.com/narnaud/git-loom/commit/5901cbdc04930b471eb55b8b415237d8b864e699)) by @narnaud, closes [#447](https://github.com/narnaud/git-loom/issues/447)
 
 
 ### Other
 
-* **deps:** bump serde_json from 1.0.151 to 1.0.154 ([cd2e75d](https://github.com/narnaud/git-loom/commit/cd2e75df6866b96a6eee2dc2f649976c6aa57fa7))
-* lower rust-version to 1.88 and check it in CI ([e738f60](https://github.com/narnaud/git-loom/commit/e738f608da9c19d0a5b3f89f83aa2360335eff47))
-* require Git 2.43 and test it in CI ([eb9a121](https://github.com/narnaud/git-loom/commit/eb9a1219cdb84bdc9c08d604aa39426ca4341f82))
+* **deps:** bump serde_json from 1.0.151 to 1.0.154 ([cd2e75d](https://github.com/narnaud/git-loom/commit/cd2e75df6866b96a6eee2dc2f649976c6aa57fa7)) by @dependabot[bot]
+* lower rust-version to 1.88 and check it in CI ([e738f60](https://github.com/narnaud/git-loom/commit/e738f608da9c19d0a5b3f89f83aa2360335eff47)) by @narnaud
+* require Git 2.43 and test it in CI ([eb9a121](https://github.com/narnaud/git-loom/commit/eb9a1219cdb84bdc9c08d604aa39426ca4341f82)) by @narnaud
 
 ## [0.27.0](https://github.com/narnaud/git-loom/compare/v0.26.0...v0.27.0) (2026-10-11)
 
