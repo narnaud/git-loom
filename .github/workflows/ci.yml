@@ -25,16 +25,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      # As the release build does: libssh2 links Homebrew's OpenSSL.
+      - if: runner.os == 'macOS'
+        run: |
+          brew install --quiet openssl@3
+          echo "OPENSSL_DIR=$(brew --prefix openssl@3)" >> $GITHUB_ENV
       # No `cargo build` first, on purpose: `cargo test` has to produce
       # target/<profile>/git-loom by itself, which is what tests/bin_is_built.rs
       # is for. Building here would hide its removal.
       - run: cargo test --locked
-      # The completion tests skip the shells that are missing.
+      # The completion tests skip the shells that are missing. Linux only:
+      # test_show runs util-linux's `script -c`, which BSD `script` lacks.
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y zsh fish
       - if: runner.os == 'Linux'
