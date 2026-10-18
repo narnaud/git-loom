@@ -104,7 +104,7 @@ fn empty_stop_is_spelled_ask_before_git_2_45() {
     assert_eq!(super::empty_stop_for(Some((2, 45))), "stop");
     assert_eq!(super::empty_stop_for(Some((3, 0))), "stop");
     assert_eq!(super::empty_stop_for(Some((2, 44))), "ask");
-    assert_eq!(super::empty_stop_for(Some((2, 40))), "ask");
+    assert_eq!(super::empty_stop_for(Some((2, 43))), "ask");
     assert_eq!(super::empty_stop_for(None), "ask");
 }
 

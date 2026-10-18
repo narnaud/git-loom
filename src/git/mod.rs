@@ -97,9 +97,10 @@ pub const FORCED_CONFIG: &[&str] = &[
 pub const ABORT_FAILED_CAUSE: &str =
     "a stale `.git/index.lock` or a concurrent git process is the usual cause";
 
-/// Minimum Git version required (`merge-tree --merge-base`, which decides
-/// whether a commit replays empty, was added in 2.40; `--update-refs` in 2.38).
-const MIN_GIT_VERSION: (u32, u32) = (2, 40);
+/// Minimum Git version: Ubuntu 24.04's, the oldest CI runs the suite on. Loom
+/// itself needs 2.40, for the `merge-tree --merge-base` that decides whether a
+/// commit replays empty.
+const MIN_GIT_VERSION: (u32, u32) = (2, 43);
 
 /// An argument as it must come back on the replay command line (Spec 019).
 ///

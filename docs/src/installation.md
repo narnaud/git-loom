@@ -36,7 +36,7 @@ cargo install --path .
 
 ## Requirements
 
-- **Git 2.40 or later.**
+- **Git 2.43 or later.**
 - **Optional:** the [`gh`](https://cli.github.com) or [`az`](https://learn.microsoft.com/en-us/cli/azure/) CLI, for `git loom push` to create pull requests on GitHub or Azure DevOps.
 
 Once installed, the binary answers to `git loom` as well as `git-loom`.

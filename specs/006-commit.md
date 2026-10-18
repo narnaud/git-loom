@@ -31,7 +31,7 @@ File paths may be relative or absolute; resolution follows Spec 002.
 
 ## Preconditions
 
-Require Git 2.40+, a non-bare working tree, and an upstream-configured integration branch. On a plain feature branch or detached HEAD, error exactly:
+Require Git 2.43+, a non-bare working tree, and an upstream-configured integration branch. On a plain feature branch or detached HEAD, error exactly:
 
 ```text
 Must be on an integration branch to use commit. Use `git commit` directly on feature branches.

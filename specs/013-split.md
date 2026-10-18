@@ -171,7 +171,7 @@ Pre-existing staged changes are always restored regardless of outcome.
 
 ## Prerequisites
 
-- Git ≥ 2.40.
+- Git ≥ 2.43.
 - Working tree required (not a bare repository).
 
 ## Examples

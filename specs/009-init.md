@@ -105,7 +105,7 @@ password, either of which can be a token; git still gets the URL as is.
 
 - Must be in a git repository with a working tree (not bare)
 - At least one remote with a fetchable branch must be configured
-- Git 2.40 or later (checked globally at startup)
+- Git 2.43 or later (checked globally at startup)
 
 ## Name Validation
 

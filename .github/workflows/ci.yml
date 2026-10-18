@@ -40,6 +40,23 @@ jobs:
       - if: runner.os == 'Linux'
         run: bash test-integration.sh
 
+  oldest-git:
+    name: Test (oldest git)
+    runs-on: ubuntu-latest
+    # Ubuntu 24.04's own git is the minimum loom accepts (MIN_GIT_VERSION);
+    # the runners carry a recent one. git goes in before checkout, which
+    # otherwise downloads a tarball instead of cloning.
+    container: ubuntu:24.04
+    steps:
+      - run: >
+          apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y
+          git ca-certificates curl build-essential pkg-config libssl-dev zsh fish
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - run: git --version
+      - run: cargo test --locked
+      - run: bash test-integration.sh
+
   hostile-config:
     name: Test (hostile gitconfig)
     runs-on: ubuntu-latest
