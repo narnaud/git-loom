@@ -69,7 +69,7 @@ See the [installation guide](https://narnaud.github.io/git-loom/installation.htm
 
 ## Contributing
 
-Contributions are welcome! This project is in early development, so there's plenty of room for new ideas and improvements.
+Contributions are welcome!
 
 ### Pre-commit Setup
 
