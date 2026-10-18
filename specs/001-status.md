@@ -40,7 +40,7 @@ Commits use `<short-id> <short-hash> <commit-message-first-line>`: the commit's 
 | `●` | Commit. |
 | `├╯` | Side branch/stack closes into integration. |
 | `!!` | Unresolved conflict; marker and filename are bold red. |
-| `XY` | Tracked status from `git status --short`; index `X` is green, worktree `Y` red. Values include `M`, `A`, `D`, `R`, and space. |
+| `XY` | Tracked status from `git status --short`; index `X` is green, worktree `Y` red. Values include `M`, `A`, `D`, and space; a rename shows as a `D` and an `A`. |
 | `⁕` preceded by one space | Untracked file (magenta), replacing `??`. |
 | `⏫` | Upstream commits ahead of the common base. |
 | `·` | Dimmed, display-only context commit with no short ID. |

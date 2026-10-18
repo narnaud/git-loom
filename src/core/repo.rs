@@ -835,9 +835,9 @@ pub struct ContextCommit {
 #[derive(Debug, Clone)]
 pub struct FileChange {
     pub path: String,
-    /// Index (staged) status: ' ', 'A', 'M', 'D', 'R', or '?'
+    /// Index (staged) status: ' ', 'A', 'M', 'D', or '?'
     pub index: char,
-    /// Worktree (unstaged) status: ' ', 'M', 'D', 'R', '?', or '!' (conflict)
+    /// Worktree (unstaged) status: ' ', 'M', 'D', '?', or '!' (conflict)
     pub worktree: char,
 }
 
