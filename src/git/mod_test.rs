@@ -185,3 +185,52 @@ fn only_a_staged_deletion_still_on_disk_is_refused() {
         "{err}"
     );
 }
+
+/// A staged deletion whose name is not UTF-8 must still be found on disk: a
+/// lossy decode would look for a name holding U+FFFD and report it absent.
+#[test]
+#[cfg(unix)]
+fn a_staged_deletion_with_a_non_utf8_name_is_still_found_on_disk() {
+    use crate::core::test_helpers::TestRepo;
+    use std::os::unix::ffi::OsStrExt;
+
+    let t = TestRepo::new();
+    let workdir = t.workdir();
+    // Latin-1 `é`, which no UTF-8 decoder accepts.
+    let name = std::ffi::OsStr::from_bytes(b"caf\xe9.txt");
+    std::fs::write(workdir.join(name), "tracked\n").unwrap();
+    let git = |args: &[&std::ffi::OsStr]| {
+        let status = std::process::Command::new("git")
+            .current_dir(&workdir)
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    };
+    git(&["add".as_ref(), "--".as_ref(), name]);
+    t.commit_staged("Add a Latin-1 name");
+    git(&[
+        "rm".as_ref(),
+        "-q".as_ref(),
+        "--cached".as_ref(),
+        "--".as_ref(),
+        name,
+    ]);
+
+    assert_eq!(
+        super::staged_deletions_on_disk(&workdir).unwrap(),
+        ["caf\u{FFFD}.txt"]
+    );
+}
+
+/// Where the platform cannot even name a file in those bytes, the check fails
+/// closed: a refusal costs a retry, a miss costs the file.
+#[test]
+fn a_path_that_is_not_utf8_counts_as_on_disk_where_bytes_cannot_name_a_file() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("plain.txt"), "").unwrap();
+
+    assert!(super::is_on_disk(dir.path(), b"plain.txt"));
+    assert!(!super::is_on_disk(dir.path(), b"missing.txt"));
+    assert_eq!(super::is_on_disk(dir.path(), b"caf\xe9.txt"), !cfg!(unix));
+}

@@ -349,7 +349,10 @@ pub fn staged_deletions_on_disk(workdir: &Path) -> Result<Vec<String>> {
     // `--raw` for the mode: a submodule's checkout is a directory on disk, and
     // nothing here sets its gitlink aside. `--no-renames` so the deleted half
     // of a rename is listed as the deletion it is in the index.
-    let out = run_git_stdout(
+    // Raw, not lossy: a path that is not UTF-8 would otherwise be looked
+    // for under a name holding U+FFFD, found absent, and left out — the
+    // one answer this check must never give by mistake.
+    let out = run_git_stdout_raw(
         workdir,
         &[
             "diff",
@@ -371,12 +374,31 @@ pub fn staged_deletions_on_disk(workdir: &Path) -> Result<Vec<String>> {
         if meta.starts_with("160000 ") {
             continue;
         }
-        // `symlink_metadata`: a broken symlink is on disk too.
-        if workdir.join(path).symlink_metadata().is_ok() {
-            paths.push(path.to_string());
+        if is_on_disk(workdir, &raw_text::encode(path)) {
+            // Named for a person: the only use the callers make of it.
+            paths.push(raw_text::for_display(path).into_owned());
         }
     }
     Ok(paths)
+}
+
+/// Whether the path git printed as `bytes` is on disk, checked byte for byte
+/// where the platform names files in bytes. Where it does not (Windows) git
+/// prints UTF-8, so bytes that are not UTF-8 cannot name a file there; they
+/// are taken as on disk rather than as absent, the answer that costs nothing
+/// but a refusal. `symlink_metadata`: a broken symlink is on disk too.
+fn is_on_disk(workdir: &Path, bytes: &[u8]) -> bool {
+    #[cfg(unix)]
+    let name = {
+        use std::os::unix::ffi::OsStrExt;
+        std::ffi::OsStr::from_bytes(bytes).to_owned()
+    };
+    #[cfg(not(unix))]
+    let name = match std::str::from_utf8(bytes) {
+        Ok(path) => std::ffi::OsString::from(path),
+        Err(_) => return true,
+    };
+    workdir.join(name).symlink_metadata().is_ok()
 }
 
 /// Refuse while [`staged_deletions_on_disk`] finds any, naming them. Like a
