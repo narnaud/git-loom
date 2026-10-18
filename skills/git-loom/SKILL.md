@@ -129,7 +129,7 @@ review). Push only when the user asked to publish: it is visible to others.
   harmlessly and creates the PR. Otherwise report `reason` and `create_url` to
   the user.
 - If the remote type is unknown, push answers `needs_input` listing the forges:
-  ask the user, then set `git config loom.remote-type <value>` as the hint says.
+  ask the user, then set `git config loom.remoteType <value>` as the hint says.
 
 ## Hunk selection
 

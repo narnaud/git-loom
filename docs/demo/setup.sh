@@ -113,7 +113,7 @@ git clone -q origin.git taskflow; cd taskflow
 git remote set-url origin git@github.com:acme/taskflow.git
 git config core.sshCommand "$DEMO/fake-ssh.sh $W/origin.git"
 git config ssh.variant simple
-git config loom.remote-type github
+git config loom.remoteType github
 rm -f "$FAKE_GH_STATE"
 git loom init >/dev/null
 

@@ -492,7 +492,7 @@ fn refuse_unused_title(remote_type: &RemoteType, title: Option<&str>) -> Result<
     let (forge, hint) = match remote_type {
         RemoteType::Plain => (
             "a plain remote",
-            "Push without `--title`, or set `loom.remote-type` to the forge",
+            "Push without `--title`, or set `loom.remoteType` to the forge",
         ),
         RemoteType::Gerrit { .. } => (
             "Gerrit",

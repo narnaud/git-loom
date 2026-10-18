@@ -23,7 +23,7 @@ pub enum RemoteType {
 }
 
 impl RemoteType {
-    /// The `loom.remote-type` value naming this type.
+    /// The `loom.remoteType` value naming this type.
     pub fn config_value(&self) -> &'static str {
         match self {
             RemoteType::Plain => "plain",
@@ -35,7 +35,7 @@ impl RemoteType {
     }
 }
 
-/// The values `loom.remote-type` takes, with the name the menu shows for each.
+/// The values `loom.remoteType` takes, with the name the menu shows for each.
 const REMOTE_TYPES: [(&str, &str); 5] = [
     ("github", "GitHub"),
     ("gitlab", "GitLab"),
@@ -57,15 +57,23 @@ fn parse_remote_type(value: &str, target_branch: &str) -> Option<RemoteType> {
     })
 }
 
-/// The remote type `loom.remote-type` names; an unknown value is warned about
+/// `key`, else `legacy_key`, its pre-1.0 dashed spelling, read but deliberately
+/// never documented or named in messages.
+fn loom_setting(workdir: &Path, key: &str, legacy_key: &str) -> Option<String> {
+    [key, legacy_key].into_iter().find_map(|name| {
+        let value = git::run_git_stdout(workdir, &["config", "--get", name]).ok()?;
+        Some(value.trim().to_string())
+    })
+}
+
+/// The remote type `loom.remoteType` names; an unknown value is warned about
 /// and treated as unset.
 fn configured_remote_type(workdir: &Path, target_branch: &str) -> Option<RemoteType> {
-    let value = git::run_git_stdout(workdir, &["config", "--get", "loom.remote-type"]).ok()?;
-    let value = value.trim();
+    let value = loom_setting(workdir, "loom.remoteType", "loom.remote-type")?;
     let remote_type = parse_remote_type(&value.to_lowercase(), target_branch);
     if remote_type.is_none() {
         msg::warn(&format!(
-            "Unknown loom.remote-type '{}' — falling back to auto-detection.\n\
+            "Unknown loom.remoteType '{}' — falling back to auto-detection.\n\
              Valid values: github, gitlab, azure, gerrit, plain",
             value
         ));
@@ -119,9 +127,9 @@ fn detect_remote_type(
         .unwrap_or(RemoteType::Plain)
 }
 
-/// The remote type `loom push` uses: `loom.remote-type`, else what
+/// The remote type `loom push` uses: `loom.remoteType`, else what
 /// auto-detection finds, else the user's pick from every type. A detected or
-/// picked type is saved as `loom.remote-type`, so it is settled once per
+/// picked type is saved as `loom.remoteType`, so it is settled once per
 /// repository.
 pub fn resolve_remote_type(
     repo: &Repository,
@@ -136,7 +144,7 @@ pub fn resolve_remote_type(
         Some(value) => value,
         None => ask_remote_type(remote)?,
     };
-    git::run_git(workdir, &["config", "loom.remote-type", value])?;
+    git::run_git(workdir, &["config", "loom.remoteType", value])?;
     Ok(parse_remote_type(value, target_branch).expect("a known remote type"))
 }
 
@@ -144,14 +152,14 @@ pub fn resolve_remote_type(
 fn ask_remote_type(remote: &str) -> Result<&'static str> {
     let picked = msg::select(
         &format!(
-            "Which kind of remote is `{}`? (saved as `loom.remote-type`)",
+            "Which kind of remote is `{}`? (saved as `loom.remoteType`)",
             remote
         ),
         REMOTE_TYPES
             .iter()
             .map(|(_, name)| name.to_string())
             .collect(),
-        "set `git config loom.remote-type <github|gitlab|azure|gerrit|plain>`, then re-run",
+        "set `git config loom.remoteType <github|gitlab|azure|gerrit|plain>`, then re-run",
     )?;
     REMOTE_TYPES
         .iter()
@@ -239,20 +247,18 @@ pub fn github_fork_parent(workdir: &Path, origin_repo: &str) -> Option<(String, 
     Some((name.to_string(), branch.to_string()))
 }
 
-/// `loom.push-remote`, when set.
+/// `loom.pushRemote`, when set.
 fn push_remote_setting(workdir: &Path) -> Option<String> {
-    let value = git::run_git_stdout(workdir, &["config", "--get", "loom.push-remote"]).ok()?;
-    let value = value.trim();
-    (!value.is_empty()).then(|| value.to_string())
+    loom_setting(workdir, "loom.pushRemote", "loom.push-remote").filter(|value| !value.is_empty())
 }
 
-/// `loom.push-remote`, when it names an existing remote.
+/// `loom.pushRemote`, when it names an existing remote.
 fn configured_push_remote(repo: &Repository, workdir: &Path) -> Option<String> {
     push_remote_setting(workdir).filter(|remote| repo.find_remote(remote).is_ok())
 }
 
 /// The remote standing for `remote`, the one the integration branch tracks:
-/// itself, or `loom.push-remote` when that is `.`, a local branch being on no
+/// itself, or `loom.pushRemote` when that is `.`, a local branch being on no
 /// remote at all.
 pub fn integration_remote(repo: &Repository, workdir: &Path, remote: &str) -> Result<String> {
     if remote != "." {
@@ -261,19 +267,19 @@ pub fn integration_remote(repo: &Repository, workdir: &Path, remote: &str) -> Re
     match push_remote_setting(workdir) {
         Some(push_remote) if repo.find_remote(&push_remote).is_ok() => Ok(push_remote),
         Some(push_remote) => bail!(
-            "`loom.push-remote` is `{}`, which names no remote\n\
+            "`loom.pushRemote` is `{}`, which names no remote\n\
              The integration branch tracks a local branch, so it needs one: \
-             `git config loom.push-remote <remote>`",
+             `git config loom.pushRemote <remote>`",
             push_remote
         ),
         None => bail!(
             "The integration branch tracks a local branch, so there is no remote to push to\n\
-             Set one with: `git config loom.push-remote <remote>`"
+             Set one with: `git config loom.pushRemote <remote>`"
         ),
     }
 }
 
-/// The remote `loom push` sends to: `loom.push-remote` if set, else `origin`
+/// The remote `loom push` sends to: `loom.pushRemote` if set, else `origin`
 /// when `remote`, the integration remote, is `upstream` (GitHub fork
 /// convention), else `remote`.
 pub fn resolve_push_remote(
@@ -297,7 +303,7 @@ pub fn resolve_push_remote(
 
 /// The remote `loom push` sends feature branches to, when it differs from
 /// `remote`, the one the integration branch tracks — i.e. a fork workflow, or
-/// a local upstream with `loom.push-remote`.
+/// a local upstream with `loom.pushRemote`.
 ///
 /// Returns `None` for the common single-remote setup, where both are the same.
 pub fn fork_push_remote(

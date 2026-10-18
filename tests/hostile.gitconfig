@@ -109,7 +109,7 @@
 
 [loom]
 	# loom's own settings, away from their defaults: the test fixtures must pin
-	# every one a test relies on. Absent: `remote-type` and `push-remote`, which
+	# every one a test relies on. Absent: `remoteType` and `pushRemote`, which
 	# have no value meaning "unset" for a fixture to pin.
 	pruneGoneBranches = true
 	statusContext = 3

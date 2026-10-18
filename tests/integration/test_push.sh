@@ -32,7 +32,7 @@ build_stack() {
     commit_file "X1" "x1.txt"
     switch_to integration
     weave_branch "x"
-    git -C "$WORK" config loom.remote-type plain
+    git -C "$WORK" config loom.remoteType plain
 }
 
 # ── PRECONDITIONS ─────────────────────────────────────────────────────────────
@@ -119,7 +119,7 @@ assert_eq "$(remote_oid b)" "$(branch_oid b)" "republish_b_oid"
 
 describe "an undetected remote type is asked about, saving nothing unanswered"
 build_stack
-git -C "$WORK" config --unset loom.remote-type
+git -C "$WORK" config --unset loom.remoteType
 gl_capture --agent push x
 assert_eq "10" "$CODE" "remote_type_menu_exit"
 assert_contains "$OUT" '"status":"needs_input"' "remote_type_menu_status"
@@ -127,18 +127,18 @@ assert_contains "$OUT" "Which kind of remote is" "remote_type_menu_prompt"
 for forge in GitHub GitLab "Azure DevOps" Gerrit "Plain Git"; do
     assert_contains "$OUT" "$forge" "remote_type_menu_lists_$forge"
 done
-assert_contains "$OUT" "git config loom.remote-type" "remote_type_menu_hint"
+assert_contains "$OUT" "git config loom.remoteType" "remote_type_menu_hint"
 remote_has x && fail "remote_type_menu: x should not be on the remote"
-git -C "$WORK" config --get loom.remote-type && fail "remote_type_menu: nothing should be saved"
+git -C "$WORK" config --get loom.remoteType && fail "remote_type_menu: nothing should be saved"
 
 describe "a detected remote type is saved"
 build_stack
-git -C "$WORK" config --unset loom.remote-type
+git -C "$WORK" config --unset loom.remoteType
 git -C "$WORK" remote set-url origin "https://github.com/owner/repo.git"
 git -C "$WORK" remote set-url --push origin "$TMPROOT/remote.git"
 gl_capture push x --no-pr
 assert_exit_ok "$CODE" "remote_type_saved_ok"
-assert_eq "github" "$(git -C "$WORK" config --get loom.remote-type)" "remote_type_saved"
+assert_eq "github" "$(git -C "$WORK" config --get loom.remoteType)" "remote_type_saved"
 
 describe "agent mode reports a plain push as JSON"
 build_stack
@@ -170,17 +170,17 @@ assert_exit_ok "$CODE" "slash_remote_ok"
 assert_contains "$OUT" 'Pushed x to team/fork' "slash_remote_msg"
 remote_has x || fail "slash_remote: x should be on the remote"
 
-describe "a local upstream pushes to loom.push-remote, which it needs"
+describe "a local upstream pushes to loom.pushRemote, which it needs"
 build_stack
 git -C "$WORK" branch -q -u "$BASE_BRANCH" integration
 gl_capture_json --agent push
 assert_eq "1" "$CODE" "local_upstream_refused_before_picking"
-assert_contains "$(json_line)" "loom.push-remote" "local_upstream_refused_before_picking_msg"
+assert_contains "$(json_line)" "loom.pushRemote" "local_upstream_refused_before_picking_msg"
 gl_capture push x
 assert_exit_fail "$CODE" "local_upstream_refused"
-assert_contains "$OUT" "loom.push-remote" "local_upstream_refused_msg"
+assert_contains "$OUT" "loom.pushRemote" "local_upstream_refused_msg"
 remote_has x && fail "local_upstream: x should not be on the remote yet"
-git -C "$WORK" config loom.push-remote origin
+git -C "$WORK" config loom.pushRemote origin
 gl_capture push x
 assert_exit_ok "$CODE" "local_upstream_ok"
 assert_contains "$OUT" 'Pushed x to origin' "local_upstream_msg"
@@ -192,7 +192,7 @@ remote_has x || fail "local_upstream: x should be on the remote"
 # exact `git push` line loom ran, options included.
 gitlab_origin() {
     git -C "$TMPROOT/remote.git" config receive.advertisePushOptions true
-    git -C "$WORK" config loom.remote-type gitlab
+    git -C "$WORK" config loom.remoteType gitlab
 }
 
 describe "gitlab: each layer is pushed with its own merge request target"
@@ -378,7 +378,7 @@ SHIM
 github_origin() {
     git -C "$WORK" remote set-url origin "https://github.com/owner/repo.git"
     git -C "$WORK" remote set-url --push origin "$TMPROOT/remote.git"
-    git -C "$WORK" config loom.remote-type github
+    git -C "$WORK" config loom.remoteType github
 }
 
 gl_gh() { PATH="$GH_SHIM:$PATH" gl "$@"; }
@@ -558,7 +558,7 @@ git -C "$WORK" remote set-url upstream "https://github.com/owner/repo.git"
 git -C "$WORK" remote set-url --push upstream "$TMPROOT/remote.git"
 git -C "$WORK" remote add origin "https://github.com/forker/repo.git"
 git -C "$WORK" remote set-url --push origin "$TMPROOT/fork.git"
-git -C "$WORK" config loom.remote-type github
+git -C "$WORK" config loom.remoteType github
 # b's PR targets the base, so it spans A1 and B1 and creating it would prompt
 # for a title. It already exists; only a's PR is created here.
 echo "1 $BASE_BRANCH forker" > "$GH_STATE/pr_b"

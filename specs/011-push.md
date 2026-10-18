@@ -215,8 +215,8 @@ local branch is removed too.
 
 The remote type is settled once per repository, first match wins:
 
-1. **Explicit config**: `git config loom.remote-type` — values: `github`, `gitlab`, `azure`, `gerrit`, `plain`. An unknown value is warned about and treated as unset.
-2. **Auto-detection**, saved as `loom.remote-type`:
+1. **Explicit config**: `git config loom.remoteType` — values: `github`, `gitlab`, `azure`, `gerrit`, `plain`. An unknown value is warned about and treated as unset.
+2. **Auto-detection**, saved as `loom.remoteType`:
    - remote URL contains `github.com` → GitHub
    - remote URL contains `gitlab` → GitLab
    - remote URL contains `dev.azure.com` → Azure DevOps
@@ -224,11 +224,11 @@ The remote type is settled once per repository, first match wins:
    - `.git/hooks/commit-msg` contains "gerrit" (case-insensitive) → Gerrit
 3. **Menu**: nothing detected, so the user picks from every type (GitHub,
    GitLab, Azure DevOps, Gerrit, Plain Git), in the CLI or as a `loom tui`
-   popup; the pick is saved as `loom.remote-type`. Cancelling saves nothing.
+   popup; the pick is saved as `loom.remoteType`. Cancelling saves nothing.
    Agent mode answers `needs_input` instead (Spec 019).
 
 Saving means a later change of URL or hook is not re-detected: change
-`loom.remote-type` instead. A plain push still surfaces the MR link the server
+`loom.remoteType` instead. A plain push still surfaces the MR link the server
 prints (see [Plain](#plain-default)).
 
 Only `git loom push` asks and saves. The detection helper is also used
@@ -240,17 +240,17 @@ saving.
 
 Detection priority (first match wins):
 
-1. **Explicit config**: `git config loom.push-remote <remote>` — specify the remote name to push to
+1. **Explicit config**: `git config loom.pushRemote <remote>` — specify the remote name to push to
 2. **GitHub fork convention**: if the integration remote is named `upstream` and `origin` exists, push to `origin`
 3. **Fallback**: integration branch's remote
 
 The integration remote and the upstream target branch are the integration
 branch's `branch.<name>.remote` and `.merge`, never cut from the upstream's
 name: a remote name can hold a `/`. A local upstream (remote `.`) is on no
-remote, so `loom.push-remote` stands in for the integration remote, remote
+remote, so `loom.pushRemote` stands in for the integration remote, remote
 type detection included; without it push refuses before asking anything.
 
-This allows fork workflows where the integration branch tracks the upstream repository but branches are pushed to a personal fork. For non-standard remote names, set `loom.push-remote` explicitly.
+This allows fork workflows where the integration branch tracks the upstream repository but branches are pushed to a personal fork. For non-standard remote names, set `loom.pushRemote` explicitly.
 
 ## PR Messages
 
@@ -579,7 +579,7 @@ git-loom push
 ### Override remote type via config
 
 ```bash
-git config loom.remote-type gerrit
+git config loom.remoteType gerrit
 git-loom push feature-a
 # Pushed `feature-a` to `origin` (Gerrit: `refs/for/main`)
 #   › https://gerrit.example.com/c/project/+/12345

@@ -6,29 +6,29 @@ Set them with `git config <setting> <value>`.
 
 | Setting | Values | Default | Description |
 |---------|--------|---------|-------------|
-| `loom.remote-type` | `github`, `gitlab`, `azure`, `gerrit`, `plain` | Detected, else asked | How `git loom push` pushes |
-| `loom.push-remote` | A remote name | Detected | The remote `git loom push` pushes to |
+| `loom.remoteType` | `github`, `gitlab`, `azure`, `gerrit`, `plain` | Detected, else asked | How `git loom push` pushes |
+| `loom.pushRemote` | A remote name | Detected | The remote `git loom push` pushes to |
 | `loom.hideBranchPattern` | A prefix | `local-` | Branches hidden from `git loom status` |
 | `loom.statusContext` | An integer ≥ 1 | `1` | Commits shown at and before the base by `status` and `tui` |
 | `loom.pruneGoneBranches` | `true`, `false` | `false` | Let `git loom update` remove merged and gone branches without asking |
 | `loom.changeId` | `true`, `false` | `true` | Add a `Change-Id` trailer to the commits loom creates |
 
-### `loom.remote-type`
+### `loom.remoteType`
 
 `git loom push` detects the forge from the remote URL (`github.com`, `gitlab`, `dev.azure.com`, an `ssh://` URL on Gerrit's port 29418) or a Gerrit `commit-msg` hook. When it can't tell, it asks. Either way the result is saved here; set it yourself if detection guessed wrong:
 
 ```bash
-git config loom.remote-type gitlab
+git config loom.remoteType gitlab
 ```
 
 See [push](commands/push.md) for what each type does.
 
-### `loom.push-remote`
+### `loom.pushRemote`
 
 By default, `git loom push` pushes to the remote your integration branch tracks. On GitHub, if that remote is `upstream` and an `origin` exists, it pushes to `origin`, your fork. Set this for any other layout, and when your integration branch tracks a local branch, which is on no remote:
 
 ```bash
-git config loom.push-remote personal
+git config loom.pushRemote personal
 ```
 
 ### `loom.hideBranchPattern`

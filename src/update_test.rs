@@ -380,7 +380,7 @@ fn update_prunes_the_push_remote_in_a_fork_workflow() {
         .repo
         .remote("personal", fork_path.to_str().unwrap())
         .unwrap();
-    test_repo.set_config("loom.push-remote", "personal");
+    test_repo.set_config("loom.pushRemote", "personal");
 
     test_repo.create_branch("feature-x");
     let workdir = test_repo.workdir();

@@ -6,7 +6,7 @@ use serde::Serialize;
 #[derive(Debug, Default, PartialEq, Eq, Serialize)]
 pub struct PushReport {
     pub remote: String,
-    /// The `loom.remote-type` value in effect.
+    /// The `loom.remoteType` value in effect.
     pub forge: &'static str,
     pub pushed: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]

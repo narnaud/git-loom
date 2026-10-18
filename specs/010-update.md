@@ -346,7 +346,7 @@ This provides a complete sync rather than a minimal one.
 
 ### Fetching the Push Remote
 
-In a fork workflow the feature branches live on the push remote (`loom.push-remote`,
+In a fork workflow the feature branches live on the push remote (`loom.pushRemote`,
 or the GitHub `upstream`/`origin` convention — see Spec 011), not on the remote
 the integration branch tracks. That remote is the one whose deletions matter for
 gone-upstream detection, so `update` fetches it too, with `--prune`, using the

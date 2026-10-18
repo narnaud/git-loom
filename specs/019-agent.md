@@ -255,7 +255,7 @@ each PR stands, so an agent can open and chain PRs without parsing
  "stack":7}}
 ```
 
-- `forge` is the `loom.remote-type` in effect (Spec 011); `pushed` the named
+- `forge` is the `loom.remoteType` in effect (Spec 011); `pushed` the named
   branch and its downstack, bottom first (a Gerrit `wip/` push names the
   `wip/` branch); `republished` and `not_pushed` the upstack branches of
   [Stacked Branches](011-push.md#stacked-branches). Empty lists are left out.
@@ -289,7 +289,7 @@ mentions the skipped action in `messages`).
 | `reword` branch-rename prompt (no `-m`) | pre-flight | `needs_input` (text); hint: `loom reword <target> -m <new-name>` |
 | `drop` confirmations | pre-flight | `needs_confirmation`; hint: `loom drop <target> -y` |
 | `push` branch picker (no branch) | pre-flight | `needs_input` (select) listing woven branches; hint: `loom push <branch>` |
-| `push` remote type menu (no `loom.remote-type`, nothing detected) | pre-flight | `needs_input` (select) with every type; hint: `git config loom.remote-type <github\|gitlab\|azure\|gerrit\|plain>`, then re-run |
+| `push` remote type menu (no `loom.remoteType`, nothing detected) | pre-flight | `needs_input` (select) with every type; hint: `git config loom.remoteType <github\|gitlab\|azure\|gerrit\|plain>`, then re-run |
 | `push` Gerrit `wip/` prefix choice (`--no-pr`) | pre-flight | `needs_input` (select) with the three choices; no flag exists to answer it — ask the user, then rename with `loom reword` or re-run interactively |
 | `push` PR title (GitHub/Azure, multi-commit layer, no `--title` for it) | post-mutation | branch is already pushed → that PR is not created, report `ok`; its `push.prs` entry is `not_created` with the `hint` `Re-run with `loom push <branch> --title <title>`` (Spec 011). Every other PR is created as in a terminal; no browser is ever opened |
 | `update` gone-branch prune confirmation | post-mutation | the pull-rebase already succeeded → skip pruning, report `ok`; `messages` notes the skipped branches and `loom update -y` |

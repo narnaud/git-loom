@@ -1018,7 +1018,7 @@ fn force_push_under_tui_of(
 
     let test_repo = TestRepo::new_with_remote();
     let workdir = test_repo.workdir();
-    test_repo.set_config("loom.remote-type", "plain");
+    test_repo.set_config("loom.remoteType", "plain");
     test_repo.create_branch("feature-a");
     test_repo.switch_branch("feature-a");
     let tip = test_repo.commit("feature commit", "a.txt");
