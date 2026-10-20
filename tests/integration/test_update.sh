@@ -534,6 +534,92 @@ assert_eq "$(git -C "$WORK" rev-parse HEAD^2)" "$(git -C "$WORK" rev-parse outer
 assert_eq "$(git -C "$WORK" log --format=%s -1 outer)" "Outer O1" "stacked_merged_outer_commit"
 assert_eq "$(git -C "$WORK" rev-parse outer^)" "$(git -C "$WORK" rev-parse "origin/$base_branch")" "stacked_merged_outer_on_upstream"
 
+# ── UPDATING A BRANCH FROM ITS REMOTE ─────────────────────────────────────────
+
+# Push a feature branch, then push more commits to it from another clone.
+# Usage: push_feature_then_remote_commit <branch> <remote commit message>
+push_feature_then_remote_commit() {
+    local name="$1" msg="$2"
+    git -C "$WORK" push -q -u origin "$name" >/dev/null 2>&1
+    new_tmpdir OTHER_ROOT
+    OTHER="$OTHER_ROOT/other"
+    git clone -q "$TMPROOT/remote.git" "$OTHER"
+    git -C "$OTHER" config user.name "Other"
+    git -C "$OTHER" config user.email "other@test.com"
+    git -C "$OTHER" config core.autocrlf false
+    git -C "$OTHER" checkout -q "$name"
+    commit_file_in "$OTHER" "$msg" "remote-$name.txt"
+    git -C "$OTHER" push -q origin "$name"
+}
+
+describe "update <branch>: takes the remote's commits"
+setup_repo_with_remote
+create_feature_branch "g-behind"
+switch_to g-behind
+commit_file "Behind B1" "behind1.txt"
+switch_to integration
+weave_branch "g-behind"
+push_feature_then_remote_commit g-behind "Behind B2 from elsewhere"
+old_tip=$(git -C "$WORK" rev-parse --short g-behind)
+out=$(gl update g-behind 2>&1)
+assert_exit_ok $? "update_branch_ok"
+assert_contains "$out" "Updated branch g-behind with origin/g-behind" "update_branch_reported"
+assert_contains "$out" "was $old_tip)" "update_branch_old_tip_reported"
+assert_eq "$(git -C "$WORK" log --format=%s -2 g-behind | tr '\n' ' ')" "Behind B2 from elsewhere Behind B1 " "update_branch_commits"
+assert_eq "$(git -C "$WORK" rev-parse HEAD^2)" "$(git -C "$WORK" rev-parse g-behind)" "update_branch_still_woven"
+assert_log_contains "Behind B2 from elsewhere" "update_branch_in_integration"
+
+describe "update <branch> in agent mode reports the branch"
+setup_repo_with_remote
+create_feature_branch "g-behind"
+switch_to g-behind
+commit_file "Behind B1" "behind1.txt"
+switch_to integration
+weave_branch "g-behind"
+push_feature_then_remote_commit g-behind "Behind B2 from elsewhere"
+gl_capture_json update g-behind --agent
+assert_exit_ok "$CODE" "update_branch_agent_ok"
+assert_contains "$(json_line)" '"status":"ok"' "update_branch_agent_status"
+assert_contains "$(json_line)" "Updated branch" "update_branch_agent_reported"
+
+describe "update <branch> replaces local commits the remote lacks"
+setup_repo_with_remote
+create_feature_branch "g-diverged"
+switch_to g-diverged
+commit_file "Diverged D1" "diverged1.txt"
+push_feature_then_remote_commit g-diverged "Diverged D2 from elsewhere"
+commit_file "Diverged D3 local only" "diverged3.txt"
+switch_to integration
+weave_branch "g-diverged"
+out=$(gl update g-diverged 2>&1)
+assert_exit_ok $? "update_diverged_ok"
+assert_eq "$(git -C "$WORK" log --format=%s -1 g-diverged)" "Diverged D2 from elsewhere" "update_diverged_remote_taken"
+assert_log_not_contains "Diverged D3 local only" "update_diverged_local_gone"
+
+describe "plain update leaves a branch behind its remote alone"
+setup_repo_with_remote
+create_feature_branch "g-behind"
+switch_to g-behind
+commit_file "Behind B1" "behind1.txt"
+switch_to integration
+weave_branch "g-behind"
+push_feature_then_remote_commit g-behind "Behind B2 from elsewhere"
+tip_before=$(git -C "$WORK" rev-parse g-behind)
+out=$(gl update -y 2>&1)
+assert_exit_ok $? "plain_update_ok"
+assert_eq "$tip_before" "$(git -C "$WORK" rev-parse g-behind)" "plain_update_branch_kept"
+
+describe "update <branch> refuses a branch without an upstream"
+setup_repo_with_remote
+create_feature_branch "g-local"
+switch_to g-local
+commit_file "Local L1" "local1.txt"
+switch_to integration
+weave_branch "g-local"
+gl_capture update g-local
+assert_exit_fail "$CODE" "update_no_upstream_fails"
+assert_contains "$OUT" "no upstream branch" "update_no_upstream_msg"
+
 # ── PERSISTENT IDS ────────────────────────────────────────────────────────────
 
 describe "a commit keeps its short ID across the update rebase"

@@ -1020,7 +1020,7 @@ fn execute_action(
         Action::Reword { target, name } => reword::run(target, name, vec![]),
         Action::Merge => merge::run(None, true),
         Action::Unmerge { branch } => unmerge::run(branch),
-        Action::Update => update::run(false),
+        Action::Update => update::run(None, false),
         Action::Push { branch } => push::run(branch, false, false, None),
         // `push` itself confirms a force under the TUI, naming every branch.
         Action::ForcePush { branch } => push::run(Some(branch), false, true, None),

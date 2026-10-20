@@ -110,8 +110,8 @@ $_gitLoomCompleter = {
     switch ($subcommand) {
         'update' {
             $subFlags = @(
-                @{ Name = '-y'; Description = 'Skip confirmation prompt' },
-                @{ Name = '--yes'; Description = 'Skip confirmation prompt' }
+                @{ Name = '-y'; Description = 'Remove merged and gone branches without asking' },
+                @{ Name = '--yes'; Description = 'Remove merged and gone branches without asking' }
             )
         }
         'push' {

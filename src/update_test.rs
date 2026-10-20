@@ -10,7 +10,7 @@ fn update_pulls_upstream_changes() {
     let before_oid = test_repo.head_oid();
     assert_ne!(before_oid, remote_oid);
 
-    let result = test_repo.in_dir(|| super::run(false));
+    let result = test_repo.in_dir(|| super::run(None, false));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     let after_oid = test_repo.head_oid();
@@ -24,7 +24,7 @@ fn update_pulls_upstream_changes() {
 fn update_works_when_already_up_to_date() {
     let test_repo = TestRepo::new_with_remote();
 
-    let result = test_repo.in_dir(|| super::run(false));
+    let result = test_repo.in_dir(|| super::run(None, false));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 }
 
@@ -34,7 +34,7 @@ fn update_fails_on_detached_head() {
     let oid = test_repo.head_oid();
     test_repo.set_detached_head(oid);
 
-    let result = test_repo.in_dir(|| super::run(false));
+    let result = test_repo.in_dir(|| super::run(None, false));
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
     assert!(
@@ -49,7 +49,7 @@ fn update_fails_without_upstream() {
     let test_repo = TestRepo::new();
     // new() creates a repo without remote/upstream
 
-    let result = test_repo.in_dir(|| super::run(false));
+    let result = test_repo.in_dir(|| super::run(None, false));
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
     assert!(
@@ -67,7 +67,7 @@ fn update_rebases_local_commits_on_top_of_upstream() {
 
     test_repo.add_remote_commits(&["Remote commit"]);
 
-    let result = test_repo.in_dir(|| super::run(false));
+    let result = test_repo.in_dir(|| super::run(None, false));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     assert_eq!(test_repo.get_message(0), "Local work");
@@ -102,7 +102,7 @@ fn update_fetches_tags_from_remote() {
         "Tag should not exist locally before update"
     );
 
-    let result = test_repo.in_dir(|| super::run(false));
+    let result = test_repo.in_dir(|| super::run(None, false));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     assert!(
@@ -151,7 +151,7 @@ fn update_keeps_tags_when_fetch_all_hits_a_tagless_remote() {
         .set_bool("fetch.all", true)
         .unwrap();
 
-    let result = test_repo.in_dir(|| super::run(false));
+    let result = test_repo.in_dir(|| super::run(None, false));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     assert!(
@@ -202,7 +202,7 @@ fn update_prunes_deleted_remote_branches() {
         branch.delete().unwrap();
     }
 
-    let result = test_repo.in_dir(|| super::run(false));
+    let result = test_repo.in_dir(|| super::run(None, false));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     assert!(
@@ -237,7 +237,7 @@ fn update_preserves_merge_topology() {
 
     test_repo.add_remote_commits(&["Upstream change"]);
 
-    let result = test_repo.in_dir(|| super::run(false));
+    let result = test_repo.in_dir(|| super::run(None, false));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     // Need to re-open since the rebase changed things
@@ -310,7 +310,7 @@ fn update_removes_gone_upstream_branches_via_config() {
     }
 
     // Run update WITHOUT --yes; the config setting should skip the prompt
-    let result = test_repo.in_dir(|| super::run(false));
+    let result = test_repo.in_dir(|| super::run(None, false));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     assert!(
@@ -359,7 +359,7 @@ fn update_removes_branches_with_gone_upstream() {
         branch.delete().unwrap();
     }
 
-    let result = test_repo.in_dir(|| super::run(true));
+    let result = test_repo.in_dir(|| super::run(None, true));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     assert!(
@@ -395,7 +395,7 @@ fn update_prunes_the_push_remote_in_a_fork_workflow() {
         branch.delete().unwrap();
     }
 
-    let result = test_repo.in_dir(|| super::run(true));
+    let result = test_repo.in_dir(|| super::run(None, true));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     assert!(
@@ -418,7 +418,7 @@ fn update_keeps_branches_without_tracking_config() {
     // Create a local branch with no upstream tracking configured
     test_repo.create_branch("local-only");
 
-    let result = test_repo.in_dir(|| super::run(false));
+    let result = test_repo.in_dir(|| super::run(None, false));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     // Branch without upstream config should not be touched
@@ -435,7 +435,7 @@ fn update_keeps_branches_tracking_a_local_branch() {
     let test_repo = TestRepo::new_with_remote();
     test_repo.create_branch_tracking("precious", "main");
 
-    let result = test_repo.in_dir(|| super::run(true));
+    let result = test_repo.in_dir(|| super::run(None, true));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     assert!(
@@ -451,7 +451,7 @@ fn update_keeps_branches_whose_local_upstream_was_deleted() {
     test_repo.create_branch_tracking("part2", "part1");
     test_repo.delete_branch("part1");
 
-    let result = test_repo.in_dir(|| super::run(true));
+    let result = test_repo.in_dir(|| super::run(None, true));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     assert!(
@@ -466,7 +466,7 @@ fn update_keeps_branches_whose_upstream_does_not_resolve() {
     test_repo.create_branch("wip");
     test_repo.track_unknown_remote("wip");
 
-    let result = test_repo.in_dir(|| super::run(true));
+    let result = test_repo.in_dir(|| super::run(None, true));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     assert!(
@@ -500,7 +500,7 @@ fn update_does_not_put_upstream_commits_in_feature_branch() {
 
     test_repo.add_remote_commits(&["Remote 1", "Remote 2", "Remote 3"]);
 
-    let result = test_repo.in_dir(|| super::run(false));
+    let result = test_repo.in_dir(|| super::run(None, false));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     let repo = &test_repo.repo;
@@ -588,7 +588,7 @@ fn update_with_multiple_woven_branches() {
 
     test_repo.add_remote_commits(&["Remote work"]);
 
-    let result = test_repo.in_dir(|| super::run(false));
+    let result = test_repo.in_dir(|| super::run(None, false));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     let repo = &test_repo.repo;
@@ -654,7 +654,7 @@ fn update_preserves_multi_commit_branch() {
 
     test_repo.add_remote_commits(&["Upstream work"]);
 
-    let result = test_repo.in_dir(|| super::run(false));
+    let result = test_repo.in_dir(|| super::run(None, false));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     let repo = &test_repo.repo;
@@ -727,7 +727,7 @@ fn update_with_partially_cherry_picked_branch() {
     test_repo.cherry_pick_to_remote(f1_oid, "F1");
     test_repo.cherry_pick_to_remote(f2_oid, "F2");
 
-    let result = test_repo.in_dir(|| super::run(false));
+    let result = test_repo.in_dir(|| super::run(None, false));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     let repo = &test_repo.repo;
@@ -792,7 +792,7 @@ fn update_handles_branch_cherry_picked_into_upstream() {
 
     test_repo.cherry_pick_to_remote(feature_oid, "Feature A work");
 
-    let result = test_repo.in_dir(|| super::run(true));
+    let result = test_repo.in_dir(|| super::run(None, true));
     assert!(
         result.is_ok(),
         "update should succeed when branch is cherry-picked upstream: {:?}",
@@ -824,7 +824,7 @@ fn update_handles_partial_cherry_pick_to_upstream() {
 
     test_repo.cherry_pick_to_remote(f1_oid, "F1");
 
-    let result = test_repo.in_dir(|| super::run(false));
+    let result = test_repo.in_dir(|| super::run(None, false));
     assert!(
         result.is_ok(),
         "update should succeed with partial cherry-pick: {:?}",
@@ -888,7 +888,7 @@ fn update_handles_fully_cherry_picked_branch() {
     test_repo.cherry_pick_to_remote(f1_oid, "F1");
     test_repo.cherry_pick_to_remote(f2_oid, "F2");
 
-    let result = test_repo.in_dir(|| super::run(true));
+    let result = test_repo.in_dir(|| super::run(None, true));
     assert!(
         result.is_ok(),
         "update should succeed when all branch commits are cherry-picked: {:?}",
@@ -1073,7 +1073,7 @@ fn update_handles_inverted_parent_merge_on_integration() {
     test_repo.add_remote_commits(&["C3"]);
 
     // Run update — should succeed and flatten (no conflicts)
-    let result = test_repo.in_dir(|| super::run(false));
+    let result = test_repo.in_dir(|| super::run(None, false));
     assert!(
         result.is_ok(),
         "update should handle inverted-parent merges: {:?}",
@@ -1138,7 +1138,7 @@ fn update_keeps_other_branches_when_one_lands_upstream() {
 
     test_repo.push_branch_to_remote_main("feature-b");
 
-    let result = test_repo.in_dir(|| super::run(true));
+    let result = test_repo.in_dir(|| super::run(None, true));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     let repo = &test_repo.repo;
@@ -1195,7 +1195,7 @@ fn update_removes_inner_branch_merged_upstream() {
 
     test_repo.push_branch_to_remote_main("feature-a");
 
-    let result = test_repo.in_dir(|| super::run(true));
+    let result = test_repo.in_dir(|| super::run(None, true));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     let repo = &test_repo.repo;
@@ -1254,7 +1254,7 @@ fn update_removes_branch_both_merged_and_gone() {
         branch.delete().unwrap();
     }
 
-    let result = test_repo.in_dir(|| super::run(true));
+    let result = test_repo.in_dir(|| super::run(None, true));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
     assert!(
         !test_repo.branch_exists("feature-a"),
@@ -1284,7 +1284,7 @@ fn update_removes_stacked_branches_merged_upstream() {
 
     test_repo.push_branch_to_remote_main("feature-b");
 
-    let result = test_repo.in_dir(|| super::run(true));
+    let result = test_repo.in_dir(|| super::run(None, true));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     for name in ["feature-a", "feature-b"] {
@@ -1322,7 +1322,7 @@ fn update_keeps_branches_below_the_base() {
 
     test_repo.add_remote_commits(&["Y"]);
 
-    let result = test_repo.in_dir(|| super::run(true));
+    let result = test_repo.in_dir(|| super::run(None, true));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     for name in ["stale", "at-base", "main", "feature"] {
@@ -1358,7 +1358,7 @@ fn update_keeps_main_inside_a_section() {
 
     test_repo.add_remote_commits(&["Y"]);
 
-    let result = test_repo.in_dir(|| super::run(true));
+    let result = test_repo.in_dir(|| super::run(None, true));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     for name in ["main", "story"] {
@@ -1392,7 +1392,7 @@ fn update_keeps_main_inside_a_section_on_a_remote_with_a_slash() {
     )
     .unwrap();
 
-    let result = test_repo.in_dir(|| super::run(true));
+    let result = test_repo.in_dir(|| super::run(None, true));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     for name in ["main", "story"] {
@@ -1427,7 +1427,7 @@ fn update_keeps_a_local_upstream_inside_a_section() {
     test_repo.switch_branch("integration");
     test_repo.merge_no_ff("story");
 
-    let result = test_repo.in_dir(|| super::run(true));
+    let result = test_repo.in_dir(|| super::run(None, true));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     for name in ["main", "story"] {
@@ -1461,7 +1461,7 @@ fn update_keeps_main_whose_section_landed_as_a_cherry_pick() {
 
     test_repo.cherry_pick_to_remote(x_oid, "X");
 
-    let result = test_repo.in_dir(|| super::run(true));
+    let result = test_repo.in_dir(|| super::run(None, true));
     assert!(result.is_ok(), "update failed: {:?}", result.err());
 
     for name in ["main", "story"] {
@@ -1494,7 +1494,7 @@ fn update_removes_its_state_when_the_rebase_never_starts() {
     .unwrap();
 
     let err = test_repo
-        .in_dir(|| super::run(false))
+        .in_dir(|| super::run(None, false))
         .expect_err("the rebase cannot run with feature-a checked out elsewhere");
     assert!(err.to_string().contains("feature-a"), "{err}");
 
@@ -1517,7 +1517,7 @@ fn update_keeps_staging_on_success() {
     t.stage_files(&["local.txt", "brand-new.txt"]);
     let before = t.status_porcelain();
 
-    t.in_dir(|| crate::update::run(true)).unwrap();
+    t.in_dir(|| crate::update::run(None, true)).unwrap();
 
     assert_eq!(t.status_porcelain(), before);
 }
@@ -1565,7 +1565,7 @@ fn update_keeps_staging_across_continue() {
     t.stage_files(&["bystander.txt"]);
     let before = t.status_porcelain();
 
-    t.in_dir(|| crate::update::run(true)).unwrap();
+    t.in_dir(|| crate::update::run(None, true)).unwrap();
     assert!(
         crate::git::rebase_is_in_progress(t.repo.path()),
         "the upstream edit must conflict with the replayed commit"
@@ -1618,33 +1618,20 @@ impl TuiUpdate {
     }
 }
 
-/// Run `update` as the TUI does, with `feature-a` fully merged upstream, and
-/// give every prompt `answer` (`None` dismisses it).
-fn update_under_tui(answer: Option<crate::core::ui::Answer>) -> TuiUpdate {
+/// Run `update` as the TUI does, giving every prompt `answer` (`None`
+/// dismisses it): the prompts, the warnings, and the result.
+fn run_under_tui(
+    test_repo: &TestRepo,
+    answer: Option<crate::core::ui::Answer>,
+) -> (Vec<String>, Vec<String>, anyhow::Result<()>) {
     use crate::core::ui::{self, Request};
 
-    let test_repo = TestRepo::new_with_remote();
-    // A global `loom.pruneGoneBranches = true` would skip the question.
-    test_repo
-        .repo
-        .config()
-        .unwrap()
-        .set_bool("loom.pruneGoneBranches", false)
-        .unwrap();
-    let merge_base_oid = test_repo.head_oid();
-    test_repo.create_branch_at_commit("feature-a", merge_base_oid);
-    test_repo.switch_branch("feature-a");
-    let feature_oid = test_repo.commit("Feature A work", "feature-a.txt");
-    test_repo.switch_branch("integration");
-    test_repo.merge_no_ff("feature-a");
-    test_repo.cherry_pick_to_remote(feature_oid, "Feature A work");
-
-    let (prompts, warnings, result) = test_repo.in_dir(|| {
+    test_repo.in_dir(|| {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::scope(|scope| {
             let worker = scope.spawn(move || {
                 ui::install(tx);
-                let result = super::run(false);
+                let result = super::run(None, false);
                 ui::uninstall();
                 result
             });
@@ -1664,7 +1651,29 @@ fn update_under_tui(answer: Option<crate::core::ui::Answer>) -> TuiUpdate {
             }
             (prompts, warnings, worker.join().unwrap())
         })
-    });
+    })
+}
+
+/// Run `update` as the TUI does, with `feature-a` fully merged upstream, and
+/// give every prompt `answer` (`None` dismisses it).
+fn update_under_tui(answer: Option<crate::core::ui::Answer>) -> TuiUpdate {
+    let test_repo = TestRepo::new_with_remote();
+    // A global `loom.pruneGoneBranches = true` would skip the question.
+    test_repo
+        .repo
+        .config()
+        .unwrap()
+        .set_bool("loom.pruneGoneBranches", false)
+        .unwrap();
+    let merge_base_oid = test_repo.head_oid();
+    test_repo.create_branch_at_commit("feature-a", merge_base_oid);
+    test_repo.switch_branch("feature-a");
+    let feature_oid = test_repo.commit("Feature A work", "feature-a.txt");
+    test_repo.switch_branch("integration");
+    test_repo.merge_no_ff("feature-a");
+    test_repo.cherry_pick_to_remote(feature_oid, "Feature A work");
+
+    let (prompts, warnings, result) = run_under_tui(&test_repo, answer);
     TuiUpdate {
         test_repo,
         prompts,
@@ -1719,7 +1728,7 @@ fn a_failed_fetch_under_the_tui_hints_at_credentials() {
         std::thread::scope(|scope| {
             let worker = scope.spawn(move || {
                 ui::install(tx);
-                let result = super::run(false);
+                let result = super::run(None, false);
                 ui::uninstall();
                 result
             });
@@ -1730,7 +1739,7 @@ fn a_failed_fetch_under_the_tui_hints_at_credentials() {
     assert!(message.starts_with("Fetch failed\n"), "{message}");
     assert!(message.contains("credentials"), "{message}");
 
-    let outside_tui = test_repo.in_dir(|| super::run(false)).unwrap_err();
+    let outside_tui = test_repo.in_dir(|| super::run(None, false)).unwrap_err();
     assert!(!outside_tui.to_string().contains("credentials"));
 }
 
@@ -1742,7 +1751,7 @@ fn update_rebases_an_octopus_merge_onto_upstream() {
     t.push_branch_to_remote_main("feat1");
     let upstream = t.add_remote_commits(&["Upstream change"]);
 
-    t.in_dir(|| super::run(false)).unwrap();
+    t.in_dir(|| super::run(None, false)).unwrap();
 
     let head = t.head_commit();
     assert!(
@@ -1758,4 +1767,422 @@ fn update_rebases_an_octopus_merge_onto_upstream() {
     for file in ["int1.txt", "feat1.txt", "feat2.txt"] {
         assert!(t.workdir().join(file).exists(), "{file}");
     }
+}
+
+// ── Updating a branch from its remote (Spec 010) ──
+
+const ID_A1: &str = "Change-Id: Iaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const ID_A2: &str = "Change-Id: Ibbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const ID_A3: &str = "Change-Id: Icccccccccccccccccccccccccccccccccccccccc";
+
+fn with_id(subject: &str, id: &str) -> String {
+    format!("{subject}\n\n{id}")
+}
+
+/// Commit `file` on the remote's `branch` with real content, so the replay
+/// has something to apply (`add_remote_commits` reuses the parent's tree).
+fn commit_on_remote(t: &TestRepo, branch: &str, file: &str, message: &str) -> git2::Oid {
+    let remote = Repository::open_bare(t.remote_path().unwrap()).unwrap();
+    let sig = Signature::now("Remote", "remote@test.com").unwrap();
+    let parent_oid = remote
+        .find_branch(branch, BranchType::Local)
+        .unwrap()
+        .get()
+        .target()
+        .unwrap();
+    let parent = remote.find_commit(parent_oid).unwrap();
+    let blob = remote.blob(message.as_bytes()).unwrap();
+    let mut builder = remote.treebuilder(Some(&parent.tree().unwrap())).unwrap();
+    builder.insert(file, blob, 0o100644).unwrap();
+    let tree = remote.find_tree(builder.write().unwrap()).unwrap();
+    remote
+        .commit(
+            Some(&format!("refs/heads/{branch}")),
+            &sig,
+            &sig,
+            message,
+            &tree,
+            &[&parent],
+        )
+        .unwrap()
+}
+
+/// Point the remote's `branch` at `oid`, as a force-push would.
+fn reset_remote_branch(t: &TestRepo, branch: &str, oid: git2::Oid) {
+    let remote = Repository::open_bare(t.remote_path().unwrap()).unwrap();
+    remote
+        .reference(&format!("refs/heads/{branch}"), oid, true, "test")
+        .unwrap();
+}
+
+/// Merge `other` into the remote's `branch`, keeping the branch's tree.
+fn merge_on_remote(t: &TestRepo, branch: &str, other: git2::Oid) -> git2::Oid {
+    let remote = Repository::open_bare(t.remote_path().unwrap()).unwrap();
+    let sig = Signature::now("Remote", "remote@test.com").unwrap();
+    let tip = remote
+        .find_branch(branch, BranchType::Local)
+        .unwrap()
+        .get()
+        .target()
+        .unwrap();
+    let ours = remote.find_commit(tip).unwrap();
+    let theirs = remote.find_commit(other).unwrap();
+    remote
+        .commit(
+            Some(&format!("refs/heads/{branch}")),
+            &sig,
+            &sig,
+            "Merge side",
+            &ours.tree().unwrap(),
+            &[&ours, &theirs],
+        )
+        .unwrap()
+}
+
+/// `feature-a` holding `A1`, pushed with tracking and woven.
+fn repo_with_pushed_feature(message: &str) -> TestRepo {
+    let t = TestRepo::new_with_remote();
+    t.create_branch_at_commit("feature-a", t.head_oid());
+    t.switch_branch("feature-a");
+    t.commit(message, "a1.txt");
+    crate::git::run_git(&t.workdir(), &["push", "-u", "origin", "feature-a"]).unwrap();
+    t.switch_branch("integration");
+    t.merge_no_ff("feature-a");
+    t
+}
+
+/// Subjects of `branch`'s commits above `origin/main`, oldest first.
+fn branch_subjects(t: &TestRepo, branch: &str) -> Vec<String> {
+    let mut walk = t.repo.revwalk().unwrap();
+    walk.push(t.get_branch_target(branch)).unwrap();
+    walk.hide(t.find_remote_branch_target("origin/main"))
+        .unwrap();
+    walk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::REVERSE)
+        .unwrap();
+    walk.map(|oid| crate::core::repo::commit_subject(&t.find_commit(oid.unwrap())))
+        .collect()
+}
+
+fn update_branch(t: &TestRepo, name: &str) -> anyhow::Result<()> {
+    t.in_dir(|| super::run(Some(name.to_string()), true))
+}
+
+fn update_error(t: &TestRepo, name: &str) -> String {
+    update_branch(t, name).unwrap_err().to_string()
+}
+
+/// The remote amended `A1` and added `A2` while upstream moved on: the branch
+/// takes that version, rebased onto the new upstream with the rest.
+#[test]
+fn update_takes_the_remote_version_of_a_branch() {
+    let t = repo_with_pushed_feature(&with_id("A1", ID_A1));
+    reset_remote_branch(&t, "feature-a", t.find_remote_branch_target("origin/main"));
+    commit_on_remote(&t, "feature-a", "a1.txt", &with_id("A1 amended", ID_A1));
+    let remote_tip = commit_on_remote(&t, "feature-a", "a2.txt", &with_id("A2", ID_A2));
+    let upstream = t.add_remote_commits(&["Upstream"]);
+
+    update_branch(&t, "feature-a").unwrap();
+
+    assert_eq!(branch_subjects(&t, "feature-a"), ["A1 amended", "A2"]);
+    assert_eq!(t.read_file("a1.txt"), with_id("A1 amended", ID_A1));
+    let tip = t.get_branch_target("feature-a");
+    assert_ne!(tip, remote_tip, "replayed onto the new upstream");
+    assert!(t.repo.graph_descendant_of(tip, upstream).unwrap());
+    let head = t.head_commit();
+    assert_eq!(head.parent_count(), 2, "the merge is kept");
+    assert_eq!(head.parent_id(1).unwrap(), tip);
+    t.assert_working_tree_clean();
+}
+
+/// Whatever the local branch had and the remote lacks goes: `A2` was never
+/// pushed, `A3` is the remote's.
+#[test]
+fn update_replaces_local_commits_the_remote_lacks() {
+    let t = repo_with_pushed_feature(&with_id("A1", ID_A1));
+    let base = t.find_remote_branch_target("origin/main");
+    t.switch_branch("feature-a");
+    t.commit(&with_id("A2", ID_A2), "a2.txt");
+    t.switch_branch("integration");
+    t.reset_hard(base);
+    t.merge_no_ff("feature-a");
+    commit_on_remote(&t, "feature-a", "a3.txt", &with_id("A3", ID_A3));
+
+    update_branch(&t, "feature-a").unwrap();
+
+    assert_eq!(branch_subjects(&t, "feature-a"), ["A1", "A3"]);
+    assert!(!t.workdir().join("a2.txt").exists());
+}
+
+/// `feature-a` tracking `mirror`, a second name for `origin` that neither
+/// fetch of `update` covers, so `commit_on_remote` leaves its ref stale.
+fn repo_tracking_a_mirror() -> TestRepo {
+    let t = repo_with_pushed_feature(&with_id("A1", ID_A1));
+    let url = t.remote_path().unwrap();
+    t.repo.remote("mirror", url.to_str().unwrap()).unwrap();
+    let workdir = t.workdir();
+    crate::git::run_git(&workdir, &["fetch", "mirror"]).unwrap();
+    crate::git::run_git(
+        &workdir,
+        &["branch", "--set-upstream-to=mirror/feature-a", "feature-a"],
+    )
+    .unwrap();
+    t
+}
+
+/// A stale tracking ref was taken as the remote version, dropping `A2`.
+#[test]
+fn update_fetches_a_branch_tracking_another_remote() {
+    let t = repo_tracking_a_mirror();
+    commit_on_remote(&t, "feature-a", "a2.txt", &with_id("A2", ID_A2));
+
+    update_branch(&t, "feature-a").unwrap();
+
+    assert_eq!(branch_subjects(&t, "feature-a"), ["A1", "A2"]);
+}
+
+#[test]
+fn update_refuses_a_branch_whose_remote_cannot_be_fetched() {
+    let t = repo_tracking_a_mirror();
+    Repository::open_bare(t.remote_path().unwrap())
+        .unwrap()
+        .find_branch("feature-a", BranchType::Local)
+        .unwrap()
+        .delete()
+        .unwrap();
+    let tip = t.get_branch_target("feature-a");
+
+    assert_eq!(
+        update_error(&t, "feature-a"),
+        "Could not fetch `mirror/feature-a`"
+    );
+    assert_eq!(t.get_branch_target("feature-a"), tip);
+}
+
+#[test]
+fn update_without_a_branch_leaves_every_branch_alone() {
+    let t = repo_with_pushed_feature(&with_id("A1", ID_A1));
+    commit_on_remote(&t, "feature-a", "a2.txt", &with_id("A2", ID_A2));
+    let tip = t.get_branch_target("feature-a");
+
+    t.in_dir(|| super::run(None, true)).unwrap();
+
+    assert_eq!(t.get_branch_target("feature-a"), tip);
+}
+
+#[test]
+fn update_reports_a_branch_already_at_its_remote_tip() {
+    let t = repo_with_pushed_feature(&with_id("A1", ID_A1));
+    let tip = t.get_branch_target("feature-a");
+
+    update_branch(&t, "feature-a").unwrap();
+
+    assert_eq!(t.get_branch_target("feature-a"), tip);
+}
+
+/// The remote version landed upstream whole, an amended `A1` fast-forwarded:
+/// nothing is left to replay, and the branch is fully merged.
+#[test]
+fn update_removes_a_branch_whose_remote_version_is_all_upstream() {
+    let t = repo_with_pushed_feature(&with_id("A1", ID_A1));
+    reset_remote_branch(&t, "feature-a", t.find_remote_branch_target("origin/main"));
+    let amended = commit_on_remote(&t, "feature-a", "a1.txt", &with_id("A1 amended", ID_A1));
+    reset_remote_branch(&t, "main", amended);
+
+    update_branch(&t, "feature-a").unwrap();
+
+    assert!(!t.branch_exists("feature-a"));
+    assert_eq!(t.head_commit().parent_count(), 1);
+    assert_eq!(t.read_file("a1.txt"), with_id("A1 amended", ID_A1));
+}
+
+/// `A1` is in HEAD's history and in the replaced section by the same hash,
+/// and both it and the remote's `A2` were cherry-picked upstream: each
+/// `git cherry` run reports `A1`, and dropping it twice used to panic.
+#[test]
+fn update_drops_a_replaced_commit_cherry_picked_upstream_once() {
+    let t = repo_with_pushed_feature(&with_id("A1", ID_A1));
+    let a2 = commit_on_remote(&t, "feature-a", "a2.txt", &with_id("A2", ID_A2));
+    t.repo
+        .find_remote("origin")
+        .unwrap()
+        .fetch(&["feature-a"], None, None)
+        .unwrap();
+    t.cherry_pick_to_remote(t.get_branch_target("feature-a"), "A1 picked upstream");
+    t.cherry_pick_to_remote(a2, "A2 picked upstream");
+
+    update_branch(&t, "feature-a").unwrap();
+
+    assert!(!t.branch_exists("feature-a"), "fully merged, so removed");
+    assert_eq!(t.head_commit().parent_count(), 1);
+    for file in ["a1.txt", "a2.txt"] {
+        assert!(t.workdir().join(file).exists(), "{file}");
+    }
+}
+
+#[test]
+fn update_takes_a_remote_version_across_continue() {
+    let t = repo_with_pushed_feature(&with_id("A1", ID_A1));
+    // Upstream and the remote's `A2` both add `shared.txt`: the replay conflicts.
+    commit_on_remote(&t, "main", "shared.txt", "Upstream");
+    commit_on_remote(&t, "feature-a", "shared.txt", &with_id("A2", ID_A2));
+
+    update_branch(&t, "feature-a").unwrap();
+    assert!(crate::git::rebase_is_in_progress(t.repo.path()));
+
+    t.write_file("shared.txt", "resolved\n");
+    t.stage_files(&["shared.txt"]);
+    crate::core::transaction::continue_cmd(&t.workdir(), t.repo.path()).unwrap();
+
+    assert!(!crate::git::rebase_is_in_progress(t.repo.path()));
+    assert_eq!(branch_subjects(&t, "feature-a"), ["A1", "A2"]);
+    assert_eq!(t.read_file("shared.txt"), "resolved\n");
+}
+
+#[test]
+fn update_aborts_a_remote_version_back_to_the_old_tip() {
+    let t = repo_with_pushed_feature(&with_id("A1", ID_A1));
+    commit_on_remote(&t, "main", "shared.txt", "Upstream");
+    commit_on_remote(&t, "feature-a", "shared.txt", &with_id("A2", ID_A2));
+    let (head, tip) = (t.head_oid(), t.get_branch_target("feature-a"));
+
+    update_branch(&t, "feature-a").unwrap();
+    assert!(crate::git::rebase_is_in_progress(t.repo.path()));
+    crate::core::transaction::abort_cmd(&t.workdir(), t.repo.path()).unwrap();
+
+    assert!(!crate::git::rebase_is_in_progress(t.repo.path()));
+    assert_eq!(t.head_oid(), head);
+    assert_eq!(t.get_branch_target("feature-a"), tip);
+    t.assert_working_tree_clean();
+}
+
+#[test]
+fn update_refuses_a_branch_sharing_its_commits() {
+    let t = repo_with_pushed_feature(&with_id("A1", ID_A1));
+    t.create_branch_at_commit("feature-b", t.get_branch_target("feature-a"));
+    commit_on_remote(&t, "feature-a", "a2.txt", &with_id("A2", ID_A2));
+
+    assert_eq!(
+        update_error(&t, "feature-a"),
+        "Cannot update `feature-a`: it shares commits with branch `feature-b`"
+    );
+    assert_eq!(branch_subjects(&t, "feature-a"), ["A1"]);
+}
+
+#[test]
+fn update_refuses_an_inner_branch() {
+    let t = TestRepo::new_with_remote();
+    t.create_branch_at_commit("feature-a", t.head_oid());
+    t.switch_branch("feature-a");
+    t.commit(&with_id("A1", ID_A1), "a1.txt");
+    crate::git::run_git(&t.workdir(), &["push", "-u", "origin", "feature-a"]).unwrap();
+    t.create_branch_at_commit("feature-b", t.get_branch_target("feature-a"));
+    t.switch_branch("feature-b");
+    t.commit(&with_id("B1", ID_A3), "b1.txt");
+    t.switch_branch("integration");
+    t.merge_no_ff("feature-b");
+    commit_on_remote(&t, "feature-a", "a2.txt", &with_id("A2", ID_A2));
+
+    assert_eq!(
+        update_error(&t, "feature-a"),
+        "Cannot update `feature-a`: branch `feature-b` is stacked on it"
+    );
+    assert_eq!(branch_subjects(&t, "feature-a"), ["A1"]);
+}
+
+#[test]
+fn update_refuses_a_remote_carrying_a_merge() {
+    let t = repo_with_pushed_feature(&with_id("A1", ID_A1));
+    reset_remote_branch(&t, "side", t.find_remote_branch_target("origin/main"));
+    let side = commit_on_remote(&t, "side", "side.txt", &with_id("Side", ID_A2));
+    merge_on_remote(&t, "feature-a", side);
+
+    assert_eq!(
+        update_error(&t, "feature-a"),
+        "Cannot update `feature-a`: `origin/feature-a` carries a merge commit"
+    );
+    assert_eq!(branch_subjects(&t, "feature-a"), ["A1"]);
+}
+
+#[test]
+fn update_refuses_a_branch_without_an_upstream() {
+    let t = TestRepo::new_with_remote();
+    t.create_branch_at_commit("feature-a", t.head_oid());
+    t.switch_branch("feature-a");
+    t.commit(&with_id("A1", ID_A1), "a1.txt");
+    t.switch_branch("integration");
+    t.merge_no_ff("feature-a");
+
+    let error = update_error(&t, "feature-a");
+    assert!(
+        error.starts_with("Branch `feature-a` has no upstream branch"),
+        "{error}"
+    );
+}
+
+/// `part2` tracks `part1`, a local branch: a stack, not a publication.
+#[test]
+fn update_refuses_a_branch_tracking_a_local_branch() {
+    let t = TestRepo::new_with_remote();
+    t.create_branch_at_commit("part1", t.head_oid());
+    t.switch_branch("part1");
+    t.commit(&with_id("P1", ID_A1), "p1.txt");
+    t.create_branch_at_commit("part2", t.get_branch_target("part1"));
+    t.commit(&with_id("P2", ID_A2), "p2.txt");
+    crate::git::run_git(
+        &t.workdir(),
+        &["branch", "--set-upstream-to=part1", "part2"],
+    )
+    .unwrap();
+    t.switch_branch("integration");
+    t.merge_no_ff("part2");
+
+    assert_eq!(
+        update_error(&t, "part2"),
+        "Branch `part2` tracks a local branch, which no fetch updates"
+    );
+}
+
+/// An empty branch at the base has no section to replace.
+#[test]
+fn update_refuses_a_branch_that_is_not_woven() {
+    let t = TestRepo::new_with_remote();
+    t.create_branch_at_commit("feature-a", t.head_oid());
+    crate::git::run_git(&t.workdir(), &["push", "-u", "origin", "feature-a"]).unwrap();
+    commit_on_remote(&t, "feature-a", "a1.txt", &with_id("A1", ID_A1));
+
+    let error = update_error(&t, "feature-a");
+    assert!(
+        error.starts_with("Branch `feature-a` is not woven into the integration branch"),
+        "{error}"
+    );
+}
+
+/// The up-to-date report used to come before the checks, so this one passed.
+#[test]
+fn update_refuses_a_branch_that_is_not_woven_at_its_remote_tip() {
+    let t = TestRepo::new_with_remote();
+    t.create_branch_at_commit("feature-a", t.head_oid());
+    crate::git::run_git(&t.workdir(), &["push", "-u", "origin", "feature-a"]).unwrap();
+
+    let error = update_error(&t, "feature-a");
+    assert!(
+        error.starts_with("Branch `feature-a` is not woven into the integration branch"),
+        "{error}"
+    );
+}
+
+#[test]
+fn update_refuses_a_branch_whose_remote_is_gone() {
+    let t = repo_with_pushed_feature(&with_id("A1", ID_A1));
+    Repository::open_bare(t.remote_path().unwrap())
+        .unwrap()
+        .find_branch("feature-a", BranchType::Local)
+        .unwrap()
+        .delete()
+        .unwrap();
+
+    assert_eq!(
+        update_error(&t, "feature-a"),
+        "`origin/feature-a` is gone: the remote no longer has it"
+    );
 }

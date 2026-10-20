@@ -110,8 +110,8 @@ _git-loom() {
     case $sub in
         update)
             flags=(
-                '-y:Skip confirmation prompt'
-                '--yes:Skip confirmation prompt'
+                '-y:Remove merged and gone branches without asking'
+                '--yes:Remove merged and gone branches without asking'
             ) ;;
         push)
             flags=(
