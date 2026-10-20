@@ -313,22 +313,40 @@ impl Weave {
             }
         }
 
-        // Strategy 2: git cherry for the rest — O(feature commits), not O(upstream)
+        // Strategy 2: git cherry for the rest — O(feature commits), not O(upstream).
+        // A section replaced by its remote version (Spec 010) holds commits
+        // outside HEAD's history, so its tip gets a run of its own.
         if !candidates.is_empty() {
             let candidate_set: HashSet<Oid> = candidates.into_iter().collect();
-            match cherry_pick_equivalents(workdir, &new_upstream_oid, &self.base_oid) {
-                Some(equivalent) => {
-                    to_drop.extend(equivalent.intersection(&candidate_set).copied());
+            let head_oid = repo::head_oid(repo)?;
+            let mut heads = vec![head_oid];
+            for section in &self.branch_sections {
+                if let Some(tip) = section.commits.last()
+                    && !repo::contains(repo, head_oid, tip.oid)?
+                {
+                    heads.push(tip.oid);
                 }
-                None => {
-                    msg::warn(
-                        "Could not run git cherry — \
-                         cherry-picked commits may not be detected",
-                    );
+            }
+            let mut failed = false;
+            for head in heads {
+                match cherry_pick_equivalents(workdir, &new_upstream_oid, &head, &self.base_oid) {
+                    Some(equivalent) => {
+                        to_drop.extend(equivalent.intersection(&candidate_set).copied());
+                    }
+                    None => failed = true,
                 }
+            }
+            if failed {
+                msg::warn(
+                    "Could not run git cherry — \
+                     cherry-picked commits may not be detected",
+                );
             }
         }
 
+        // A commit both HEAD and a replaced section hold is reported twice.
+        let mut seen = HashSet::new();
+        to_drop.retain(|oid| seen.insert(*oid));
         let mut emptied = Vec::new();
         for oid in to_drop {
             emptied.extend(
@@ -470,6 +488,38 @@ impl Weave {
     pub fn section_branch_names(&self, branch_name: &str) -> &[String] {
         self.section_index(branch_name)
             .map_or(&[], |i| &self.branch_sections[i].branch_names)
+    }
+
+    /// The other refs `branch_name`'s section carries: co-located names and
+    /// inner (stacked) refs. `None` when it has no section.
+    pub fn other_refs_in_section(&self, branch_name: &str) -> Option<Vec<String>> {
+        let section = &self.branch_sections[self.section_index(branch_name)?];
+        Some(
+            section
+                .branch_names
+                .iter()
+                .filter(|n| *n != branch_name)
+                .chain(section.commits.iter().flat_map(|c| c.update_refs.iter()))
+                .cloned()
+                .collect(),
+        )
+    }
+
+    /// Replace `branch_name`'s section commits with `commits`, its remote
+    /// version (Spec 010); the rebase replays them like any other section.
+    /// `false` when the section carries another ref — co-located or inner —
+    /// that the new commits could not place, or there is no section.
+    #[must_use]
+    pub fn replace_branch_commits(&mut self, branch_name: &str, commits: Vec<CommitEntry>) -> bool {
+        if self
+            .other_refs_in_section(branch_name)
+            .is_none_or(|others| !others.is_empty())
+        {
+            return false;
+        }
+        let idx = self.section_index(branch_name).expect("checked above");
+        self.branch_sections[idx].commits = commits;
+        true
     }
 
     /// Whether `branch_name` is an inner (stacked) ref, i.e. a branch whose tip
@@ -1873,15 +1923,25 @@ fn rewritten_branches(workdir: &Path, todo: &str) -> Vec<String> {
     branches
 }
 
-/// OIDs in `base..HEAD` that have cherry-pick equivalents in `upstream`.
+/// OIDs in `limit..head` that have cherry-pick equivalents in `head..upstream`.
 ///
-/// From `git cherry <upstream> HEAD <base>`, whose `- <sha>` lines mark the
-/// commits already upstream. O(feature commits), and it shares git's own
-/// patch-ID logic, so `diff.algorithm` stays consistent.
-fn cherry_pick_equivalents(workdir: &Path, upstream: &Oid, base: &Oid) -> Option<HashSet<Oid>> {
+/// From `git cherry <upstream> <head> <limit>`, whose `- <sha>` lines mark
+/// them. O(feature commits), and it shares git's own patch-ID logic, so
+/// `diff.algorithm` stays consistent.
+fn cherry_pick_equivalents(
+    workdir: &Path,
+    upstream: &Oid,
+    head: &Oid,
+    limit: &Oid,
+) -> Option<HashSet<Oid>> {
     let stdout = git::run_git_stdout(
         workdir,
-        &["cherry", &upstream.to_string(), "HEAD", &base.to_string()],
+        &[
+            "cherry",
+            &upstream.to_string(),
+            &head.to_string(),
+            &limit.to_string(),
+        ],
     )
     .ok()?;
 

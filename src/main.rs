@@ -172,7 +172,9 @@ enum Command {
     /// Pull-rebase the integration branch and update submodules
     #[command(visible_alias = "up")]
     Update {
-        /// Skip confirmation prompt
+        /// Branch to update from its remote branch first (name or short ID)
+        branch: Option<String>,
+        /// Remove merged and gone branches without asking
         #[arg(short, long)]
         yes: bool,
     },
@@ -715,7 +717,7 @@ fn main() {
             force,
             title,
         }) => push::run(branch, no_pr, force, title),
-        Some(Command::Update { yes }) => update::run(yes),
+        Some(Command::Update { branch, yes }) => update::run(branch, yes),
         Some(Command::Fold {
             create,
             patch,

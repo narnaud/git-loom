@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use git2::BranchType;
+use git2::{BranchType, Oid, Repository};
 use serde::{Deserialize, Serialize};
 
 use crate::core::remote;
@@ -10,7 +10,7 @@ use crate::core::repo;
 use crate::core::agent_mode;
 use crate::core::msg;
 use crate::core::transaction::{self, LoomState, Rollback};
-use crate::core::weave::Weave;
+use crate::core::weave::{self, Command, CommitEntry, Weave};
 use crate::git::{self, RebaseOutcome};
 
 #[derive(Serialize, Deserialize)]
@@ -21,10 +21,47 @@ struct UpdateContext {
     /// Branches whose every commit was already upstream before the rebase.
     #[serde(default)]
     merged_branches: Vec<String>,
+    /// The branch the rebase replaces with its remote version (Spec 010).
+    #[serde(default)]
+    updated_branch: Option<UpdatedBranch>,
+}
+
+/// A woven branch taking its remote version, as the report names it.
+#[derive(Serialize, Deserialize, Clone)]
+struct UpdatedBranch {
+    name: String,
+    /// The remote branch, as `origin/feature`.
+    remote: String,
+    /// Its tip, which the report names: the rebase gives the branch a new one.
+    tip: String,
+    /// The branch's own tip before, the way back the report names.
+    old_tip: String,
+}
+
+/// The branch `loom update <branch>` names, resolved before the fetch.
+struct Target {
+    name: String,
+    /// The remote branch, as `origin/feature`, and its full ref name.
+    remote: String,
+    remote_ref: String,
+    /// Where it is fetched from: the remote, and the branch there, as
+    /// `refs/heads/feature`.
+    remote_name: String,
+    merge_ref: String,
+}
+
+/// What taking the remote version did to the graph.
+enum Taken {
+    Replaced(UpdatedBranch),
+    /// The remote is at the local tip already.
+    Unchanged,
+    /// The new upstream has every remote commit: the section is gone and the
+    /// branch is fully merged.
+    AllUpstream,
 }
 
 /// Update the integration branch by fetching and rebasing from upstream.
-pub fn run(skip_confirm: bool) -> Result<()> {
+pub fn run(branch: Option<String>, skip_confirm: bool) -> Result<()> {
     let repo = repo::open_repo()?;
     let workdir = repo::require_workdir(&repo, "update")?.to_path_buf();
     let git_dir = repo.path().to_path_buf();
@@ -54,6 +91,12 @@ pub fn run(skip_confirm: bool) -> Result<()> {
 
     let head_refname = head.name().context("HEAD ref name is not valid UTF-8")?;
     let (upstream_remote, upstream_branch) = repo::upstream_remote_and_branch(&repo, head_refname)?;
+
+    // Resolved before the fetch, so a wrong name costs nothing.
+    let target = branch
+        .as_deref()
+        .map(|arg| resolve_target(&repo, arg))
+        .transpose()?;
 
     // Fetch with tags, force-update, and prune deleted remote branches. The
     // remote is named explicitly so `--tags` makes the tag refspec explicit and
@@ -99,7 +142,13 @@ pub fn run(skip_confirm: bool) -> Result<()> {
         }
     }
 
-    fetch_push_remote(&repo, &workdir, &upstream_remote, &upstream_branch);
+    let push_remote = fetch_push_remote(&repo, &workdir, &upstream_remote, &upstream_branch);
+    if let Some(target) = &target
+        && target.remote_name != upstream_remote
+        && push_remote.as_ref() != Some(&target.remote_name)
+    {
+        fetch_target(&workdir, target)?;
+    }
 
     let repo = git2::Repository::discover(&workdir)?;
 
@@ -108,15 +157,39 @@ pub fn run(skip_confirm: bool) -> Result<()> {
     // place new upstream commits inside a feature branch instead of on the base
     // line; the weave's todo `reset onto` for every branch section, so branches
     // land on the new upstream tip.
-    let (todo, merged_branches) = match Weave::from_repo(&repo) {
+    let (todo, merged_branches, updated_branch) = match Weave::from_repo(&repo) {
         Ok(mut graph) => {
-            // Drop branch-section commits already in the new upstream, so their
-            // content is not replayed onto a base that already has it.
             let new_upstream_oid = repo
                 .revparse_single(&upstream_name)
                 .context("Failed to resolve upstream ref")?
                 .id();
+
+            // The named branch takes its remote version first, so it goes
+            // through the filtering and the rebase like its own.
+            let mut updated = None;
+            let mut taken_merged = Vec::new();
+            if let Some(target) = &target {
+                match take_remote_version(&repo, &mut graph, target, new_upstream_oid)? {
+                    Taken::Replaced(info) => updated = Some(info),
+                    Taken::Unchanged => msg::success(&format!(
+                        "Branch `{}` is up to date with `{}`",
+                        target.name, target.remote
+                    )),
+                    Taken::AllUpstream => taken_merged.push(target.name.clone()),
+                }
+            }
+
+            // Drop branch-section commits already in the new upstream, so their
+            // content is not replayed onto a base that already has it.
             let filtered_out = graph.filter_upstream_commits(&repo, &workdir, new_upstream_oid)?;
+            // A remote version the upstream already has in full empties the
+            // section: the ref stays where it was, and the branch is merged.
+            if updated
+                .as_ref()
+                .is_some_and(|b| filtered_out.contains(&b.name))
+            {
+                updated = None;
+            }
 
             // Fully merged branches: every commit was filtered out (merged
             // or cherry-picked), or the tip sits below the merge base with
@@ -129,24 +202,30 @@ pub fn run(skip_confirm: bool) -> Result<()> {
                 graph.base_oid,
                 new_upstream_oid,
             )?;
+            // The updated branch's old tip may be upstream; its new commits are not.
+            merged.retain(|name| updated.as_ref().is_none_or(|b| b.name != *name));
             merged.extend(filtered_out);
+            merged.extend(taken_merged);
             // A woven branch started from a local `main` holds its tip, so both
             // tests can find it; it stays loom's to keep (Spec 010).
             merged.retain(|name| *name != upstream_branch);
             merged.sort();
             merged.dedup();
-            (Some(graph.to_todo()), merged)
+            (Some(graph.to_todo()), merged, updated)
         }
         // Git's own rebase still updates (an octopus merge, Spec 010). The
         // cause line only: the builder's remedy is for a refused rewrite.
         Err(e) => {
             let cause = e.to_string();
+            let cause = cause.lines().next().unwrap_or_default();
+            if let Some(target) = &target {
+                bail!("Cannot update `{}`: {cause}", target.name);
+            }
             msg::warn(&format!(
-                "{}\nUpdating with git's own rebase instead: branches already \
-                 merged upstream are not offered for removal",
-                cause.lines().next().unwrap_or_default()
+                "{cause}\nUpdating with git's own rebase instead: branches already \
+                 merged upstream are not offered for removal"
             ));
-            (None, Vec::new())
+            (None, Vec::new(), None)
         }
     };
 
@@ -156,6 +235,7 @@ pub fn run(skip_confirm: bool) -> Result<()> {
         upstream_name: upstream_name.clone(),
         skip_confirm,
         merged_branches,
+        updated_branch,
     };
     let state = LoomState {
         command: "update".to_string(),
@@ -210,7 +290,7 @@ pub fn run(skip_confirm: bool) -> Result<()> {
 }
 
 /// Fetch and prune the push remote when it differs from the integration
-/// branch's remote.
+/// branch's remote; returns it once fetched.
 ///
 /// In a fork workflow feature branches live on the push remote, which the
 /// fetch above never touches: its remote-tracking refs would stay stale and
@@ -225,11 +305,8 @@ fn fetch_push_remote(
     workdir: &Path,
     upstream_remote: &str,
     upstream_branch: &str,
-) {
-    let Some(remote) = remote::fork_push_remote(repo, workdir, upstream_remote, upstream_branch)
-    else {
-        return;
-    };
+) -> Option<String> {
+    let remote = remote::fork_push_remote(repo, workdir, upstream_remote, upstream_branch)?;
 
     let spinner = msg::spinner();
     spinner.start(&format!("Fetching `{}`...", remote));
@@ -249,6 +326,7 @@ fn fetch_push_remote(
             if !summary.is_empty() {
                 msg::human_line(&summary);
             }
+            Some(remote)
         }
         // An unreachable fork must not stop the update: the integration branch
         // can still be rebased onto its own upstream.
@@ -257,6 +335,40 @@ fn fetch_push_remote(
                 "Could not fetch `{}` — branches deleted there are not detected",
                 remote
             ));
+            None
+        }
+    }
+}
+
+/// Fetch `target`'s remote branch when no fetch before covered its remote (a
+/// third one, or a push remote whose fetch failed): its tracking ref may be
+/// stale, and taking it would bring back an old version. Tags come from the
+/// integration remote only.
+fn fetch_target(workdir: &Path, target: &Target) -> Result<()> {
+    let spinner = msg::spinner();
+    spinner.start(&format!("Fetching `{}`...", target.remote));
+    // Forced: the remote branch may have been rewritten, the case naming it is for.
+    let refspec = format!("+{}:{}", target.merge_ref, target.remote_ref);
+    match git::run_git_combined(
+        workdir,
+        &[
+            "fetch",
+            "--no-progress",
+            "--no-tags",
+            &target.remote_name,
+            &refspec,
+        ],
+    ) {
+        Ok(summary) => {
+            spinner.stop(&format!("Fetched `{}`", target.remote));
+            if !summary.is_empty() {
+                msg::human_line(&summary);
+            }
+            Ok(())
+        }
+        Err(e) => {
+            spinner.error("Fetch failed");
+            Err(e.context(format!("Could not fetch `{}`", target.remote)))
         }
     }
 }
@@ -293,21 +405,20 @@ fn post_update(workdir: &Path, repo: &git2::Repository, ctx: &UpdateContext) -> 
         }
     }
 
-    let upstream_info = repo
-        .revparse_single(&ctx.upstream_name)
-        .ok()
-        .and_then(|obj| obj.peel_to_commit().ok())
-        .map(|commit| {
-            let short_id = git::short_hash(&commit.id().to_string()).to_string();
-            let summary = repo::commit_subject(&commit);
-            format!(" ({} {})", short_id, summary)
-        })
-        .unwrap_or_default();
-
     msg::success(&format!(
         "Updated branch `{}` with `{}`{}",
-        ctx.branch_name, ctx.upstream_name, upstream_info
+        ctx.branch_name,
+        ctx.upstream_name,
+        commit_blurb(repo, &ctx.upstream_name, None)
     ));
+    if let Some(branch) = &ctx.updated_branch {
+        msg::success(&format!(
+            "Updated branch `{}` with `{}`{}",
+            branch.name,
+            branch.remote,
+            commit_blurb(repo, &branch.tip, Some(&branch.old_tip))
+        ));
+    }
 
     // Propose removing local branches that are fully merged upstream or
     // whose remote tracking branch was pruned
@@ -378,6 +489,154 @@ fn post_update(workdir: &Path, repo: &git2::Repository, ctx: &UpdateContext) -> 
     }
 
     Ok(())
+}
+
+/// ` (abc1234 subject[, was def5678])` for `spec` and the tip it replaced;
+/// empty when `spec` does not resolve, since the message prints either way.
+fn commit_blurb(repo: &Repository, spec: &str, was: Option<&str>) -> String {
+    repo.revparse_single(spec)
+        .ok()
+        .and_then(|obj| obj.peel_to_commit().ok())
+        .map(|commit| {
+            let short_id = git::short_hash(&commit.id().to_string()).to_string();
+            let was = was.map_or(String::new(), |old| {
+                format!(", was {}", git::short_hash(old))
+            });
+            format!(" ({} {}{})", short_id, repo::commit_subject(&commit), was)
+        })
+        .unwrap_or_default()
+}
+
+/// `arg`, a branch name or short ID, with its remote branch: refused without
+/// an upstream, or with a local one (remote `.`), which no fetch updates.
+fn resolve_target(repo: &Repository, arg: &str) -> Result<Target> {
+    let name = repo::resolve_arg(repo, arg, &[repo::TargetKind::Branch])?.expect_branch()?;
+    let refname = format!("refs/heads/{name}");
+    let text = |buf: Result<git2::Buf, git2::Error>| {
+        buf.ok()
+            .and_then(|buf| buf.as_str().ok().map(str::to_string))
+    };
+    let remote_name = text(repo.branch_upstream_remote(&refname));
+    if remote_name.as_deref() == Some(".") {
+        bail!("Branch `{name}` tracks a local branch, which no fetch updates");
+    }
+    let (Some(remote_name), Some(merge_ref), Some(remote_ref)) = (
+        remote_name,
+        text(repo.branch_upstream_merge(&refname)),
+        text(repo.branch_upstream_name(&refname)),
+    ) else {
+        bail!(
+            "Branch `{name}` has no upstream branch\n\
+             Set one with `git branch --set-upstream-to=<remote>/<branch> {name}`"
+        );
+    };
+    let remote = remote_ref
+        .strip_prefix("refs/remotes/")
+        .unwrap_or(&remote_ref)
+        .to_string();
+    Ok(Target {
+        name,
+        remote,
+        remote_ref,
+        remote_name,
+        merge_ref,
+    })
+}
+
+/// Replace `target`'s section with its remote branch's commits, those the new
+/// upstream lacks, oldest first (Spec 010). Refused, before anything is
+/// rewritten, for a branch the remote's commits could not stand in for.
+fn take_remote_version(
+    repo: &Repository,
+    graph: &mut Weave,
+    target: &Target,
+    upstream_oid: Oid,
+) -> Result<Taken> {
+    let name = target.name.as_str();
+    let local_tip = repo
+        .find_branch(name, BranchType::Local)?
+        .get()
+        .target()
+        .with_context(|| format!("Branch `{name}` has no commit"))?;
+    let remote_tip = match repo.find_reference(&target.remote_ref) {
+        Ok(reference) => reference
+            .target()
+            .with_context(|| format!("`{}` is not a branch", target.remote))?,
+        Err(e) if e.code() == git2::ErrorCode::NotFound => {
+            bail!("`{}` is gone: the remote no longer has it", target.remote)
+        }
+        Err(e) => return Err(e.into()),
+    };
+    if graph.is_inner_branch(name) {
+        let why = match graph.inner_branch_keeper(name) {
+            Some(keeper) => format!("branch `{keeper}` is stacked on it"),
+            None => "commits of a branch deleted locally sit on it".to_string(),
+        };
+        bail!("Cannot update `{name}`: {why}");
+    }
+    let others = graph.other_refs_in_section(name).with_context(|| {
+        format!(
+            "Branch `{name}` is not woven into the integration branch\n\
+             Update it with git: `git branch -f {name} {}`",
+            target.remote
+        )
+    })?;
+    if !others.is_empty() {
+        bail!(
+            "Cannot update `{name}`: it shares commits with {}",
+            weave::describe_branches(&others)
+        );
+    }
+    if remote_tip == local_tip {
+        return Ok(Taken::Unchanged);
+    }
+    let (commits, has_merge) = commits_not_in(repo, remote_tip, upstream_oid)?;
+    if has_merge {
+        bail!(
+            "Cannot update `{name}`: `{}` carries a merge commit",
+            target.remote
+        );
+    }
+    if commits.is_empty() {
+        if !graph.drop_branch(name) {
+            bail!("Branch `{name}` is not woven into the integration branch");
+        }
+        return Ok(Taken::AllUpstream);
+    }
+    if !graph.replace_branch_commits(name, commits) {
+        bail!("Cannot update `{name}`: its section carries another ref");
+    }
+    Ok(Taken::Replaced(UpdatedBranch {
+        name: name.to_string(),
+        remote: target.remote.clone(),
+        tip: remote_tip.to_string(),
+        old_tip: local_tip.to_string(),
+    }))
+}
+
+/// Non-merge commits of `tip` not in `upstream`, oldest first, as a section's
+/// picks, and whether a merge was among them.
+fn commits_not_in(repo: &Repository, tip: Oid, upstream: Oid) -> Result<(Vec<CommitEntry>, bool)> {
+    let mut walk = repo.revwalk()?;
+    walk.push(tip)?;
+    walk.hide(upstream)?;
+    walk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::REVERSE)?;
+    let mut commits = Vec::new();
+    let mut has_merge = false;
+    for oid in walk {
+        let commit = repo.find_commit(oid?)?;
+        if commit.parent_count() > 1 {
+            has_merge = true;
+        } else {
+            commits.push(CommitEntry {
+                oid: commit.id(),
+                message: repo::commit_subject(&commit),
+                command: Command::Pick,
+                update_refs: Vec::new(),
+            });
+        }
+    }
+    Ok((commits, has_merge))
 }
 
 /// The cleanup question, naming every branch and why it goes: under the TUI
