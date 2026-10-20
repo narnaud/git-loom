@@ -39,7 +39,7 @@ A rewrite keeps the modification time of files whose content did not change, so 
 
 ### Short IDs
 
-`git loom status` labels every branch, commit and file with a short ID (`fa`, `mqt`, `ma`) that you type in other commands instead of hashes, names or paths.
+`git loom status` labels every branch, commit and file with a short ID (`fa`, `pop`, `ma`) that you type in other commands instead of hashes, names or paths.
 
 Commit IDs are persistent: they come from a `Change-Id` trailer that loom adds to every commit it creates (see [`loom.changeId`](configuration.md#loomchangeid)), so they survive rewrites and you can chain commands on the same ID.
 

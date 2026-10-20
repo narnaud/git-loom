@@ -256,10 +256,10 @@ fn zz_is_never_generated_for_other_entities() {
 
 // ── Persistent commit IDs (Change-Id letters) ────────────────────────────
 
-/// `3ac7…` encodes to `wpns…`, `3ac8…` to `wpnr…`, `b71…` to `osy…`.
-const ID_A: &str = "I3ac7000000000000000000000000000000000000";
-const ID_B: &str = "I3ac8000000000000000000000000000000000000";
-const ID_C: &str = "Ib710000000000000000000000000000000000000";
+/// `…1c3` spells `suna…`, `…510` `sune…`, `…2b8` `sun…`: least significant digit first.
+const ID_A: &str = "I00000000000000000000000000000000000001c3";
+const ID_B: &str = "I0000000000000000000000000000000000000510";
+const ID_C: &str = "I00000000000000000000000000000000000002b8";
 
 fn persistent(byte: u8, change_id: &str) -> Entity {
     Entity::Commit {
@@ -271,21 +271,21 @@ fn persistent(byte: u8, change_id: &str) -> Entity {
 #[test]
 fn commit_with_change_id_gets_three_letters() {
     let alloc = IdAllocator::new(vec![persistent(1, ID_A), persistent(2, ID_C)]);
-    assert_eq!(alloc.get_commit(oid(1)), "wpn");
-    assert_eq!(alloc.get_commit(oid(2)), "osy");
+    assert_eq!(alloc.get_commit(oid(1)), "sun");
+    assert_eq!(alloc.get_commit(oid(2)), "pot");
 }
 
 /// A newcomer sharing a prefix must never take an existing commit's ID: both
-/// grow, so a stale `wpn` matches neither instead of the wrong one.
+/// grow, so a stale `sun` matches neither instead of the wrong one.
 #[test]
 fn a_colliding_newcomer_lengthens_both_ids() {
     let before = IdAllocator::new(vec![persistent(1, ID_A)]);
-    assert_eq!(before.get_commit(oid(1)), "wpn");
+    assert_eq!(before.get_commit(oid(1)), "sun");
 
     // Newest first, as the graph lists commits.
     let after = IdAllocator::new(vec![persistent(2, ID_B), persistent(1, ID_A)]);
-    assert_eq!(after.get_commit(oid(1)), "wpns");
-    assert_eq!(after.get_commit(oid(2)), "wpnr");
+    assert_eq!(after.get_commit(oid(1)), "suna");
+    assert_eq!(after.get_commit(oid(2)), "sune");
 }
 
 #[test]
@@ -311,7 +311,7 @@ fn letter_and_hex_commits_coexist_with_a_branch() {
         Entity::Branch("wp-n".to_string()),
     ]);
     assert_eq!(alloc.get_commit(oid(0xAB)), "ab");
-    assert_eq!(alloc.get_commit(oid(1)), "wpn");
+    assert_eq!(alloc.get_commit(oid(1)), "sun");
     assert_eq!(alloc.get_branch("wp-n"), "wn");
 }
 
@@ -322,20 +322,20 @@ fn find_persistent_by_prefix_or_literal() {
         persistent(1, ID_A),
         Entity::commit(oid(0xAB)),
     ]);
-    assert_eq!(alloc.find_persistent("wpns"), vec![oid(1)]);
-    assert_eq!(alloc.find_persistent("wpnszzz"), vec![oid(1)]);
+    assert_eq!(alloc.find_persistent("suna"), vec![oid(1)]);
+    assert_eq!(alloc.find_persistent("sunacac"), vec![oid(1)]);
     assert_eq!(alloc.find_persistent(ID_B), vec![oid(2)]);
     assert_eq!(alloc.find_persistent(&ID_B.to_uppercase()), vec![oid(2)]);
-    assert_eq!(sorted(alloc.find_persistent("wpn")), vec![oid(1), oid(2)]);
+    assert_eq!(sorted(alloc.find_persistent("sun")), vec![oid(1), oid(2)]);
     assert!(
         alloc.find_persistent("wp").is_empty(),
         "shorter than MIN_LEN"
     );
     assert!(
-        alloc.find_persistent("ab").is_empty(),
-        "hex ids are not letters"
+        alloc.find_persistent("3ac").is_empty(),
+        "digits are not letters"
     );
-    assert!(alloc.find_persistent("osy").is_empty());
+    assert!(alloc.find_persistent("pot").is_empty());
 }
 
 #[test]
@@ -346,7 +346,7 @@ fn find_persistent_returns_both_twins() {
         vec![oid(0x11), oid(0x22)]
     );
     assert_eq!(
-        sorted(alloc.find_persistent("wpn")),
+        sorted(alloc.find_persistent("sun")),
         vec![oid(0x11), oid(0x22)]
     );
 }

@@ -21,8 +21,8 @@ git loom show [<target>] [-- <git args>...]
 Arguments after `--` go to `git show` — see [Passing Options to Git](README.md#passing-options-to-git):
 
 ```bash
-git loom show mqt -- --stat
-git loom show mqt -- -- src/main.rs
+git loom show pop -- --stat
+git loom show pop -- -- src/main.rs
 ```
 
 ## What It Does
@@ -42,7 +42,7 @@ Merge commits can't be shown this way; use `git show`. A branch outside your int
 ## Examples
 
 ```bash
-git loom show mqt          # one commit
+git loom show pop          # one commit
 git loom show feature-a    # every commit of the branch
 ```
 

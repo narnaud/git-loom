@@ -1,5 +1,5 @@
 //! Persistent commit identity: Gerrit `Change-Id` trailers and their
-//! jujutsu-style letter form (Spec 002).
+//! letter form (Spec 002).
 
 use std::path::Path;
 
@@ -9,6 +9,14 @@ use git2::Repository;
 pub const TRAILER: &str = "Change-Id";
 /// Shortest displayed persistent commit ID.
 pub const MIN_LEN: usize = 3;
+/// Consonants of persistent IDs, the radix-13 digits at even positions
+/// (Spec 002).
+pub const CONSONANTS: &str = "cdfghmnprstwy";
+/// Vowels of persistent IDs, the radix-5 digits at odd positions.
+pub const VOWELS: &str = "aeiou";
+/// Letters in a full persistent ID: the fewest whose alternating radices
+/// hold 160 bits (13^27 · 5^26 ≥ 2^160; one letter fewer falls short).
+pub const LETTERS_LEN: usize = 53;
 const HEX_LEN: usize = 40;
 /// `git hash-object -t tree /dev/null`, what Gerrit's hook uses as `refhash`
 /// on an unborn branch.
@@ -60,23 +68,56 @@ fn message_trailers(message: &str) -> Option<git2::MessageTrailersStrs> {
     git2::message_trailers_strs(&text).ok()
 }
 
-/// Reverse-hex letters, jujutsu's change-id alphabet: `0→z … f→k`. A
-/// leading `I` is skipped; any other non-hex character is kept as is.
+/// The alphabet of letter position `i`: consonants at even positions,
+/// vowels at odd ones.
+pub fn alphabet_at(i: usize) -> &'static str {
+    if i.is_multiple_of(2) {
+        CONSONANTS
+    } else {
+        VOWELS
+    }
+}
+
+/// `change_id` as letters (Spec 002): its value written least significant
+/// digit first in the alternating radices of [`alphabet_at`], always
+/// [`LETTERS_LEN`] letters. A leading `I` is skipped; non-hex characters are
+/// ignored.
 pub fn to_letters(change_id: &str) -> String {
-    change_id
+    let mut digits: Vec<u8> = change_id
         .strip_prefix('I')
         .unwrap_or(change_id)
         .chars()
-        .map(|c| match c.to_digit(16) {
-            Some(d) => (b'z' - d as u8) as char,
-            None => c,
+        .filter_map(|c| c.to_digit(16))
+        .map(|d| d as u8)
+        .collect();
+    (0..LETTERS_LEN)
+        .map(|i| {
+            let alphabet = alphabet_at(i);
+            let rem = divide_hex_in_place(&mut digits, alphabet.len() as u32);
+            alphabet.as_bytes()[rem as usize] as char
         })
         .collect()
 }
 
-/// Whether `s` could be a persistent commit ID or a prefix of one.
+/// Divides the hex number `digits` (most significant first) by `radix` in
+/// place and returns the remainder.
+fn divide_hex_in_place(digits: &mut [u8], radix: u32) -> u32 {
+    let mut rem = 0;
+    for d in digits.iter_mut() {
+        let cur = rem * 16 + u32::from(*d);
+        *d = (cur / radix) as u8;
+        rem = cur % radix;
+    }
+    rem
+}
+
+/// Whether `s` is shaped like a persistent ID or a prefix of one: consonants
+/// and vowels alternating from a consonant. Shape does not make an ID
+/// persistent: a hash prefix such as `da` or `dace` passes too, so whether a
+/// displayed ID is persistent is the allocator's to say
+/// (`IdAllocator::persistent_commit`).
 pub fn is_letters(s: &str) -> bool {
-    !s.is_empty() && s.chars().all(|c| ('k'..='z').contains(&c))
+    !s.is_empty() && s.char_indices().all(|(i, c)| alphabet_at(i).contains(c))
 }
 
 /// Whether loom should add a Change-Id to the commits it creates: git config

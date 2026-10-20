@@ -49,13 +49,13 @@ git loom commit -b feature-auth -m "add login form" zz
 │   no changes
 │
 │╭─ fa [feature-auth]
-│●    mqt  711d082 add login form
+│●    pop  711d082 add login form
 ├╯
 │
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit
 ```
 
-`fa` and `mqt` are short IDs for the branch and the commit; you type them in later commands. Add password validation and commit again, this time naming the branch by its short ID:
+`fa` and `pop` are short IDs for the branch and the commit; you type them in later commands. Add password validation and commit again, this time naming the branch by its short ID:
 
 ```bash
 git loom commit -b fa -m "add password validation" zz
@@ -66,8 +66,8 @@ git loom commit -b fa -m "add password validation" zz
 │   no changes
 │
 │╭─ fa [feature-auth]
-│●    pkz  4f825d2 add password validation
-│●    mqt  711d082 add login form
+│●    hug  4f825d2 add password validation
+│●    pop  711d082 add login form
 ├╯
 │
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit
@@ -86,12 +86,12 @@ git loom commit -b feature-dashboard -m "add dashboard layout" zz
 │   no changes
 │
 │╭─ fd [feature-dashboard]
-│●    rsv  7a5bb0b add dashboard layout
+│●    dog  7a5bb0b add dashboard layout
 ├╯
 │
 │╭─ fa [feature-auth]
-│●    pkz  4f825d2 add password validation
-│●    mqt  711d082 add login form
+│●    hug  4f825d2 add password validation
+│●    pop  711d082 add login form
 ├╯
 │
 ● a1b2c3d (upstream) [origin/main] Latest upstream commit
@@ -112,12 +112,12 @@ git loom update
 │   no changes
 │
 │╭─ fd [feature-dashboard]
-│●    rsv  8f74d1c add dashboard layout
+│●    dog  8f74d1c add dashboard layout
 ├╯
 │
 │╭─ fa [feature-auth]
-│●    pkz  660e970 add password validation
-│●    mqt  885cc0c add login form
+│●    hug  660e970 add password validation
+│●    pop  885cc0c add login form
 ├╯
 │
 ● b2c3d4e (upstream) [origin/main] Teammate's latest commit

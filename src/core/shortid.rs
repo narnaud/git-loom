@@ -34,6 +34,9 @@ struct CommitId {
     /// The commit's Change-Id as letters, for prefix resolution. Present for
     /// every commit with a Change-Id, twins included.
     letters: Option<String>,
+    /// Whether `id` is spelled from those letters rather than the hash
+    /// (false for twins).
+    persistent: bool,
 }
 
 /// Allocates unique short IDs to entities (Spec 002): persistent letter IDs
@@ -55,6 +58,7 @@ impl IdAllocator {
     /// Create a new allocator from a list of entities.
     /// IDs are deterministic: same entities in same order produce same IDs.
     pub fn new(entities: Vec<Entity>) -> Self {
+        let persistent: HashSet<git2::Oid> = persistent_candidates(&entities).into_keys().collect();
         let map = resolve_collisions(entities);
         let commits = map
             .iter()
@@ -64,6 +68,7 @@ impl IdAllocator {
                     CommitId {
                         id: id.clone(),
                         letters: change_id.as_deref().map(changeid::to_letters),
+                        persistent: persistent.contains(oid),
                     },
                 )),
                 _ => None,
@@ -88,6 +93,16 @@ impl IdAllocator {
 
     pub fn get_commit(&self, oid: git2::Oid) -> &str {
         self.commits.get(&oid).map(|c| c.id.as_str()).unwrap_or("")
+    }
+
+    /// The commit's ID when it is persistent, i.e. spelled from its Change-Id
+    /// rather than its hash (Spec 002). Shape cannot tell: `a`–`f` are
+    /// letters too, so a hash prefix such as `da` or `dace` looks the same.
+    pub fn persistent_commit(&self, oid: git2::Oid) -> Option<&str> {
+        self.commits
+            .get(&oid)
+            .filter(|c| c.persistent)
+            .map(|c| c.id.as_str())
     }
 
     pub fn get_file(&self, path: &str) -> &str {

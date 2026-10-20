@@ -20,7 +20,7 @@ The last 10 records are kept in `.git/loom/logs/`.
 
 ```bash
 git loom trace
-# [2026-03-04 14:30:00.123] git loom fold pkz mqt
+# [2026-03-04 14:30:00.123] git loom fold hug pop
 # ================================================================================
 #
 #   [git] rebase --interactive --autostash ...  [230ms]

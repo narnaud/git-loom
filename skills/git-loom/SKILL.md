@@ -16,10 +16,10 @@ stdout.
 
 Run `git loom status --agent` once. If it succeeds, use loom for every history
 mutation; read-only Git (`status`, `log`, `blame`, etc.) is allowed. Its stdout
-is a single JSON object whose `graph` field is the whole branch graph. Letter
-commit IDs (`mqt`) are persistent: they survive every rewrite, and `commit`,
-`split`, `reword`, and `fold` name the commits they create or rewrite by them,
-so chain commands on those IDs. Re-run `git loom status --agent` to learn the
+is a single JSON object whose `graph` field is the whole branch graph.
+Persistent commit IDs (`pop`) survive every rewrite, and `commit`, `split`,
+`reword`, and `fold` name the commits they create or rewrite by them, so chain
+commands on those IDs. Re-run `git loom status --agent` to learn the
 IDs of new files or branches, after `update`, or when a command reports an
 ambiguous ID.
 
@@ -54,12 +54,15 @@ Rules:
 ## IDs and inspection
 
 Every entity in `graph` carries the `id` to pass back: `zz` = all local changes
-(`local_changes.id`); two letters such as `fa` = branch or file; three or more
-letters `k`–`z` such as `mqt` = commit with a Change-Id (persistent; any longer
-prefix of it also works); hex prefix such as `3ac` = commit without one
-(changes on every rewrite); `mqt:0` = the first file of commit `mqt`
-(with `status -f`, ids count from 0). Short IDs work in loom commands wherever
-that entity is accepted; names, paths, and hashes also work. Short IDs mean
+(`local_changes.id`); two letters such as `fa` = branch or file; `pop` or `3ac`
+= commit; `pop:0` = the first file of commit `pop` (with `status -f`, ids count
+from 0). A commit's `id` is persistent when spelled from its Change-Id (letters;
+longer prefixes work) and changes on every rewrite when it is a hash prefix.
+Neither its shape (`a`–`f` are letters too) nor `change_id` alone (twins sharing
+one get hash IDs) tells which: use the `id` as reported, and after a rewrite
+re-run `status` for any commit no command message has named by its ID. Short
+IDs work in loom commands wherever that entity is accepted; names, paths, and
+hashes also work. Short IDs mean
 nothing to raw Git: inspect with `git loom show <id> --agent` /
 `git loom diff <id> --agent`, or pass Git the commit's `oid` from
 `git loom status --agent`. `status -a` includes hidden branches

@@ -14,7 +14,7 @@ git loom diff [<arg>...] [--staged | --all] [-- <git args>...]
 
 | Argument | Description |
 |----------|-------------|
-| `<arg>...` | Files (short ID or path), commits (short ID or hash), or ranges such as `mqt..pkz`. Mix them freely. |
+| `<arg>...` | Files (short ID or path), commits (short ID or hash), or ranges such as `pop..hug`. Mix them freely. |
 
 ### Options
 
@@ -31,7 +31,7 @@ Arguments after `--` go to `git diff` — see [Passing Options to Git](README.md
 
 ```bash
 git loom diff -- --stat
-git loom diff mqt..pkz -- --name-only
+git loom diff pop..hug -- --name-only
 git loom diff -- -a            # git's --text; loom's own -a is --all
 ```
 
@@ -52,9 +52,9 @@ A single target can't be a branch name or a merge commit: use a range.
 ```bash
 git loom diff --all          # everything not committed
 git loom diff ma             # one file, by short ID
-git loom diff mqt            # since commit mqt
-git loom diff mqt..pkz       # between two commits
-git loom diff mqt ma         # one file, since commit mqt
+git loom diff pop            # since commit pop
+git loom diff pop..hug       # between two commits
+git loom diff pop ma         # one file, since commit pop
 ```
 
 ## Prerequisites

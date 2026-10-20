@@ -17,7 +17,7 @@ No arguments. The global `--theme` and `--no-color` options apply.
 │ ╭─ zz [local changes]                ││ diff --git a/src/main.rs ...  │
 │ │   ma M  src/main.rs                ││ @@ -1,3 +1,4 @@               │
 │ │╭─ fa [feature-a] ✓                 ││ +new line                     │
-│ │●  mqt  Add parser (2 files)        ││ ...                           │
+│ │●  pop  Add parser (2 files)        ││ ...                           │
 │ ├╯                                   ││                               │
 │ ●  9999999 (upstream) ...            ││                               │
 └──────────────────────────────────────┘└───────────────────────────────┘

@@ -98,17 +98,17 @@ information rendered for a person.
 The possible statuses:
 
 ```json
-{"status":"ok","messages":["Created commit `mqt` (1a2b3c4) on branch `feature-auth`"]}
+{"status":"ok","messages":["Created commit `pop` (1a2b3c4) on branch `feature-auth`"]}
 ```
 
 Emitted when the command succeeds. `messages` collects the success and warning
 lines the command printed (some commands print several; none may be present).
 A message from `commit`, `split`, `reword`, or `fold` naming a commit it
 created or rewrote gives its persistent short ID before the hash,
-`` `mqt` (1a2b3c4) ``, when the commit has one (Spec 002); the ID survives
+`` `pop` (1a2b3c4) ``, when the commit has one (Spec 002); the ID survives
 later rewrites, so the agent can chain commands on it without re-running
 `status`. A commit that `reword` or `fold` rewrote keeps its ID, so it is
-named `` `mqt` (was: 1a2b3c4, now: 5d6e7f8) ``. A commit without a Change-Id is named
+named `` `pop` (was: 1a2b3c4, now: 5d6e7f8) ``. A commit without a Change-Id is named
 by hash alone (`` `1a2b3c4` (now `5d6e7f8`) `` when rewritten); `swap` and
 `drop` name commits by hash.
 
@@ -195,13 +195,13 @@ same order (Spec 001), same short IDs — so an agent never parses glyphs:
     {"names": [{"id":"fu","name":"feature-ui","remote":null}],
      "stacked_on": "feature-api", "stacked_on_hidden": false,
      "commits": [
-       {"id":"qvn","hash":"9c1d044","oid":"9c1d0448…",
+       {"id":"dog","hash":"9c1d044","oid":"9c1d0448…",
         "subject":"feat(ui): render the settings panel","change_id":"I9c1d…",
-        "files":[{"id":"qvn:0","path":"src/ui.rs","index":"M","worktree":" "}]}
+        "files":[{"id":"dog:0","path":"src/ui.rs","index":"M","worktree":" "}]}
      ]},
     {"names": [{"id":"fa","name":"feature-api","remote":"synced"}],
      "stacked_on": null, "stacked_on_hidden": false,
-     "commits": [{"id":"mqt","hash":"1a2b3c4","oid":"1a2b3c4d…",
+     "commits": [{"id":"pop","hash":"1a2b3c4","oid":"1a2b3c4d…",
                   "subject":"feat(api): add the settings endpoint",
                   "change_id":"I1a2b…","files":[]}]}
   ],
@@ -543,7 +543,7 @@ $ git-loom commit --agent -b feature-auth -m "Fix login validation"
 ```
 
 ```json
-{"status":"ok","messages":["Created commit `mqt` (1a2b3c4) on branch `feature-auth`"]}
+{"status":"ok","messages":["Created commit `pop` (1a2b3c4) on branch `feature-auth`"]}
 ```
 
 ### Dropping a file — confirmation becomes data

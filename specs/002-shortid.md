@@ -23,10 +23,10 @@ Branch and file IDs are at least two characters, commit IDs with a Change-Id at 
 
 Commit candidates depend on whether the commit carries a Change-Id:
 
-- With one, its 40 hex digits are encoded as letters — jujutsu's reverse hex, `0→z, 1→y, … f→k` — and the candidates are prefixes of that string from the shortest length, at least three, at which no other displayed commit's letters share the prefix. This minimum is computed against every other Change-Id commit, so it is symmetric: a new commit whose letters share a prefix with an older one lengthens both IDs and never takes the older one; the old shorter ID then resolves to neither (see Argument resolution). A Change-Id displayed by more than one commit (cherry-pick twins) identifies none of them; those commits use hash candidates.
+- With one, its value is written as letters, least significant digit first, in alternating radices: a consonant from `cdfghmnprstwy` at even positions, a vowel from `aeiou` at odd ones, 53 letters in all (the fewest that hold 160 bits). Every ID is thus a string of syllables, three-letter IDs are consonant-vowel-consonant, and many are words (`pop`, `sun`, `dog`). The candidates are prefixes of that string from the shortest length, at least three, at which no other displayed commit's letters share the prefix. This minimum is computed against every other Change-Id commit, so it is symmetric: a new commit whose letters share a prefix with an older one lengthens both IDs and never takes the older one; the old shorter ID then resolves to neither (see Argument resolution). A Change-Id displayed by more than one commit (cherry-pick twins) identifies none of them; those commits use hash candidates.
 - Without one, successive hash prefixes of length 2, 3, 4, and so on.
 
-The two alphabets are disjoint: letters mean a persistent ID, hex an ephemeral one.
+The alphabets overlap on `a`–`f`. A hash ID is a prefix of the commit's hash and a persistent ID a prefix of its letters; allocation keeps them distinct, but shape does not tell them apart (`da` may be either), so whether a displayed ID is persistent is asked of the allocator, never read off the ID. A persistent ID of four or more letters all in `a`–`f` is also a well-formed hash abbreviation; see Argument resolution.
 
 ## Allocation and collisions
 
@@ -51,7 +51,7 @@ IDs use blue underline (`COLOR_SHORTID`). Placement is:
 │   ma M src/main.rs
 │
 │╭─ fa [feature-a]
-│●    mqt  d072f9a Fix bug
+│●    pop  d072f9a Fix bug
 │●    3a   3a6f21c Cherry-picked
 ├╯
 ```
@@ -115,7 +115,7 @@ Commands use `git::resolve_arg(repo, arg, accept)`, where ordered `accept: &[Tar
 
 For accepted kinds, resolution proceeds as follows:
 
-1. Try Git-native revision resolution first: full hashes, partial hashes of at least four characters, symbolic refs (`HEAD`, `HEAD~2`, `main`, `origin/main`), and other valid revision syntax. A successful result is a commit, subject to accepted kind and the non-merge rule.
+1. Try Git-native revision resolution first: full hashes, partial hashes of at least four characters, symbolic refs (`HEAD`, `HEAD~2`, `main`, `origin/main`), and other valid revision syntax. A successful result is a commit, subject to accepted kind and the non-merge rule. When `arg` is hash-shaped (4–40 hex characters), shaped like a persistent ID (consonant and vowel alternating from a consonant) and names no ref, a successful result is checked against steps 2 and 3: if they resolve `arg` to a different target, resolution errors naming both, because loom cannot tell a hash abbreviation from a short ID and never picks one; `status -f` skips such an ID. A gather failure leaves git's result standing. A hash-shaped argument not shaped like a persistent ID (`beef`) is git's without that check: a hash ID cannot be another commit's prefix without git itself reporting the ambiguity, and a branch or file whose fallback ID happens to be hex is not protected.
 2. If Git resolution fails, build the same full graph/status entities and look up an exact short ID in this order: branch, commit, file (restricted by `accept`).
 3. For `Commit`/`CommitFile` only, then match a persistent commit ID: a canonical `I<40 hex>` Change-Id (any case), or a prefix of at least three letters of a commit's Change-Id letters. Exactly one commit resolves; several (a prefix shorter than the displayed IDs, or twins sharing a Change-Id) error, listing each as `<id> <hash> <subject>`; a listed commit may be on a hidden branch. This pass runs after step 2 for every accepted kind, so a prefix never shadows a branch or file whose exact ID starts the same way. `status -f` accepts the same prefixes and skips ambiguous ones.
 4. If no match exists, error and suggest `git-loom status` to list IDs.

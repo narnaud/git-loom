@@ -1,6 +1,6 @@
 use crate::core::repo::gather_repo_info;
 use crate::core::shortid::IdAllocator;
-use crate::core::test_helpers::TestRepo;
+use crate::core::test_helpers::{TestRepo, hash_shaped_ids};
 
 use super::resolve_commit_filter;
 
@@ -75,11 +75,11 @@ fn commit_id_survives_an_update_rebase() {
     let id_before = {
         let info = gather_repo_info(&test_repo.repo, false, 1).unwrap();
         IdAllocator::new(info.collect_entities())
-            .get_commit(tip_before)
+            .persistent_commit(tip_before)
+            .expect("a persistent ID")
             .to_string()
     };
     assert_eq!(id_before.len(), 3, "{id_before}");
-    assert!(id_before.chars().all(|c| ('k'..='z').contains(&c)));
 
     test_repo.add_remote_commits(&["Upstream change"]);
     test_repo.in_dir(|| crate::update::run(true)).unwrap();
@@ -96,11 +96,11 @@ fn commit_id_survives_an_update_rebase() {
 fn filter_by_persistent_prefix_skips_ambiguous_ones() {
     let test_repo = TestRepo::new_with_remote();
     let a = test_repo.commit(
-        "A\n\nChange-Id: I3ac7000000000000000000000000000000000000\n",
+        "A\n\nChange-Id: I00000000000000000000000000000000000001c3\n",
         "a.txt",
     );
     test_repo.commit(
-        "B\n\nChange-Id: I3ac8000000000000000000000000000000000000\n",
+        "B\n\nChange-Id: I0000000000000000000000000000000000000510\n",
         "b.txt",
     );
 
@@ -108,12 +108,31 @@ fn filter_by_persistent_prefix_skips_ambiguous_ones() {
     let allocator = IdAllocator::new(info.collect_entities());
     let filter =
         |arg: &str| resolve_commit_filter(&test_repo.repo, &[arg.to_string()], &info, &allocator);
-    assert_eq!(filter("wpnsz").into_iter().collect::<Vec<_>>(), vec![a]);
+    assert_eq!(filter("sunac").into_iter().collect::<Vec<_>>(), vec![a]);
     assert_eq!(
-        filter("I3ac7000000000000000000000000000000000000")
+        filter("I00000000000000000000000000000000000001c3")
             .into_iter()
             .collect::<Vec<_>>(),
         vec![a]
     );
-    assert!(filter("wpn").is_empty(), "ambiguous prefix is skipped");
+    assert!(filter("sun").is_empty(), "ambiguous prefix is skipped");
+}
+
+#[test]
+fn filter_skips_a_hash_shaped_persistent_id_that_is_also_a_hash_prefix() {
+    let test_repo = TestRepo::new_with_remote();
+    let ids = hash_shaped_ids(&test_repo);
+
+    let info = gather_repo_info(&test_repo.repo, true, 1).unwrap();
+    let allocator = IdAllocator::new(info.collect_entities());
+    let filter =
+        |arg: &str| resolve_commit_filter(&test_repo.repo, &[arg.to_string()], &info, &allocator);
+    assert!(
+        filter(&ids.shadowed).is_empty(),
+        "shadowed by a hash prefix"
+    );
+    assert_eq!(
+        filter(&ids.sibling).into_iter().collect::<Vec<_>>(),
+        vec![ids.sibling_oid]
+    );
 }

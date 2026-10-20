@@ -39,9 +39,9 @@ want:
 | You ask | The agent runs |
 |---------|----------------|
 | "Commit the login form to a new feature-auth branch" | `git loom commit -b feature-auth -m "Add login form" src/auth.rs` |
-| "Put this CSRF fix into the login form commit" | `git loom fold src/auth.rs mqt` |
-| "Move the logging helper to feature-dashboard" | `git loom fold tqn feature-dashboard` |
-| "Split the validation helpers out of that commit" | `git loom split mqt -m "Add validation helpers" src/validation.rs` |
+| "Put this CSRF fix into the login form commit" | `git loom fold src/auth.rs pop` |
+| "Move the logging helper to feature-dashboard" | `git loom fold sun feature-dashboard` |
+| "Split the validation helpers out of that commit" | `git loom split pop -m "Add validation helpers" src/validation.rs` |
 | "Pull main and rebase everything" | `git loom update -y` |
 | "Open a PR for feature-auth" | `git loom push feature-auth` |
 
@@ -84,7 +84,7 @@ The agent reads the diffs, picks, and re-runs:
 
 ```console
 $ git loom commit --agent -b feature-auth -m "Trim user names" -p src/auth.rs --hunks src/auth.rs:1 --hunks-from 3d12f8f83f89
-{"status":"ok","messages":["Applied 1 change(s) across 1 file(s)","Created commit `pkz` (c420bf8) on branch `feature-auth`"]}
+{"status":"ok","messages":["Applied 1 change(s) across 1 file(s)","Created commit `hug` (c420bf8) on branch `feature-auth`"]}
 ```
 
 If the file changes between the two calls, the fingerprint no longer matches

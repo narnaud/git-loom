@@ -29,7 +29,7 @@ git loom split [-p] [-m <message>] <target> [<files>...] [-- <git args>...]
 Arguments after `--` go to both `git commit`s split makes, unchecked — expert mode, see [Passing Options to Git](README.md#passing-options-to-git):
 
 ```bash
-git loom split mqt -m "Extract config" config.rs -- --no-verify
+git loom split pop -m "Extract config" config.rs -- --no-verify
 ```
 
 ## What It Does
@@ -44,24 +44,24 @@ The files or hunks you pick become the first commit, with the new message. The r
 ### Pick the files
 
 ```bash
-git loom split mqt
+git loom split pop
 # ? Select files for the first commit
 # > [x] src/validation.rs
 #   [ ] src/auth.rs
 # (opens the editor for the first commit's message)
-# ✓ Split `291658f` into `wsl` (8c2b2fa) and `mqt` (5e1a9c2)
+# ✓ Split `291658f` into `cup` (8c2b2fa) and `pop` (5e1a9c2)
 ```
 
 ### Name the files
 
 ```bash
-git loom split mqt -m "add validation helpers" src/validation.rs
+git loom split pop -m "add validation helpers" src/validation.rs
 ```
 
 ### Pick hunks
 
 ```bash
-git loom split -p mqt -m "fix: extract bounds check"
+git loom split -p pop -m "fix: extract bounds check"
 # Opens the hunk picker on the commit's changes
 ```
 

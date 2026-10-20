@@ -303,7 +303,7 @@ assert_exit_ok "$CODE" "commit_change_id_ok"
 body=$(git -C "$WORK" log -1 --format=%B g-ident)
 assert_eq "1" "$(printf '%s' "$body" | grep -c '^Change-Id: I[0-9a-f]\{40\}$')" "commit_change_id_trailer"
 sid=$(commit_sid_from_status "Identified commit")
-[[ "$sid" =~ ^[k-z]{3,}$ ]] || fail "commit_change_id_letters: got '$sid'"
+[[ "$sid" =~ ^[cdfghmnprstwy]([aeiou][cdfghmnprstwy])+[aeiou]?$ ]] || fail "commit_change_id_letters: got '$sid'"
 assert_contains "$OUT" "Created commit $sid (" "commit_change_id_in_message"
 gl_capture show "$sid"
 assert_exit_ok "$CODE" "commit_change_id_resolves"

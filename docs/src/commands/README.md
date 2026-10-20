@@ -57,7 +57,7 @@ Wherever a command takes a commit, branch or file, you can give its [short ID](s
 
 ```bash
 git loom show -- --stat
-git loom diff mqt..pkz -- --name-only
+git loom diff pop..hug -- --name-only
 git loom commit -m "wip" -- --no-verify
 git loom add zz -- -f
 ```

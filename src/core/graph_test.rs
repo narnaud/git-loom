@@ -1139,7 +1139,7 @@ fn stack_helpers_use_canonical_name_for_colocated_tips() {
 fn commit_ids_share_one_fixed_width_column() {
     let mut info = base_info();
     let mut a2 = commit(2, "A2", Some(1));
-    a2.change_id = Some("I3ac7000000000000000000000000000000000000".to_string());
+    a2.change_id = Some("I00000000000000000000000000000000000001c3".to_string());
     info.commits = vec![a2, commit(1, "A1", None)];
     info.branches = vec![BranchInfo {
         name: "feature-a".to_string(),
@@ -1149,7 +1149,7 @@ fn commit_ids_share_one_fixed_width_column() {
 
     let output = render_plain(info);
     assert!(
-        output.contains("│●    wpn  0000002 A2\n│●    01   0000001 A1\n"),
+        output.contains("│●    sun  0000002 A2\n│●    01   0000001 A1\n"),
         "{output}"
     );
 }
@@ -1160,9 +1160,9 @@ fn commit_ids_share_one_fixed_width_column() {
 fn an_oversized_commit_id_pushes_only_its_own_line() {
     let mut info = base_info();
     let mut a3 = commit(3, "A3", Some(2));
-    a3.change_id = Some("I3ac7000000000000000000000000000000000000".to_string());
+    a3.change_id = Some("I00000000000000000000000000000000000001c3".to_string());
     let mut a2 = commit(2, "A2", Some(1));
-    a2.change_id = Some("I3ac7100000000000000000000000000000000000".to_string());
+    a2.change_id = Some("I0000000000000000000000000000000000001244".to_string());
     info.commits = vec![a3, a2, commit(1, "A1", None)];
     info.branches = vec![BranchInfo {
         name: "feature-a".to_string(),
@@ -1173,8 +1173,8 @@ fn an_oversized_commit_id_pushes_only_its_own_line() {
     let output = render_plain(info);
     assert!(
         output.contains(
-            "│●    wpnsz 0000003 A3
-│●    wpnsy 0000002 A2
+            "│●    sunac 0000003 A3
+│●    sunad 0000002 A2
 │●    01   0000001 A1
 "
         ),
@@ -1186,11 +1186,11 @@ fn an_oversized_commit_id_pushes_only_its_own_line() {
 fn loose_commit_puts_the_hash_before_the_subject() {
     let mut info = base_info();
     let mut c = commit(2, "Fix typo", Some(1));
-    c.change_id = Some("Ib710000000000000000000000000000000000000".to_string());
+    c.change_id = Some("I00000000000000000000000000000000000002b8".to_string());
     info.commits = vec![c];
 
     let output = render_plain(info);
-    assert!(output.contains("●    osy  0000002 Fix typo\n"), "{output}");
+    assert!(output.contains("●    pot  0000002 Fix typo\n"), "{output}");
 }
 
 #[test]

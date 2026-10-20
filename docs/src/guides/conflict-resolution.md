@@ -46,7 +46,7 @@ Use `git rm` for a file the resolution deletes.
 
 ```bash
 git loom continue
-# ✓ Created commit `mqt` (b2c3d4e) on branch `feature-auth`
+# ✓ Created commit `pop` (b2c3d4e) on branch `feature-auth`
 ```
 
 Loom finishes the command as if nothing had happened, staged changes included. If a later commit conflicts too, it pauses again: repeat steps 2 to 5.

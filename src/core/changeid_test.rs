@@ -53,14 +53,36 @@ fn from_message_reads_past_a_dash_line() {
 }
 
 #[test]
-fn letters_use_jujutsu_reverse_hex() {
-    assert_eq!(to_letters("0f"), "zk");
-    assert_eq!(to_letters("I0123456789abcdef"), "zyxwvutsrqponmlk");
-    assert_eq!(to_letters(ID).len(), 40);
-    assert!(is_letters("mqt"));
-    assert!(!is_letters("mq1"));
+fn letters_alternate_consonants_and_vowels() {
+    assert_eq!((CONSONANTS.len(), VOWELS.len()), (13, 5));
+    let bits = |consonants: f64, vowels: f64| {
+        consonants * (CONSONANTS.len() as f64).log2() + vowels * (VOWELS.len() as f64).log2()
+    };
+    assert!(bits(27.0, 26.0) >= 160.0, "53 letters hold a Change-Id");
+    assert!(bits(26.0, 26.0) < 160.0, "52 letters would not");
+    let zero = to_letters(&format!("I{:040}", 0));
+    assert_eq!(zero.len(), LETTERS_LEN);
+    assert_eq!(&zero[..6], "cacaca");
+    assert!(to_letters(&format!("I{:039}1", 0)).starts_with("dacaca"));
+    // 696 = 7 + 3·13 + 10·65 spells `pot`, least significant digit first.
+    assert!(to_letters("I00000000000000000000000000000000000002b8").starts_with("potacac"));
+    assert_eq!(to_letters(ID).len(), LETTERS_LEN);
+    assert!(is_letters("pop"));
+    assert!(
+        is_letters("dace"),
+        "hex letters in the pattern are letters too"
+    );
+    assert!(!is_letters("sea"), "two vowels in a row");
+    assert!(!is_letters("ab"), "a vowel first");
+    assert!(!is_letters("po1"));
     assert!(!is_letters(""));
     assert!(!is_letters("3ac"));
+    for dropped in ["bad", "jam", "kit", "lip", "quiz", "vow", "box", "zip"] {
+        assert!(
+            !is_letters(dropped),
+            "{dropped}: b j k l q v x z are left out"
+        );
+    }
 }
 
 /// The hook pipes `git var GIT_COMMITTER_IDENT`, the refhash, and the message

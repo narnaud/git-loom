@@ -27,7 +27,7 @@ git loom reword <target> [-m <message>] [-- <git args>...]
 For a commit, arguments after `--` go to the `git commit --amend` that rewrites it, unchecked — expert mode, see [Passing Options to Git](README.md#passing-options-to-git):
 
 ```bash
-git loom reword mqt -- --reset-author
+git loom reword pop -- --reset-author
 ```
 
 ## What It Does
@@ -53,8 +53,8 @@ To reword the commit at a branch tip, name the commit, not the branch.
 ### Reword a commit
 
 ```bash
-git loom reword mqt -m "Fix authentication bug in login flow"
-# ✓ Updated commit message for `mqt` (was: ab12cd3, now: e45f678)
+git loom reword pop -m "Fix authentication bug in login flow"
+# ✓ Updated commit message for `pop` (was: ab12cd3, now: e45f678)
 ```
 
 ### Rename a branch
@@ -69,7 +69,7 @@ git loom reword fa -m feature-authentication
 If upstream already has everything the commit changes, loom refuses rather than rewrite something else:
 
 ```bash
-git loom reword mqt
+git loom reword pop
 # ✗ Commit `4783c1b` is redundant — the history below it already has its change
 #   › Nothing was rewritten. Run `loom update` if it landed upstream, or `loom drop 4783c1b -y` to remove it now
 ```
@@ -79,7 +79,7 @@ git loom reword mqt
 Rewording replays the merges above the commit. A merge whose conflicts you resolved by hand conflicts again, and the reword pauses:
 
 ```bash
-git loom reword mqt -m "Fix authentication bug"
+git loom reword pop -m "Fix authentication bug"
 # ! Conflicts detected — resolve them with git, then run:
 #   › loom continue   to complete the reword
 #   › loom abort      to cancel and restore original state
@@ -87,7 +87,7 @@ git loom reword mqt -m "Fix authentication bug"
 
 ```bash
 git add shared.rs && git loom continue
-# ✓ Updated commit message for `mqt` (was: ab12cd3, now: e45f678)
+# ✓ Updated commit message for `pop` (was: ab12cd3, now: e45f678)
 ```
 
 With git's `rerere` enabled, your recorded resolution is replayed for you: stage it and continue. With `rerere.autoUpdate` too, the reword carries on by itself. See [`continue`](continue.md) and [`abort`](abort.md).

@@ -21,12 +21,12 @@ Exchanges the two commits and replays the commits above them. Both must sit in t
 ## Examples
 
 ```bash
-git loom swap pkz mqt
+git loom swap hug pop
 # ✓ Swapped commits `4f825d2` and `711d082`
 ```
 
 ```bash
-git loom swap rsv mqt
+git loom swap dog pop
 # ✗ Cannot swap commits from different branch sections
 ```
 
@@ -35,7 +35,7 @@ git loom swap rsv mqt
 If upstream already has everything one of the commits changes, swap refuses:
 
 ```bash
-git loom swap pkz mqt
+git loom swap hug pop
 # ✗ Commit `4f825d2` is redundant — the history below it already has its change
 #   › Nothing was rewritten. Run `loom update` if it landed upstream, or `loom drop 4f825d2 -y` to remove it now
 ```
@@ -45,7 +45,7 @@ git loom swap pkz mqt
 If the replay conflicts, the swap pauses:
 
 ```bash
-git loom swap pkz mqt
+git loom swap hug pop
 # ! Conflicts detected — resolve them with git, then run:
 #   › loom continue   to complete the swap
 #   › loom abort      to cancel and restore original state

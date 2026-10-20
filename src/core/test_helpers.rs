@@ -208,6 +208,36 @@ impl TestRepo {
         }
     }
 
+    /// An unreferenced commit whose hash starts with `len` characters that
+    /// satisfy `accept`, found by varying the message; the hash-shaped
+    /// persistent IDs of Spec 002 need one.
+    pub fn stray_commit_with_hash_prefix(
+        &self,
+        len: usize,
+        accept: impl Fn(&str) -> bool,
+    ) -> git2::Oid {
+        let sig = Self::sig();
+        let parent = self.head_commit();
+        let tree = parent.tree().unwrap();
+        for n in 0.. {
+            let message = format!("Hash probe {n}");
+            let buf = self
+                .repo
+                .commit_create_buffer(&sig, &sig, &message, &tree, &[&parent])
+                .unwrap();
+            let oid = git2::Oid::hash_object(git2::ObjectType::Commit, &buf).unwrap();
+            if accept(&oid.to_string()[..len]) {
+                return self
+                    .repo
+                    .odb()
+                    .unwrap()
+                    .write(git2::ObjectType::Commit, &buf)
+                    .unwrap();
+            }
+        }
+        unreachable!()
+    }
+
     /// Create a commit without changing files (reusing the current tree).
     pub fn commit_empty(&self, message: &str) -> git2::Oid {
         let sig = Self::sig();
@@ -1140,6 +1170,67 @@ pub fn write_retrying(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) {
             }
             result => return result.unwrap(),
         }
+    }
+}
+
+/// Whether `c` at letter position `i` is both a hex digit and a persistent-ID
+/// letter (Spec 002): what makes an ID hash-shaped.
+pub fn is_hex_letter_at(i: usize, c: char) -> bool {
+    c.is_ascii_hexdigit() && crate::core::changeid::alphabet_at(i).contains(c)
+}
+
+/// The Change-Id whose letters start with `letters` and go on with the lowest
+/// digits (`cacaca…`): the inverse of `changeid::to_letters` for a short
+/// prefix.
+pub fn change_id_spelling(letters: &str) -> String {
+    let mut value: u128 = 0;
+    let mut weight: u128 = 1;
+    for (i, c) in letters.char_indices() {
+        let alphabet = crate::core::changeid::alphabet_at(i);
+        let digit = alphabet
+            .find(c)
+            .expect("a letter of its position's alphabet");
+        value += digit as u128 * weight;
+        weight *= alphabet.len() as u128;
+    }
+    format!("I{value:040x}")
+}
+
+/// Spec 002: a persistent ID of four hex letters is also a hash abbreviation.
+/// `shadowed` is such an ID, and git resolves it to `stray`, an unreferenced
+/// commit; `sibling` shares its first three letters, which is what makes both
+/// IDs four letters long, and no object's hash starts like it.
+pub struct HashShapedIds {
+    pub stray: git2::Oid,
+    pub shadowed: String,
+    pub sibling: String,
+    pub sibling_oid: git2::Oid,
+}
+
+pub fn hash_shaped_ids(test_repo: &TestRepo) -> HashShapedIds {
+    let sibling_of = |id: &str| {
+        let vowel = if id.ends_with('a') { 'e' } else { 'a' };
+        format!("{}{vowel}", &id[..3])
+    };
+    let stray = test_repo.stray_commit_with_hash_prefix(4, |prefix| {
+        prefix.char_indices().all(|(i, c)| is_hex_letter_at(i, c))
+            && test_repo.repo.revparse_single(&sibling_of(prefix)).is_err()
+    });
+    let shadowed = stray.to_string()[..4].to_string();
+    let sibling = sibling_of(&shadowed);
+    test_repo.commit(
+        &format!("Shadowed\n\nChange-Id: {}\n", change_id_spelling(&shadowed)),
+        "shadowed.txt",
+    );
+    let sibling_oid = test_repo.commit(
+        &format!("Sibling\n\nChange-Id: {}\n", change_id_spelling(&sibling)),
+        "sibling.txt",
+    );
+    HashShapedIds {
+        stray,
+        shadowed,
+        sibling,
+        sibling_oid,
     }
 }
 

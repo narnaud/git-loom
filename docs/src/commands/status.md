@@ -25,12 +25,12 @@ git loom [status] [-f [<commit>...]] [-n <N>] [-a]
 │   un  ⁕ untracked.txt
 │
 │╭─ fb [feature-b] ✓
-│●    mqt  d0472f9 Fix bug in feature B
-│●    pkz  7a067a9 Start feature B
+│●    pop  d0472f9 Fix bug in feature B
+│●    hug  7a067a9 Start feature B
 ├╯
 │
 │╭─ fa [feature-a] ↑
-│●    rsv  2ee61e1 Add feature A
+│●    dog  2ee61e1 Add feature A
 ├╯
 │
 ● ff1b247 (upstream) [origin/main] Initial commit
@@ -61,34 +61,34 @@ From top to bottom:
 
 Every branch, commit and file gets a short ID — what you see is what you type in other commands. `zz` always means all local changes.
 
-- **Commits** made by loom get a persistent ID of letters `k`–`z`, such as `mqt`. It comes from the commit's `Change-Id` trailer, so it survives every rewrite. Other commits get a hash prefix, such as `3a`, which changes when the commit is rewritten.
+- **Commits** made by loom get a persistent ID of three or more letters, such as `pop`. It comes from the commit's `Change-Id` trailer, so it survives every rewrite. IDs alternate a consonant from `c d f g h m n p r s t w y` and a vowel from `a e i o u`, so every ID can be said aloud and many are words (`pop`, `sun`, `dog`); the letters were picked to spell short words, with look-alikes left out. Other commits get a hash prefix, such as `3a`, which changes when the commit is rewritten. In the rare case where an ID of four or more letters is also a prefix of some object's hash, loom refuses the ambiguous argument instead of guessing; give the full hash or the Change-Id.
 - IDs are as short as they can be while staying unique. When a new commit shares an ID's first letters, both IDs grow, and the shorter form stops working rather than point at the wrong commit.
 - Any longer prefix of a letter ID works too; a hash ID works from four characters, as in git.
 
 ## Showing Files
 
 ```bash
-git loom status -f rsv
+git loom status -f dog
 ```
 
 ```
 │╭─ fa [feature-a]
-│●    rsv  2ee61e1 Add feature A
-│┊      rsv:0 M  src/feature.rs
-│┊      rsv:1 A  tests/feature_test.rs
+│●    dog  2ee61e1 Add feature A
+│┊      dog:0 M  src/feature.rs
+│┊      dog:1 A  tests/feature_test.rs
 ├╯
 ```
 
-Commit files get IDs such as `rsv:0`, which [`fold`](fold.md) accepts to move or uncommit a single file.
+Commit files get IDs such as `dog:0`, which [`fold`](fold.md) accepts to move or uncommit a single file.
 
 ## Branch Layouts
 
 ```
 │╭─ fb [feature-b]        │╭─ fv [feature-a-v2]     │╭─ fs [feature-stale]
-│●    mqt  4e046ab B      │├─ fa [feature-a]        ├╯
-││                        │●    rsv  2ee61e1 A      │
+│●    pop  4e046ab B      │├─ fa [feature-a]        ├╯
+││                        │●    dog  2ee61e1 A      │
 │├─ fa [feature-a]        ├╯
-│●    rsv  caa87a9 A
+│●    dog  caa87a9 A
 ├╯
 ```
 
@@ -119,7 +119,7 @@ With [`--agent`](agent.md#agent-mode), the tree goes to stderr and stdout gets t
   "branches": [
     {"names": [{"id":"fu","name":"feature-ui","remote":null}],
      "stacked_on": "feature-api", "stacked_on_hidden": false,
-     "commits": [{"id":"qvn","hash":"9c1d044","oid":"9c1d0448…",
+     "commits": [{"id":"sun","hash":"9c1d044","oid":"9c1d0448…",
                   "subject":"feat(ui): settings panel","change_id":"I9c1d…","files":[]}]}
   ],
   "loose_commits": [],

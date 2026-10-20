@@ -31,7 +31,7 @@ Every drop asks for confirmation first, listing what it will remove; `-y` skips 
 Removes the commit from history. A branch whose only commit it was is kept, empty, at the base, ready for a new `git loom commit -b`:
 
 ```bash
-git loom drop mqt
+git loom drop pop
 # Drop commit `4783c1b` Add login form, leaving branch `feature-a` empty? (y/N)
 # ✓ Dropped commit `4783c1b`
 #   › branch feature-a now empty, at the base
@@ -88,7 +88,7 @@ Discards all local changes, staged or not, and deletes untracked files. Ignored 
 Dropping a commit pauses on a conflict:
 
 ```bash
-git loom drop mqt
+git loom drop pop
 # ! Conflicts detected — resolve them with git, then run:
 #   › loom continue   to complete the drop
 #   › loom abort      to cancel and restore original state

@@ -402,6 +402,7 @@ pub fn resolve_arg(repo: &Repository, arg: &str, accept: &[TargetKind]) -> Resul
             TargetKind::CommitFile | TargetKind::Unstaged => None,
         };
         if let Some(target) = result {
+            reject_hash_shadowing_a_short_id(repo, arg, accept, &target)?;
             return Ok(target);
         }
     }
@@ -413,6 +414,54 @@ pub fn resolve_arg(repo: &Repository, arg: &str, accept: &[TargetKind]) -> Resul
 
     let types: Vec<_> = accept.iter().map(|k| k.to_string()).collect();
     bail!("'{}' did not resolve to a {}", arg, types.join(" or "))
+}
+
+/// Whether `arg` is an abbreviated hash that can also be a persistent ID: 4 to
+/// 40 hex characters shaped like letters, naming no ref (Spec 002). Any other
+/// hash-shaped argument is git's without a graph build.
+pub fn is_hash_and_letter_shaped(repo: &Repository, arg: &str) -> bool {
+    (4..=40).contains(&arg.len())
+        && arg.bytes().all(|b| b.is_ascii_hexdigit())
+        && crate::core::changeid::is_letters(arg)
+        && repo.resolve_reference_from_short_name(arg).is_err()
+}
+
+/// Spec 002: when git resolved `arg` as an abbreviated hash and the short IDs
+/// resolve it to something else, loom cannot know which the user meant and
+/// refuses rather than pick. A gather failure (no integration context) leaves
+/// git's answer standing: there are no short IDs to collide with.
+fn reject_hash_shadowing_a_short_id(
+    repo: &Repository,
+    arg: &str,
+    accept: &[TargetKind],
+    target: &Target,
+) -> Result<()> {
+    let Target::Commit(hash) = target else {
+        return Ok(());
+    };
+    if !is_hash_and_letter_shaped(repo, arg) {
+        return Ok(());
+    }
+    match try_resolve_shortid(repo, arg, accept) {
+        Ok(Some(other)) if &other != target => bail!(
+            "'{arg}' is ambiguous: a prefix of commit {}'s hash, and the short ID of {}\nUse the full hash, or the commit's Change-Id",
+            crate::git::short_hash(hash),
+            describe_target(&other)
+        ),
+        _ => Ok(()),
+    }
+}
+
+fn describe_target(target: &Target) -> String {
+    match target {
+        Target::Commit(hash) => format!("commit {}", crate::git::short_hash(hash)),
+        Target::Branch(name) => format!("branch `{name}`"),
+        Target::File(path) => format!("file `{path}`"),
+        Target::CommitFile { commit, path } => {
+            format!("file `{path}` of commit {}", crate::git::short_hash(commit))
+        }
+        Target::Unstaged => "the local changes".to_string(),
+    }
 }
 
 fn reject_merge_commit(repo: &Repository, oid: git2::Oid) -> Result<()> {
@@ -841,7 +890,7 @@ pub struct FileChange {
     pub worktree: char,
 }
 
-/// How success messages name a commit (Spec 019): `` `mqt` (1a2b3c4) `` when
+/// How success messages name a commit (Spec 019): `` `pop` (1a2b3c4) `` when
 /// it has a persistent ID, else `` `1a2b3c4` ``. Never fails, so a message is
 /// printed even when the graph cannot be gathered.
 pub fn describe_commit(workdir: &Path, hash: &str) -> String {
@@ -853,7 +902,7 @@ pub fn describe_commit(workdir: &Path, hash: &str) -> String {
 }
 
 /// How success messages name a commit they rewrote (Spec 019):
-/// `` `mqt` (was: 1a2b3c4, now: 5d6e7f8) `` when it has a persistent ID, else
+/// `` `pop` (was: 1a2b3c4, now: 5d6e7f8) `` when it has a persistent ID, else
 /// `` `1a2b3c4` (now `5d6e7f8`) ``.
 pub fn describe_rewritten(workdir: &Path, old_hash: &str, new_hash: &str) -> String {
     let old = crate::git::short_hash(old_hash);
@@ -871,8 +920,7 @@ pub fn persistent_id(workdir: &Path, hash: &str) -> Option<String> {
     let oid = repo.revparse_single(hash).ok()?.peel_to_commit().ok()?.id();
     let info = gather_commit_graph(&repo).ok()?;
     let ids = crate::core::shortid::IdAllocator::new(info.collect_entities());
-    let id = ids.get_commit(oid);
-    crate::core::changeid::is_letters(id).then(|| id.to_string())
+    ids.persistent_commit(oid).map(str::to_string)
 }
 
 /// Whether the repo has an integration context: HEAD on a branch that has an

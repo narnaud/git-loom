@@ -63,19 +63,19 @@ A malformed command line exits with 2 and prints no JSON.
 Every `-p` form (`add`, `commit`, `fold`, `split`) takes two calls. The first lists the hunks and changes nothing:
 
 ```bash
-git loom split mqt --agent -m "Fix the off-by-one" -p
+git loom split pop --agent -m "Fix the off-by-one" -p
 # {"status":"needs_input","kind":"multiselect","prompt":"Select hunks",
 #  "options":["src/parse.rs:1","src/parse.rs:2"],"fingerprint":"a91c3f2be417",
 #  "items":[{"id":"src/parse.rs:1","path":"src/parse.rs","diff":"@@ -12,7 +12,7 @@ fn scan\n..."},
 #           {"id":"src/parse.rs:2", ...}],
-#  "hint":"re-run with: loom split mqt -m 'Fix the off-by-one' -p --hunks <id> [--hunks <id>...] --hunks-from a91c3f2be417"}
+#  "hint":"re-run with: loom split pop -m 'Fix the off-by-one' -p --hunks <id> [--hunks <id>...] --hunks-from a91c3f2be417"}
 ```
 
 The second re-runs the `hint` with the chosen ids, one `--hunks` per id:
 
 ```bash
-git loom split mqt --agent -m "Fix the off-by-one" -p --hunks src/parse.rs:1 --hunks-from a91c3f2be417
-# {"status":"ok","messages":["Split `b41c298` into `kmr` (2a0a929) and `mqt` (d979b2b)"]}
+git loom split pop --agent -m "Fix the off-by-one" -p --hunks src/parse.rs:1 --hunks-from a91c3f2be417
+# {"status":"ok","messages":["Split `b41c298` into `cup` (2a0a929) and `pop` (d979b2b)"]}
 ```
 
 - `--hunks` is the whole selection. Hunks already staged are listed with `"staged": true`: leaving one out unstages it with `add -p`, and keeps it staged but out of the commit with `commit -p` and `fold -p`.
@@ -104,7 +104,7 @@ git loom commit --agent -m "Fix login"
 #  "hint":"re-run with: loom commit -b <branch> -m <message> [files...] (a new name creates the branch), or -l for a loose commit on the integration branch"}
 
 git loom commit --agent -b feature-auth -m "Fix login"
-# {"status":"ok","messages":["Created commit `mqt` (1a2b3c4) on branch `feature-auth`"]}
+# {"status":"ok","messages":["Created commit `pop` (1a2b3c4) on branch `feature-auth`"]}
 ```
 
 ### A conflicting update

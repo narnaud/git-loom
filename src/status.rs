@@ -95,7 +95,11 @@ fn resolve_commit_filter(
         if let Ok(obj) = repo.revparse_single(id)
             && let Ok(commit) = obj.peel_to_commit()
         {
-            filter_oids.insert(commit.id());
+            // Spec 002: a hash abbreviation that is also another commit's
+            // short ID is ambiguous, and ambiguous IDs are skipped.
+            if !shadows_short_id(repo, id, commit.id(), info, allocator) {
+                filter_oids.insert(commit.id());
+            }
             continue;
         }
 
@@ -116,6 +120,30 @@ fn resolve_commit_filter(
     }
 
     filter_oids
+}
+
+/// Whether `id`, which git resolved to `oid` by hash abbreviation, is also
+/// the short ID or unique persistent prefix of another commit (Spec 002).
+fn shadows_short_id(
+    repo: &git2::Repository,
+    id: &str,
+    oid: git2::Oid,
+    info: &repo::RepoInfo,
+    allocator: &shortid::IdAllocator,
+) -> bool {
+    if !repo::is_hash_and_letter_shaped(repo, id) {
+        return false;
+    }
+    let exact = info
+        .commits
+        .iter()
+        .find(|c| allocator.get_commit(c.oid) == id)
+        .map(|c| c.oid);
+    let other = exact.or_else(|| match allocator.find_persistent(id).as_slice() {
+        [one] => Some(*one),
+        _ => None,
+    });
+    other.is_some_and(|o| o != oid)
 }
 
 #[cfg(test)]

@@ -80,7 +80,7 @@ git loom commit
 
 ```bash
 git loom commit -b feature-auth -m "add password validation" zz
-# ✓ Created commit `pkz` (4f825d2) on branch `feature-auth`
+# ✓ Created commit `hug` (4f825d2) on branch `feature-auth`
 ```
 
 ### Commit one file to a new branch
@@ -88,7 +88,7 @@ git loom commit -b feature-auth -m "add password validation" zz
 ```bash
 git loom commit -b feature-logging -m "add request logging" au
 # ✓ Created branch `feature-logging` at `a1b2c3d`
-# ✓ Created commit `tqn` (6395f01) on branch `feature-logging`
+# ✓ Created commit `sun` (6395f01) on branch `feature-logging`
 ```
 
 ### Loose commit on the integration branch
@@ -117,7 +117,7 @@ git loom commit -b feature-auth -m "add auth" zz
 
 ```bash
 git add <resolved-files> && git loom continue
-# ✓ Created commit `mqt` (b4c5d6e) on branch `feature-auth`
+# ✓ Created commit `pop` (b4c5d6e) on branch `feature-auth`
 ```
 
 `git loom abort` undoes the commit and puts your changes back as they were, staged ones staged. See [`continue`](continue.md) and [`abort`](abort.md).

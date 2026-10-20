@@ -2,7 +2,7 @@ use crate::core::repo::{
     self, RemoteStatus, Target, TargetKind, gather_repo_info, get_working_changes,
     get_working_changes_recurse,
 };
-use crate::core::test_helpers::TestRepo;
+use crate::core::test_helpers::{TestRepo, hash_shaped_ids, is_hex_letter_at};
 
 // ── Tests ──────────────────────────────────────────────────────────────
 
@@ -803,9 +803,9 @@ fn resolve_arg_unstaged_not_accepted() {
 
 // ── Persistent commit IDs (Spec 002) ─────────────────────────────────────
 
-/// `3ac7…` encodes to `wpns…`, `3ac8…` to `wpnr…`.
-const ID_A: &str = "I3ac7000000000000000000000000000000000000";
-const ID_B: &str = "I3ac8000000000000000000000000000000000000";
+/// `…1c3` spells `suna…` and `…510` `sune…`: least significant digit first.
+const ID_A: &str = "I00000000000000000000000000000000000001c3";
+const ID_B: &str = "I0000000000000000000000000000000000000510";
 
 fn resolve(test_repo: &TestRepo, arg: &str, accept: &[TargetKind]) -> anyhow::Result<Target> {
     test_repo.in_dir(|| repo::resolve_arg(&test_repo.repo, arg, accept))
@@ -816,7 +816,7 @@ fn resolve_arg_persistent_id_and_any_longer_prefix() {
     let test_repo = TestRepo::new_with_remote();
     let a = test_repo.commit(&format!("A\n\nChange-Id: {ID_A}\n"), "a.txt");
 
-    for arg in ["wpn", "wpns", "wpnszzzz"] {
+    for arg in ["sun", "suna", "sunacaca"] {
         let target = resolve(&test_repo, arg, &[TargetKind::Commit]).unwrap();
         assert_eq!(target, Target::Commit(a.to_string()), "{arg}");
     }
@@ -830,11 +830,11 @@ fn resolve_arg_persistent_prefix_shared_by_two_commits_lists_them() {
     test_repo.commit(&format!("Older\n\nChange-Id: {ID_A}\n"), "a.txt");
     test_repo.commit(&format!("Newer\n\nChange-Id: {ID_B}\n"), "b.txt");
 
-    let err = resolve(&test_repo, "wpn", &[TargetKind::Commit]).unwrap_err();
+    let err = resolve(&test_repo, "sun", &[TargetKind::Commit]).unwrap_err();
     let msg = err.to_string();
-    assert!(msg.contains("'wpn' matches several commits"), "{msg}");
-    assert!(msg.contains("wpnr ") && msg.contains(" Newer"), "{msg}");
-    assert!(msg.contains("wpns ") && msg.contains(" Older"), "{msg}");
+    assert!(msg.contains("'sun' matches several commits"), "{msg}");
+    assert!(msg.contains("sune ") && msg.contains(" Newer"), "{msg}");
+    assert!(msg.contains("suna ") && msg.contains(" Older"), "{msg}");
 }
 
 #[test]
@@ -854,7 +854,7 @@ fn resolve_arg_twins_are_ambiguous_by_change_id_but_not_by_hash_id() {
     let first = test_repo.commit(&format!("First\n\nChange-Id: {ID_A}\n"), "a.txt");
     test_repo.commit(&format!("Twin\n\nChange-Id: {ID_A}\n"), "b.txt");
 
-    for arg in [ID_A, "wpn"] {
+    for arg in [ID_A, "sun"] {
         let err = resolve(&test_repo, arg, &[TargetKind::Commit]).unwrap_err();
         assert!(
             err.to_string().contains("matches several commits"),
@@ -877,7 +877,7 @@ fn resolve_arg_persistent_commit_file() {
     let test_repo = TestRepo::new_with_remote();
     let a = test_repo.commit(&format!("A\n\nChange-Id: {ID_A}\n"), "a.txt");
 
-    let target = resolve(&test_repo, "wpn:0", &[TargetKind::CommitFile]).unwrap();
+    let target = resolve(&test_repo, "sun:0", &[TargetKind::CommitFile]).unwrap();
     assert_eq!(
         target,
         Target::CommitFile {
@@ -885,7 +885,7 @@ fn resolve_arg_persistent_commit_file() {
             path: "a.txt".to_string()
         }
     );
-    let err = resolve(&test_repo, "wpn:3", &[TargetKind::CommitFile]).unwrap_err();
+    let err = resolve(&test_repo, "sun:3", &[TargetKind::CommitFile]).unwrap_err();
     assert!(err.to_string().contains("no file at index 3"), "{err}");
 }
 
@@ -895,27 +895,27 @@ fn resolve_arg_persistent_id_respects_the_accepted_kinds() {
     let test_repo = TestRepo::new_with_remote();
     test_repo.commit(&format!("A\n\nChange-Id: {ID_A}\n"), "a.txt");
 
-    let err = resolve(&test_repo, "wpn:0", &[TargetKind::Commit]).unwrap_err();
+    let err = resolve(&test_repo, "sun:0", &[TargetKind::Commit]).unwrap_err();
     assert!(err.to_string().contains("did not resolve"), "{err}");
-    let err = resolve(&test_repo, "wpn", &[TargetKind::CommitFile]).unwrap_err();
+    let err = resolve(&test_repo, "sun", &[TargetKind::CommitFile]).unwrap_err();
     assert!(err.to_string().contains("did not resolve"), "{err}");
 }
 
 /// The prefix pass runs after every exact match: a branch whose exact ID is
-/// `wpn` wins over the commits whose letters merely start with it.
+/// `sun` wins over the commits whose letters merely start with it.
 #[test]
 fn resolve_arg_exact_branch_id_beats_a_commit_prefix() {
     let test_repo = TestRepo::new_with_remote();
     test_repo.commit(&format!("Older\n\nChange-Id: {ID_A}\n"), "a.txt");
     let tip = test_repo.commit(&format!("Newer\n\nChange-Id: {ID_B}\n"), "b.txt");
-    // `wpn` has candidates wp, wn, pn, then wpn; the first three go to
+    // `sun` has candidates su, sn, un, then sun; the first three go to
     // their own branches.
-    for name in ["wp", "wn", "pn", "wpn"] {
+    for name in ["su", "sn", "un", "sun"] {
         test_repo.create_branch_at_commit(name, tip);
     }
 
-    let target = resolve(&test_repo, "wpn", &[TargetKind::Commit, TargetKind::Branch]).unwrap();
-    assert_eq!(target, Target::Branch("wpn".to_string()));
+    let target = resolve(&test_repo, "sun", &[TargetKind::Commit, TargetKind::Branch]).unwrap();
+    assert_eq!(target, Target::Branch("sun".to_string()));
 }
 
 #[test]
@@ -927,7 +927,7 @@ fn describe_commit_names_persistent_ids_and_falls_back_to_the_hash() {
 
     assert_eq!(
         repo::describe_commit(&test_repo.workdir(), &with_id.to_string()),
-        format!("`wpn` ({})", short(with_id))
+        format!("`sun` ({})", short(with_id))
     );
     assert_eq!(
         repo::describe_commit(&test_repo.workdir(), &plain.to_string()),
@@ -951,7 +951,7 @@ fn describe_rewritten_leads_with_the_persistent_id() {
 
     assert_eq!(
         repo::describe_rewritten(&test_repo.workdir(), old, &with_id.to_string()),
-        format!("`wpn` (was: 1234567, now: {})", &with_id.to_string()[..7])
+        format!("`sun` (was: 1234567, now: {})", &with_id.to_string()[..7])
     );
     assert_eq!(
         repo::describe_rewritten(&test_repo.workdir(), old, &plain.to_string()),
@@ -986,4 +986,66 @@ fn unusable_context_config_keeps_the_default() {
             "{value}"
         );
     }
+}
+
+// ── Hash-shaped persistent IDs (Spec 002) ────────────────────────────────
+
+#[test]
+fn hash_shaped_persistent_id_shadowed_by_a_hash_prefix_is_refused() {
+    let test_repo = TestRepo::new_with_remote();
+    let ids = hash_shaped_ids(&test_repo);
+
+    let err = resolve(&test_repo, &ids.shadowed, &[TargetKind::Commit]).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains(&format!("'{}' is ambiguous", ids.shadowed)),
+        "{msg}"
+    );
+    assert!(msg.contains(&ids.stray.to_string()[..7]), "{msg}");
+}
+
+#[test]
+fn hash_shaped_persistent_id_resolves_when_no_object_shares_the_prefix() {
+    let test_repo = TestRepo::new_with_remote();
+    let ids = hash_shaped_ids(&test_repo);
+
+    let target = resolve(&test_repo, &ids.sibling, &[TargetKind::Commit]).unwrap();
+    assert_eq!(target, Target::Commit(ids.sibling_oid.to_string()));
+}
+
+/// A ref literally named like the ID still wins in step 1.
+#[test]
+fn ref_named_like_a_hash_shaped_persistent_id_wins() {
+    let test_repo = TestRepo::new_with_remote();
+    let plain = test_repo.commit("Plain", "p.txt");
+    let ids = hash_shaped_ids(&test_repo);
+    let object = test_repo.repo.find_object(plain, None).unwrap();
+    test_repo
+        .repo
+        .tag_lightweight(&ids.shadowed, &object, false)
+        .unwrap();
+
+    let target = resolve(&test_repo, &ids.shadowed, &[TargetKind::Commit]).unwrap();
+    assert_eq!(target, Target::Commit(plain.to_string()));
+}
+
+/// A hash ID can be letters too (`da`), so the hash form must not depend on
+/// the ID's shape.
+#[test]
+fn describe_commit_keeps_the_hash_form_for_a_letter_shaped_hash_id() {
+    let test_repo = TestRepo::new_with_remote();
+    let oid = test_repo.stray_commit_with_hash_prefix(2, |prefix| {
+        prefix.char_indices().all(|(i, c)| is_hex_letter_at(i, c))
+    });
+    // Its tree is HEAD's, so advancing the branch to it keeps the tree clean.
+    let head = test_repo.repo.head().unwrap().name().unwrap().to_string();
+    test_repo
+        .repo
+        .reference(&head, oid, true, "advance to the probe")
+        .unwrap();
+
+    assert_eq!(
+        repo::describe_commit(&test_repo.workdir(), &oid.to_string()),
+        format!("`{}`", &oid.to_string()[..7])
+    );
 }

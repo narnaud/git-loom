@@ -88,9 +88,9 @@ Minimal topology examples:
 
 ```text
 │╭─ [feature-b]          │╭─ [feature-a-v2]     │╭─ [feature-stale]
-│●   pkz  bbbbbbb B      │├─ [feature-a]        ├╯
-│├─ [feature-a]          │●   mqt  aaaaaaa A    │
-│●   mqt  aaaaaaa A      ├╯                     ● base (upstream) [origin/main]
+│●   hug  bbbbbbb B      │├─ [feature-a]        ├╯
+│├─ [feature-a]          │●   pop  aaaaaaa A    │
+│●   pop  aaaaaaa A      ├╯                     ● base (upstream) [origin/main]
 ├╯
 ```
 

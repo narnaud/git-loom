@@ -113,7 +113,7 @@ Show
 Sleep 2s
 Type "# fold, the swiss army knife. Amend any commit:"
 Enter
-Type "git loom fold st ryq"
+Type "git loom fold st pay"
 Sleep 400ms
 Enter
 Sleep 3.5s
@@ -123,13 +123,13 @@ Type 'git loom commit in -b fs -m "Load the theme script"'
 Sleep 400ms
 Enter
 Sleep 2.5s
-Type "git loom fold tms dm"
+Type "git loom fold mup dm"
 Sleep 400ms
 Enter
 Sleep 3.5s
 Type "# Not ready after all? Uncommit it:"
 Enter
-Type "git loom fold tms zz"
+Type "git loom fold mup zz"
 Sleep 400ms
 Enter
 Sleep 4s
@@ -142,7 +142,7 @@ Show
 Sleep 1s
 Type "# Reword any commit, no interactive rebase"
 Enter
-Type 'git loom reword tvw -m "Reject empty task titles"'
+Type 'git loom reword tus -m "Reject empty task titles"'
 Sleep 400ms
 Enter
 Sleep 4s
@@ -166,7 +166,7 @@ Sleep 4.5s
 # ── Stacks and PRs ──
 Type "# Stack branches: the search API under its UI"
 Enter
-Type "git loom branch search-api --on yvk"
+Type "git loom branch search-api --on cef"
 Sleep 400ms
 Enter
 Sleep 4s
