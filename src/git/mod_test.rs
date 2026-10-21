@@ -188,8 +188,10 @@ fn only_a_staged_deletion_still_on_disk_is_refused() {
 
 /// A staged deletion whose name is not UTF-8 must still be found on disk: a
 /// lossy decode would look for a name holding U+FFFD and report it absent.
+/// Not on macOS: APFS and HFS+ refuse such a name (`EILSEQ`), so the fixture
+/// cannot exist there.
 #[test]
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "macos")))]
 fn a_staged_deletion_with_a_non_utf8_name_is_still_found_on_disk() {
     use crate::core::test_helpers::TestRepo;
     use std::os::unix::ffi::OsStrExt;
