@@ -177,16 +177,20 @@ fn blocked_worker(app: &mut App) -> std::sync::mpsc::Sender<()> {
     release
 }
 
-/// Poll until the worker has been reaped.
+/// Poll until the worker has been reaped, within [`deadline`].
 fn poll_until_idle(app: &mut App) {
-    for _ in 0..200 {
+    let deadline = deadline();
+    loop {
         app.poll_background();
         if app.running.is_none() {
             return;
         }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "worker never finished"
+        );
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
-    panic!("worker never finished");
 }
 
 #[test]
@@ -4384,6 +4388,92 @@ fn push_takes_a_selected_branch_over_the_cursor() {
     app.selected.insert(oid('a').to_string());
     assert!(app.action_push(false).is_none());
     assert_eq!(app.notice.as_deref(), Some("push: select one branch"));
+}
+
+#[test]
+fn update_asks_only_on_one_pushed_branch() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    move_cursor_to(&mut app, "br:feature-a");
+    assert_eq!(app.action_update(), Some(Action::Update), "never pushed");
+
+    let mut info = make_info();
+    info.branches[0].remote = Some(RemoteStatus::Different);
+    let mut app = make_app(snapshot_of(info), &theme);
+    move_cursor_to(&mut app, &oid('a').to_string());
+    assert_eq!(app.action_update(), Some(Action::Update));
+
+    app.selected.insert("wf:a.rs".to_string());
+    move_cursor_to(&mut app, "br:feature-a");
+    assert_eq!(app.action_update(), Some(Action::Update), "a file selected");
+    assert!(app.popup.is_none());
+
+    app.selected.clear();
+    app.selected.insert("br:feature-a".to_string());
+    move_cursor_to(&mut app, &oid('a').to_string());
+    assert!(app.action_update().is_none());
+    let Some(Popup::Choice { actions, .. }) = &app.popup else {
+        panic!("expected the update menu");
+    };
+    assert_eq!(
+        actions,
+        &[
+            Action::Update,
+            Action::UpdateBranch {
+                branch: "feature-a".to_string()
+            }
+        ]
+    );
+    let sid = app.sid_of("feature-a");
+    assert_eq!(
+        app.command_line(&actions[1]),
+        format!("loom update {}", sid)
+    );
+
+    press(&mut app, KeyCode::Esc);
+    assert!(app.popup.is_none());
+    assert!(app.running.is_none());
+    assert_eq!(app.notice.as_deref(), Some("update cancelled"));
+}
+
+/// `feature-a` was pushed with `A2`, then lost it locally.
+#[test]
+fn update_menu_updates_or_takes_the_remote_version() {
+    let test_repo = crate::core::test_helpers::TestRepo::new_with_remote();
+    test_repo.create_branch_at_commit("feature-a", test_repo.head_oid());
+    test_repo.switch_branch("feature-a");
+    let a1 = test_repo.commit("A1", "a1.txt");
+    test_repo.commit("A2", "a2.txt");
+    crate::git::run_git(&test_repo.workdir(), &["push", "-u", "origin", "feature-a"]).unwrap();
+    test_repo.reset_hard(a1);
+    test_repo.switch_branch("integration");
+    test_repo.merge_no_ff("feature-a");
+    let theme = make_theme();
+
+    test_repo.in_dir(|| {
+        let mut app = make_app(load_snapshot(1).unwrap(), &theme);
+        let mut run = |keys: &[KeyCode]| {
+            move_cursor_to(&mut app, "br:feature-a");
+            press(&mut app, KeyCode::Char('u'));
+            for &key in keys {
+                press(&mut app, key);
+            }
+            poll_until_idle(&mut app);
+            let lines = app
+                .log
+                .last()
+                .map(|e| e.lines.iter().map(|(_, t)| t.clone()).collect::<Vec<_>>());
+            assert!(app.popup.is_none(), "{lines:?}");
+            app.log.last().unwrap().command.clone()
+        };
+
+        assert_eq!(run(&[KeyCode::Enter]), "loom update");
+        assert!(!test_repo.workdir().join("a2.txt").exists());
+
+        let command = run(&[KeyCode::Down, KeyCode::Enter]);
+        assert!(command.starts_with("loom update "), "{command}");
+        assert!(test_repo.workdir().join("a2.txt").exists());
+    });
 }
 
 // ── Paused operation ─────────────────────────────────────────────────────
