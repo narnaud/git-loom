@@ -4,6 +4,10 @@
 # Usage:
 #   ./tests/integration/run_all.sh
 #   GL_BIN=target/release/git-loom ./tests/integration/run_all.sh
+#   LOOM_TEST_JOBS=1 ./tests/integration/run_all.sh   # one script at a time, output live
+#
+# The scripts run concurrently by default (each keeps to its own temp dirs)
+# and their output is printed in name order as they finish.
 
 set -uo pipefail
 unset CDPATH  # keep cd from echoing the directory into $(...)
@@ -17,20 +21,46 @@ else
     RED=''; GREEN=''; YELLOW=''; BOLD=''; NC=''
 fi
 
+scripts=("$DIR"/test_*.sh)
 passed=0
 failed=0
 failed_names=()
 
-for test_script in "$DIR"/test_*.sh; do
-    name="$(basename "$test_script" .sh)"
-    printf "${YELLOW}${BOLD}── %s ${NC}\n" "$name"
-    if bash "$test_script"; then
+record() {
+    if [[ "$2" -eq 0 ]]; then
         ((passed++)) || true
     else
         ((failed++)) || true
-        failed_names+=("$name")
+        failed_names+=("$1")
     fi
-done
+}
+
+if [[ "${LOOM_TEST_JOBS:-}" == 1 ]]; then
+    for test_script in "${scripts[@]}"; do
+        name="$(basename "$test_script" .sh)"
+        printf "${YELLOW}${BOLD}── %s ${NC}\n" "$name"
+        bash "$test_script"
+        record "$name" $?
+    done
+else
+    logdir="$(mktemp -d "${TMPDIR:-/tmp}/git-loom-run.XXXXXXXXXX")"
+    trap 'rm -rf "$logdir"' EXIT
+    pids=()
+    for i in "${!scripts[@]}"; do
+        (
+            bash "${scripts[$i]}" > "$logdir/$i.log" 2>&1
+            echo $? > "$logdir/$i.code"
+        ) &
+        pids[$i]=$!
+    done
+    for i in "${!scripts[@]}"; do
+        name="$(basename "${scripts[$i]}" .sh)"
+        wait "${pids[$i]}"
+        printf "${YELLOW}${BOLD}── %s ${NC}\n" "$name"
+        cat "$logdir/$i.log"
+        record "$name" "$(cat "$logdir/$i.code" 2>/dev/null || echo 1)"
+    done
+fi
 
 echo ""
 printf "${BOLD}────────────────────────────────${NC}\n"

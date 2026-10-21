@@ -70,13 +70,17 @@ trap cleanup_tmpdirs EXIT
 
 # ── Repo setup helpers ────────────────────────────────────────────────────
 
-# Create a repo with a bare remote.
-# Sets WORK (integration branch, tracking origin/<default-branch>).
-setup_repo_with_remote() {
-    new_tmpdir TMPROOT
+# Template for setup_repo_with_remote, built on its first call: a bare remote
+# holding one commit, and its configured working clone. Each scenario gets a
+# copy: building it from scratch took ~15 git spawns per scenario, about half
+# of the suite's time on Windows.
+LOOM_TEMPLATE=""
+
+build_repo_template() {
+    new_tmpdir LOOM_TEMPLATE
 
     # Build a seed repo with an initial commit
-    local seed="$TMPROOT/seed"
+    local seed="$LOOM_TEMPLATE/seed"
     git init -q "$seed"
     git -C "$seed" config user.email "test@test.com"
     git -C "$seed" config user.name "Test"
@@ -85,17 +89,15 @@ setup_repo_with_remote() {
     git -C "$seed" add .
     git -C "$seed" commit -q -m "Initial"
     # Exported as BASE_BRANCH: git's default branch name differs per machine.
-    local base_branch
-    base_branch="$(git -C "$seed" rev-parse --abbrev-ref HEAD)"
-    BASE_BRANCH="$base_branch"
+    BASE_BRANCH="$(git -C "$seed" rev-parse --abbrev-ref HEAD)"
 
     # Clone it as the bare remote
-    git clone -q --bare "$seed" "$TMPROOT/remote.git"
+    git clone -q --bare "$seed" "$LOOM_TEMPLATE/remote.git"
     rm -rf "$seed"
 
     # Working clone
-    WORK="$TMPROOT/work"
-    git clone -q "$TMPROOT/remote.git" "$WORK"
+    local WORK="$LOOM_TEMPLATE/work"
+    git clone -q "$LOOM_TEMPLATE/remote.git" "$WORK"
     git -C "$WORK" config user.email "test@test.com"
     git -C "$WORK" config user.name "Test"
     git -C "$WORK" config core.autocrlf false
@@ -109,7 +111,22 @@ setup_repo_with_remote() {
 
     # Integration branch tracking origin/<default>
     git -C "$WORK" checkout -q -b integration
-    git -C "$WORK" branch --set-upstream-to="origin/$base_branch" integration > /dev/null 2>&1
+    git -C "$WORK" branch --set-upstream-to="origin/$BASE_BRANCH" integration > /dev/null 2>&1
+}
+
+# Create a repo with a bare remote.
+# Sets WORK (integration branch, tracking origin/<default-branch>).
+setup_repo_with_remote() {
+    if [[ -z "$LOOM_TEMPLATE" ]]; then
+        build_repo_template
+    fi
+    new_tmpdir TMPROOT
+    cp -R "$LOOM_TEMPLATE/remote.git" "$LOOM_TEMPLATE/work" "$TMPROOT/"
+    WORK="$TMPROOT/work"
+    git -C "$WORK" remote set-url origin "$TMPROOT/remote.git"
+    # The copy has fresh stat data: refresh the index before a plumbing
+    # command takes .gitkeep for modified.
+    git -C "$WORK" update-index -q --refresh
 }
 
 # Commit a single file in $WORK.
