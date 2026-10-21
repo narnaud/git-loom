@@ -56,8 +56,7 @@ at a time with live output). While iterating, run only the affected script:
 copy the binary first, because a concurrent build swaps
 `target/debug/git-loom(.exe)` mid-run, then
 `GL_BIN=<copy> bash tests/integration/test_<cmd>.sh`; run the full suite
-before pushing. `test_show`'s pager case needs util-linux `script`, absent
-from Git Bash, where the suite always reports 18/19.
+before pushing.
 
 Keep `tests/bin_is_built.rs`: it makes `cargo test` build the binary used as the
 sequence editor by rebase tests. Removing it breaks rebase tests in an unbuilt tree.

@@ -199,14 +199,19 @@ assert_exit_fail "$CODE" "show_bogus_option_fails"
 # ── PAGER ─────────────────────────────────────────────────────────────────────
 
 # git pages only on a tty, and dies from SIGPIPE when the pager exits unread.
-describe "a pager that quits early is not a failure"
-setup_repo_with_remote
-seq 1 200000 > "$WORK/big.txt"
-git -C "$WORK" add big.txt
-git -C "$WORK" commit -q -m "Big commit"
-code=0
-(cd "$WORK" && GIT_PAGER=true script -qec "$(printf %q "$GL_BIN") show HEAD" /dev/null > /dev/null) || code=$?
-assert_eq "$code" "0" "show_pager_quit_ok"
+# The tty comes from util-linux `script -c`, which BSD `script` and Git Bash lack.
+if script --version 2>/dev/null | grep -q util-linux; then
+    describe "a pager that quits early is not a failure"
+    setup_repo_with_remote
+    seq 1 200000 > "$WORK/big.txt"
+    git -C "$WORK" add big.txt
+    git -C "$WORK" commit -q -m "Big commit"
+    code=0
+    (cd "$WORK" && GIT_PAGER=true script -qec "$(printf %q "$GL_BIN") show HEAD" /dev/null > /dev/null) || code=$?
+    assert_eq "$code" "0" "show_pager_quit_ok"
+else
+    skipped "pager case (needs util-linux script for a tty)"
+fi
 
 # ── ALIAS ─────────────────────────────────────────────────────────────────────
 
