@@ -32,6 +32,8 @@ git loom absorb -- --no-verify
 
 For each hunk, absorb finds the commit that last changed the lines it modifies or deletes, among the commits on your integration branch. Hunks of one file can go to different commits. All the fixups happen in one rewrite.
 
+When a `pre-commit` hook fixes files and fails, absorb rolls back, the hook's fixes included, and does not commit again: a formatter's whole-file rewrite would land in one fixup, with lines other commits own. Run the formatter yourself first (e.g. `pre-commit run --files <files>`), then absorb: each fixed line goes to its own commit.
+
 A hunk stays in the working tree when its target can't be told:
 
 - it only adds lines, so there is nothing to trace back (use [`fold`](fold.md) instead)

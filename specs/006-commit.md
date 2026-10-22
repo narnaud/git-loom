@@ -75,6 +75,21 @@ A new empty target MUST fork from the base, even when other sections exist, so b
 
 Create the commit at HEAD, then relocate it to the target via one Weave operation (Spec 004). The checkout remains on integration and all affected refs advance correctly.
 
+## Hooks that fix files
+
+When `git commit` fails and a hook rewrote a fully staged file (index differs
+from HEAD and matched the working tree before the hook), loom stages those
+files again and runs the same `git commit` once more. A partly staged file is
+never staged again; with no fully staged file rewritten there is no retry. If
+the retry fails, it puts back the index entries it replaced (the only copy of
+what was staged), then the normal failure path runs.
+
+Only `commit`, and `fold` of files, hunks or staged changes into a commit,
+retry. Never when `git commit` runs uncaptured (the editor, or forwarded
+arguments outside agent mode), for a commit rebuilt from history (`split`,
+fold's moves and uncommits, `reword`), or for `absorb`, whose rollback
+restores the working tree from before the hook ran.
+
 ## Conflicts and recovery
 
 If relocation conflicts, pause and save `.git/loom/state.json`. The new commit remains recoverable in the working tree through mixed reset; original staged changes MUST be restored on abort.

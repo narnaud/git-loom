@@ -157,7 +157,7 @@ pub fn run(
     repo::verify_has_staged_changes(&repo)?;
 
     let do_commit = || -> Result<()> {
-        git::commit_opts(&workdir, message.as_deref(), &git_opts)?;
+        git::commit_opts_retrying(&workdir, message.as_deref(), &git_opts)?;
         // The editor path: the message is only known now.
         if message.is_none() {
             changeid::ensure_on_head_or_warn(&repo, &workdir, None);

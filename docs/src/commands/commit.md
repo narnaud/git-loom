@@ -54,6 +54,18 @@ When the integration branch has the same name as its upstream (`main` tracking `
 
 Only the hunks you keep in the picker are committed. Everything else, staged or not, stays as it was.
 
+### A hook that fixes files
+
+When a `pre-commit` hook fixes files and fails, as formatters run from the `pre-commit` framework do, loom stages the fixed files and commits again, once. It only stages a fixed file again if it was fully staged, so unstaged work never gets into the commit. It does not retry when git opens the editor (no `-m`) or takes options after `--` outside agent mode, since you see the hook's output then.
+
+`fold` of files, hunks or staged changes retries too, options after `--` or not. `absorb` does not, since a formatter rewrites whole files and the retry would put lines other commits own into one fixup: run the formatter yourself before absorbing.
+
+```bash
+git loom commit -b feature-auth -m "Check the token" src/auth.rs
+# ! a commit hook changed `src/auth.rs`; committing again with its changes
+# ✓ Created commit `hug` (4f825d2) on branch `feature-auth`
+```
+
 ### A change that is already upstream
 
 If upstream already has everything the commit changes, loom undoes it instead of creating an empty commit. Your changes come back:

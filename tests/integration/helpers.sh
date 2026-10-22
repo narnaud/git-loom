@@ -178,12 +178,31 @@ switch_to() { git -C "$WORK" checkout -q "$1"; }
 # Write a file in $WORK without committing.
 write_file() { echo "$2" > "$WORK/$1"; }
 
-# Install a git hook that always fails. The global config may point
-# core.hooksPath elsewhere; aim it back at the repo.
+# Install a git hook that always fails.
 install_failing_hook() {
+    printf '#!/bin/sh\nexit 1\n' | install_hook "$1"
+}
+
+# Install a pre-commit hook that acts like a formatter run from the pre-commit
+# framework: it strips trailing spaces from staged files, then fails.
+install_trailing_space_fixer() {
+    install_hook pre-commit <<'HOOK'
+#!/bin/sh
+for f in $(git diff --cached --name-only); do
+  if git show ":$f" | grep -q ' $'; then
+    sed 's/ *$//' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+    exit 1
+  fi
+done
+HOOK
+}
+
+# Install a git hook whose script is read from stdin. The global config may
+# point core.hooksPath elsewhere; aim it back at the repo.
+install_hook() {
     mkdir -p "$WORK/.git/hooks"
     git -C "$WORK" config core.hooksPath "$WORK/.git/hooks"
-    printf '#!/bin/sh\nexit 1\n' > "$WORK/.git/hooks/$1"
+    cat > "$WORK/.git/hooks/$1"
     chmod +x "$WORK/.git/hooks/$1"
 }
 

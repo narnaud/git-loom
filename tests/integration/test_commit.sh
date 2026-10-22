@@ -58,6 +58,16 @@ assert_not_contains "$out" "on branch"      "integration_no_branch_label"
 assert_head_msg "Integration commit"        "integration_head_msg"
 assert_head_parent_count 1                  "integration_single_parent"
 
+describe "hook fix: agent mode retries with forwarded options"
+setup_repo_with_remote
+install_trailing_space_fixer
+write_file "fixed.txt" "fixed "
+gl_capture --agent commit -l -m "Hook fixed" fixed.txt -- --signoff
+assert_exit_ok "$CODE" "hook_fix_agent_ok"
+assert_contains "$OUT" "committing again" "hook_fix_agent_msg"
+assert_eq "$(git -C "$WORK" show HEAD:fixed.txt)" "fixed" "hook_fix_agent_committed"
+assert_contains "$(git -C "$WORK" log -1 --format=%B)" "Signed-off-by" "hook_fix_agent_signoff"
+
 describe "loose commit: -l skips the picker and leaves woven branches alone"
 setup_repo_with_remote
 create_feature_branch "g-untouched"

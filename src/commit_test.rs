@@ -237,6 +237,29 @@ fn a_failed_commit_puts_back_the_staging_it_set_aside() {
     assert!(status.contains("A  kept.txt"), "{status}");
 }
 
+#[cfg(unix)]
+#[test]
+fn commit_takes_what_a_hook_fixed() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.install_trailing_space_fixer();
+    test_repo.write_file("new.txt", "a \n");
+
+    test_repo
+        .in_dir(|| {
+            run(
+                Some("feature".to_string()),
+                Some("Message".to_string()),
+                vec!["new.txt".to_string()],
+            )
+        })
+        .unwrap();
+
+    let committed =
+        crate::git::run_git_stdout(&test_repo.workdir(), &["show", "feature:new.txt"]).unwrap();
+    assert_eq!(committed, "a\n");
+    assert_eq!(test_repo.status_porcelain(), "");
+}
+
 /// #430: the branch was created before `git commit`, so a rejecting hook left
 /// it behind and the retry was refused as a non-woven branch.
 #[test]

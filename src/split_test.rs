@@ -842,6 +842,30 @@ fn an_aborted_first_commit_of_an_older_commit_leaves_history_alone() {
     assert_eq!(test_repo.status_porcelain(), "");
 }
 
+/// A split rebuilds content from the commit, which a hook's rewrite must not
+/// change, so it never commits again after one.
+#[cfg(unix)]
+#[test]
+fn split_does_not_commit_what_a_hook_fixed() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("Base", "base.txt");
+    let target_oid =
+        test_repo.commit_multi(&[("a.txt", "a \n"), ("b.txt", "b")], "Two files commit");
+    test_repo.install_trailing_space_fixer();
+
+    super::split_commit_with_selection(
+        &test_repo.repo,
+        &target_oid.to_string(),
+        vec!["a.txt".to_string()],
+        "First part".to_string(),
+        &[],
+    )
+    .expect_err("the hook fails");
+
+    assert_eq!(test_repo.hook_runs(), 1);
+    assert_eq!(test_repo.head_oid(), target_oid);
+}
+
 #[cfg(unix)]
 #[test]
 fn split_skips_the_hooks_with_no_verify() {

@@ -204,6 +204,20 @@ assert_exit_ok $? "amend_non_head_ok"
 assert_head_msg "Top commit" "amend_non_head_top_msg"
 assert_file_content "base.txt" "amended base" "amend_non_head_content"
 
+describe "amend: a pre-commit hook that fixes the folded file gets one retry"
+setup_repo_with_remote
+commit_file "Base commit" "base.txt"
+target_hash="$(head_hash)"
+commit_file "Top commit" "top.txt"
+install_trailing_space_fixer
+write_file "base.txt" "fixed base "
+gl_capture fold base.txt "$target_hash"
+assert_exit_ok "$CODE" "amend_hook_fix_ok"
+assert_contains "$OUT" "committing again" "amend_hook_fix_msg"
+assert_head_msg "Top commit" "amend_hook_fix_top_msg"
+assert_eq "$(git -C "$WORK" show HEAD~1:base.txt)" "fixed base" "amend_hook_fix_committed"
+assert_eq "$(git -C "$WORK" status --porcelain)" "" "amend_hook_fix_clean"
+
 describe "amend: fold multiple files into HEAD"
 setup_repo_with_remote
 commit_file "Multi file commit" "multi-a.txt"

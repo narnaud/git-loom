@@ -1629,7 +1629,9 @@ fn fold_files_into_commit(
         if !skip_staging {
             git::stage_files(workdir, &file_refs)?;
         }
-        if let Err(e) = git::commit_amend_no_edit(workdir, git_opts) {
+        if let Err(e) =
+            git::retry_after_hook_fixes(workdir, || git::commit_amend_no_edit(workdir, git_opts))
+        {
             undo_commit_attempt(workdir, staged_by_loom, staged);
             return Err(e);
         }
@@ -1647,7 +1649,9 @@ fn fold_files_into_commit(
         if !skip_staging {
             git::stage_files(workdir, &file_refs)?;
         }
-        if let Err(e) = git::commit_captured(workdir, &message, git_opts) {
+        if let Err(e) = git::retry_after_hook_fixes(workdir, || {
+            git::commit_captured(workdir, &message, git_opts)
+        }) {
             undo_commit_attempt(workdir, staged_by_loom, staged);
             return Err(e);
         }

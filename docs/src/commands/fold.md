@@ -68,6 +68,8 @@ git add src/auth.rs && git loom fold pop   # amend what is staged
 
 Unstaged changes to the same files stay in the working tree when you fold only the staged ones.
 
+When you amend with files, hunks or staged changes, a `pre-commit` hook that fixes files and fails gets one retry with its fixes, as in [`commit`](commit.md#a-hook-that-fixes-files).
+
 ### Fix up a commit
 
 ```bash

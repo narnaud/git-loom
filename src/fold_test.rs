@@ -91,6 +91,59 @@ fn fold_file_into_non_head_commit() {
     assert_ne!(test_repo.get_oid(1), c1_oid);
 }
 
+#[cfg(unix)]
+#[test]
+fn fold_file_into_non_head_commit_takes_what_a_hook_fixed() {
+    let test_repo = TestRepo::new_with_remote();
+    let c1_oid = test_repo.commit("First commit", "file1.txt");
+    test_repo.commit("Second commit", "file2.txt");
+    test_repo.write_file("file1.txt", "a \n");
+    test_repo.write_file("other.txt", "b \n");
+    test_repo.stage_files(&["other.txt"]);
+    test_repo.install_trailing_space_fixer();
+
+    super::fold_files_into_commit(
+        &test_repo.repo,
+        &["file1.txt".to_string()],
+        &c1_oid.to_string(),
+        false,
+        &[],
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(test_repo.hook_runs(), 2);
+    assert_eq!(test_repo.get_message(0), "Second commit");
+    assert_eq!(show(&test_repo, "HEAD~:file1.txt"), "a\n");
+    assert_eq!(test_repo.read_file("file1.txt"), "a\n");
+    assert_eq!(test_repo.status_porcelain(), "A  other.txt\n");
+    assert_eq!(test_repo.read_file("other.txt"), "b \n");
+}
+
+#[cfg(unix)]
+#[test]
+fn fold_staged_into_head_takes_what_a_hook_fixed() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("First commit", "file1.txt");
+    test_repo.write_file("file1.txt", "a \n");
+    test_repo.stage_files(&["file1.txt"]);
+    test_repo.install_trailing_space_fixer();
+
+    super::fold_files_into_commit(
+        &test_repo.repo,
+        &["file1.txt".to_string()],
+        &test_repo.head_oid().to_string(),
+        true,
+        &[],
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(test_repo.hook_runs(), 2);
+    assert_eq!(show(&test_repo, "HEAD:file1.txt"), "a\n");
+    assert_eq!(test_repo.status_porcelain(), "");
+}
+
 #[test]
 fn fold_file_no_changes_fails() {
     let test_repo = TestRepo::new();

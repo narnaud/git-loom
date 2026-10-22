@@ -2,6 +2,8 @@ use std::path::Path;
 
 use anyhow::Result;
 
+use crate::core::msg;
+
 /// Amend the current commit, optionally replacing its message
 /// (`git commit --quiet [opts] --allow-empty --amend --only [-m msg]`).
 /// `--only` keeps staged changes out, `--quiet` suppresses the summary on the
@@ -180,11 +182,160 @@ pub fn commit_opts(workdir: &Path, message: Option<&str>, opts: &[&str]) -> Resu
     if let Some(message) = message {
         args.extend(["-m", message]);
     }
-    if message.is_none() || runs_uncaptured(opts) {
+    if commit_runs_uncaptured(message, opts) {
         super::run_git_interactive(workdir, &args)
     } else {
         super::run_git(workdir, &args)
     }
+}
+
+/// [`commit_opts`], committing again after a hook fixed files
+/// ([`retry_after_hook_fixes`]) when git runs captured. Uncaptured, the user
+/// saw the hook fail, and may have cancelled in the editor.
+pub fn commit_opts_retrying(workdir: &Path, message: Option<&str>, opts: &[&str]) -> Result<()> {
+    if commit_runs_uncaptured(message, opts) {
+        return commit_opts(workdir, message, opts);
+    }
+    retry_after_hook_fixes(workdir, || commit_opts(workdir, message, opts))
+}
+
+/// Run `commit`, and once more if it failed after a hook rewrote fully staged
+/// files in the working tree, as a formatter run from `pre-commit` does (Spec 006).
+/// Only for a commit of the user's own work: the retry commits the hook's
+/// version of those files.
+pub fn retry_after_hook_fixes(workdir: &Path, commit: impl Fn() -> Result<()>) -> Result<()> {
+    // Best effort: without the list there is just no retry.
+    let Ok(fully_staged) = fully_staged_paths(workdir) else {
+        return commit();
+    };
+    let Err(err) = commit() else {
+        return Ok(());
+    };
+    // Only a file whose index matched its working tree is staged again, so no
+    // unstaged work gets into the commit.
+    if fully_staged.is_empty() {
+        return Err(err);
+    }
+    let staged: Vec<&str> = fully_staged.iter().map(String::as_str).collect();
+    let Ok(unstaged) = unstaged_paths(workdir, &staged) else {
+        return Err(err);
+    };
+    let fixed: Vec<&str> = fully_staged
+        .iter()
+        .filter(|p| unstaged.contains(*p))
+        .map(String::as_str)
+        .collect();
+    if fixed.is_empty() {
+        return Err(err);
+    }
+    // The hook rewrote the working tree, so the index as the failed commit
+    // left it holds the only copy of what was staged: put it back if the
+    // retry fails.
+    let Ok(entries) = index_entries(workdir, &fixed) else {
+        return Err(err);
+    };
+    let names = path_list(&fixed);
+    let restore = || {
+        if let Err(e) = restore_index_entries(workdir, &entries) {
+            let args: Vec<String> = entries
+                .iter()
+                .map(|entry| format!("--cacheinfo {}", super::shell_quote(entry)))
+                .collect();
+            msg::warn(&format!(
+                "could not restore the staged version of {names}: {e}\n\
+                 `git update-index {}` puts it back",
+                args.join(" ")
+            ));
+        }
+    };
+    if stage_files(workdir, &fixed).is_err() {
+        restore();
+        return Err(err);
+    }
+    msg::warn(&format!(
+        "a commit hook changed {names}; committing again with its changes"
+    ));
+    commit().inspect_err(|_| restore())
+}
+
+/// `paths` as backticked names, the first few only.
+fn path_list(paths: &[&str]) -> String {
+    const SHOWN: usize = 5;
+    let mut list: Vec<String> = paths.iter().take(SHOWN).map(|p| format!("`{p}`")).collect();
+    if paths.len() > SHOWN {
+        list.push(format!("{} more", paths.len() - SHOWN));
+    }
+    list.join(", ")
+}
+
+/// Tracked paths whose index differs from HEAD and matches the working tree.
+fn fully_staged_paths(workdir: &Path) -> Result<Vec<String>> {
+    let out = super::run_git_stdout(
+        workdir,
+        &[
+            "diff",
+            "--cached",
+            "--name-only",
+            "-z",
+            "--no-renames",
+            "--ignore-submodules=all",
+        ],
+    )?;
+    let staged: Vec<&str> = out.split('\0').filter(|p| !p.is_empty()).collect();
+    if staged.is_empty() {
+        return Ok(Vec::new());
+    }
+    // Scoped to the staged paths, so only they get a stat, not the whole tree.
+    let unstaged = unstaged_paths(workdir, &staged)?;
+    Ok(staged
+        .into_iter()
+        .filter(|p| !unstaged.contains(*p))
+        .map(str::to_string)
+        .collect())
+}
+
+/// Those of `paths` whose working tree differs from the index.
+fn unstaged_paths(workdir: &Path, paths: &[&str]) -> Result<std::collections::HashSet<String>> {
+    let literal = super::literal_pathspecs(paths);
+    let mut args = vec!["diff", "--name-only", "-z", "--ignore-submodules=all", "--"];
+    args.extend(literal.iter().map(String::as_str));
+    let out = super::run_git_stdout(workdir, &args)?;
+    Ok(out
+        .split('\0')
+        .filter(|p| !p.is_empty())
+        .map(str::to_string)
+        .collect())
+}
+
+/// `git ls-files -s` entries of `paths`, as `--cacheinfo` values.
+fn index_entries(workdir: &Path, paths: &[&str]) -> Result<Vec<String>> {
+    let literal = super::literal_pathspecs(paths);
+    let mut args = vec!["ls-files", "-s", "-z", "--"];
+    args.extend(literal.iter().map(String::as_str));
+    let out = super::run_git_stdout(workdir, &args)?;
+    Ok(out
+        .split('\0')
+        .filter_map(|entry| {
+            let (info, path) = entry.split_once('\t')?;
+            let mut fields = info.split(' ');
+            let (mode, oid) = (fields.next()?, fields.next()?);
+            Some(format!("{mode},{oid},{path}"))
+        })
+        .collect())
+}
+
+fn restore_index_entries(workdir: &Path, entries: &[String]) -> Result<()> {
+    let mut args = vec!["update-index"];
+    for entry in entries {
+        args.extend(["--cacheinfo", entry.as_str()]);
+    }
+    super::run_git(workdir, &args)
+}
+
+/// Whether [`commit_opts`] runs git uncaptured: with no message, or with
+/// forwarded options outside agent mode.
+fn commit_runs_uncaptured(message: Option<&str>, opts: &[&str]) -> bool {
+    message.is_none() || runs_uncaptured(opts)
 }
 
 /// Whether a git command carrying `opts` the user forwarded should run

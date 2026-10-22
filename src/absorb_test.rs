@@ -42,6 +42,27 @@ fn absorb_single_file() {
     });
 }
 
+/// A formatter's whole-file rewrite would put lines other commits own into
+/// one fixup, so absorb does not commit again after it, and its rollback puts
+/// the working tree back as the user had it (Spec 006).
+#[cfg(unix)]
+#[test]
+fn absorb_does_not_commit_what_a_hook_fixed() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("Add file1", "file1.txt");
+    let head = test_repo.head_oid();
+    test_repo.write_file("file1.txt", "modified content \n");
+    test_repo.install_trailing_space_fixer();
+
+    test_repo
+        .in_dir(|| super::run(false, vec![], vec![]))
+        .expect_err("the hook fails");
+
+    assert_eq!(test_repo.hook_runs(), 1);
+    assert_eq!(test_repo.head_oid(), head);
+    assert_eq!(test_repo.read_file("file1.txt"), "modified content \n");
+}
+
 #[test]
 fn absorb_multiple_files_different_commits() {
     let test_repo = TestRepo::new_with_remote();

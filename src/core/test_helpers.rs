@@ -705,6 +705,35 @@ impl TestRepo {
         self.set_config("core.hooksPath", hooks.to_str().unwrap());
     }
 
+    /// Install a `pre-commit` hook that acts like a formatter run from the
+    /// `pre-commit` framework: it strips trailing spaces from the working-tree
+    /// copy of each staged file whose staged content has some, then fails.
+    /// Every run appends a line to `.git/hook-runs`.
+    #[cfg(unix)]
+    pub fn install_trailing_space_fixer(&self) {
+        self.install_hook(
+            "pre-commit",
+            r#"echo run >> "$(git rev-parse --git-dir)/hook-runs"
+status=0
+for f in $(git diff --cached --name-only --diff-filter=AM); do
+  if git show ":$f" | grep -q ' $'; then
+    sed 's/ *$//' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+    status=1
+  fi
+done
+exit $status
+"#,
+        );
+    }
+
+    /// How many times the hook from [`Self::install_trailing_space_fixer`] ran.
+    #[cfg(unix)]
+    pub fn hook_runs(&self) -> usize {
+        std::fs::read_to_string(self.repo.path().join("hook-runs"))
+            .map(|s| s.lines().count())
+            .unwrap_or(0)
+    }
+
     /// Get porcelain status output.
     pub fn status_porcelain(&self) -> String {
         crate::git::run_git_stdout(self.workdir().as_path(), &["status", "--porcelain"]).unwrap()

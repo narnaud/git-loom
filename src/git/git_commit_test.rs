@@ -171,3 +171,177 @@ fn commit_empty_copy_of_skips_pre_commit_and_commit_msg_hooks() {
     assert_eq!(test_repo.get_message(0), "First commit");
     assert_eq!(test_repo.get_message(1), "First commit");
 }
+
+/// The commit [`git::retry_after_hook_fixes`] wraps in these tests.
+#[cfg(unix)]
+fn commit_second(test_repo: &TestRepo) -> anyhow::Result<()> {
+    let workdir = test_repo.workdir();
+    git::retry_after_hook_fixes(workdir.as_path(), || {
+        git::commit_captured(workdir.as_path(), "Second", &[])
+    })
+}
+
+#[cfg(unix)]
+fn staged(test_repo: &TestRepo, path: &str) -> String {
+    git::run_git_stdout(
+        test_repo.workdir().as_path(),
+        &["show", &format!(":{path}")],
+    )
+    .unwrap()
+}
+
+#[cfg(unix)]
+#[test]
+fn retry_commits_again_with_what_a_hook_fixed() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("First commit", "file1.txt");
+    test_repo.write_file("file1.txt", "a \n");
+    test_repo.stage_files(&["file1.txt"]);
+    test_repo.install_trailing_space_fixer();
+
+    commit_second(&test_repo).unwrap();
+
+    assert_eq!(test_repo.hook_runs(), 2);
+    assert_eq!(test_repo.get_message(0), "Second");
+    assert_eq!(test_repo.status_porcelain(), "");
+    assert_eq!(test_repo.read_file("file1.txt"), "a\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn retry_amends_with_what_a_hook_fixed() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("First commit", "file1.txt");
+    test_repo.write_file("file1.txt", "a \n");
+    test_repo.stage_files(&["file1.txt"]);
+    test_repo.install_trailing_space_fixer();
+    let workdir = test_repo.workdir();
+
+    git::retry_after_hook_fixes(workdir.as_path(), || {
+        git::commit_amend_no_edit(workdir.as_path(), &[])
+    })
+    .unwrap();
+
+    assert_eq!(test_repo.hook_runs(), 2);
+    assert_eq!(test_repo.get_message(0), "First commit");
+    assert_eq!(test_repo.status_porcelain(), "");
+    assert_eq!(test_repo.read_file("file1.txt"), "a\n");
+}
+
+/// Staging the fixed file again would sweep its unstaged lines into the commit.
+#[cfg(unix)]
+#[test]
+fn retry_leaves_a_partly_staged_file_alone() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("First commit", "file1.txt");
+    test_repo.write_file("file1.txt", "a \n");
+    test_repo.stage_files(&["file1.txt"]);
+    test_repo.write_file("file1.txt", "a \nunstaged\n");
+    test_repo.install_trailing_space_fixer();
+
+    commit_second(&test_repo).expect_err("the hook fails");
+
+    assert_eq!(test_repo.hook_runs(), 1);
+    assert_eq!(test_repo.get_message(0), "First commit");
+    assert_eq!(staged(&test_repo, "file1.txt"), "a \n");
+    assert_eq!(test_repo.read_file("file1.txt"), "a\nunstaged\n");
+}
+
+/// The hook rewrote the working tree, so the index held the only copy of what
+/// the user staged.
+#[cfg(unix)]
+#[test]
+fn a_failed_retry_puts_the_staged_content_back() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("First commit", "file,1.txt");
+    test_repo.write_file("file,1.txt", "changed\n");
+    test_repo.stage_files(&["file,1.txt"]);
+    test_repo.install_hook(
+        "pre-commit",
+        "echo run >> \"$(git rev-parse --git-dir)/hook-runs\"\necho x >> file,1.txt\nexit 1\n",
+    );
+
+    commit_second(&test_repo).expect_err("the hook never passes");
+
+    assert_eq!(test_repo.hook_runs(), 2);
+    assert_eq!(test_repo.get_message(0), "First commit");
+    assert_eq!(staged(&test_repo, "file,1.txt"), "changed\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn retry_skipped_when_a_hook_changed_nothing() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("First commit", "file1.txt");
+    test_repo.write_file("file1.txt", "changed\n");
+    test_repo.stage_files(&["file1.txt"]);
+    test_repo.install_hook(
+        "pre-commit",
+        "echo run >> \"$(git rev-parse --git-dir)/hook-runs\"\nexit 1\n",
+    );
+
+    commit_second(&test_repo).expect_err("the hook never passes");
+
+    assert_eq!(test_repo.hook_runs(), 1);
+}
+
+/// With the editor, the user watched the hook fail and may have cancelled.
+#[cfg(unix)]
+#[test]
+fn commit_opts_retrying_does_not_retry_on_the_editor_path() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("First commit", "file1.txt");
+    test_repo.write_file("file1.txt", "a \n");
+    test_repo.stage_files(&["file1.txt"]);
+    test_repo.install_trailing_space_fixer();
+
+    git::commit_opts_retrying(test_repo.workdir().as_path(), None, &[])
+        .expect_err("the hook fails");
+
+    assert_eq!(test_repo.hook_runs(), 1);
+    assert_eq!(staged(&test_repo, "file1.txt"), "a \n");
+}
+
+#[cfg(unix)]
+#[test]
+fn commit_opts_retrying_retries_with_a_message() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("First commit", "file1.txt");
+    test_repo.write_file("file1.txt", "a \n");
+    test_repo.stage_files(&["file1.txt"]);
+    test_repo.install_trailing_space_fixer();
+
+    git::commit_opts_retrying(test_repo.workdir().as_path(), Some("Second"), &[]).unwrap();
+
+    assert_eq!(test_repo.hook_runs(), 2);
+    assert_eq!(test_repo.get_message(0), "Second");
+}
+
+#[test]
+fn path_list_names_the_first_five() {
+    let paths = ["a", "b", "c", "d", "e", "f", "g"];
+
+    assert_eq!(super::path_list(&paths[..5]), "`a`, `b`, `c`, `d`, `e`");
+    assert_eq!(super::path_list(&paths), "`a`, `b`, `c`, `d`, `e`, 2 more");
+}
+
+/// Forwarded options run uncaptured outside agent mode, where the user sees
+/// the hook's output.
+#[cfg(unix)]
+#[test]
+fn commit_opts_retrying_does_not_retry_with_forwarded_options() {
+    let test_repo = TestRepo::new();
+    test_repo.commit("First commit", "file1.txt");
+    test_repo.write_file("file1.txt", "a \n");
+    test_repo.stage_files(&["file1.txt"]);
+    test_repo.install_trailing_space_fixer();
+
+    git::commit_opts_retrying(
+        test_repo.workdir().as_path(),
+        Some("Second"),
+        &["--signoff"],
+    )
+    .expect_err("the hook fails");
+
+    assert_eq!(test_repo.hook_runs(), 1);
+}
