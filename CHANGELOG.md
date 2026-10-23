@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.29.0](https://github.com/narnaud/git-loom/compare/v0.28.0...v0.29.0) (2026-10-23)
+
+
+### Features ✨
+
+* **commit:** commit again after a hook fixed the files ([d064e13](https://github.com/narnaud/git-loom/commit/d064e1336fff57b338069c5be06085051b8b1c72)) by @dfaure-kdab
+* **push:** leave Change-Id trailers out of PR descriptions ([3344a68](https://github.com/narnaud/git-loom/commit/3344a680402fb7398b01f8a9bebfa07c82d94d9f)) by @dfaure-kdab
+* **shortid:** spell persistent IDs as alternating consonants and vowels ([113eea8](https://github.com/narnaud/git-loom/commit/113eea8ac9b455277fd70a1dbd1da57c9e904697)) by @narnaud
+
+
+### Bug Fixes 🐞
+
+* check a staged deletion's path on disk byte for byte ([f98b498](https://github.com/narnaud/git-loom/commit/f98b49830704b7e330af0719a4ac1ff486c34baa)) by @narnaud
+* **push:** run gh as an account that can push to the head repo ([bc26a09](https://github.com/narnaud/git-loom/commit/bc26a091cdb6a7308e67ff62ebe690320b089281)) by @dfaure-kdab
+* refuse a file removed from the index but kept on disk before any reset or autostash ([697eb55](https://github.com/narnaud/git-loom/commit/697eb557bc2352f12d9d63b78de31af77d762250)) by @narnaud
+* tell the user to move a kept file out of the repository, not to stash it ([a333feb](https://github.com/narnaud/git-loom/commit/a333febb3aacd3776c2b2ad5ddf5eb078dd709e0)) by @narnaud
+
+
+### Tests
+
+* **integration:** run the scripts concurrently on a copied fixture ([d449f76](https://github.com/narnaud/git-loom/commit/d449f762a3aabd433e6abfefdda06f6a43ea3887)) by @narnaud
+* **show:** skip the pager case where util-linux script is missing ([79d67b7](https://github.com/narnaud/git-loom/commit/79d67b76e0b6a529a4c2de845b995b14a5849c08)) by @narnaud
+* skip the non-UTF-8 name test on macOS, whose filesystems refuse such a name ([d90c809](https://github.com/narnaud/git-loom/commit/d90c809078be5806ddf5dd4b9678dec382af9196)) by @narnaud
+
 ## [0.28.0](https://github.com/narnaud/git-loom/compare/v0.27.0...v0.28.0) (2026-10-18)
 
 
