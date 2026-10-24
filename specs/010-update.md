@@ -33,8 +33,13 @@ todo where every branch section resets to the upstream tip.
 **Alias:** `up`
 
 ```bash
-git-loom update [--yes]
+git-loom update [<branch>] [--yes]
 ```
+
+**Arguments:**
+
+- `<branch>`: A woven branch, by name or short ID, to update from its remote
+  branch before the rebase (see "Updating a Branch from its Remote" below).
 
 **Flags:**
 
@@ -58,20 +63,23 @@ git-loom update [--yes]
    branch tracks, including tags. Moved tags are force-updated. Deleted remote
    branches are pruned locally. When the push remote differs from that remote
    (fork workflow), it is fetched and pruned as well — branches only, no tags.
-3. **Upstream commit filtering**: Before rebasing, any feature-branch commits
+3. **Branch update** (with `<branch>`): the branch's section takes its remote
+   branch's commits (see "Updating a Branch from its Remote" below), which
+   the next steps treat like its own.
+4. **Upstream commit filtering**: Before rebasing, any feature-branch commits
    already present in the new upstream are removed from the rebase todo. This
    uses two detection strategies (see "Upstream Commit Filtering" below).
-4. **Weave-based rebase**: The integration topology is rebuilt using the weave
+5. **Weave-based rebase**: The integration topology is rebuilt using the weave
    model (see Spec 004). Every branch section resets to the upstream tip,
    ensuring new upstream commits land on the base line — not inside feature
    branches. Uncommitted working tree changes are automatically stashed and
    restored.
-5. **Submodule update** (conditional): If `.gitmodules` exists, submodules are
+6. **Submodule update** (conditional): If `.gitmodules` exists, submodules are
    initialized and updated recursively.
-6. **Branch cleanup**: Two kinds of local branches are listed, and the user
+7. **Branch cleanup**: Two kinds of local branches are listed, and the user
    is prompted once to remove them all:
    - branches fully merged upstream: the new upstream contains their tip, or
-     every commit was filtered out in step 3 (cherry-picked). Only branches
+     every commit was filtered out in step 4 (cherry-picked). Only branches
      reachable from the integration branch count, and none at or below the
      integration base (the first commit of its first-parent line that the
      upstream contains): a local `main` sitting in upstream history is not
@@ -82,6 +90,10 @@ git-loom update [--yes]
      resolve (unknown remote, no matching refspec) and a local upstream
      (remote `.`) never count: no fetch prunes them. `status` reports `gone`
      by the same rule.
+
+   A branch updated in step 3 is not offered as merged on account of its old
+   tip, which may be upstream; it is when step 4 empties its remote version,
+   which the rebase then leaves where it was.
 
    The prompt names each branch and its kind itself, so it stands alone as a
    TUI menu (Spec 020); without a prompt (`--yes`, the config below, agent
@@ -110,7 +122,7 @@ built (an octopus merge, Spec 004), loom warns with the cause and falls back to
 puts every branch on the new upstream as the weave does (Git's default keeps a
 branch forked below a merge-base that moved on its old base). Git still skips
 commits already upstream, but branches already merged upstream are not
-offered for removal.
+offered for removal, and a named `<branch>` is refused.
 
 ## Upstream Commit Filtering
 
@@ -146,6 +158,38 @@ commands), a warning is displayed and filtering falls back to OID ancestry
 only. This is a graceful degradation — duplicate commits may cause conflicts
 during rebase, but no data is lost.
 
+A section that took its remote's commits holds commits outside HEAD's
+history, so `git cherry` runs for its tip as well as for HEAD.
+
+## Updating a Branch from its Remote
+
+`loom update <branch>` takes the remote version of a woven branch: the
+section is replaced with the commits of its remote branch — the upstream
+`branch.<name>.merge` names, fetched in step 2 — that the new upstream lacks,
+oldest first, keeping its merge entry; the rebase then replays them like any
+other section, and the branch is reported as `Updated branch `<name>` with
+`<remote>` (<hash> <subject>, was <old hash>)`: the remote's tip, and the
+tip it replaced, the way back. Nothing is compared: whatever the local
+branch had and the remote lacks — commits, amendments — goes, which is what
+naming the branch means. A remote version the new upstream already has in
+full leaves the branch fully merged, offered for removal in step 7; a remote
+at the local tip is reported as up to date. The update proceeds as usual
+either way. The plain `update` never touches a branch's commits.
+
+A remote branch on a remote step 2 did not fetch (neither the integration nor
+the push remote, or a push remote whose fetch failed) is fetched alone, without
+tags, right after it; a failure stops the update before anything is
+rewritten, so a stale tracking ref is never taken.
+
+Refused, before anything is rewritten: a branch that is not woven (`git
+branch -f` updates it); one sharing its section's commits with another ref —
+a co-located branch, an inner branch on its commits, or the branch it is
+stacked under — which the remote's commits could not place; one whose remote
+carries a merge commit, which a section cannot hold; and one without an
+upstream, with a local branch as upstream (remote `.`), or whose remote
+branch is gone. The name is resolved before the fetch, so a wrong one costs
+nothing.
+
 ## Conflict Recovery
 
 The update command supports resumable conflict handling via `loom continue`
@@ -157,10 +201,7 @@ When the rebase encounters a merge conflict:
 2. The state is saved to `.git/loom/state.json`
 3. loom reports that the operation is paused and exits successfully
 
-The saved state contains:
-- `branch_name`: the current integration branch name
-- `upstream_name`: the upstream tracking ref (e.g. `origin/main`)
-- `skip_confirm`: whether `--yes` was passed
+The saved state is the `update` context of Spec 014.
 
 After the user resolves the conflict:
 
@@ -237,6 +278,22 @@ git-loom update
 # ✓ Updated submodules
 # ✓ Updated branch `integration` with `origin/main` (abc1234 Latest upstream commit)
 ```
+
+### Update a branch from its remote
+
+`feature-a` was pushed, then a teammate (or you, elsewhere) amended it and
+pushed two more commits:
+
+```bash
+git-loom update feature-a
+# ✓ Fetched latest changes
+# ✓ Rebased onto upstream
+# ✓ Updated branch `integration` with `origin/main` (abc1234 Latest upstream commit)
+# ✓ Updated branch `feature-a` with `origin/feature-a` (def5678 Second new commit, was 1a2b3c4)
+```
+
+`feature-a` now holds the remote's commits, rebased onto the new upstream
+like the rest; the commit it had, `1a2b3c4`, is the way back.
 
 ### Update with a branch merged upstream
 
@@ -363,12 +420,25 @@ authoritative ones, and force-updating from a fork could move them backwards.
 A failure to fetch the push remote is a warning, not an error: the integration
 branch can still be rebased onto its own upstream.
 
+### A Branch Is Named, Never Detected
+
+Taking a branch's remote version replaces its commits wholesale rather than
+appending the new ones: the remote may have amended the shared commits too (a
+rewritten stack). Which branch to take is the user's to say: after a rebase a
+branch and its remote share no hashes, and deciding whether a local commit is
+"on the remote" needs an identity rule (Change-Id, patch) with holes a reword,
+a stack or a cherry-pick falls through, each one a guard and a warning. The
+user knows when a branch was advanced elsewhere — another machine, a
+colleague's push, an agent updating the pull request — and naming it is the
+whole signal; the old tip in the report is the way back.
+
 ### Automatic Working Tree Preservation
 
 Uncommitted changes are automatically preserved during the rebase via
 `--autostash`. Users don't need to manually stash before updating.
 
-### No Arguments
+### Current Branch Only
 
-The update command takes no positional arguments because it always operates on
-the current branch's upstream. There is no ambiguity about what to update.
+The update always rebases the current branch onto its upstream; `<branch>`
+only names a woven branch to take from its remote, never another branch to
+rebase.

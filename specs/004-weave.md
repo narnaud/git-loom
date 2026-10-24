@@ -53,6 +53,7 @@ Mutations MUST remain repository-free until serialization/execution.
 | Add branch section / merge | Add corresponding topology, including an empty/new branch. |
 | Weave branch | Move non-woven integration commits to a new section and add its merge before the first remaining pick (all were built on the target), after every merge entry otherwise. |
 | Reassign branch | Transfer a co-located woven section to a surviving branch. |
+| Replace branch commits | Replace a section's commits with others (its remote version, Spec 010); refused for a section carrying any other ref, co-located or inner, which the new commits could not place. |
 
 ### Move commit
 
@@ -89,8 +90,9 @@ A pause MUST still be verified before anything is rewritten: the commit git reco
 | reword (Spec 003), split (Spec 013) | edit commit |
 | swap (Spec 015) | reorder commits/branch sections |
 | absorb (Spec 012) | fixup commit |
+| update (Spec 010) | replace branch commits; drop commits already upstream |
 
-Only the commands listed above mutate via the Weave; status, init, update, push, and branch rename do not (update may use its execution/recovery infrastructure).
+Only the commands listed above mutate via the Weave; status, init, push, and branch rename do not.
 
 ## Staging safety
 

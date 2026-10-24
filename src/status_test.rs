@@ -82,7 +82,7 @@ fn commit_id_survives_an_update_rebase() {
     assert_eq!(id_before.len(), 3, "{id_before}");
 
     test_repo.add_remote_commits(&["Upstream change"]);
-    test_repo.in_dir(|| crate::update::run(true)).unwrap();
+    test_repo.in_dir(|| crate::update::run(None, true)).unwrap();
 
     let tip_after = test_repo.get_branch_target("feature-a");
     assert_ne!(tip_after, tip_before, "the rebase rewrote the commit");

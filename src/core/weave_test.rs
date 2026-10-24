@@ -2261,3 +2261,78 @@ fn from_repo_refuses_an_octopus_merge_below_head() {
     );
     assert!(err.contains(&rebase), "{err}");
 }
+
+#[test]
+fn replace_branch_commits_takes_the_remote_version() {
+    let mut graph = Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![BranchSection {
+            reset_target: "onto".to_string(),
+            commits: vec![make_commit(OID_A1, "A1")],
+            label: "feature-a".to_string(),
+            branch_names: vec!["feature-a".to_string()],
+        }],
+        integration_line: vec![IntegrationEntry::Merge {
+            original_oid: Some(oid(OID_MERGE1)),
+            label: "feature-a".to_string(),
+        }],
+        base_refs: vec![],
+    };
+
+    assert!(graph.replace_branch_commits(
+        "feature-a",
+        vec![make_commit(OID_A2, "A1 amended"), make_commit(OID_B1, "A2")]
+    ));
+
+    let todo = graph.to_todo();
+    assert!(!todo.contains(&oid(OID_A1).to_string()), "{todo}");
+    let picks = format!(
+        "pick {} # A1 amended\npick {} # A2\n",
+        oid(OID_A2),
+        oid(OID_B1)
+    );
+    assert!(todo.contains(&picks), "{todo}");
+    let merge = format!("merge -C {} feature-a", oid(OID_MERGE1));
+    assert!(todo.contains(&merge), "{todo}");
+    assert!(!graph.replace_branch_commits("feature-b", vec![]));
+}
+
+/// Another ref in the section has nowhere to go among the new commits.
+#[test]
+fn replace_branch_commits_refuses_a_shared_section() {
+    let section = |commits, branch_names| BranchSection {
+        reset_target: "onto".to_string(),
+        commits,
+        label: "feature-a".to_string(),
+        branch_names,
+    };
+    let names = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let mut graph = Weave {
+        base_oid: oid(BASE),
+        branch_sections: vec![section(
+            vec![make_commit(OID_A1, "A1")],
+            names(&["feature-a", "feature-b"]),
+        )],
+        integration_line: vec![],
+        base_refs: vec![],
+    };
+    assert_eq!(
+        graph.other_refs_in_section("feature-a"),
+        Some(names(&["feature-b"]))
+    );
+    assert!(!graph.replace_branch_commits("feature-a", vec![make_commit(OID_A2, "A2")]));
+
+    graph.branch_sections = vec![section(
+        vec![
+            make_commit_with_refs(OID_A1, "A1", vec!["inner"]),
+            make_commit(OID_A2, "A2"),
+        ],
+        names(&["feature-a"]),
+    )];
+    assert_eq!(
+        graph.other_refs_in_section("feature-a"),
+        Some(names(&["inner"]))
+    );
+    assert!(!graph.replace_branch_commits("feature-a", vec![make_commit(OID_B1, "B1")]));
+    assert_eq!(graph.other_refs_in_section("missing"), None);
+}

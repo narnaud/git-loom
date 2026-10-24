@@ -419,12 +419,16 @@ which `after_continue` handler is invoked during dispatch.
 {
   "branch_name": "<local branch name>",
   "upstream_name": "<upstream tracking branch name>",
-  "skip_confirm": false
+  "skip_confirm": false,
+  "merged_branches": ["<branch whose every commit was already upstream>"],
+  "updated_branch": {"name": "<branch>", "remote": "<remote branch>",
+                     "tip": "<its hash>", "old_tip": "<the hash it replaced>"}
 }
 ```
 
 After continue: restores pre-existing staged changes, runs submodule update (if
-applicable), reports the upstream commit info, and proposes removing
+applicable), reports the upstream commit info and the branch updated from its
+remote when one was named (Spec 010), and proposes removing merged and
 gone-upstream branches.
 
 ### `commit` context
