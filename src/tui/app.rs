@@ -47,6 +47,7 @@ use crate::tui::theme::TuiTheme;
 use crate::tui::widgets::common::{colorize_diff, highlight_backticks, pane_block};
 use crate::tui::widgets::diff_pane::DiffPane;
 use crate::tui::widgets::list_pane::ListPane;
+use crate::tui::widgets::menu::{Menu, MenuItem, MenuOutcome};
 use crate::tui::widgets::popup::{self, LogEntry, Notice, Prompt, PromptOutcome, TextField};
 use crate::{absorb, branch, commit, drop, fold, merge, push, reword, split, unmerge, update};
 
@@ -429,6 +430,9 @@ enum Action {
     Unmerge { branch: Option<String> },
     /// `loom update`: takes no target.
     Update,
+    /// `loom update <branch>`: takes the branch's remote version (Spec 010),
+    /// picked in `u`'s menu on that branch.
+    UpdateBranch { branch: String },
     /// `loom push [branch]`; no branch is push's own picker.
     Push { branch: Option<String> },
     /// `loom push <branch> -f`; push confirms it under the TUI.
@@ -749,6 +753,13 @@ enum Popup {
         prompt: Prompt,
         reply: Sender<Option<Answer>>,
     },
+    /// A menu the TUI asks before any command runs: picking item `i` starts
+    /// `actions[i]`; `command` names it in the cancel notice.
+    Choice {
+        menu: Menu,
+        actions: Vec<Action>,
+        command: &'static str,
+    },
     /// A message to dismiss; `then` runs on dismissal.
     Notice {
         notice: Notice,
@@ -803,7 +814,10 @@ const HELP: &[popup::HelpSection] = &[
             ("r", "reword a commit, or rename a branch"),
             ("M", "merge a local or remote branch (pick one)"),
             ("U", "unmerge a branch, keeping it (else pick one)"),
-            ("u", "update: pull-rebase onto upstream"),
+            (
+                "u",
+                "update; on a pushed branch, a menu also offers its remote version",
+            ),
             (
                 "p / P",
                 "push a branch (else pick one) / force-push the branch",
@@ -1021,6 +1035,7 @@ fn execute_action(
         Action::Merge => merge::run(None, true),
         Action::Unmerge { branch } => unmerge::run(branch),
         Action::Update => update::run(None, false),
+        Action::UpdateBranch { branch } => update::run(Some(branch), false),
         Action::Push { branch } => push::run(branch, false, false, None),
         // `push` itself confirms a force under the TUI, naming every branch.
         Action::ForcePush { branch } => push::run(Some(branch), false, true, None),
@@ -1383,6 +1398,9 @@ impl<'a> App<'a> {
                 words.extend(branch.iter().map(|b| sid(b)));
             }
             Action::Update => words.push("update".into()),
+            Action::UpdateBranch { branch } => {
+                words.extend(["update".into(), sid(branch)]);
+            }
             Action::Push { branch } => {
                 words.push("push".into());
                 words.extend(branch.iter().map(|b| sid(b)));
@@ -1578,6 +1596,25 @@ impl<'a> App<'a> {
                 PromptOutcome::Cancel => {
                     let _ = reply.send(None);
                 }
+            },
+            Popup::Choice {
+                mut menu,
+                actions,
+                command,
+            } => match menu.handle_key(code, modifiers) {
+                MenuOutcome::Pending => {
+                    self.popup = Some(Popup::Choice {
+                        menu,
+                        actions,
+                        command,
+                    })
+                }
+                MenuOutcome::Choose(i) => {
+                    if let Some(action) = actions.into_iter().nth(i) {
+                        self.start_action(action);
+                    }
+                }
+                MenuOutcome::Cancel => self.notice = Some(format!("{} cancelled", command)),
             },
             Popup::Notice { notice, then } => {
                 if Notice::dismisses(code) {
@@ -1793,7 +1830,7 @@ impl<'a> App<'a> {
             KeyCode::Char('r') => self.action_reword(),
             KeyCode::Char('M') => Some(Action::Merge),
             KeyCode::Char('U') => self.action_unmerge(),
-            KeyCode::Char('u') => Some(Action::Update),
+            KeyCode::Char('u') => self.action_update(),
             KeyCode::Char('p') => self.action_push(false),
             KeyCode::Char('P') => self.action_push(true),
             // A refresh rather than a reload: an operation paused from another
@@ -3269,6 +3306,47 @@ impl<'a> App<'a> {
         Some(Action::Unmerge { branch })
     }
 
+    /// `u`: the plain update at once, unless the selection, else the cursor
+    /// row, is one branch with an upstream: a menu then asks between it and
+    /// taking that branch's remote version, which replaces its commits
+    /// (Spec 020).
+    fn action_update(&mut self) -> Option<Action> {
+        let branch = match self.picked_rows().as_slice() {
+            [row]
+                if matches!(
+                    row.kind,
+                    RowKind::BranchName {
+                        remote: Some(_),
+                        ..
+                    }
+                ) =>
+            {
+                row.target.clone()
+            }
+            _ => None,
+        };
+        let Some(branch) = branch else {
+            return Some(Action::Update);
+        };
+        let menu = Menu::new(
+            self.command_line(&Action::Update),
+            vec![
+                MenuItem::new("Update the integration branch")
+                    .help("Fetch and rebase onto upstream; the branch keeps its commits"),
+                MenuItem::new(format!("Take the remote version of `{}`", branch)).help(
+                    "Update, replacing the branch's commits with its remote's\n\
+                     What only the local branch has goes; the report names the old tip",
+                ),
+            ],
+        );
+        self.popup = Some(Popup::Choice {
+            menu,
+            actions: vec![Action::Update, Action::UpdateBranch { branch }],
+            command: "update",
+        });
+        None
+    }
+
     /// `p`/`P`: push the picked branch; with none `p` lets push pick one,
     /// while `P` refuses, a force naming the branch it overwrites.
     fn action_push(&mut self, force: bool) -> Option<Action> {
@@ -3684,6 +3762,7 @@ impl ShellApp for App<'_> {
     fn render_overlay(&mut self, frame: &mut Frame, area: Rect) {
         match &mut self.popup {
             Some(Popup::Prompt { prompt, .. }) => prompt.render(frame, area, self.theme),
+            Some(Popup::Choice { menu, .. }) => menu.render(frame, area, self.theme),
             Some(Popup::Notice { notice, .. }) => notice.render(frame, area, self.theme),
             Some(Popup::Log { scroll }) => {
                 popup::render_log(frame, area, &self.log, scroll, self.theme)

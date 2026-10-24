@@ -64,7 +64,7 @@ Actions take the selected rows, or the row under the cursor when nothing is sele
 | `r` | [`reword`](reword.md) | On a commit: edit its message. On a branch: rename it in place. |
 | `M` | [`merge`](merge.md) | Pick a branch to merge, local or remote. |
 | `U` | [`unmerge`](unmerge.md) | Take a branch out of the integration branch, after confirmation. |
-| `u` | [`update`](update.md) | Fetch and rebase onto upstream. |
+| `u` | [`update`](update.md) | Fetch and rebase onto upstream. On a pushed branch, a menu also offers to take the branch's remote version, replacing its commits. |
 | `p` | [`push`](push.md) | Push a branch with its stack and open its pull request. |
 | `P` | [`push -f`](push.md) | Force-push, after confirmation — for a push refused because the branch changed on the remote. |
 
