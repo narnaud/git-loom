@@ -1,6 +1,7 @@
 # Summary
 
 [Introduction](introduction.md)
+[git-loom 1.0](announcing-1.0.md)
 
 # Getting Started
 
