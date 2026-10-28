@@ -151,6 +151,41 @@ fn completion_scripts_cover_the_cli() {
     );
 }
 
+/// `GROUPED_COMMANDS` copies clap's command list by hand and had drifted: it
+/// still offered the `c`/`a` aliases #380 removed, and not `cont`.
+#[test]
+fn grouped_help_lists_each_command_with_its_aliases() {
+    let plain = apply_styles(GROUPED_COMMANDS, &help_styles(ThemeMode::Dark, false));
+    // `  name, alias      Description`: the name column ends at two spaces.
+    let rows: Vec<(&str, &str)> = plain
+        .lines()
+        .filter_map(|line| line.strip_prefix("  ")?.split_once("  "))
+        .collect();
+    let cli = Cli::command();
+    let commands: Vec<_> = cli
+        .get_subcommands()
+        .filter(|s| !s.is_hide_set() && s.get_name() != "help")
+        .collect();
+    assert_eq!(rows.len(), commands.len(), "one row per command:\n{plain}");
+    for cmd in commands {
+        let name = cmd.get_name();
+        let (names, description) = rows
+            .iter()
+            .find(|(names, _)| names.split(", ").next() == Some(name))
+            .unwrap_or_else(|| panic!("no row for `{name}`"));
+        let aliases = cmd.get_visible_aliases().collect::<Vec<_>>().join(", ");
+        // Too many for the column, fold's trail its description.
+        let shown = match names.split_once(", ") {
+            Some((_, shown)) => shown,
+            None if !aliases.is_empty() => description
+                .rsplit_once(" [")
+                .map_or("", |(_, shown)| shown.trim_end_matches(']')),
+            None => "",
+        };
+        assert_eq!(shown, aliases, "aliases of `{name}`");
+    }
+}
+
 /// `commit -l` targets the integration branch and `-b` a feature branch;
 /// accepting both would silently drop one of them.
 #[test]
