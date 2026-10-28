@@ -46,7 +46,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          BRANCH: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+          # Evaluated even when `if` skips the step: a release run has no `pr`,
+          # and `fromJSON('')` fails the job.
+          BRANCH: ${{ fromJSON(steps.release.outputs.pr || '{}').headBranchName }}
           HEAD_SHA: ${{ github.sha }}
         run: |
           previous=$(gh api "repos/$GH_REPO/releases?per_page=10" \
