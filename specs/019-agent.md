@@ -213,7 +213,10 @@ same order (Spec 001), same short IDs — so an agent never parses glyphs:
 }}
 ```
 
-- `schema` is an integer, bumped on any breaking change to this shape.
+- `schema` is an integer, bumped on any breaking change to this shape. A bump
+  ships in a minor release, so its commit is never marked breaking (`!`), which
+  would cut a major; the rest of agent mode breaks only in a major
+  (`docs/src/compatibility.md`).
 - `branches` lists branch *groups* in render order: empty ones first, then the
   top of each stack downward. A group holds several `names` when branches are
   co-located on one tip, ordered alphabetically last first as the tree draws
