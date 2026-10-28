@@ -131,7 +131,7 @@ With [`--agent`](agent.md#agent-mode), the tree goes to stderr and stdout gets t
 
 | Field | Meaning |
 |-------|---------|
-| `schema` | Bumped on any breaking change to this format |
+| `schema` | Bumped on any breaking change to this format, possibly in a minor release (see [Compatibility](../compatibility.md)) |
 | `cwd_prefix` | The directory paths are relative to |
 | `branches[]` | In display order. `names[]` lists branches sharing one tip. |
 | `stacked_on` | The branch below in a stack, or `null` |

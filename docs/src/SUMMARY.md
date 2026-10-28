@@ -53,3 +53,4 @@
 # Reference
 
 - [Configuration](configuration.md)
+- [Compatibility](compatibility.md)
