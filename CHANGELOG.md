@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.29.1](https://github.com/narnaud/git-loom/compare/v0.29.0...v0.29.1) (2026-10-28)
+
+
+### Bug Fixes 🐞
+
+* **cli:** show cont, not c and a, in the help for continue and abort ([d5d9c88](https://github.com/narnaud/git-loom/commit/d5d9c88340bc6390cac764a0efd88996d251519e)) by @narnaud
+
+
+### Documentation
+
+* say what 1.0 keeps stable ([8dbaf62](https://github.com/narnaud/git-loom/commit/8dbaf6257c341f76f0f46e90fa180ad832b5a452)) by @narnaud
+* Update videos to the latest git-loom ([da85732](https://github.com/narnaud/git-loom/commit/da85732a49bae01d3ee2f57cba83e13e45dd9d30)) by @narnaud
+
 ## [0.29.0](https://github.com/narnaud/git-loom/compare/v0.28.0...v0.29.0) (2026-10-25)
 
 

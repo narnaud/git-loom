@@ -1,6 +1,6 @@
 [package]
 name = "git-loom"
-version = "0.29.0"
+version = "0.29.1"
 edition = "2024"
 rust-version = "1.88"
 description = "A Git CLI tool that weaves together multiple feature branches into integration branches"
