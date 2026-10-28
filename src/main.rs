@@ -99,8 +99,8 @@ const GROUPED_COMMANDS: &str = "\
   {l}trace{r}             Show the latest command trace
 
 {h}Recovery:{r}
-  {l}continue{r}, {l}c{r}       Resume a paused operation after resolving conflicts
-  {l}abort{r}, {l}a{r}          Cancel a paused operation and restore original state";
+  {l}continue{r}, {l}cont{r}    Resume a paused operation after resolving conflicts
+  {l}abort{r}             Cancel a paused operation and restore original state";
 
 /// Style palette for the help output. Yellow is unreadable on a light
 /// background, so headers move to blue and placeholders to magenta there.
