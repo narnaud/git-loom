@@ -165,6 +165,15 @@ pub fn prune_gone_branches(repo: &Repository) -> bool {
         .unwrap_or(false)
 }
 
+/// Read git config `loom.tuiAutoReload`: when true, `loom tui` starts with
+/// auto-reload on (spec 020). False if unset.
+pub fn tui_auto_reload(repo: &Repository) -> bool {
+    repo.config()
+        .ok()
+        .and_then(|config| config.get_bool("loom.tuiAutoReload").ok())
+        .unwrap_or(false)
+}
+
 /// Extract the local branch name from a remote tracking ref.
 ///
 /// e.g. `"origin/main"` → `"main"`, `"origin/feat/foo"` → `"feat/foo"`.

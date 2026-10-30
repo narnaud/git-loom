@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEventKind};
@@ -44,6 +44,7 @@ use crate::tui::status_tree::{
     commit_file_key, working_file_key,
 };
 use crate::tui::theme::TuiTheme;
+use crate::tui::watch::{self, Watch};
 use crate::tui::widgets::common::{colorize_diff, highlight_backticks, pane_block};
 use crate::tui::widgets::diff_pane::DiffPane;
 use crate::tui::widgets::list_pane::ListPane;
@@ -838,6 +839,7 @@ const HELP: &[popup::HelpSection] = &[
             ("L", "action log"),
             ("T", "latest trace: the git commands an action ran"),
             ("R / F5", "reload"),
+            ("A", "toggle auto-reload on changes from other terminals"),
             ("?", "this help"),
             ("q / Ctrl-C", "quit"),
         ],
@@ -873,6 +875,7 @@ pub fn run(theme: graph::Theme) -> Result<()> {
     // `Paused::load` reads an unreadable state as none: say so before the
     // terminal is taken over, as the `main.rs` guard does.
     transaction::load(&git_dir)?;
+    let stamp = repo_stamp(&git_dir);
     let paused = Paused::load(&workdir, &git_dir);
     let snapshot = match paused {
         Some(_) => Snapshot::placeholder(workdir, git_dir.clone()),
@@ -884,6 +887,7 @@ pub fn run(theme: graph::Theme) -> Result<()> {
     expanded.insert(LOCAL_CHANGES_KEY.to_string());
 
     let mut app = App::new(snapshot, &tui_theme, theme, expanded, context);
+    app.watch = Watch::new(stamp, repo::tui_auto_reload(&repo), Instant::now());
     if let Some(paused) = paused {
         app.show_paused(paused);
     }
@@ -1039,7 +1043,7 @@ fn execute_action(
         Action::Push { branch } => push::run(branch, false, false, None),
         // `push` itself confirms a force under the TUI, naming every branch.
         Action::ForcePush { branch } => push::run(Some(branch), false, true, None),
-        // The view reloads only on `R` or after an action.
+        // The shown view can lag the repo.
         Action::Continue { paused } if PausedId::load(git_dir).as_ref() != Some(&paused) => {
             Err(anyhow::anyhow!(
                 "The paused operation changed since it was shown\nPress R to look at it again"
@@ -1061,6 +1065,25 @@ fn execute_action(
 }
 
 // ── App state ────────────────────────────────────────────────────────────
+
+/// What auto-reload compares: the repo files a reload reads, and the paused operation.
+type RepoStamp = (watch::FsStamp, Option<PausedId>);
+
+fn repo_stamp(git_dir: &std::path::Path) -> RepoStamp {
+    (watch::fs_stamp(git_dir), PausedId::load(git_dir))
+}
+
+/// Marks the tree and paused panes while auto-reload is on.
+fn auto_reload_badge(
+    block: ratatui::widgets::Block<'static>,
+    on: bool,
+) -> ratatui::widgets::Block<'static> {
+    if on {
+        block.title_top(Line::from(" ⟳ auto-reload ").right_aligned())
+    } else {
+        block
+    }
+}
 
 struct App<'a> {
     snapshot: Snapshot,
@@ -1105,6 +1128,8 @@ struct App<'a> {
     log: Vec<LogEntry>,
     /// Set while an operation is paused: the view replacing the tree.
     paused: Option<Paused>,
+    /// Auto-reload (`A`), holding the fingerprint taken before the last load.
+    watch: Watch<RepoStamp>,
 }
 
 impl<'a> App<'a> {
@@ -1116,6 +1141,8 @@ impl<'a> App<'a> {
         context: usize,
     ) -> Self {
         let (request_tx, requests) = channel();
+        // `run` replaces it with one stamped before the first load.
+        let watch = Watch::new((Vec::new(), None), false, Instant::now());
         let mut app = App {
             snapshot,
             theme,
@@ -1141,6 +1168,7 @@ impl<'a> App<'a> {
             popup: None,
             log: Vec::new(),
             paused: None,
+            watch,
         };
         app.rows = app.build_rows();
         let cursor = app.rows.iter().position(|r| r.focusable).unwrap_or(0);
@@ -1223,9 +1251,15 @@ impl<'a> App<'a> {
     /// Reload the tree from the repo; a failure is shown, the old tree kept.
     /// Reports whether the new snapshot was applied.
     fn reload(&mut self) -> bool {
+        self.reload_stamped(repo_stamp(&self.snapshot.git_dir))
+    }
+
+    /// `reload` with a fingerprint taken before anything else was read from the repo.
+    fn reload_stamped(&mut self, stamp: RepoStamp) -> bool {
         match load_snapshot(self.context) {
             Ok(snapshot) => {
                 self.apply_snapshot(snapshot);
+                self.watch.loaded(stamp, Instant::now());
                 true
             }
             Err(e) => {
@@ -1543,18 +1577,47 @@ impl<'a> App<'a> {
         }
     }
 
-    /// Re-read the repo after an action, or on `R`: the paused view while an
-    /// operation is paused (every other command is blocked until it ends),
-    /// otherwise the tree.
-    fn refresh(&mut self) {
+    /// Re-read the paused view while an operation is paused (every other command is
+    /// blocked until it ends), otherwise the tree; false when a failed load kept the old one.
+    fn refresh(&mut self) -> bool {
+        let stamp = repo_stamp(&self.snapshot.git_dir);
         match Paused::load(&self.snapshot.workdir, &self.snapshot.git_dir) {
-            Some(paused) => self.show_paused(paused),
+            Some(paused) => {
+                self.show_paused(paused);
+                self.watch.loaded(stamp, Instant::now());
+                true
+            }
             None => {
-                self.paused = None;
-                self.diff_cache.clear();
-                self.reload();
+                // Out of the way for the new snapshot's diff, back if the load fails.
+                let old = self.paused.take();
+                let loaded = self.reload_stamped(stamp);
+                if !loaded {
+                    self.paused = old;
+                }
+                loaded
             }
         }
+    }
+
+    /// Auto-reload is on and its check finds the repo changed; never while a modal is open.
+    fn auto_reload_due(&mut self) -> bool {
+        if self.modal_active() || !matches!(self.mode, Mode::Normal) {
+            return false;
+        }
+        let git_dir = &self.snapshot.git_dir;
+        self.watch.due(Instant::now(), || repo_stamp(git_dir))
+    }
+
+    fn toggle_auto_reload(&mut self) {
+        let on = self.watch.toggle(Instant::now());
+        self.notice = Some(
+            if on {
+                "auto-reload on"
+            } else {
+                "auto-reload off"
+            }
+            .to_string(),
+        );
     }
 
     /// Replace the tree, or the previous paused view, with `paused`, keeping
@@ -1579,7 +1642,9 @@ impl<'a> App<'a> {
     fn dismiss_notice(&mut self, then: AfterNotice) {
         match then {
             AfterNotice::Nothing => {}
-            AfterNotice::Reload => self.refresh(),
+            AfterNotice::Reload => {
+                self.refresh();
+            }
         }
     }
 
@@ -1792,6 +1857,10 @@ impl<'a> App<'a> {
                 self.open_trace();
                 None
             }
+            KeyCode::Char('A') => {
+                self.toggle_auto_reload();
+                None
+            }
             KeyCode::Char(' ') => {
                 self.toggle_selection();
                 None
@@ -1905,6 +1974,10 @@ impl<'a> App<'a> {
             }
             KeyCode::Char('T') => {
                 self.open_trace();
+                None
+            }
+            KeyCode::Char('A') => {
+                self.toggle_auto_reload();
                 None
             }
             KeyCode::Char('R') | KeyCode::F(5) => {
@@ -3493,7 +3566,7 @@ impl<'a> App<'a> {
             Mode::RenameBranch { .. } => " Rename branch ".to_string(),
             Mode::NewBranch { .. } => " New branch ".to_string(),
         };
-        let block = pane_block(&title, self.theme, focused);
+        let block = auto_reload_badge(pane_block(&title, self.theme, focused), self.watch.is_on());
         self.tree
             .render(frame, area, items, block, self.theme.file_selected);
     }
@@ -3503,6 +3576,7 @@ impl<'a> App<'a> {
             return;
         };
         let theme = self.theme;
+        let auto_reload = self.watch.is_on();
         let mut items = vec![
             ListItem::new(Line::from(highlight_backticks(
                 paused.headline,
@@ -3529,7 +3603,7 @@ impl<'a> App<'a> {
         } else {
             theme.file_selected
         };
-        let block = pane_block(&paused.title(), theme, focused);
+        let block = auto_reload_badge(pane_block(&paused.title(), theme, focused), auto_reload);
         paused.list.render(frame, area, items, block, highlight);
     }
 
@@ -3832,6 +3906,12 @@ impl ShellApp for App<'_> {
         }
         if let Some(outcome) = self.outcome.take() {
             return Tick::Exit(outcome);
+        }
+        if self.auto_reload_due() {
+            if self.refresh() {
+                self.notice = Some("reloaded: the repo changed (A to disable)".to_string());
+            }
+            changed = true;
         }
         if changed { Tick::Redraw } else { Tick::Idle }
     }

@@ -11,6 +11,7 @@ Set them with `git config <setting> <value>`.
 | `loom.hideBranchPattern` | A prefix | `local-` | Branches hidden from `git loom status` |
 | `loom.statusContext` | An integer ≥ 1 | `1` | Commits shown at and before the base by `status` and `tui` |
 | `loom.pruneGoneBranches` | `true`, `false` | `false` | Let `git loom update` remove merged and gone branches without asking |
+| `loom.tuiAutoReload` | `true`, `false` | `false` | Start `git loom tui` with auto-reload on |
 | `loom.changeId` | `true`, `false` | `true` | Add a `Change-Id` trailer to the commits loom creates |
 
 ### `loom.remoteType`
@@ -47,6 +48,10 @@ How much history to show at and before the base: `1` shows the base alone, `3` a
 ### `loom.pruneGoneBranches`
 
 When `true`, `git loom update` removes branches that were fully merged upstream, or whose remote branch was deleted, without asking — as `update -y` does.
+
+### `loom.tuiAutoReload`
+
+When `true`, `git loom tui` starts with auto-reload on: it reloads when `HEAD`, the index or the refs change from another terminal. `A` toggles it for the session and never writes this setting. See [tui](commands/tui.md).
 
 ### `loom.changeId`
 

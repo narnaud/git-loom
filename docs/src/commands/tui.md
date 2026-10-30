@@ -39,6 +39,7 @@ The tree is the one `git loom status -f` shows, with the same short IDs. Commits
 | `Space` | Select the row (`✓`) and move down |
 | `+` (or `=`) / `-` | One more / one fewer context commit before the base |
 | `R` / `F5` | Reload |
+| `A` | Toggle auto-reload: reload when the repo changes from another terminal. Starts on with `loom.tuiAutoReload` ([configuration](../configuration.md)). |
 | `L` | Show the action log |
 | `T` | Show the latest [trace](trace.md) |
 | `?` | Show every key |
