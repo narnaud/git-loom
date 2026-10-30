@@ -266,7 +266,8 @@ each PR stands, so an agent can open and chain PRs without parsing
   review, a plain remote's create link), tags dropped.
 - `prs` has one entry per PR line, bottom first: `state` is `created`,
   `updated` or `not_created`; `url` is present unless `not_created` (or Azure
-  printed none); `retargeted` when its base was just moved to `base`.
+  printed none); `retargeted` when its base was just moved to `base`; `draft`
+  when `--draft` just made it one, created or converted (Spec 011).
   `not_created` carries the warning's `reason`, and `create_url` and `hint`
   when it shows them (Spec 011, PR Messages). An existing PR whose retarget
   failed is `updated` with the warning as `reason` and its actual `base`.

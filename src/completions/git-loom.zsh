@@ -119,6 +119,8 @@ _git-loom() {
                 '-f:Push with --force instead of --force-with-lease'
                 '--force:Push with --force instead of --force-with-lease'
                 '--title:Title of the PR created for this branch'
+                '--draft:Mark the PR as a draft, or the Gerrit review as work in progress'
+                '--wip:Alias of --draft'
             ) ;;
         add)
             flags=(

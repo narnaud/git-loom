@@ -119,7 +119,9 @@ $_gitLoomCompleter = {
                 @{ Name = '--no-pr'; Description = 'Push without creating a PR or Gerrit review' },
                 @{ Name = '-f'; Description = 'Push with --force instead of --force-with-lease' },
                 @{ Name = '--force'; Description = 'Push with --force instead of --force-with-lease' },
-                @{ Name = '--title'; Description = 'Title of the PR created for this branch' }
+                @{ Name = '--title'; Description = 'Title of the PR created for this branch' },
+                @{ Name = '--draft'; Description = 'Mark the PR as a draft, or the Gerrit review as work in progress' },
+                @{ Name = '--wip'; Description = 'Alias of --draft' }
             )
         }
         'add' {

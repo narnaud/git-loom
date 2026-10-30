@@ -237,33 +237,55 @@ fn extract_azure_remote_unrecognized() {
 }
 
 #[test]
+fn the_rerun_command_keeps_no_pr_and_draft() {
+    assert_eq!(
+        super::rerun_command("feature-a", false, false),
+        "loom push feature-a"
+    );
+    assert_eq!(
+        super::rerun_command("feature-a", true, false),
+        "loom push feature-a --no-pr"
+    );
+    assert_eq!(
+        super::rerun_command("feature-a", false, true),
+        "loom push feature-a --draft"
+    );
+}
+
+#[test]
 fn a_refused_push_names_the_flag_that_gets_past_it() {
     let refused = || anyhow::Error::new(super::PushFailed::Refused);
 
-    let hinted = super::push_hint(refused(), "feature-a", false, false);
+    let hinted = super::push_hint(refused(), "feature-a", "loom push feature-a", false);
     assert!(
         hinted.to_string().contains("loom push feature-a -f"),
         "no way out offered: {}",
         hinted
     );
-    let hinted = super::push_hint(refused(), "feature-a", true, false);
+    // The command that was run is what gets forced, `--no-pr` or `--draft` kept.
+    let hinted = super::push_hint(refused(), "feature-a", "loom push feature-a --draft", false);
     assert!(
         hinted
             .to_string()
-            .contains("loom push feature-a --no-pr -f"),
-        "the way out drops --no-pr: {}",
+            .contains("loom push feature-a --draft -f"),
+        "the way out drops --draft: {}",
         hinted
     );
 
-    let forced = super::push_hint(refused(), "feature-a", false, true);
+    let forced = super::push_hint(refused(), "feature-a", "loom push feature-a", true);
     assert_eq!(forced.to_string(), super::PUSH_FAILED);
-    let other = super::push_hint(anyhow::anyhow!("Cancelled"), "feature-a", false, false);
+    let other = super::push_hint(
+        anyhow::anyhow!("Cancelled"),
+        "feature-a",
+        "loom push feature-a",
+        false,
+    );
     assert_eq!(other.to_string(), "Cancelled");
     for failed in [
         super::PushFailed::ServerRejected,
         super::PushFailed::NoRefStatus,
     ] {
-        let hinted = super::push_hint(failed.into(), "feature-a", false, false);
+        let hinted = super::push_hint(failed.into(), "feature-a", "loom push feature-a", false);
         assert_eq!(
             hinted.to_string(),
             super::PUSH_FAILED,
@@ -278,7 +300,7 @@ fn a_refused_push_under_the_tui_names_its_key() {
     let (tx, _rx) = std::sync::mpsc::channel();
     crate::core::ui::install(tx);
     let hint = |failed: super::PushFailed, force| {
-        super::push_hint(failed.into(), "feature-a", false, force).to_string()
+        super::push_hint(failed.into(), "feature-a", "loom push feature-a", force).to_string()
     };
     let refused = hint(super::PushFailed::Refused, false);
     let no_status = hint(super::PushFailed::NoRefStatus, false);
@@ -780,12 +802,20 @@ fn push_report_serializes_only_what_happened() {
         super::PrState::Updated,
         Some("https://github.com/o/r/pull/1"),
         true,
+        false,
     );
     report.pr_not_created(
         &layer("b", "a"),
         super::UNTITLED_REASON,
         Some("https://github.com/o/r/compare/a...b?expand=1"),
         Some(&super::title_hint("b")),
+    );
+    report.pr(
+        &layer("c", "b"),
+        super::PrState::Created,
+        Some("https://github.com/o/r/pull/3"),
+        false,
+        true,
     );
     report.stack = Some(7);
     assert_eq!(
@@ -802,11 +832,140 @@ fn push_report_serializes_only_what_happened() {
                 {"branch": "b", "base": "a", "state": "not_created",
                  "reason": "it has several commits and no `--title`",
                  "create_url": "https://github.com/o/r/compare/a...b?expand=1",
-                 "hint": "Re-run with `loom push b --title <title>`"}
+                 "hint": "Re-run with `loom push b --title <title>`"},
+                {"branch": "c", "base": "b", "state": "created",
+                 "url": "https://github.com/o/r/pull/3", "draft": true}
             ],
             "stack": 7
         })
     );
+}
+
+/// Every forge reports a draft the same way: the created line names it, an
+/// existing PR gets the mark as a continuation, like a retarget.
+#[test]
+fn a_draft_pr_is_named_on_its_line() {
+    use crate::core::ui::{self, Level, Request};
+
+    let layer = super::Layer {
+        branch: "b".to_string(),
+        base: "a".to_string(),
+    };
+    let (tx, rx) = std::sync::mpsc::channel();
+    let success = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            ui::install(tx);
+            let mut report = super::PushReport::new("origin", &super::RemoteType::GitLab);
+            let url = Some("https://gitlab.example.com/g/r/-/merge_requests/2");
+            report.pr(&layer, super::PrState::Created, url, false, true);
+            report.pr(&layer, super::PrState::Updated, url, true, true);
+            report.pr(&layer, super::PrState::Updated, url, false, false);
+            ui::uninstall();
+        });
+        rx.into_iter()
+            .filter_map(|request| match request {
+                Request::Message {
+                    level: Level::Success,
+                    text,
+                } => Some(text),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(
+        success,
+        [
+            "Draft PR created: https://gitlab.example.com/g/r/-/merge_requests/2",
+            "PR updated: https://gitlab.example.com/g/r/-/merge_requests/2\n\
+             Retargeted to `a`\n\
+             Marked as draft",
+            "PR updated: https://gitlab.example.com/g/r/-/merge_requests/2",
+        ]
+    );
+}
+
+#[test]
+fn draft_is_refused_on_a_plain_remote_and_without_the_cli_that_marks_it() {
+    let err = super::refuse_unused_draft(&super::RemoteType::Plain, true, true).unwrap_err();
+    assert!(
+        err.to_string().contains("`--draft` marks a pull request"),
+        "{}",
+        err
+    );
+    assert!(super::refuse_unused_draft(&super::RemoteType::Plain, false, true).is_ok());
+    for (remote_type, cli) in [
+        (super::RemoteType::GitHub, "gh"),
+        (super::RemoteType::AzureDevOps, "az"),
+    ] {
+        let err = super::refuse_unused_draft(&remote_type, true, false).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains(&format!("`--draft` needs `{}` to mark", cli)),
+            "{}",
+            err
+        );
+        assert!(super::refuse_unused_draft(&remote_type, false, false).is_ok());
+        assert!(super::refuse_unused_draft(&remote_type, true, true).is_ok());
+    }
+    // Gerrit takes it on the refspec, GitLab on a push option.
+    let gerrit = super::RemoteType::Gerrit {
+        target_branch: "main".to_string(),
+    };
+    for remote_type in [gerrit, super::RemoteType::GitLab] {
+        assert!(super::refuse_unused_draft(&remote_type, true, false).is_ok());
+    }
+}
+
+#[test]
+fn a_wip_gerrit_push_uploads_to_refs_for_wip() {
+    use crate::core::ui::{self, Level, Request};
+
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    test_repo.create_branch("feature-a");
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (success, report) = std::thread::scope(|scope| {
+        let worker = scope.spawn(|| {
+            ui::install(tx);
+            let mut report = Default::default();
+            let result = super::push_gerrit(
+                &workdir,
+                "origin",
+                &super::PushPlan::single("feature-a"),
+                &crate::core::test_helpers::base_info(),
+                "main",
+                true,
+                &mut report,
+            );
+            ui::uninstall();
+            result.map(|()| report)
+        });
+        let success = rx
+            .into_iter()
+            .filter_map(|request| match request {
+                Request::Message {
+                    level: Level::Success,
+                    text,
+                } => Some(text),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        (success, worker.join().unwrap())
+    });
+
+    let report: crate::core::push_json::PushReport = report.unwrap();
+    assert_eq!(report.pushed, ["feature-a"]);
+    assert_eq!(
+        success,
+        ["Pushed `feature-a` to `origin` (Gerrit: `refs/for/main%wip`)"]
+    );
+    let remote = test_repo.remote_path().unwrap();
+    let uploaded =
+        crate::git::run_git_stdout(&remote, &["rev-parse", "--verify", "refs/for/main%wip"])
+            .unwrap();
+    let tip = crate::git::run_git_stdout(&workdir, &["rev-parse", "feature-a"]).unwrap();
+    assert_eq!(uploaded.trim(), tip.trim());
 }
 
 #[test]
@@ -911,10 +1070,35 @@ fn parse_gh_pr_list_reads_number_url_and_base() {
             number: 42,
             url: "https://github.com/o/r/pull/42".to_string(),
             base: "feature-a".to_string(),
+            draft: false,
         })
     );
+    let draft = r#"[{"baseRefName":"main","number":7,"url":"https://github.com/o/r/pull/7","isDraft":true}]"#;
+    assert!(super::parse_gh_pr_list(draft, None).unwrap().draft);
     assert_eq!(super::parse_gh_pr_list("[]", None), None);
     assert_eq!(super::parse_gh_pr_list("not json", None), None);
+}
+
+#[test]
+fn parse_azure_pr_reads_id_url_and_draft() {
+    let pr = serde_json::json!({
+        "pullRequestId": 42,
+        "isDraft": true,
+        "repository": {
+            "name": "repo",
+            "url": "https://dev.azure.com/org/_apis/git/repositories/guid",
+            "project": {"name": "project"}
+        }
+    });
+    assert_eq!(
+        super::parse_azure_pr(&pr),
+        Some(super::AzurePr {
+            id: 42,
+            url: "https://dev.azure.com/org/project/_git/repo/pullrequest/42".to_string(),
+            draft: true,
+        })
+    );
+    assert_eq!(super::parse_azure_pr(&serde_json::json!({})), None);
 }
 
 #[test]
@@ -1069,7 +1253,7 @@ fn force_push_under_tui_of(
         std::thread::scope(|scope| {
             let worker = scope.spawn(move || {
                 ui::install(tx);
-                let result = super::run(Some(pushed_branch.to_string()), false, true, None);
+                let result = super::run(Some(pushed_branch.to_string()), false, true, None, false);
                 ui::uninstall();
                 result
             });
@@ -1138,7 +1322,8 @@ fn a_gerrit_review_push_records_the_tips_it_uploaded() {
     test_repo.switch_branch("integration");
     test_repo.merge_no_ff("feature-b");
 
-    let result = test_repo.in_dir(|| super::run(Some("feature-b".to_string()), false, false, None));
+    let result =
+        test_repo.in_dir(|| super::run(Some("feature-b".to_string()), false, false, None, false));
     assert!(result.is_ok(), "{:?}", result.err());
 
     let recorded = |name: &str| {

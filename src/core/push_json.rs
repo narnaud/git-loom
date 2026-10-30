@@ -33,6 +33,9 @@ pub struct PrReport {
     pub url: Option<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub retargeted: bool,
+    /// `--draft` made it one on this push: created as a draft, or marked as one.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub draft: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

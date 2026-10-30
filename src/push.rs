@@ -121,19 +121,30 @@ impl PushReport {
     }
 
     /// Print and record a PR this push created or found; `retargeted` when
-    /// its base was moved to `layer.base`.
-    fn pr(&mut self, layer: &Layer, state: PrState, url: Option<&str>, retargeted: bool) {
-        let verb = if state == PrState::Created {
-            "created"
-        } else {
-            "updated"
+    /// its base was moved to `layer.base`, `draft` when `--draft` just made it
+    /// one (a PR that already was gets no word, like one whose base fits).
+    fn pr(
+        &mut self,
+        layer: &Layer,
+        state: PrState,
+        url: Option<&str>,
+        retargeted: bool,
+        draft: bool,
+    ) {
+        let what = match (state, draft) {
+            (PrState::Created, true) => "Draft PR created",
+            (PrState::Created, false) => "PR created",
+            _ => "PR updated",
         };
         let mut line = match url {
-            Some(url) => format!("PR {}: {}", verb, url),
-            None => format!("PR {} for `{}`", verb, layer.branch),
+            Some(url) => format!("{}: {}", what, url),
+            None => format!("{} for `{}`", what, layer.branch),
         };
         if retargeted {
             line.push_str(&format!("\nRetargeted to `{}`", layer.base));
+        }
+        if draft && state != PrState::Created {
+            line.push_str("\nMarked as draft");
         }
         msg::success(&line);
         self.prs.push(PrReport {
@@ -142,6 +153,7 @@ impl PushReport {
             state,
             url: url.map(str::to_string),
             retargeted,
+            draft,
             reason: None,
             create_url: None,
             hint: None,
@@ -168,6 +180,7 @@ impl PushReport {
             state: PrState::NotCreated,
             url: None,
             retargeted: false,
+            draft: false,
             reason: Some(reason.to_string()),
             create_url: create_url.map(str::to_string),
             hint: hint.map(str::to_string),
@@ -364,8 +377,15 @@ fn title_hint(branch: &str) -> String {
 ///
 /// `no_pr` skips PR/review creation; for Gerrit it prompts unless the branch
 /// is `wip/`-prefixed. `force` pushes with `--force` instead of the default
-/// `--force-with-lease --force-if-includes`.
-pub fn run(branch: Option<String>, no_pr: bool, force: bool, title: Option<String>) -> Result<()> {
+/// `--force-with-lease --force-if-includes`. `draft` makes the named branch's
+/// PR a draft, or its Gerrit review work-in-progress.
+pub fn run(
+    branch: Option<String>,
+    no_pr: bool,
+    force: bool,
+    title: Option<String>,
+    draft: bool,
+) -> Result<()> {
     let repo = repo::open_repo()?;
     let workdir = repo::require_workdir(&repo, "push")?.to_path_buf();
     let mut info = repo::gather_repo_info(&repo, false, 1)?;
@@ -407,7 +427,7 @@ pub fn run(branch: Option<String>, no_pr: bool, force: bool, title: Option<Strin
 
     let plan = plan_push(&info, &branch_name, target_branch);
 
-    // Probed before the push, so an unsupported stack is refused untouched.
+    // Probed before the push, so an unsupported stack or draft is refused untouched.
     let has_cli = !no_pr
         && match remote_type {
             RemoteType::GitHub => cli_available("gh", Command::new("gh")),
@@ -417,6 +437,7 @@ pub fn run(branch: Option<String>, no_pr: bool, force: bool, title: Option<Strin
     if !no_pr {
         refuse_unsupported_stack(&remote_type, &plan, has_cli)?;
         refuse_unused_title(&remote_type, title.as_deref())?;
+        refuse_unused_draft(&remote_type, draft, has_cli)?;
     }
     if force && crate::core::ui::active() {
         confirm_force(&remote_type, no_pr, &remote_name, &plan)?;
@@ -438,6 +459,7 @@ pub fn run(branch: Option<String>, no_pr: bool, force: bool, title: Option<Strin
             plan: &plan,
             info: &info,
             title: title.as_deref(),
+            draft,
             force,
         };
         match remote_type {
@@ -452,17 +474,19 @@ pub fn run(branch: Option<String>, no_pr: bool, force: bool, title: Option<Strin
                 &plan,
                 &info,
                 &target_branch,
+                draft,
                 &mut report,
             ),
         }
     };
-    pushed.map_err(|err| push_hint(err, &branch_name, no_pr, force))?;
+    let rerun = rerun_command(&branch_name, no_pr, draft);
+    pushed.map_err(|err| push_hint(err, &branch_name, &rerun, force))?;
     agent_mode::set_push(&report);
     Ok(())
 }
 
-/// What a forge's push needs to look after its PRs. `title` is `--title`,
-/// for the PR of the branch the user named.
+/// What a forge's push needs to look after its PRs. `title` and `draft` are
+/// `--title` and `--draft`, for the PR of the branch the user named.
 struct PrContext<'a> {
     repo: &'a Repository,
     workdir: &'a Path,
@@ -470,10 +494,16 @@ struct PrContext<'a> {
     plan: &'a PushPlan,
     info: &'a repo::RepoInfo,
     title: Option<&'a str>,
+    draft: bool,
     force: bool,
 }
 
 impl PrContext<'_> {
+    /// Whether `--draft` applies to `layer`: the branch the user named.
+    fn draft_for(&self, layer: &Layer) -> bool {
+        self.draft && layer.branch == self.plan.requested()
+    }
+
     /// The PR title and description for `layer`: `--title` on the branch the
     /// user named; otherwise a lone commit gives both; several prompt for a
     /// title, or, in agent mode, give `None` so the PR is reported not created.
@@ -511,6 +541,31 @@ fn refuse_unused_title(remote_type: &RemoteType, title: Option<&str>) -> Result<
         );
     }
     Ok(())
+}
+
+/// Refuse `--draft` before the push when nothing can mark the PR: a plain
+/// remote has none, and GitHub and Azure DevOps mark it through their CLI,
+/// without which the push would leave an existing PR ready for review and say
+/// nothing. Gerrit and GitLab mark it on the push itself.
+fn refuse_unused_draft(remote_type: &RemoteType, draft: bool, has_cli: bool) -> Result<()> {
+    if !draft {
+        return Ok(());
+    }
+    let (cli, url) = match remote_type {
+        RemoteType::Plain => bail!(
+            "`--draft` marks a pull request, which a plain remote does not have\n\
+             Push without `--draft`, or set `loom.remoteType` to the forge"
+        ),
+        RemoteType::GitHub if !has_cli => ("gh", GH_INSTALL_URL),
+        RemoteType::AzureDevOps if !has_cli => ("az", AZ_INSTALL_URL),
+        _ => return Ok(()),
+    };
+    bail!(
+        "`--draft` needs `{}` to mark the pull request: {}\n\
+         Install it, or push without `--draft` and mark the draft on the forge",
+        cli,
+        url
+    )
 }
 
 fn resolve_branch(repo: &Repository, info: &repo::RepoInfo, branch_arg: &str) -> Result<String> {
@@ -639,8 +694,19 @@ fn confirm_force(
     }
 }
 
+/// The command that was run, for the hint to force: `--no-pr` and `--draft`
+/// survive it (Spec 011), `--title` is left to the user to retype.
+fn rerun_command(branch: &str, no_pr: bool, draft: bool) -> String {
+    format!(
+        "loom push {}{}{}",
+        branch,
+        if no_pr { " --no-pr" } else { "" },
+        if draft { " --draft" } else { "" }
+    )
+}
+
 /// Add the flag that gets past a refused push, or under `loom tui` the likely
-/// cause of a push that failed outright.
+/// cause of a push that failed outright. `rerun` is the command that was run.
 ///
 /// A forge rebases a stacked branch for us when the pull request below it
 /// lands, after which `--force-with-lease`/`--force-if-includes` refuse every
@@ -648,7 +714,7 @@ fn confirm_force(
 /// only merges back content the branch already carries. Whether the force is
 /// warranted is the user's call, so they have to type it, or under `loom tui`
 /// press `P` and confirm it.
-fn push_hint(err: anyhow::Error, branch: &str, no_pr: bool, force: bool) -> anyhow::Error {
+fn push_hint(err: anyhow::Error, branch: &str, rerun: &str, force: bool) -> anyhow::Error {
     let failed = err.downcast_ref::<PushFailed>().copied();
     let refused = failed == Some(PushFailed::Refused) && !force;
     match (refused, crate::core::ui::active()) {
@@ -658,11 +724,10 @@ fn push_hint(err: anyhow::Error, branch: &str, no_pr: bool, force: bool) -> anyh
             branch
         ),
         (true, false) => anyhow!(
-            "{}\nIf `{}` has diverged on the remote, push again with `loom push {}{} -f`",
+            "{}\nIf `{}` has diverged on the remote, push again with `{} -f`",
             err,
             branch,
-            branch,
-            if no_pr { " --no-pr" } else { "" }
+            rerun
         ),
         // Git may not prompt under the TUI (Spec 020).
         (false, true) if failed == Some(PushFailed::NoRefStatus) => anyhow!(
@@ -986,6 +1051,7 @@ struct GhPr {
     url: String,
     /// The branch the PR merges into.
     base: String,
+    draft: bool,
 }
 
 /// The PR number at the end of a GitHub PR URL.
@@ -994,7 +1060,7 @@ fn pr_number_from_url(url: &str) -> Option<u64> {
 }
 
 /// Pick our PR out of the `gh pr list --json
-/// number,url,baseRefName,headRepositoryOwner` output.
+/// number,url,baseRefName,isDraft,headRepositoryOwner` output.
 ///
 /// `gh pr list --head` matches the branch name across every fork of the
 /// repository, so the PR whose head lives in `head_owner`'s repository is the
@@ -1014,6 +1080,7 @@ fn parse_gh_pr_list(json: &str, head_owner: Option<&str>) -> Option<GhPr> {
         number: pr.get("number")?.as_u64()?,
         url: pr.get("url")?.as_str()?.to_string(),
         base: pr.get("baseRefName")?.as_str()?.to_string(),
+        draft: pr.get("isDraft").and_then(|d| d.as_bool()).unwrap_or(false),
     })
 }
 
@@ -1035,7 +1102,7 @@ fn find_existing_github_pr(
             "--repo",
             gh_repo,
             "--json",
-            "number,url,baseRefName,headRepositoryOwner",
+            "number,url,baseRefName,isDraft,headRepositoryOwner",
             "--limit",
             "30",
         ],
@@ -1052,20 +1119,22 @@ fn create_github_pr(
     base: &str,
     title: &str,
     body: &str,
+    draft: bool,
 ) -> Option<GhPr> {
-    let stdout = run_gh(
-        gh,
-        &[
-            "pr", "create", "--head", head, "--base", base, "--repo", gh_repo, "--title", title,
-            "--body", body,
-        ],
-        None,
-    )?;
+    let mut args = vec![
+        "pr", "create", "--head", head, "--base", base, "--repo", gh_repo, "--title", title,
+        "--body", body,
+    ];
+    if draft {
+        args.push("--draft");
+    }
+    let stdout = run_gh(gh, &args, None)?;
     let url = stdout.lines().rev().find(|l| l.contains("/pull/"))?.trim();
     Some(GhPr {
         number: pr_number_from_url(url)?,
         url: url.to_string(),
         base: base.to_string(),
+        draft,
     })
 }
 
@@ -1078,6 +1147,30 @@ fn retarget_github_pr(gh: &Gh, gh_repo: &str, number: u64, base: &str) -> bool {
         None,
     )
     .is_some()
+}
+
+/// Convert an existing PR to a draft for `--draft`, unless it is one already;
+/// true when it is a draft now because of this call. A failure is warned
+/// about: the push is done and the PR is in place.
+fn mark_github_pr_draft(gh: &Gh, gh_repo: &str, pr: &GhPr) -> bool {
+    if pr.draft {
+        return false;
+    }
+    let number = pr.number.to_string();
+    let marked = run_gh(
+        gh,
+        &["pr", "ready", "--undo", &number, "--repo", gh_repo],
+        None,
+    )
+    .is_some();
+    if !marked {
+        msg::warn(&draft_failed_message(&pr.url));
+    }
+    marked
+}
+
+fn draft_failed_message(url: &str) -> String {
+    format!("Could not mark {} as draft — see `loom trace`", url)
 }
 
 /// How the chain of PRs relates to GitHub's Stack objects.
@@ -1327,15 +1420,21 @@ fn push_github(ctx: &PrContext, has_gh: bool, report: &mut PushReport) -> Result
     // Each layer with its PR number, bottom to top, for the stack registration.
     let mut chain: Vec<(Layer, Option<u64>)> = Vec::new();
     for (layer, republish) in &layers {
+        let draft = ctx.draft_for(layer);
         let pr = match find_existing_github_pr(
             &gh,
             pr_target_repo,
             &layer.branch,
             head_owner.as_deref(),
         ) {
-            Some(pr) if pr.base != layer.base => {
-                if retarget_github_pr(&gh, pr_target_repo, pr.number, &layer.base) {
-                    report.pr(layer, PrState::Updated, Some(&pr.url), true);
+            Some(pr) => {
+                let retargeted = pr.base != layer.base
+                    && retarget_github_pr(&gh, pr_target_repo, pr.number, &layer.base);
+                // A separate call: the draft is asked for whatever became of
+                // the base.
+                let marked = draft && mark_github_pr_draft(&gh, pr_target_repo, &pr);
+                if retargeted || pr.base == layer.base {
+                    report.pr(layer, PrState::Updated, Some(&pr.url), retargeted, marked);
                     Some(pr)
                 } else {
                     let reason = format!(
@@ -1343,12 +1442,16 @@ fn push_github(ctx: &PrContext, has_gh: bool, report: &mut PushReport) -> Result
                         pr.url, layer.base
                     );
                     msg::warn(&reason);
+                    if marked {
+                        msg::success("Marked as draft");
+                    }
                     report.prs.push(PrReport {
                         branch: layer.branch.clone(),
                         base: pr.base.clone(),
                         state: PrState::Updated,
                         url: Some(pr.url.clone()),
                         retargeted: false,
+                        draft: marked,
                         reason: Some(reason),
                         create_url: None,
                         hint: None,
@@ -1358,10 +1461,6 @@ fn push_github(ctx: &PrContext, has_gh: bool, report: &mut PushReport) -> Result
                     // over a chain GitHub will reject.
                     None
                 }
-            }
-            Some(pr) => {
-                report.pr(layer, PrState::Updated, Some(&pr.url), false);
-                Some(pr)
             }
             None if *republish => None,
             None => match ctx.title_and_description(layer)? {
@@ -1382,9 +1481,10 @@ fn push_github(ctx: &PrContext, has_gh: bool, report: &mut PushReport) -> Result
                         &layer.base,
                         &title,
                         &body,
+                        draft,
                     );
                     match &pr {
-                        Some(pr) => report.pr(layer, PrState::Created, Some(&pr.url), false),
+                        Some(pr) => report.pr(layer, PrState::Created, Some(&pr.url), false, draft),
                         None => report.pr_not_created(
                             layer,
                             "`gh pr create` failed — see `loom trace`",
@@ -1407,10 +1507,21 @@ fn push_github(ctx: &PrContext, has_gh: bool, report: &mut PushReport) -> Result
     Ok(())
 }
 
+/// One layer's GitLab push, done: what the server printed for it.
+struct GitlabPush<'a> {
+    layer: &'a Layer,
+    republish: bool,
+    /// `merge_request.draft` was passed, so its MR is a draft.
+    draft: bool,
+    stderr: String,
+}
+
 /// Push to GitLab: push each branch with `merge_request.create` push options
 /// so GitLab creates or updates a merge request, then report each MR from the
 /// link GitLab prints. Re-published upstack layers carry only the target
-/// option, updating an existing MR without creating one.
+/// option, updating an existing MR without creating one. `--draft` adds
+/// `merge_request.draft` to the named branch's push, which marks its MR a
+/// draft whether the push creates it or not.
 ///
 /// Push options apply to the whole push and each layer targets a different
 /// branch, so layers go out one push at a time, bottom first. GitLab prints the
@@ -1431,13 +1542,14 @@ fn push_gitlab(ctx: &PrContext, report: &mut PushReport) -> Result<()> {
         return push_plain(workdir, remote, plan, force, report);
     }
 
-    let mut pushed: Vec<(&Layer, bool, String)> = Vec::new();
+    let mut pushed: Vec<GitlabPush> = Vec::new();
     for (layer, republish) in plan.pr_layers() {
         let target_opt = format!("merge_request.target={}", layer.base);
         let title_opt = ctx
             .title
             .filter(|_| layer.branch == plan.requested())
             .map(|title| format!("merge_request.title={}", title));
+        let draft = ctx.draft_for(layer);
         let mut args = vec!["push"];
         args.extend_from_slice(force_args(force));
         if !republish {
@@ -1446,15 +1558,23 @@ fn push_gitlab(ctx: &PrContext, report: &mut PushReport) -> Result<()> {
         if let Some(title_opt) = &title_opt {
             args.extend_from_slice(&["-o", title_opt]);
         }
+        if draft {
+            args.extend_from_slice(&["-o", "merge_request.draft"]);
+        }
         args.extend_from_slice(&["-o", &target_opt, "-u", remote, &layer.branch]);
         match run_push_capture(workdir, &args) {
-            Ok(stderr) => pushed.push((layer, republish, stderr)),
+            Ok(stderr) => pushed.push(GitlabPush {
+                layer,
+                republish,
+                draft,
+                stderr,
+            }),
             Err(err) => {
                 // The layers below are on the server already.
                 if !pushed.is_empty() {
                     msg::success(&format!(
                         "Pushed {} to `{}`",
-                        backticked(pushed.iter().map(|(l, _, _)| &l.branch)),
+                        backticked(pushed.iter().map(|p| &p.layer.branch)),
                         remote
                     ));
                     report_gitlab_mrs(info, &pushed, report);
@@ -1471,13 +1591,10 @@ fn push_gitlab(ctx: &PrContext, report: &mut PushReport) -> Result<()> {
 }
 
 /// Report the MR GitLab printed for each pushed layer; see [`push_gitlab`].
-fn report_gitlab_mrs(
-    info: &repo::RepoInfo,
-    pushed: &[(&Layer, bool, String)],
-    report: &mut PushReport,
-) {
-    for (layer, republish, stderr) in pushed {
-        let links = gitlab_mr_links(stderr);
+fn report_gitlab_mrs(info: &repo::RepoInfo, pushed: &[GitlabPush], report: &mut PushReport) {
+    for push in pushed {
+        let layer = push.layer;
+        let links = gitlab_mr_links(&push.stderr);
         if let Some(url) = links.view {
             let existed = matches!(
                 remote_status(info, &layer.branch),
@@ -1488,8 +1605,8 @@ fn report_gitlab_mrs(
             } else {
                 PrState::Created
             };
-            report.pr(layer, state, Some(&url), false);
-        } else if let Some(url) = links.create.filter(|_| !republish) {
+            report.pr(layer, state, Some(&url), false, push.draft);
+        } else if let Some(url) = links.create.filter(|_| !push.republish) {
             report.pr_not_created(layer, "GitLab did not create it", Some(&url), None);
         }
     }
@@ -1645,8 +1762,10 @@ fn push_azure(ctx: &PrContext, has_az: bool, report: &mut PushReport) -> Result<
     }
 
     for (layer, republish) in plan.pr_layers() {
-        if let Some(pr_url) = find_existing_azure_pr(workdir, &layer.branch, azure.as_ref()) {
-            report.pr(layer, PrState::Updated, Some(&pr_url), false);
+        let draft = ctx.draft_for(layer);
+        if let Some(pr) = find_existing_azure_pr(workdir, &layer.branch, azure.as_ref()) {
+            let marked = draft && mark_azure_pr_draft(workdir, &pr, azure.as_ref());
+            report.pr(layer, PrState::Updated, Some(&pr.url), false, marked);
             continue;
         }
         if republish {
@@ -1667,13 +1786,31 @@ fn push_azure(ctx: &PrContext, has_az: bool, report: &mut PushReport) -> Result<
             layer,
             &title,
             &description,
+            draft,
             azure.as_ref(),
-            create_url(layer).as_deref(),
             report,
         )?;
     }
 
     Ok(())
+}
+
+/// Run `az` with `args` in `workdir`, trace-log it, and return stdout on
+/// success; a failure yields `None`, its stderr in the trace.
+fn run_az(workdir: &Path, args: &[&str]) -> Option<String> {
+    let start = Instant::now();
+    let output = az_command().current_dir(workdir).args(args).output().ok()?;
+    trace_log::log_command(
+        "az",
+        &args.join(" "),
+        start.elapsed().as_millis(),
+        output.status.success(),
+        &String::from_utf8_lossy(&output.stderr),
+    );
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// Run `az repos pr create` for one layer and print the new PR's URL.
@@ -1682,8 +1819,8 @@ fn create_azure_pr(
     layer: &Layer,
     title: &str,
     description: &str,
+    draft: bool,
     azure: Option<&AzureRemote>,
-    create_url: Option<&str>,
     report: &mut PushReport,
 ) -> Result<()> {
     // Write description to a temp file and pass `--description @<path>` to az,
@@ -1717,34 +1854,69 @@ fn create_azure_pr(
         args.push("--description");
         args.push(&desc_arg);
     }
+    if draft {
+        args.extend(["--draft", "true"]);
+    }
 
-    let start = Instant::now();
-    let output = az_command().current_dir(workdir).args(&args).output()?;
-    let duration_ms = start.elapsed().as_millis();
-    trace_log::log_command(
-        "az",
-        &args.join(" "),
-        duration_ms,
-        output.status.success(),
-        &String::from_utf8_lossy(&output.stderr),
-    );
-
-    if !output.status.success() {
+    let Some(stdout) = run_az(workdir, &args) else {
         report.pr_not_created(
             layer,
             "`az repos pr create` failed — see `loom trace`",
-            create_url,
+            azure_create_pr_url(azure, &layer.branch, &layer.base).as_deref(),
             None,
         );
         return Ok(());
-    }
+    };
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
     let url = serde_json::from_str::<serde_json::Value>(stdout.trim())
         .ok()
         .and_then(|pr| azure_pr_url(&pr));
-    report.pr(layer, PrState::Created, url.as_deref(), false);
+    report.pr(layer, PrState::Created, url.as_deref(), false, draft);
     Ok(())
+}
+
+/// An existing Azure DevOps PR, as `az repos pr list` reports it.
+#[derive(Debug, PartialEq, Eq)]
+struct AzurePr {
+    id: u64,
+    url: String,
+    draft: bool,
+}
+
+/// Read a PR from an `az repos pr list` entry, `None` when its URL cannot
+/// be built.
+fn parse_azure_pr(pr: &serde_json::Value) -> Option<AzurePr> {
+    Some(AzurePr {
+        id: pr["pullRequestId"].as_u64()?,
+        url: azure_pr_url(pr)?,
+        draft: pr["isDraft"].as_bool().unwrap_or(false),
+    })
+}
+
+/// `az repos pr update` finds a PR by id alone: `--org` when the remote URL
+/// gave it, `--detect` otherwise; it takes no project or repository.
+fn azure_org_args(azure: Option<&AzureRemote>) -> Vec<&str> {
+    match azure {
+        Some(azure) => vec!["--org", azure.org_url.as_str()],
+        None => vec!["--detect"],
+    }
+}
+
+/// Convert an existing PR to a draft for `--draft`, unless it is one already;
+/// true when it is a draft now because of this call. A failure is warned
+/// about: the push is done and the PR is in place.
+fn mark_azure_pr_draft(workdir: &Path, pr: &AzurePr, azure: Option<&AzureRemote>) -> bool {
+    if pr.draft {
+        return false;
+    }
+    let id = pr.id.to_string();
+    let mut args = vec!["repos", "pr", "update", "--id", &id, "--draft", "true"];
+    args.extend(azure_org_args(azure));
+    let marked = run_az(workdir, &args).is_some();
+    if !marked {
+        msg::warn(&draft_failed_message(&pr.url));
+    }
+    marked
 }
 
 /// Browser URL of an Azure DevOps PR, built from its structured fields since
@@ -1764,16 +1936,14 @@ fn azure_pr_url(pr: &serde_json::Value) -> Option<String> {
     ))
 }
 
-/// The web URL of an existing Azure DevOps PR for the source branch, or
-/// `None` when there is none or the check fails.
+/// The existing Azure DevOps PR for the source branch, or `None` when there
+/// is none or the check fails.
 fn find_existing_azure_pr(
     workdir: &Path,
     branch: &str,
     azure: Option<&AzureRemote>,
-) -> Option<String> {
-    let mut cmd = az_command();
-    cmd.current_dir(workdir);
-    cmd.args([
+) -> Option<AzurePr> {
+    let mut args = vec![
         "repos",
         "pr",
         "list",
@@ -1781,17 +1951,11 @@ fn find_existing_azure_pr(
         branch,
         "--output",
         "json",
-    ]);
-    cmd.args(azure_location_args(azure));
-    let output = cmd.output().ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    ];
+    args.extend(azure_location_args(azure));
+    let stdout = run_az(workdir, &args)?;
     let prs: serde_json::Value = serde_json::from_str(stdout.trim()).ok()?;
-    azure_pr_url(prs.get(0)?)
+    parse_azure_pr(prs.get(0)?)
 }
 
 /// Push to Gerrit without creating a review (plain force push). A branch not
@@ -1841,24 +2005,28 @@ fn push_gerrit_no_pr(
 }
 
 /// Push to Gerrit with the `refs/for/` refspec, surfacing the review URLs
-/// Gerrit prints in the push output.
+/// Gerrit prints in the push output. `wip` appends `%wip`, which marks every
+/// change the push uploads work-in-progress: Gerrit has no per-change option.
 fn push_gerrit(
     workdir: &Path,
     remote: &str,
     plan: &PushPlan,
     info: &repo::RepoInfo,
     target_branch: &str,
+    wip: bool,
     report: &mut PushReport,
 ) -> Result<()> {
     let branch = plan.requested();
-    let refspec = format!("{}:refs/for/{}", branch, target_branch);
+    let target = format!(
+        "refs/for/{}{}",
+        target_branch,
+        if wip { "%wip" } else { "" }
+    );
+    let refspec = format!("{}:{}", branch, target);
 
     let stderr = run_push_capture(workdir, &["push", remote, &refspec])?;
 
-    let mut message = format!(
-        "Pushed `{}` to `{}` (Gerrit: `refs/for/{}`)",
-        branch, remote, target_branch
-    );
+    let mut message = format!("Pushed `{}` to `{}` (Gerrit: `{}`)", branch, remote, target);
     report.links = append_remote_urls(&mut message, &stderr, None);
     report.pushed = vec![branch.to_string()];
     msg::success(&message);
