@@ -1036,9 +1036,9 @@ fn execute_action(
         Action::Unmerge { branch } => unmerge::run(branch),
         Action::Update => update::run(None, false),
         Action::UpdateBranch { branch } => update::run(Some(branch), false),
-        Action::Push { branch } => push::run(branch, false, false, None),
+        Action::Push { branch } => push::run(branch, false, false, None, false),
         // `push` itself confirms a force under the TUI, naming every branch.
-        Action::ForcePush { branch } => push::run(Some(branch), false, true, None),
+        Action::ForcePush { branch } => push::run(Some(branch), false, true, None, false),
         // The view reloads only on `R` or after an action.
         Action::Continue { paused } if PausedId::load(git_dir).as_ref() != Some(&paused) => {
             Err(anyhow::anyhow!(

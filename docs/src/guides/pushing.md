@@ -14,7 +14,13 @@ On GitHub and Azure DevOps, a branch with one commit takes its title from that c
 
 If `feature-auth` is stacked on another branch, the branch below is pushed too, and each gets its own review targeting the one below it. A stack needs `gh` on GitHub, and Azure DevOps has no stacked pull requests: both refuse unless you pass `--no-pr`.
 
-To push without opening a review, for a backup or work in progress:
+To open the review as a draft, visible but not yet up for review:
+
+```bash
+git loom push fa --draft
+```
+
+To push without opening a review at all, for a backup:
 
 ```bash
 git loom push fa --no-pr

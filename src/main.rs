@@ -192,6 +192,9 @@ enum Command {
         /// Title of the PR created for this branch (default: its lone commit's subject, else asked)
         #[arg(long, conflicts_with = "no_pr")]
         title: Option<String>,
+        /// Mark this branch's PR as a draft, or its Gerrit review as work in progress
+        #[arg(long, visible_alias = "wip", conflicts_with = "no_pr")]
+        draft: bool,
     },
     /// Set up AI agent integration
     Agent(AgentCmd),
@@ -716,7 +719,8 @@ fn main() {
             no_pr,
             force,
             title,
-        }) => push::run(branch, no_pr, force, title),
+            draft,
+        }) => push::run(branch, no_pr, force, title, draft),
         Some(Command::Update { branch, yes }) => update::run(branch, yes),
         Some(Command::Fold {
             create,

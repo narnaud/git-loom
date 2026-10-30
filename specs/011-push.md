@@ -21,7 +21,7 @@ varies significantly depending on the hosting platform:
 ## CLI
 
 ```bash
-git-loom push [branch] [--no-pr] [-f|--force] [--title <title>]
+git-loom push [branch] [--no-pr] [-f|--force] [--title <title>] [--draft]
 ```
 
 **Arguments:**
@@ -46,6 +46,15 @@ git-loom push [branch] [--no-pr] [-f|--force] [--title <title>]
   the layers below it (see [PR Title and Description](#pr-title-and-description)).
   Conflicts with `--no-pr`. On a plain or Gerrit remote, which have no PR to
   give it to, it is refused before anything is pushed.
+- `--draft` (alias `--wip`): The named branch's PR is a draft: created as one, or marked as one
+  when it exists (GitHub, GitLab, Azure DevOps; see [Push
+  Strategies](#push-strategies)). On Gerrit the review goes to
+  `refs/for/<target>%wip`, which marks every change the push uploads
+  work-in-progress — the whole relation chain, Gerrit having no per-change
+  option. Like `--title`, it applies to the named branch, not to the layers
+  below it. Conflicts with `--no-pr`; refused on a plain remote, which has
+  nothing to mark, before anything is pushed. Nothing is ever taken out of
+  draft: a push without `--draft` leaves a draft as it is.
 
 **Behavior:**
 
@@ -266,8 +275,15 @@ every branch pushed, then one line per PR the push looks after, bottom first.
 
 `PR created` names a PR this push opened, `PR updated` one that existed (GitLab
 tells them apart by the branch alone, see [GitLab](#gitlab)); a retargeted PR
-adds `Retargeted to `a``. The success line carries the server's `remote:`
-links as on a plain remote, except its new-PR hint (GitHub's `/pull/new/`,
+adds `Retargeted to `a``. With `--draft` the named branch's line reads `Draft PR
+created: <url>`, or adds `Marked as draft` under `PR updated` when this push
+converted it — under the retarget warning when that failed, the two being
+separate calls; a PR that already was a draft gets no word, like one whose
+base already fit (GitLab, which does not say, is always reported as marked). A
+conversion that failed is warned about (`Could not mark <url> as draft — see
+`loom trace``) and the PR reported as it is. The success line carries the
+server's `remote:` links as on a plain remote, except its new-PR hint (GitHub's
+`/pull/new/`,
 Azure's `pullrequestcreate`), which the PR lines stand for — kept when loom
 cannot build the forge's new-PR form (below). GitHub then adds its stack line
 ([GitHub stack registration](#github-stack-registration)).
@@ -344,6 +360,8 @@ gh pr create --head <head> --base <target> --repo <owner/repo> --title <t> --bod
 #   PR created: https://github.com/owner/repo/pull/43
 # and an existing PR whose base is wrong is retargeted
 gh pr edit <n> --repo <owner/repo> --base <branch below>
+# --draft adds --draft; an existing PR that is not a draft (`isDraft`) is converted
+gh pr ready --undo <n> --repo <owner/repo>
 ```
 
 Pushes the branch with `--force-with-lease` (same safety as plain), then
@@ -388,7 +406,8 @@ git push --force-with-lease --force-if-includes \
 # a re-published layer keeps its MR: the target option without merge_request.create
 git push --force-with-lease --force-if-includes \
     -o merge_request.target=<branch below> -u <remote> <branch>
-# --title adds -o merge_request.title=<title> to the named branch's push
+# --title adds -o merge_request.title=<title> to the named branch's push,
+# --draft adds -o merge_request.draft, which marks its MR new or not
 # ✓ Pushed `feature-a` to `origin`
 # ✓ PR created: https://gitlab.com/group/repo/-/merge_requests/42
 ```
@@ -419,6 +438,9 @@ git push --force-with-lease --force-if-includes [--atomic] -u <remote> <branch>.
 az repos pr create --output json --source-branch <branch> --target-branch <target> \
     --org <org-url> --project <project> --repository <repo>
 #   PR created: https://dev.azure.com/org/project/_git/repo/pullrequest/43
+# --draft adds --draft true; an existing PR that is not a draft (`isDraft`) is
+# converted by its id, which `az repos pr update` locates with --org alone
+az repos pr update --id <id> --draft true --org <org-url>
 ```
 
 Pushes the branch with `--force-with-lease` (same safety as plain), then checks
@@ -438,10 +460,13 @@ Without `az`, see [PR Messages](#pr-messages).
 
 ```bash
 git push <remote> <branch>:refs/for/<target>
+# --draft: the review and every change uploaded with it are work-in-progress
+git push <remote> <branch>:refs/for/<target>%wip
 ```
 
 Uses the Gerrit `refs/for/` refspec to create or update a change. No topic is
-set — Gerrit keeps whatever topic the change already has.
+set — Gerrit keeps whatever topic the change already has. The success line
+names the refspec target, `%wip` included.
 
 It sets no upstream, so on success it saves each uploaded branch's tip (the
 requested branch and the downstack it carries as a relation chain) as
@@ -648,7 +673,9 @@ So a refused push says which flag gets past it:
 
 The command is the one that was run, forced: `--no-pr` survives it, since
 without it the re-run would open a pull request that was deliberately declined,
-and on Gerrit push a review instead of a branch.
+and on Gerrit push a review instead of a branch; so does `--draft`, without
+which the re-run would open the PR ready for review. `--title` is left to the
+user to retype.
 
 Nothing is checked before saying this. Whether the remote holds anything worth
 keeping is a question only someone who can look at it can answer, and the
@@ -692,3 +719,4 @@ branches are never pushed together — that would be confusing and error-prone.
 - Git 2.43 or later (checked globally at startup)
 - `gh` CLI 2.81+ (optional, for GitHub PR creation; `auth status --json`)
 - `az` CLI (optional, for Azure DevOps PR creation)
+- GitLab 15.0+ for `--draft` (`merge_request.draft`)
