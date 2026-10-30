@@ -209,6 +209,18 @@ fn commit_accepts_hidden_i_alias() {
     }
 }
 
+/// Gerrit's name for a draft.
+#[test]
+fn push_accepts_wip_for_draft() {
+    let parse = |args: &[&str]| Cli::try_parse_from(["git-loom"].iter().chain(args).copied());
+    for flag in ["--draft", "--wip"] {
+        match parse(&["push", "feature-a", flag]).unwrap().command {
+            Some(Command::Push { draft, .. }) => assert!(draft, "{flag}"),
+            _ => panic!("{flag}: not a push"),
+        }
+    }
+}
+
 /// Issue #380: one letter was easy to hit by mistake, and the TUI tree binds
 /// `c`/`a` to commit/absorb.
 #[test]

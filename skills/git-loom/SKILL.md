@@ -110,7 +110,7 @@ The `graph` fields:
 | Create branch | Usually commit with `-b <new-name>`; empty branch: `git loom branch <name>`. `--on <branch>` starts it empty on that branch's tip, so its first commit stacks on it. `--on <commit>`: a commit inside a branch splits that branch into two stacked layers, the new one owning that commit and those below; a loose commit moves the loose commits up to it into the new branch. |
 | Merge/unmerge | `git loom merge <branch>` / `git loom unmerge <branch>`. A branch woven into another worktree's integration branch is refused: unmerge it there first. |
 | Pull-rebase | `git loom update -y`. `git loom update <branch>` first replaces a woven branch's commits with its remote branch's (another machine's or a teammate's push), whatever the local branch had; the report names the old tip. |
-| Push / PR | `git loom push <branch> [--title "<title>"]` pushes and opens or updates its PR (see Pull requests); `--no-pr` skips PR/review creation. |
+| Push / PR | `git loom push <branch> [--title "<title>"] [--draft]` pushes and opens or updates its PR (see Pull requests); `--no-pr` skips PR/review creation. |
 | Diff/show | `git loom diff` / `git loom show`; short IDs work; Git options follow `--`. |
 | Test branch | `git loom switch <branch>`. |
 | Worktrees | Each worktree holds its own integration branch and runs every command as the main one does. `git loom wt new <name>` creates `../<dir>-<name>` on `integration-<name>`; `git loom wt` (or `git loom wt list`) lists them; `git loom wt path <id>` prints a path; `git loom wt drop <id>` refuses dirty or paused worktrees and keeps a branch with unique commits. `git loom init` in a plain git worktree names the branch the same way. |
@@ -126,6 +126,11 @@ review). Push only when the user asked to publish: it is visible to others.
 - A one-commit branch's PR takes the commit's subject and body. Give
   `--title "<title>"` for a branch with several commits; it titles the named
   branch's PR only, the description still comes from the commits.
+- `--draft` makes the named branch's PR a draft (a Gerrit review and its chain
+  work-in-progress), created or existing. Its `prs[]` entry says `draft` when
+  this push created it as a draft or converted it: a GitHub or Azure DevOps PR
+  that already was one has no `draft` field (GitLab cannot tell and always
+  says it). Nothing takes a PR out of draft: that is done on the forge.
 - Read the `push` object of the `ok` line: `pushed`, then `prs[]` with
   `branch`, `base`, `state` (`created` / `updated` / `not_created`) and `url`.
   A `not_created` entry says why in `reason`; when it has a `hint` (a lower

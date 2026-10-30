@@ -7,7 +7,7 @@ Push a feature branch, with the branches it is stacked on, and open or update it
 ## Usage
 
 ```
-git loom push [<branch>] [--no-pr] [-f] [--title <title>]
+git loom push [<branch>] [--no-pr] [-f] [--title <title>] [--draft]
 ```
 
 ### Arguments
@@ -23,6 +23,7 @@ git loom push [<branch>] [--no-pr] [-f] [--title <title>]
 | `--no-pr` | Push only: no pull request or Gerrit review |
 | `-f, --force` | Force the push, even if the branch changed on the remote |
 | `--title <title>` | Title of the branch's new pull request (see [PR Title and Description](#pr-title-and-description)) |
+| `--draft` (alias `--wip`) | Open the branch's pull request as a draft, or its Gerrit review as work in progress (see [Draft Pull Requests](#draft-pull-requests)) |
 
 ## What It Does
 
@@ -44,7 +45,7 @@ git loom push feature-a
 # ✓ PR created: https://github.com/owner/repo/pull/42
 ```
 
-Without `gh` or `az`, the branch is still pushed, and loom prints a link to create the pull request in the browser. A stacked branch on GitHub needs `gh`.
+Without `gh` or `az`, the branch is still pushed, and loom prints a link to create the pull request in the browser. A stacked branch on GitHub needs `gh`, and `--draft` needs `gh` or `az`, which is what marks the pull request.
 
 ## Stacked Branches
 
@@ -78,6 +79,20 @@ A new pull request is titled and described from its branch's commits:
 `--title` applies to the branch you named, not to the branches below it. It works on GitHub, Azure DevOps and GitLab.
 
 Change-Id trailers are left out of the description. On GitLab the server writes the description, so they stay there.
+
+## Draft Pull Requests
+
+`--draft` opens the branch's pull request as a draft, or converts the one it already has:
+
+```bash
+git loom push feature-a --draft
+# ✓ Pushed `feature-a` to `origin`
+# ✓ Draft PR created: https://github.com/owner/repo/pull/42
+```
+
+On GitHub, GitLab and Azure DevOps the pull request is a draft. On GitHub and Azure DevOps that takes `gh` or `az`: without it the push is refused rather than leaving the pull request ready for review. On Gerrit the review is pushed as work in progress (`refs/for/main%wip`), and so are the reviews it is chained on. Like `--title`, it applies to the branch you named, not to the branches below it.
+
+Loom never takes a pull request out of draft: mark it ready on the forge when it is.
 
 ## Forcing a Push
 
@@ -120,13 +135,14 @@ With [`--agent`](agent.md#agent-mode), the JSON `ok` line carries a `push` repor
          "create_url":"https://github.com/owner/repo/compare/a...b?expand=1","hint":"Re-run with `loom push b --title <title>`"}]}}
 ```
 
-Each PR's `state` is `created`, `updated` or `not_created`. A branch of several commits can't be asked for a title, so its PR is `not_created` unless you pass `--title`. `republished`, `not_pushed`, `links` and the GitHub `stack` number appear when they apply.
+Each PR's `state` is `created`, `updated` or `not_created`. A branch of several commits can't be asked for a title, so its PR is `not_created` unless you pass `--title`. `draft` is set when `--draft` made it one. `republished`, `not_pushed`, `links` and the GitHub `stack` number appear when they apply.
 
 ## Examples
 
 ```bash
 git loom push feature-a                      # push and open or update the PR
 git loom push feature-b --title "Login page" # several commits: give the PR a title
+git loom push feature-a --draft              # open the PR as a draft
 git loom push feature-a --no-pr              # push only
 git loom push                                # pick the branch
 ```
