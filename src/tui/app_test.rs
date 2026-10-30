@@ -4585,6 +4585,24 @@ fn tree_actions_are_refused_while_paused() {
 }
 
 #[test]
+fn a_failed_reload_after_the_operation_ended_keeps_the_paused_view() {
+    let (repo, _) = repo_with_a_paused_drop();
+    let theme = make_theme();
+    let mut app = repo.in_dir(|| paused_app(&repo, &theme));
+    assert!(!app.diff_cache.is_empty());
+    std::fs::remove_dir_all(repo.repo.path().join("rebase-merge")).unwrap();
+    crate::core::transaction::delete(repo.repo.path()).unwrap();
+
+    let outside = tempfile::tempdir().unwrap();
+    let reloaded = repo.in_dir_path(outside.path(), || app.refresh());
+
+    assert!(!reloaded);
+    assert!(app.popup.is_some(), "the failure is shown");
+    assert!(app.paused.is_some());
+    assert!(!app.diff_cache.is_empty());
+}
+
+#[test]
 fn staging_the_resolution_then_continuing_finishes_the_operation() {
     let (repo, _) = repo_with_a_paused_drop();
     let theme = make_theme();
@@ -4796,4 +4814,26 @@ fn capital_t_opens_the_latest_trace() {
 
     press(&mut app, KeyCode::Char('T'));
     assert!(app.popup.is_none(), "T closes it too");
+}
+
+#[test]
+fn a_toggles_auto_reload_and_it_waits_for_a_modal() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    assert!(!app.watch.is_on());
+    press(&mut app, KeyCode::Char('A'));
+    assert!(app.watch.is_on());
+    assert_eq!(app.notice.as_deref(), Some("auto-reload on"));
+
+    press(&mut app, KeyCode::Char('?'));
+    assert!(app.popup.is_some());
+    let stale = (vec![(PathBuf::from("x"), None)], None);
+    app.watch
+        .loaded(stale, Instant::now() - Duration::from_secs(10));
+    assert!(!app.auto_reload_due());
+
+    press(&mut app, KeyCode::Esc);
+    assert!(app.auto_reload_due());
+    press(&mut app, KeyCode::Char('A'));
+    assert!(!app.watch.is_on());
 }
