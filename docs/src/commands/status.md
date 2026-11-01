@@ -57,6 +57,8 @@ From top to bottom:
 | `⏫` | Upstream has new commits; run [`update`](update.md) |
 | `·` | Context commit before the base (`-n`) |
 
+On Gerrit, a review push sets no upstream: loom compares the branch with the patch set Gerrit has instead, as last seen by [`push`](push.md) or [`update`](update.md). `✗` means the change was merged or abandoned.
+
 ### Short IDs
 
 Every branch, commit and file gets a short ID — what you see is what you type in other commands. `zz` always means all local changes.

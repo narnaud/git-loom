@@ -5,6 +5,7 @@ use anyhow::{Context, Result, bail};
 use chrono::DateTime;
 use git2::{BranchType, Repository, StatusOptions};
 
+use crate::core::gerrit;
 use crate::core::msg;
 use crate::git;
 
@@ -1335,13 +1336,25 @@ fn find_branches_in_range(
 
 /// Determine the remote tracking status of a feature branch.
 ///
-/// Returns `None` if the branch has never been pushed (no upstream configured).
+/// Returns `None` if the branch has never been pushed.
 fn detect_remote_status(
     repo: &Repository,
     branch: &git2::Branch,
     tip_oid: git2::Oid,
 ) -> Option<RemoteStatus> {
-    Some(match resolve_upstream(repo, branch)? {
+    let Some(upstream) = resolve_upstream(repo, branch) else {
+        let name = branch.name().ok()??;
+        // A Gerrit review push sets no upstream (Spec 001).
+        let revision = repo.config().ok()?.get_string(&gerrit::key(name)).ok()?;
+        return Some(if revision == gerrit::CLOSED {
+            RemoteStatus::Gone
+        } else if revision == tip_oid.to_string() {
+            RemoteStatus::Synced
+        } else {
+            RemoteStatus::Different
+        });
+    };
+    Some(match upstream {
         Upstream::Present(Some(upstream_oid)) if upstream_oid == tip_oid => RemoteStatus::Synced,
         Upstream::Present(_) => RemoteStatus::Different,
         Upstream::Gone => RemoteStatus::Gone,

@@ -443,6 +443,11 @@ git push <remote> <branch>:refs/for/<target>
 Uses the Gerrit `refs/for/` refspec to create or update a change. No topic is
 set — Gerrit keeps whatever topic the change already has.
 
+It sets no upstream, so on success it saves each uploaded branch's tip (the
+requested branch and the downstack it carries as a relation chain) as
+`branch.<name>.loomGerritRevision`, for the status remote indicator (Spec 001).
+`loom update` refreshes it from the server (Spec 010).
+
 After pushing, stderr from the git push command is captured and scanned for
 review URLs. Lines starting with `remote:` that contain `http://` or `https://`
 are extracted and displayed below the success message as indented continuation

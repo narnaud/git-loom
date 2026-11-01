@@ -74,7 +74,7 @@ Ownership walks parents from each branch tip and stops at the base or another br
 
 Feature branches normally remain parallel: each forks from the base and is woven into the integration branch by its own merge commit (Specs 004 and 006).
 
-Append the applicable remote indicator (`✓`, `↑`, or `✗`) after `]`; show none for a never-pushed local-only branch.
+Append the applicable remote indicator (`✓`, `↑`, or `✗`) after `]`; show none for a never-pushed local-only branch. A branch with no upstream uses `branch.<name>.loomGerritRevision`, what Gerrit last held for it (Specs 010 and 011): `✓` when that revision is the tip, `✗` for `closed` (merged or abandoned), `↑` otherwise. `update` never removes a branch for it: only a gone upstream counts (Spec 010).
 
 ### Loose commits and base
 

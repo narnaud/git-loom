@@ -29,7 +29,8 @@ git loom update [<branch>] [-y]
 3. **Drops** commits that already landed upstream, merged or cherry-picked.
 4. **Rebases** every feature branch onto the new upstream, keeping the integration layout. Uncommitted changes are kept, staged ones staged.
 5. **Updates submodules**, if any.
-6. **Offers to remove** local branches that were fully merged upstream, or whose remote branch was deleted. Set [`loom.pruneGoneBranches`](../configuration.md#loomprunegonebranches) to always remove them without asking.
+6. **Asks Gerrit**, on a Gerrit remote reached over ssh, which patch set each feature branch's changes are at, so [`status`](status.md) can show whether a branch is pushed. A plain `git fetch` or `git pull` doesn't.
+7. **Offers to remove** local branches that were fully merged upstream, or whose remote branch was deleted. Set [`loom.pruneGoneBranches`](../configuration.md#loomprunegonebranches) to always remove them without asking.
 
 An integration branch holding an octopus merge (several branches merged at once) is still updated, by git's own rebase, with a warning: branches already merged upstream are not offered for removal, and a named branch is refused.
 

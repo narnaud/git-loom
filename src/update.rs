@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
@@ -8,6 +9,7 @@ use crate::core::remote;
 use crate::core::repo;
 
 use crate::core::agent_mode;
+use crate::core::gerrit;
 use crate::core::msg;
 use crate::core::transaction::{self, LoomState, Rollback};
 use crate::core::weave::{self, Command, CommitEntry, Weave};
@@ -386,7 +388,8 @@ pub fn after_continue(
     post_update(workdir, &repo, &ctx)
 }
 
-/// Post-rebase work: submodule update, upstream reporting, gone-branch cleanup.
+/// Post-rebase work: submodule update, upstream reporting, Gerrit state
+/// refresh, gone-branch cleanup.
 fn post_update(workdir: &Path, repo: &git2::Repository, ctx: &UpdateContext) -> Result<()> {
     if workdir.join(".gitmodules").exists() {
         let spinner = msg::spinner();
@@ -419,6 +422,8 @@ fn post_update(workdir: &Path, repo: &git2::Repository, ctx: &UpdateContext) -> 
             commit_blurb(repo, &branch.tip, Some(&branch.old_tip))
         ));
     }
+
+    refresh_gerrit(workdir, repo);
 
     // Propose removing local branches that are fully merged upstream or
     // whose remote tracking branch was pruned
@@ -489,6 +494,53 @@ fn post_update(workdir: &Path, repo: &git2::Repository, ctx: &UpdateContext) -> 
     }
 
     Ok(())
+}
+
+/// On a Gerrit remote, ask the server what it holds for each feature branch,
+/// for the status remote indicator. A failure only warns: the update landed.
+fn refresh_gerrit(workdir: &Path, repo: &Repository) {
+    // The server and target branch, when the integration remote is Gerrit
+    // and loom pushes to it over ssh: no other is queried.
+    let gerrit_server = || -> Option<(gerrit::SshServer, String)> {
+        let head = repo.head().ok()?;
+        let (remote, target_branch) =
+            repo::upstream_remote_and_branch(repo, head.name().ok()?).ok()?;
+        let integration = remote::integration_remote(repo, workdir, &remote).ok()?;
+        let remote_type = remote::detect_remote_type(repo, workdir, &integration, &target_branch);
+        if !matches!(remote_type, remote::RemoteType::Gerrit { .. }) {
+            return None;
+        }
+        let push = remote::resolve_push_remote(repo, workdir, &integration, &remote_type);
+        Some((gerrit::ssh_server(repo, &push)?, target_branch))
+    };
+    let Some((server, target_branch)) = gerrit_server() else {
+        return;
+    };
+    let spinner = msg::spinner();
+    // Nothing to ask when no branch has a Change-Id; saving still forgets
+    // what the branches had.
+    let result = repo::gather_commit_graph(repo).and_then(|info| {
+        let branches = gerrit::branch_change_ids(&info);
+        let asked = branches.iter().any(|b| !b.ids.is_empty());
+        let changes = if asked {
+            spinner.start("Asking Gerrit about the feature branches...");
+            gerrit::ask(repo, &server, &target_branch, &branches)?
+        } else {
+            HashMap::new()
+        };
+        gerrit::save_all(repo, workdir, &branches, &changes)?;
+        Ok(asked)
+    });
+    match result {
+        Ok(true) => spinner.stop("Asked Gerrit about the feature branches"),
+        Ok(false) => {}
+        Err(e) => {
+            spinner.error("Could not ask Gerrit about the feature branches");
+            msg::warn(&format!(
+                "{e:#}\nThe branches' remote indicators may be out of date"
+            ));
+        }
+    }
 }
 
 /// ` (abc1234 subject[, was def5678])` for `spec` and the tip it replaced;

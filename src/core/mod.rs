@@ -1,6 +1,7 @@
 pub mod agent_mode;
 pub mod changeid;
 pub mod diff;
+pub mod gerrit;
 pub mod graph;
 pub mod hidden;
 pub mod hunk_select;

@@ -76,7 +76,20 @@ git-loom update [<branch>] [--yes]
    restored.
 6. **Submodule update** (conditional): If `.gitmodules` exists, submodules are
    initialized and updated recursively.
-7. **Branch cleanup**: Two kinds of local branches are listed, and the user
+7. **Gerrit state** (Gerrit remote type, pushed to over ssh with OpenSSH,
+   as git determines it; anything else is skipped silently): the server is
+   asked about each feature branch's own changes on the upstream branch, by
+   Change-Id: its commits above the base, down to the tip of a branch it is
+   stacked on. The topmost change the server knows decides
+   `branch.<name>.loomGerritRevision` (Spec 001): an open change's current
+   revision; `closed` when the tip's own change is merged or abandoned;
+   otherwise `stale`. A branch with no known change has it unset. The query
+   runs the ssh git would run, never prompts (a question would land under
+   the spinner or the TUI) and never hangs on a host out of reach. Any
+   failure, including an answer Gerrit refused, truncated or cut short, only
+   warns and keeps the saved values: the update has landed. A plain
+   `git fetch`/`git pull` refreshes none of it.
+8. **Branch cleanup**: Two kinds of local branches are listed, and the user
    is prompted once to remove them all:
    - branches fully merged upstream: the new upstream contains their tip, or
      every commit was filtered out in step 4 (cherry-picked). Only branches
@@ -172,7 +185,7 @@ other section, and the branch is reported as `Updated branch `<name>` with
 tip it replaced, the way back. Nothing is compared: whatever the local
 branch had and the remote lacks — commits, amendments — goes, which is what
 naming the branch means. A remote version the new upstream already has in
-full leaves the branch fully merged, offered for removal in step 7; a remote
+full leaves the branch fully merged, offered for removal in step 8; a remote
 at the local tip is reported as up to date. The update proceeds as usual
 either way. The plain `update` never touches a branch's commits.
 
@@ -206,7 +219,8 @@ The saved state is the `update` context of Spec 014.
 After the user resolves the conflict:
 
 - `loom continue` — continues the rebase, then runs submodule update, reports
-  the updated upstream commit, and proposes removal of gone-upstream branches
+  the updated upstream commit, refreshes the Gerrit state, and proposes
+  removal of gone-upstream branches
 - `loom abort` — aborts the rebase and restores the original branch state
 
 While the operation is paused, most other loom commands are blocked. Only
