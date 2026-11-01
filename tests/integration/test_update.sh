@@ -641,4 +641,122 @@ assert_exit_ok "$CODE" "update_stable_ok"
 assert_ne "$hash_before" "$(git -C "$WORK" rev-parse g-stable)" "update_stable_hash_changed"
 assert_eq "$sid_before" "$(commit_sid_from_status "Stable id commit")" "update_stable_sid_kept"
 
+# ── GERRIT REMOTE INDICATORS ──────────────────────────────────────────────────
+
+describe "on Gerrit, update asks the server what it holds for each branch"
+# They come before the fake ssh on PATH.
+unset GIT_SSH_COMMAND GIT_SSH GIT_SSH_VARIANT
+setup_repo_with_remote
+git -C "$WORK" config loom.remoteType gerrit
+git -C "$WORK" remote add review https://review.example.com/proj
+git -C "$WORK" remote set-url --push review ssh://me@review.example.com:29418/proj.git
+git -C "$WORK" config loom.pushRemote review
+echo a > "$WORK/a.txt"
+gl_capture commit -b g-open -m "Open change" a.txt
+echo b > "$WORK/b.txt"
+gl_capture commit -b g-merged -m "Merged change" b.txt
+echo c > "$WORK/c.txt"
+gl_capture commit -b g-unknown -m "Unknown change" c.txt
+echo d > "$WORK/d.txt"
+gl_capture commit -b g-moved -m "Moved change" d.txt
+change_id() { git -C "$WORK" log -1 --format=%B "$1" | sed -n 's/^Change-Id: //p'; }
+mkdir "$TMPROOT/bin"
+cat > "$TMPROOT/bin/ssh" <<FAKE
+#!/bin/sh
+echo "\$*" > "$TMPROOT/ssh-args"
+echo '{"id":"$(change_id g-open)","status":"NEW","currentPatchSet":{"revision":"$(branch_oid g-open)"}}'
+echo '{"id":"$(change_id g-merged)","status":"MERGED","currentPatchSet":{"revision":"0000"}}'
+echo '{"id":"$(change_id g-moved)","status":"NEW","currentPatchSet":{"revision":"1111111111111111111111111111111111111111"}}'
+echo '{"type":"stats","rowCount":3}'
+FAKE
+chmod +x "$TMPROOT/bin/ssh"
+CODE=0
+OUT=$(cd "$WORK" && PATH="$TMPROOT/bin:$PATH" NO_COLOR=1 GIT_TERMINAL_PROMPT=0 "$GL_BIN" update -y 2>&1) || CODE=$?
+assert_exit_ok "$CODE" "gerrit_update_ok"
+assert_contains "$OUT" "Asked Gerrit" "gerrit_update_asked"
+args=$(cat "$TMPROOT/ssh-args")
+assert_contains "$args" "-o BatchMode=yes" "gerrit_update_never_prompts"
+assert_contains "$args" "-p 29418 -- me@review.example.com gerrit query" "gerrit_update_server"
+target=$(git -C "$WORK" rev-parse --abbrev-ref @{u})
+assert_contains "$args" "project:proj branch:${target#origin/}" "gerrit_update_project_branch"
+assert_contains "$args" "--format=JSON --current-patch-set" "gerrit_update_query_flags"
+assert_contains "$args" "change:$(change_id g-open)" "gerrit_update_query_open_change"
+assert_contains "$args" "change:$(change_id g-merged)" "gerrit_update_query_merged_change"
+assert_contains "$args" "change:$(change_id g-unknown)" "gerrit_update_query_unknown_change"
+status=$(gl status)
+assert_contains "$status" "[g-open] ✓" "gerrit_update_open_synced"
+assert_contains "$status" "[g-merged] ✗" "gerrit_update_merged_gone"
+assert_contains "$status" "[g-moved] ↑" "gerrit_update_moved_different"
+assert_not_contains "$status" "[g-unknown] " "gerrit_update_unknown_unmarked"
+
+describe "on Gerrit, update forgets a branch the server knows nothing of"
+git -C "$WORK" config branch.g-unknown.loomGerritRevision "$(branch_oid g-unknown)"
+assert_contains "$(gl status)" "[g-unknown] ✓" "gerrit_update_forget_before"
+CODE=0
+OUT=$(cd "$WORK" && PATH="$TMPROOT/bin:$PATH" NO_COLOR=1 GIT_TERMINAL_PROMPT=0 "$GL_BIN" update -y 2>&1) || CODE=$?
+assert_exit_ok "$CODE" "gerrit_update_forget_ok"
+assert_eq "" "$(git -C "$WORK" config branch.g-unknown.loomGerritRevision)" "gerrit_update_forget_unset"
+assert_not_contains "$(gl status)" "[g-unknown] " "gerrit_update_forget_unmarked"
+
+describe "on Gerrit, a failed query only warns"
+printf '#!/bin/sh\nexit 255\n' > "$TMPROOT/bin/ssh"
+CODE=0
+OUT=$(cd "$WORK" && PATH="$TMPROOT/bin:$PATH" NO_COLOR=1 GIT_TERMINAL_PROMPT=0 "$GL_BIN" update -y 2>&1) || CODE=$?
+assert_exit_ok "$CODE" "gerrit_update_failed_query_ok"
+assert_contains "$OUT" "Could not ask Gerrit" "gerrit_update_failed_query_warned"
+assert_contains "$(gl status)" "[g-open] ✓" "gerrit_update_failed_query_keeps_state"
+
+describe "on Gerrit, a query Gerrit refuses only warns"
+printf '#!/bin/sh\necho %s\n' "'{\"type\":\"error\",\"message\":\"Unsupported operator\"}'" > "$TMPROOT/bin/ssh"
+CODE=0
+OUT=$(cd "$WORK" && PATH="$TMPROOT/bin:$PATH" NO_COLOR=1 GIT_TERMINAL_PROMPT=0 "$GL_BIN" update -y 2>&1) || CODE=$?
+assert_exit_ok "$CODE" "gerrit_update_refused_query_ok"
+assert_contains "$OUT" "Gerrit refused the query: Unsupported operator" "gerrit_update_refused_query_warned"
+assert_contains "$(gl status)" "[g-open] ✓" "gerrit_update_refused_query_keeps_state"
+
+describe "on Gerrit, the query runs the ssh command git uses"
+mkdir "$TMPROOT/sshcmd"
+cat > "$TMPROOT/sshcmd/my-ssh" <<FAKE
+#!/bin/sh
+echo "\$*" > "$TMPROOT/sshcmd-args"
+echo '{"id":"$(change_id g-open)","status":"NEW","currentPatchSet":{"revision":"$(branch_oid g-open)"}}'
+echo '{"type":"stats","rowCount":1}'
+FAKE
+chmod +x "$TMPROOT/sshcmd/my-ssh"
+git -C "$WORK" config core.sshCommand "$TMPROOT/sshcmd/my-ssh -i key"
+git -C "$WORK" config ssh.variant ssh
+git -C "$WORK" config --unset branch.g-open.loomGerritRevision
+CODE=0
+OUT=$(cd "$WORK" && PATH="$TMPROOT/bin:$PATH" NO_COLOR=1 GIT_TERMINAL_PROMPT=0 "$GL_BIN" update -y 2>&1) || CODE=$?
+assert_exit_ok "$CODE" "gerrit_update_ssh_command_ok"
+assert_contains "$(cat "$TMPROOT/sshcmd-args")" "-i key -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -p 29418 -- me@review.example.com" "gerrit_update_ssh_command_used"
+assert_contains "$OUT" "Asked Gerrit" "gerrit_update_ssh_command_asked"
+assert_eq "$(branch_oid g-open)" "$(git -C "$WORK" config branch.g-open.loomGerritRevision)" "gerrit_update_ssh_command_saved"
+
+describe "on Gerrit, an ssh.variant other than OpenSSH is not queried"
+rm -f "$TMPROOT/sshcmd-args"
+git -C "$WORK" config ssh.variant plink
+CODE=0
+OUT=$(cd "$WORK" && PATH="$TMPROOT/bin:$PATH" NO_COLOR=1 GIT_TERMINAL_PROMPT=0 "$GL_BIN" update -y 2>&1) || CODE=$?
+assert_exit_ok "$CODE" "gerrit_update_plink_ok"
+assert_eq "no" "$([ -e "$TMPROOT/sshcmd-args" ] && echo yes || echo no)" "gerrit_update_plink_not_run"
+assert_not_contains "$OUT" "Gerrit" "gerrit_update_plink_silent"
+git -C "$WORK" config --unset ssh.variant
+
+describe "on Gerrit, an ssh git does not take for OpenSSH is not queried"
+rm -f "$TMPROOT/sshcmd-args"
+CODE=0
+OUT=$(cd "$WORK" && PATH="$TMPROOT/bin:$PATH" NO_COLOR=1 GIT_TERMINAL_PROMPT=0 "$GL_BIN" update -y 2>&1) || CODE=$?
+assert_exit_ok "$CODE" "gerrit_update_not_openssh_ok"
+assert_not_contains "$OUT" "Gerrit" "gerrit_update_not_openssh_silent"
+assert_eq "no" "$([ -e "$TMPROOT/sshcmd-args" ] && echo yes || echo no)" "gerrit_update_not_openssh_not_run"
+git -C "$WORK" config --unset core.sshCommand
+
+describe "on Gerrit, a remote loom does not push to over ssh is not queried"
+git -C "$WORK" config --unset remote.review.pushurl
+CODE=0
+OUT=$(cd "$WORK" && PATH="$TMPROOT/bin:$PATH" NO_COLOR=1 GIT_TERMINAL_PROMPT=0 "$GL_BIN" update -y 2>&1) || CODE=$?
+assert_exit_ok "$CODE" "gerrit_update_https_ok"
+assert_not_contains "$OUT" "Gerrit" "gerrit_update_https_silent"
+
 pass

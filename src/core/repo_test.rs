@@ -42,6 +42,37 @@ fn remote_status_is_synced_when_the_tips_match() {
 }
 
 #[test]
+fn remote_status_compares_with_the_saved_gerrit_revision() {
+    let test_repo = TestRepo::new_with_remote();
+    let pushed = test_repo.commit("A1", "a.txt");
+    test_repo.create_branch("feat");
+    test_repo.set_config("branch.feat.loomGerritRevision", &pushed.to_string());
+    assert!(matches!(
+        remote_status_of(&test_repo, "feat"),
+        Some(RemoteStatus::Synced)
+    ));
+
+    test_repo.switch_branch("feat");
+    test_repo.commit("A2", "a2.txt");
+    assert!(matches!(
+        remote_status_of(&test_repo, "feat"),
+        Some(RemoteStatus::Different)
+    ));
+}
+
+#[test]
+fn remote_status_is_gone_when_the_gerrit_change_closed() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.commit("A1", "a.txt");
+    test_repo.create_branch("feat");
+    test_repo.set_config("branch.feat.loomGerritRevision", "closed");
+    assert!(matches!(
+        remote_status_of(&test_repo, "feat"),
+        Some(RemoteStatus::Gone)
+    ));
+}
+
+#[test]
 fn remote_status_is_different_when_only_new_commits_were_added() {
     let test_repo = TestRepo::new_with_remote();
     let published = test_repo.commit("A1", "a.txt");

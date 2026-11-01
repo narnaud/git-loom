@@ -230,7 +230,8 @@ same order (Spec 001), same short IDs — so an agent never parses glyphs:
   `loom.hideBranchPattern`: `push` refuses the group (Spec 011), and hiding
   removes the edge, so `stacked_on` is `null` unless `--all` shows it.
 - `remote` is `synced`, `different`, `gone`, or `null` for a branch never
-  pushed — the `✓`/`↑`/`✗` indicators, or none.
+  pushed — the `✓`/`↑`/`✗` indicators, or none. On Gerrit, `gone` means the
+  change was merged or abandoned (Spec 001).
 - `state` on a working-tree file is `conflicted`, `tracked` or `untracked`:
   the three groups the local-changes section renders, already classified.
   `index` and `worktree` carry the raw `XY` characters alongside.

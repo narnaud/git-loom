@@ -113,7 +113,7 @@ fn auto_detect_remote_type(repo: &Repository, remote: &str) -> Option<&'static s
 
 /// The remote type without asking or saving anything: config, then
 /// auto-detection, then Plain. For callers that cannot prompt.
-fn detect_remote_type(
+pub fn detect_remote_type(
     repo: &Repository,
     workdir: &Path,
     remote: &str,

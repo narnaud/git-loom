@@ -76,7 +76,8 @@ The `graph` fields:
   `cwd_prefix`, the directory every path is relative to.
 - `branches[]` — branch groups, top of stack first. `names[]` holds the
   co-located branches sharing one tip, each with `id`, `name` and `remote`
-  (`synced` / `different` / `gone` / `null` when never pushed).
+  (`synced` / `different` / `gone` / `null` when never pushed; on Gerrit,
+  `gone` means the change was merged or abandoned).
 - `stacked_on` — the branch directly below in the stack, or `null`. A stacked
   push includes it. Each group's `commits[]` already excludes what the branch
   below owns. `stacked_on_hidden: true` means the branch below is hidden:

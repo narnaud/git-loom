@@ -1125,6 +1125,36 @@ fn a_gerrit_review_push_never_asks_about_a_force() {
 }
 
 #[test]
+fn a_gerrit_review_push_records_the_tips_it_uploaded() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.set_config("loom.remoteType", "gerrit");
+    test_repo.create_branch("feature-a");
+    test_repo.switch_branch("feature-a");
+    let tip_a = test_repo.commit("feature commit", "a.txt");
+    test_repo.create_branch("feature-a2");
+    test_repo.create_branch("feature-b");
+    test_repo.switch_branch("feature-b");
+    let tip_b = test_repo.commit("stacked commit", "b.txt");
+    test_repo.switch_branch("integration");
+    test_repo.merge_no_ff("feature-b");
+
+    let result = test_repo.in_dir(|| super::run(Some("feature-b".to_string()), false, false, None));
+    assert!(result.is_ok(), "{:?}", result.err());
+
+    let recorded = |name: &str| {
+        test_repo
+            .repo
+            .config()
+            .unwrap()
+            .get_string(&format!("branch.{name}.loomGerritRevision"))
+            .unwrap()
+    };
+    assert_eq!(recorded("feature-a"), tip_a.to_string());
+    assert_eq!(recorded("feature-a2"), tip_a.to_string());
+    assert_eq!(recorded("feature-b"), tip_b.to_string());
+}
+
+#[test]
 fn a_force_push_of_a_stacked_branch_names_the_branches_below_it() {
     let (prompts, result, pushed, tip) = force_push_under_tui_of(true, true);
     assert_eq!(

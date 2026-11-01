@@ -9,6 +9,7 @@ use git2::Repository;
 
 use crate::core::agent_mode;
 use crate::core::changeid;
+use crate::core::gerrit;
 use crate::core::graph;
 use crate::core::hidden;
 use crate::core::msg;
@@ -448,7 +449,8 @@ pub fn run(branch: Option<String>, no_pr: bool, force: bool, title: Option<Strin
             RemoteType::Gerrit { target_branch } => push_gerrit(
                 &workdir,
                 &remote_name,
-                &branch_name,
+                &plan,
+                &info,
                 &target_branch,
                 &mut report,
             ),
@@ -1843,10 +1845,12 @@ fn push_gerrit_no_pr(
 fn push_gerrit(
     workdir: &Path,
     remote: &str,
-    branch: &str,
+    plan: &PushPlan,
+    info: &repo::RepoInfo,
     target_branch: &str,
     report: &mut PushReport,
 ) -> Result<()> {
+    let branch = plan.requested();
     let refspec = format!("{}:refs/for/{}", branch, target_branch);
 
     let stderr = run_push_capture(workdir, &["push", remote, &refspec])?;
@@ -1858,6 +1862,19 @@ fn push_gerrit(
     report.links = append_remote_urls(&mut message, &stderr, None);
     report.pushed = vec![branch.to_string()];
     msg::success(&message);
+
+    // The push made these tips the current patch sets, the layers below
+    // included as a relation chain. Branches sharing a layer's tip too.
+    let tips: Vec<git2::Oid> = plan
+        .layers
+        .iter()
+        .filter_map(|layer| info.branches.iter().find(|b| b.name == layer.branch))
+        .map(|b| b.tip_oid)
+        .collect();
+    for b in info.branches.iter().filter(|b| tips.contains(&b.tip_oid)) {
+        // Only the status display depends on it; the push itself succeeded.
+        let _ = gerrit::save(workdir, &b.name, &b.tip_oid.to_string());
+    }
 
     Ok(())
 }
