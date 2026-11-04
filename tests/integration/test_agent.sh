@@ -828,7 +828,7 @@ git -C "$WORK" reset -q
 echo "UNIQUEMARKER" > "$WORK/new.txt"
 seq 1 200 | sed 's/^/line /' >> "$WORK/new.txt"
 perl -pi -e 's/^line 100$/line ONEHUNDRED/' "$WORK/new.txt"
-assert_eq "201" "$(wc -l < "$WORK/new.txt")" "untracked_edited_same_line_count"
+assert_eq "201" "$(wc -l < "$WORK/new.txt" | tr -d ' ')" "untracked_edited_same_line_count"
 gl_capture add -p new.txt --hunks new.txt:1 --hunks-from "$FP" --agent
 assert_eq "1" "$CODE" "untracked_edited_exit"
 assert_contains "$OUT" "The hunks changed since the listing" "untracked_edited_msg"
