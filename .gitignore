@@ -6,3 +6,4 @@
 /docs/demo/work
 /docs/demo/fake-gh/target
 /docs/demo/fake-gh/Cargo.lock
+/.claude/settings.local.json
