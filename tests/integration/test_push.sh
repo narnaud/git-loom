@@ -155,6 +155,14 @@ remote_has x && fail "title_plain: x should not be on the remote"
 gl_capture push x --no-pr --title "T"
 assert_eq "2" "$CODE" "title_no_pr_conflicts"
 
+describe "--draft is refused on a plain remote, which has nothing to mark"
+gl_capture push x --draft
+assert_exit_fail "$CODE" "draft_plain_fails"
+assert_contains "$OUT" "--draft marks a pull request" "draft_plain_msg"
+remote_has x && fail "draft_plain: x should not be on the remote"
+gl_capture push x --no-pr --draft
+assert_eq "2" "$CODE" "draft_no_pr_conflicts"
+
 describe "--no-pr pushes the downstack too"
 build_stack
 gl_capture push b --no-pr
@@ -284,6 +292,39 @@ trace="$(gl trace)"
 assert_contains "$trace" "-o merge_request.title=Add B -o merge_request.target=a -u origin b" "gitlab_title_on_b"
 assert_not_contains "$trace" "merge_request.title=Add B -o merge_request.target=$BASE_BRANCH" "gitlab_title_not_on_a"
 
+describe "gitlab: --draft marks the named branch's merge request a draft, new or not"
+build_stack
+gitlab_origin
+gitlab_hook
+gl_capture push b --draft
+assert_exit_ok "$CODE" "gitlab_draft_ok"
+assert_contains "$OUT" "PR created: https://gitlab.example.com/g/r/-/merge_requests/a" "gitlab_draft_a_plain"
+assert_contains "$OUT" "Draft PR created: https://gitlab.example.com/g/r/-/merge_requests/b" "gitlab_draft_b_draft"
+assert_not_contains "$OUT" "Draft PR created: https://gitlab.example.com/g/r/-/merge_requests/a" "gitlab_draft_a_not_draft"
+trace="$(gl trace)"
+assert_contains "$trace" "-o merge_request.create -o merge_request.draft -o merge_request.target=a -u origin b" "gitlab_draft_on_b"
+assert_not_contains "$trace" "merge_request.draft -o merge_request.target=$BASE_BRANCH" "gitlab_draft_not_on_a"
+b1_sid="$(commit_sid_from_status "B1")"
+gl reword "$b1_sid" -m "B1 reworded" > /dev/null
+gl_capture_json --agent push b --draft
+assert_exit_ok "$CODE" "gitlab_draft_again_ok"
+assert_contains "$(json_line)" '{"branch":"b","base":"a","state":"updated","url":"https://gitlab.example.com/g/r/-/merge_requests/b","draft":true}' "gitlab_draft_agent_json"
+assert_contains "$(json_line)" "Marked as draft" "gitlab_draft_marked"
+
+# ── GERRIT (the refspec checked on the bare remote) ───────────────────────────
+
+describe "gerrit: --wip, the alias of --draft, uploads the review as work in progress"
+build_stack
+git -C "$WORK" config loom.remoteType gerrit
+gl_capture push x
+assert_exit_ok "$CODE" "gerrit_ready_ok"
+assert_contains "$OUT" "Pushed x to origin (Gerrit: refs/for/$BASE_BRANCH)" "gerrit_ready_msg"
+assert_eq "$(git -C "$TMPROOT/remote.git" rev-parse "refs/for/$BASE_BRANCH")" "$(branch_oid x)" "gerrit_ready_ref"
+gl_capture push x --wip
+assert_exit_ok "$CODE" "gerrit_wip_ok"
+assert_contains "$OUT" "Pushed x to origin (Gerrit: refs/for/$BASE_BRANCH%wip)" "gerrit_wip_msg"
+assert_eq "$(git -C "$TMPROOT/remote.git" rev-parse "refs/for/$BASE_BRANCH%wip")" "$(branch_oid x)" "gerrit_wip_ref"
+
 # ── GITHUB (gh shim) ──────────────────────────────────────────────────────────
 # The shim is a shell script on PATH; Rust's Command cannot spawn one on
 # Windows, so these scenarios only run elsewhere.
@@ -325,12 +366,12 @@ case "$1 ${2:-}" in
         done
         echo "{\"hosts\":{\"github.com\":[$accounts]}}" ;;
     "pr list")
-        # State files hold "<number> <base> <head owner>"; --head matches the
-        # branch name whatever fork it lives in, like GitHub.
+        # State files hold "<number> <base> <head owner> [<draft>]"; --head
+        # matches the branch name whatever fork it lives in, like GitHub.
         head="$(arg_after --head "$@")"
         if [[ -f "$GH_STATE/pr_$head" ]]; then
-            read -r number base owner < "$GH_STATE/pr_$head"
-            echo "[{\"number\":$number,\"url\":\"https://github.com/$repo/pull/$number\",\"baseRefName\":\"$base\",\"headRepositoryOwner\":{\"login\":\"${owner:-owner}\"}}]"
+            read -r number base owner draft < "$GH_STATE/pr_$head"
+            echo "[{\"number\":$number,\"url\":\"https://github.com/$repo/pull/$number\",\"baseRefName\":\"$base\",\"isDraft\":${draft:-false},\"headRepositoryOwner\":{\"login\":\"${owner:-owner}\"}}]"
         else
             echo "[]"
         fi ;;
@@ -339,15 +380,26 @@ case "$1 ${2:-}" in
         base="$(arg_after --base "$@")"
         owner="${repo%%/*}"
         [[ "$head" == *:* ]] && { owner="${head%%:*}"; head="${head#*:}"; }
+        draft=false; for arg in "$@"; do [[ "$arg" == --draft ]] && draft=true; done
         number=$(( $(ls "$GH_STATE" | grep -c '^pr_' || true) + 1 ))
-        echo "$number $base $owner" > "$GH_STATE/pr_$head"
+        echo "$number $base $owner $draft" > "$GH_STATE/pr_$head"
         echo "https://github.com/$repo/pull/$number" ;;
     "pr edit")
+        # $GH_STATE/no_edit makes the retarget fail, like a base GitHub lacks.
+        [[ -f "$GH_STATE/no_edit" ]] && { echo "HTTP 422" >&2; exit 1; }
         number="$3"
         base="$(arg_after --base "$@")"
         for f in "$GH_STATE"/pr_*; do
-            read -r n _ < "$f"
-            [[ "$n" == "$number" ]] && echo "$number $base" > "$f"
+            read -r n _ owner draft < "$f"
+            [[ "$n" == "$number" ]] && echo "$number $base ${owner:-owner} ${draft:-false}" > "$f"
+        done ;;
+    "pr ready")
+        # gh pr ready --undo <n> --repo <repo>: back to draft.
+        [[ "$3" == "--undo" ]] || { echo "gh shim: only --undo is expected" >&2; exit 1; }
+        number="$4"
+        for f in "$GH_STATE"/pr_*; do
+            read -r n base owner _ < "$f"
+            [[ "$n" == "$number" ]] && echo "$number $base ${owner:-owner} true" > "$f"
         done ;;
     "api --hostname")
         # gh api --hostname github.com repos/<repo> --jq .permissions.push:
@@ -492,6 +544,54 @@ assert_not_contains "$(cat "$GH_LOG")" "pr view" "gh_lone_no_browser"
 assert_not_contains "$(cat "$GH_LOG")" "pr create --web" "gh_lone_no_form"
 assert_not_contains "$(cat "$GH_LOG")" "stacks" "gh_lone_no_stack"
 
+describe "github: --draft converts an existing PR to a draft once"
+: > "$GH_LOG"
+gl_gh_capture push x --draft
+assert_exit_ok "$CODE" "gh_draft_existing_ok"
+assert_contains "$OUT" "PR updated: https://github.com/owner/repo/pull/5" "gh_draft_existing_updated"
+assert_contains "$OUT" "Marked as draft" "gh_draft_existing_marked"
+assert_contains "$(cat "$GH_LOG")" "pr ready --undo 5 --repo owner/repo" "gh_draft_existing_ready_undo"
+: > "$GH_LOG"
+gl_gh_capture push x --draft
+assert_exit_ok "$CODE" "gh_draft_already_ok"
+assert_not_contains "$OUT" "Marked as draft" "gh_draft_already_quiet"
+assert_not_contains "$(cat "$GH_LOG")" "pr ready" "gh_draft_already_no_call"
+
+describe "github: --draft creates the named branch's PR as a draft"
+create_feature_branch "y"
+switch_to y
+commit_file "Y1" "y1.txt"
+switch_to integration
+weave_branch "y"
+: > "$GH_LOG"
+gl_gh_capture --agent push y --draft
+assert_exit_ok "$CODE" "gh_draft_create_ok"
+assert_contains "$OUT" "Draft PR created: https://github.com/owner/repo/pull/6" "gh_draft_create_msg"
+assert_contains "$OUT" '{"branch":"y","base":"'"$BASE_BRANCH"'","state":"created","url":"https://github.com/owner/repo/pull/6","draft":true}' "gh_draft_create_json"
+assert_contains "$(cat "$GH_LOG")" "pr create --head y --base $BASE_BRANCH --repo owner/repo --title Y1 --body  --draft" "gh_draft_create_flag"
+
+describe "github: --draft marks the draft whatever became of the base"
+# y's PR 6, undrafted and on the wrong base, is retargeted and marked.
+echo "6 a owner false" > "$GH_STATE/pr_y"
+: > "$GH_LOG"
+gl_gh_capture push y --draft
+assert_exit_ok "$CODE" "gh_draft_retarget_ok"
+assert_contains "$OUT" "PR updated: https://github.com/owner/repo/pull/6" "gh_draft_retarget_updated"
+assert_contains "$OUT" "Retargeted to $BASE_BRANCH" "gh_draft_retarget_base"
+assert_contains "$OUT" "Marked as draft" "gh_draft_retarget_marked"
+assert_contains "$(cat "$GH_LOG")" "pr ready --undo 6 --repo owner/repo" "gh_draft_retarget_ready_undo"
+# The retarget failing does not take the draft with it.
+echo "6 a owner false" > "$GH_STATE/pr_y"
+touch "$GH_STATE/no_edit"
+: > "$GH_LOG"
+gl_gh_capture --agent push y --draft
+assert_exit_ok "$CODE" "gh_draft_retarget_failed_ok"
+assert_contains "$OUT" "Could not retarget https://github.com/owner/repo/pull/6 to" "gh_draft_retarget_failed_warned"
+assert_contains "$OUT" "Marked as draft" "gh_draft_retarget_failed_marked"
+assert_contains "$OUT" '{"branch":"y","base":"a","state":"updated","url":"https://github.com/owner/repo/pull/6","draft":true,"reason":"Could not retarget' "gh_draft_retarget_failed_json"
+assert_contains "$(cat "$GH_LOG")" "pr ready --undo 6 --repo owner/repo" "gh_draft_retarget_failed_ready_undo"
+rm "$GH_STATE/no_edit"
+
 # A `gh` whose `--version` fails counts as not installed.
 install_broken_gh() {
     install_gh_shim
@@ -614,7 +714,7 @@ assert_exit_ok "$CODE" "gh_account_ok"
 log="$(cat "$GH_LOG")"
 assert_contains "$log" "api --hostname github.com repos/forker/repo --jq .permissions.push [token forker-token]" "gh_account_owner_probed"
 assert_not_contains "$log" "[token other-token]" "gh_account_owner_first"
-assert_contains "$log" "pr list --head a --repo owner/repo --json number,url,baseRefName,headRepositoryOwner --limit 30 [token forker-token]" "gh_account_used"
+assert_contains "$log" "pr list --head a --repo owner/repo --json number,url,baseRefName,isDraft,headRepositoryOwner --limit 30 [token forker-token]" "gh_account_used"
 assert_not_contains "$(gl trace)" "forker-token" "gh_account_not_traced"
 
 describe "github: a GH_TOKEN set by the user wins over the fork owner"
