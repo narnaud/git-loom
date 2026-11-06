@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.1.0](https://github.com/narnaud/git-loom/compare/v1.0.0...v1.1.0) (2026-11-06)
+
+
+### Features ✨
+
+* **status:** show the remote indicator for branches on Gerrit ([2eabeaa](https://github.com/narnaud/git-loom/commit/2eabeaa18bf40421ee57c013ad5e7dc11ac7903e))
+* **tui:** `A` toggles auto-reload on changes from other terminals ([b20446c](https://github.com/narnaud/git-loom/commit/b20446c8fdb201dc2c2fe990d9dd3e89be13aa58))
+
+
+### Tests
+
+* **agent:** strip the padding BSD wc puts on the line count ([f57974e](https://github.com/narnaud/git-loom/commit/f57974e0e2e0a418b006fff4ecf73e10f53885ea))
+
+
+### Other
+
+* **claude:** share permissions in settings.json, untrack settings.local.json ([11a8f8a](https://github.com/narnaud/git-loom/commit/11a8f8a885051c2cbaf4d426021911919deb7546))
+
 ## [1.0.0](https://github.com/narnaud/git-loom/compare/v0.29.0...v1.0.0) (2026-11-02)
 
 
