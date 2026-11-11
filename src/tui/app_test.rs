@@ -3278,6 +3278,25 @@ fn plain_diff_text_has_no_header_region() {
     assert_eq!(lines[1].spans[0].style, theme.added);
 }
 
+#[test]
+fn diff_tabs_expand_to_the_theme_width() {
+    let mut theme = make_theme();
+    theme.tab_width = 2;
+    let lines = colorize_diff("+\tif x {\n+\t\ty\n", &theme);
+    assert_eq!(lines[0].to_string(), "+  if x {");
+    assert_eq!(lines[1].to_string(), "+    y");
+}
+
+#[test]
+fn theme_for_repo_reads_the_tab_width() {
+    let test_repo = crate::core::test_helpers::TestRepo::new();
+    let dark = graph::Theme::dark();
+    assert_eq!(TuiTheme::for_repo(&dark, &test_repo.repo).tab_width, 4);
+    test_repo.set_config("loom.tuiTabWidth", "8");
+    let repo = git2::Repository::open(test_repo.workdir()).unwrap();
+    assert_eq!(TuiTheme::for_repo(&dark, &repo).tab_width, 8);
+}
+
 /// Shrinking the context (`-`) removes the row the cursor sits on; it must
 /// land on the neighbour, not back at the top of the tree.
 #[test]

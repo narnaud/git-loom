@@ -174,6 +174,14 @@ pub fn tui_auto_reload(repo: &Repository) -> bool {
         .unwrap_or(false)
 }
 
+/// Read git config `loom.tuiTabWidth`: the spaces each tab in a TUI diff
+/// shows as (spec 020). Values below 1 and unparsable ones are ignored,
+/// leaving the built-in default.
+pub fn tui_tab_width(repo: &Repository) -> Option<usize> {
+    let width = repo.config().ok()?.get_i32("loom.tuiTabWidth").ok()?;
+    usize::try_from(width).ok().filter(|n| *n >= 1)
+}
+
 /// Extract the local branch name from a remote tracking ref.
 ///
 /// e.g. `"origin/main"` → `"main"`, `"origin/feat/foo"` → `"feat/foo"`.

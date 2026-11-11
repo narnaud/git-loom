@@ -158,6 +158,7 @@ impl TestRepo {
         config.set_str("loom.hideBranchPattern", "local-").unwrap();
         config.set_i32("loom.statusContext", 1).unwrap();
         config.set_bool("loom.pruneGoneBranches", false).unwrap();
+        config.set_i32("loom.tuiTabWidth", 4).unwrap();
         config.set_bool("gerrit.createChangeId", true).unwrap();
         config.set_str("gerrit.reviewUrl", "").unwrap();
     }

@@ -1019,6 +1019,17 @@ fn unusable_context_config_keeps_the_default() {
     }
 }
 
+#[test]
+fn tui_tab_width_comes_from_config_or_is_unset() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.set_config("loom.tuiTabWidth", "2");
+    assert_eq!(repo::tui_tab_width(&reopen(&test_repo)), Some(2));
+    for value in ["0", "-2", "wide"] {
+        test_repo.set_config("loom.tuiTabWidth", value);
+        assert_eq!(repo::tui_tab_width(&reopen(&test_repo)), None, "{value}");
+    }
+}
+
 // ── Hash-shaped persistent IDs (Spec 002) ────────────────────────────────
 
 #[test]

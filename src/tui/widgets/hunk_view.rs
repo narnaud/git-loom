@@ -11,7 +11,7 @@ use ratatui::{
 
 use crate::core::hunks::{FileEntry, HunkEntry, HunkOrigin};
 use crate::tui::theme::TuiTheme;
-use crate::tui::widgets::common::hunk_line_style;
+use crate::tui::widgets::common::{expand_tabs, hunk_line_style};
 use crate::tui::widgets::diff_pane::DiffPane;
 
 /// What a hunk-cursor move means for the host app.
@@ -154,7 +154,10 @@ impl HunkView {
             let shown = crate::git::raw_text::for_display(&entry.hunk.text);
             for raw_line in shown.lines() {
                 let style = hunk_line_style(raw_line, theme);
-                lines.push(Line::from(Span::styled(raw_line.to_string(), style)));
+                lines.push(Line::from(Span::styled(
+                    expand_tabs(raw_line, theme.tab_width),
+                    style,
+                )));
             }
 
             if i + 1 < total {
