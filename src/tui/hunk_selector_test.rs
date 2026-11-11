@@ -598,3 +598,29 @@ fn whole_file_entries_are_titled_as_such() {
     );
     assert!(binary.contains(&"[ ] Whole file".to_string()), "{binary:?}");
 }
+
+#[test]
+fn hunk_lines_expand_tabs_to_the_theme_width() {
+    let mut theme = make_theme();
+    theme.tab_width = 2;
+    let files = vec![FileEntry {
+        path: "main.rs".to_string(),
+        hunks: vec![HunkEntry {
+            hunk: make_hunk("@@ -1 +1 @@\n-\told\n+\t\tnew\n"),
+            selected: false,
+            origin: HunkOrigin::Unstaged,
+        }],
+        index_status: ' ',
+        worktree_status: 'M',
+        binary: false,
+    }];
+    let app = HunkSelectorApp::new(files, theme);
+    let lines: Vec<String> = app
+        .hunks
+        .build_lines(&app.files[0], &app.theme, true)
+        .iter()
+        .map(|l| l.to_string())
+        .collect();
+    assert!(lines.contains(&"-  old".to_string()), "{lines:?}");
+    assert!(lines.contains(&"+    new".to_string()), "{lines:?}");
+}

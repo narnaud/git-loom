@@ -12,6 +12,7 @@ Set them with `git config <setting> <value>`.
 | `loom.statusContext` | An integer ≥ 1 | `1` | Commits shown at and before the base by `status` and `tui` |
 | `loom.pruneGoneBranches` | `true`, `false` | `false` | Let `git loom update` remove merged and gone branches without asking |
 | `loom.tuiAutoReload` | `true`, `false` | `false` | Start `git loom tui` with auto-reload on |
+| `loom.tuiTabWidth` | An integer ≥ 1 | `4` | Spaces each tab shows as in `git loom tui` diffs |
 | `loom.changeId` | `true`, `false` | `true` | Add a `Change-Id` trailer to the commits loom creates |
 
 ### `loom.remoteType`
@@ -52,6 +53,14 @@ When `true`, `git loom update` removes branches that were fully merged upstream,
 ### `loom.tuiAutoReload`
 
 When `true`, `git loom tui` starts with auto-reload on: it reloads when `HEAD`, the index or the refs change from another terminal. `A` toggles it for the session and never writes this setting. See [tui](commands/tui.md).
+
+### `loom.tuiTabWidth`
+
+The diff pane of `git loom tui` and the hunk picker of `-p` show each tab as this many spaces. Set it to the indentation width of your code:
+
+```bash
+git config loom.tuiTabWidth 8
+```
 
 ### `loom.changeId`
 

@@ -333,7 +333,7 @@ fn resolve_staging_patch<'a>(
         filter.as_deref(),
         picker,
         staging::LeftOut::KeptStaged,
-        hunk_selector::selector(theme),
+        hunk_selector::selector(theme, repo),
     )?
     else {
         return Err(msg::cancelled());

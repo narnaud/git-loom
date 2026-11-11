@@ -1,9 +1,13 @@
 use ratatui::style::{Color, Modifier, Style};
 
-use crate::core::graph;
+use crate::core::{graph, repo};
+
+/// Spaces a tab shows as when `loom.tuiTabWidth` is unset.
+const DEFAULT_TAB_WIDTH: usize = 4;
 
 /// TUI color theme derived from the graph theme, providing styles for the
 /// interactive hunk selector and other TUI components.
+#[derive(Clone)]
 pub struct TuiTheme {
     /// Added lines in diffs (`+`).
     pub added: Style,
@@ -82,9 +86,20 @@ pub struct TuiTheme {
     /// (`[INSERT COMMIT]`, `[INSERT BRANCH]`); inverted so it cannot be read
     /// as an existing commit or branch.
     pub pending_tag: Style,
+    /// Spaces each tab in a diff shows as (`loom.tuiTabWidth`, spec 020).
+    pub tab_width: usize,
 }
 
 impl TuiTheme {
+    /// [`TuiTheme::from_graph_theme`] with the settings `repo` configures.
+    pub fn for_repo(theme: &graph::Theme, repo: &git2::Repository) -> Self {
+        let mut tui_theme = Self::from_graph_theme(theme);
+        if let Some(width) = repo::tui_tab_width(repo) {
+            tui_theme.tab_width = width;
+        }
+        tui_theme
+    }
+
     /// Build a TUI theme from the graph theme used in status output.
     pub fn from_graph_theme(theme: &graph::Theme) -> Self {
         TuiTheme {
@@ -140,6 +155,7 @@ impl TuiTheme {
             pending_tag: Style::default()
                 .fg(map_color(theme.label))
                 .add_modifier(Modifier::REVERSED | Modifier::BOLD),
+            tab_width: DEFAULT_TAB_WIDTH,
         }
     }
 }

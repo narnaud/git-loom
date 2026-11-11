@@ -867,8 +867,8 @@ pub fn run(theme: graph::Theme) -> Result<()> {
         );
     }
 
-    let tui_theme = TuiTheme::from_graph_theme(&theme);
     let repo = repo::open_repo()?;
+    let tui_theme = TuiTheme::for_repo(&theme, &repo);
     let context = repo::resolve_context(&repo, None);
     let workdir = repo::require_workdir(&repo, "display status")?.to_path_buf();
     let git_dir = repo.path().to_path_buf();
@@ -2551,12 +2551,7 @@ impl<'a> App<'a> {
         entries: Vec<FileEntry>,
         terminal: &mut ratatui::DefaultTerminal,
     ) -> Result<bool> {
-        let picked = run_hunk_selector_nested(
-            entries,
-            TuiTheme::from_graph_theme(&self.graph_theme),
-            "COMMIT",
-            terminal,
-        )?;
+        let picked = run_hunk_selector_nested(entries, self.theme.clone(), "COMMIT", terminal)?;
         let Some(picked) = picked else {
             return Ok(false);
         };
@@ -3945,12 +3940,8 @@ impl ShellApp for App<'_> {
                 if self.refuse_split_pick(&entries) {
                     return;
                 }
-                let picked = run_hunk_selector_nested(
-                    entries,
-                    TuiTheme::from_graph_theme(&self.graph_theme),
-                    "SPLIT",
-                    terminal,
-                );
+                let picked =
+                    run_hunk_selector_nested(entries, self.theme.clone(), "SPLIT", terminal);
                 if let Some(action) = self.finish_split_pick(picked, commit) {
                     self.start_action(action);
                 }
@@ -3965,12 +3956,8 @@ impl ShellApp for App<'_> {
                     self.notice = Some("fold: no hunks to pick".to_string());
                     return;
                 }
-                let picked = run_hunk_selector_nested(
-                    entries,
-                    TuiTheme::from_graph_theme(&self.graph_theme),
-                    "FOLD",
-                    terminal,
-                );
+                let picked =
+                    run_hunk_selector_nested(entries, self.theme.clone(), "FOLD", terminal);
                 self.finish_fold_pick(picked, stamp, sources, targets, commit, origin);
             }
         }

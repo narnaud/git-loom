@@ -148,7 +148,7 @@ fn split_commit(
             &oid_str,
             &files,
             &picker,
-            hunk_selector::selector(theme),
+            hunk_selector::selector(theme, repo),
         )?
         .ok_or_else(msg::cancelled)?;
 

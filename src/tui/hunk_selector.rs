@@ -517,11 +517,13 @@ pub fn run_hunk_selector(files: Vec<FileEntry>, theme: TuiTheme) -> Result<Optio
     Ok(confirmed(app, verdict))
 }
 
-/// `run_hunk_selector` as the `select` that `core::staging` pickers take.
+/// `run_hunk_selector` as the `select` that `core::staging` pickers take,
+/// with the display settings `repo` configures.
 pub fn selector(
     theme: &graph::Theme,
+    repo: &git2::Repository,
 ) -> impl FnOnce(Vec<FileEntry>) -> Result<Option<Vec<FileEntry>>> + use<> {
-    let theme = TuiTheme::from_graph_theme(theme);
+    let theme = TuiTheme::for_repo(theme, repo);
     move |files| run_hunk_selector(files, theme)
 }
 

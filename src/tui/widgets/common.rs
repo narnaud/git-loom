@@ -99,7 +99,20 @@ pub(crate) fn render_scrollbar(
     );
 }
 
-/// Colorize plain diff text by line prefix.
+/// `line` with each tab shown as `width` spaces: the terminal grid has no
+/// tab stops, and a diff's one-column prefix would shift them anyway.
+pub(crate) fn expand_tabs(line: &str, width: usize) -> String {
+    let mut out = String::with_capacity(line.len());
+    for c in line.chars() {
+        match c {
+            '\t' => out.extend(std::iter::repeat_n(' ', width)),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// Colorize plain diff text by line prefix, tabs expanded per the theme.
 ///
 /// `git show` output opens with a header (commit line, author, date, the
 /// commit message, diffstat) whose lines would otherwise be styled as dim
@@ -122,7 +135,7 @@ pub(crate) fn colorize_diff(text: &str, theme: &TuiTheme) -> Vec<Line<'static>> 
             } else {
                 diff_line_style(raw, theme)
             };
-            Line::from(Span::styled(raw.to_string(), style))
+            Line::from(Span::styled(expand_tabs(raw, theme.tab_width), style))
         })
         .collect()
 }

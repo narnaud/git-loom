@@ -87,7 +87,7 @@ fn run_patch(files: Vec<String>, hunks: HunkArgs, theme: &graph::Theme) -> Resul
         filter.as_deref(),
         &picker,
         staging::LeftOut::Unstaged,
-        hunk_selector::selector(theme),
+        hunk_selector::selector(theme, &repo),
     )?;
     if picked.is_none() {
         return Err(msg::cancelled());

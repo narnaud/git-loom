@@ -762,7 +762,7 @@ fn run_patch_fold(
         filter.as_deref(),
         &picker,
         staging::LeftOut::KeptStaged,
-        hunk_selector::selector(theme),
+        hunk_selector::selector(theme, repo),
     )? {
         Some(picked) => picked,
         None => return Err(msg::cancelled()),
@@ -1020,7 +1020,7 @@ fn run_patch_fold_commit_to_commit(
         source_hash,
         &[],
         picker,
-        hunk_selector::selector(theme),
+        hunk_selector::selector(theme, repo),
     )?
     .ok_or_else(msg::cancelled)?;
 
@@ -1262,7 +1262,7 @@ fn run_patch_fold_commit_to_unstaged(
         commit_hash,
         &[],
         picker,
-        hunk_selector::selector(theme),
+        hunk_selector::selector(theme, repo),
     )?
     .ok_or_else(msg::cancelled)?;
 
