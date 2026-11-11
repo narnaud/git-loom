@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.1.0](https://github.com/narnaud/git-loom/compare/v1.0.0...v1.1.0) (2026-11-11)
+
+
+### Features ✨
+
+* **push:** add --draft to open the PR as a draft ([2605207](https://github.com/narnaud/git-loom/commit/2605207d5a4552a63a0dea678dededca734b3211))
+* **status:** show the remote indicator for branches on Gerrit ([2eabeaa](https://github.com/narnaud/git-loom/commit/2eabeaa18bf40421ee57c013ad5e7dc11ac7903e))
+* **tui:** `A` toggles auto-reload on changes from other terminals ([b20446c](https://github.com/narnaud/git-loom/commit/b20446c8fdb201dc2c2fe990d9dd3e89be13aa58))
+* **tui:** show tabs in diffs as loom.tuiTabWidth spaces ([2d612af](https://github.com/narnaud/git-loom/commit/2d612aff2920abfb6dc93ace6028593275a1f23d))
+
+
+### Documentation
+
+* Add gif video of TUI ([c19c6a1](https://github.com/narnaud/git-loom/commit/c19c6a19387b6550af3161af7aa2abd1214f03d7))
+
+
+### Tests
+
+* **agent:** strip the padding BSD wc puts on the line count ([f57974e](https://github.com/narnaud/git-loom/commit/f57974e0e2e0a418b006fff4ecf73e10f53885ea))
+
+
+### Other
+
+* **claude:** share permissions in settings.json, untrack settings.local.json ([11a8f8a](https://github.com/narnaud/git-loom/commit/11a8f8a885051c2cbaf4d426021911919deb7546))
+
 ## [1.0.0](https://github.com/narnaud/git-loom/compare/v0.29.0...v1.0.0) (2026-11-02)
 
 
