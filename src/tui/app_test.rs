@@ -16,6 +16,7 @@ use crate::core::ui::{Cancelled, PromptKind, Request};
 use crate::session::action::{LogEntry, execute_action};
 use crate::session::diff_text::{diff_line, untracked_file_text};
 use crate::session::paused::is_conflicted;
+use crate::session::paused::test_support::repo_with_a_paused_drop;
 use crate::session::snapshot::place_moved_commit;
 use crate::tui::widgets::common::diff_style;
 
@@ -4604,24 +4605,6 @@ fn update_menu_updates_or_takes_the_remote_version() {
 }
 
 // ── Paused operation ─────────────────────────────────────────────────────
-
-/// Dropping `one` pauses: `two` edits the file `one` created, so replaying it
-/// without `one` conflicts. Returns the repo and its HEAD before the drop.
-fn repo_with_a_paused_drop() -> (crate::core::test_helpers::TestRepo, git2::Oid) {
-    let repo = crate::core::test_helpers::TestRepo::new_with_remote();
-    repo.write_file("f.txt", "one\n");
-    repo.stage_files(&["f.txt"]);
-    repo.commit_staged("one");
-    let one = repo.head_oid();
-    repo.write_file("f.txt", "two\n");
-    repo.stage_files(&["f.txt"]);
-    repo.commit_staged("two");
-    let head = repo.head_oid();
-    repo.in_dir(|| crate::drop::run(vec![one.to_string()], true))
-        .unwrap();
-    assert!(crate::git::rebase_is_in_progress(repo.repo.path()));
-    (repo, head)
-}
 
 /// What `run` opens on a paused repo: the paused view over a placeholder tree.
 fn paused_app<'a>(repo: &crate::core::test_helpers::TestRepo, theme: &'a TuiTheme) -> App<'a> {

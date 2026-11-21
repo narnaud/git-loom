@@ -150,3 +150,27 @@ impl PausedOp {
 pub(crate) fn is_conflicted(change: &FileChange) -> bool {
     graph::file_group(change.index, change.worktree) == graph::FileGroup::Conflicted
 }
+
+/// A paused repository, for the tests of what opens on one.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use crate::core::test_helpers::TestRepo;
+
+    /// Dropping `one` pauses: `two` edits the file `one` created, so replaying it
+    /// without `one` conflicts. Returns the repo and its HEAD before the drop.
+    pub(crate) fn repo_with_a_paused_drop() -> (TestRepo, git2::Oid) {
+        let repo = TestRepo::new_with_remote();
+        repo.write_file("f.txt", "one\n");
+        repo.stage_files(&["f.txt"]);
+        repo.commit_staged("one");
+        let one = repo.head_oid();
+        repo.write_file("f.txt", "two\n");
+        repo.stage_files(&["f.txt"]);
+        repo.commit_staged("two");
+        let head = repo.head_oid();
+        repo.in_dir(|| crate::drop::run(vec![one.to_string()], true))
+            .unwrap();
+        assert!(crate::git::rebase_is_in_progress(repo.repo.path()));
+        (repo, head)
+    }
+}

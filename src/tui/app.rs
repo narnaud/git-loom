@@ -31,7 +31,6 @@ use crate::core::trace_log;
 use crate::core::transaction;
 use crate::core::ui::{Answer, Hint, Level};
 use crate::git;
-use crate::session::Refusal;
 use crate::session::action::{self, Action, CommitSource, Stamp, Summary};
 use crate::session::commands::{self, Reword, Split};
 use crate::session::diff_text::{
@@ -49,6 +48,7 @@ use crate::session::tree::{
 };
 use crate::session::watch::{RepoStamp, Watch, repo_stamp};
 use crate::session::worker::{Ask, Ended, Event, Job, Worker};
+use crate::session::{self, Refusal};
 use crate::tui::hunk_selector::run_hunk_selector_nested;
 use crate::tui::shell::{KeyResult, PaneId, Shell, ShellApp, ShellConfig, Tick};
 use crate::tui::theme::TuiTheme;
@@ -177,7 +177,10 @@ const PAUSED_HEADER_ROWS: usize = 2;
 
 impl Paused {
     fn load(workdir: &std::path::Path, git_dir: &std::path::Path) -> Option<Paused> {
-        let op = PausedOp::load(workdir, git_dir)?;
+        PausedOp::load(workdir, git_dir).map(Paused::new)
+    }
+
+    fn new(op: PausedOp) -> Paused {
         let headline = match op.state {
             PausedState::Conflicts => {
                 "Conflicts — resolve them, stage each with Space, then c to continue"
@@ -188,12 +191,12 @@ impl Paused {
             PausedState::Resolved => "No conflicts left — review the result, then c to continue",
             PausedState::Stopped => "Stopped part-way — t shows why; c carries on once it is fixed",
         };
-        Some(Paused {
+        Paused {
             op,
             headline,
             cursor: 0,
             list: ListPane::new(PAUSED_HEADER_ROWS),
-        })
+        }
     }
 
     fn current(&self) -> Option<&FileChange> {
@@ -326,20 +329,15 @@ pub fn run(theme: graph::Theme) -> Result<()> {
         );
     }
 
-    let repo = repo::open_repo()?;
+    let session::Opened {
+        repo,
+        context,
+        stamp,
+        snapshot,
+        paused,
+    } = session::open()?;
     let tui_theme = TuiTheme::for_repo(&theme, &repo);
-    let context = repo::resolve_context(&repo, None);
-    let workdir = repo::require_workdir(&repo, "display status")?.to_path_buf();
-    let git_dir = repo.path().to_path_buf();
-    // `Paused::load` reads an unreadable state as none: say so before the
-    // terminal is taken over, as the `cli.rs` guard does.
-    transaction::load(&git_dir)?;
-    let stamp = repo_stamp(&git_dir);
-    let paused = Paused::load(&workdir, &git_dir);
-    let snapshot = match paused {
-        Some(_) => Snapshot::placeholder(workdir, git_dir.clone()),
-        None => load_snapshot(context)?,
-    };
+    let git_dir = snapshot.git_dir.clone();
 
     // Local changes start expanded.
     let mut expanded: HashSet<String> = HashSet::new();
@@ -348,7 +346,7 @@ pub fn run(theme: graph::Theme) -> Result<()> {
     let mut app = App::new(snapshot, &tui_theme, theme, expanded, context);
     app.watch = Watch::new(stamp, repo::tui_auto_reload(&repo), Instant::now());
     if let Some(paused) = paused {
-        app.show_paused(paused);
+        app.show_paused(Paused::new(paused));
     }
     let (_, Outcome::Quit) = Shell::new(app).run()?;
 
