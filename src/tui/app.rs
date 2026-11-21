@@ -34,6 +34,7 @@ use crate::core::trace_log;
 use crate::core::transaction;
 use crate::core::ui::{self, Answer, Cancelled, Level, Request};
 use crate::git;
+use crate::session::paused::{PausedId, PausedOp, PausedState};
 use crate::session::snapshot::{
     CommitDest, MoveSlot, NEW_BRANCH_NAME, Preview, Snapshot, is_staged, load_snapshot,
 };
@@ -41,7 +42,7 @@ use crate::session::tree::{
     self, LOCAL_CHANGES_KEY, PENDING_COMMIT_OID, Row, RowKind, RowMark, SelectionClass, branch_key,
     commit_file_key, nearest_focusable, working_file_key,
 };
-use crate::session::watch::{self, Watch};
+use crate::session::watch::{RepoStamp, Watch, repo_stamp};
 use crate::tui::hunk_selector::run_hunk_selector_nested;
 use crate::tui::shell::{KeyResult, PaneId, Shell, ShellApp, ShellConfig, Tick};
 use crate::tui::theme::TuiTheme;
@@ -333,138 +334,45 @@ struct Running {
 /// What stands in for the tree while an operation is paused: HEAD is detached
 /// mid-rebase, so no tree can be gathered until the operation ends.
 struct Paused {
-    /// The command the loom state names; `None` for a git rebase or merge no
-    /// state describes.
-    command: Option<String>,
-    /// `rebase` or `merge`; `None` when git has neither left, the user having
-    /// finished it by hand.
-    git_op: Option<&'static str>,
-    step: Option<(usize, usize)>,
+    op: PausedOp,
     headline: &'static str,
-    files: Vec<FileChange>,
-    /// Index into `files`.
+    /// Index into `op.files`.
     cursor: usize,
     list: ListPane,
-    id: PausedId,
 }
 
 /// Rows above the files in the paused view: the headline and a gap.
 const PAUSED_HEADER_ROWS: usize = 2;
 
-/// What tells one paused operation from the next, even of the same command:
-/// the commit git started it from.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct PausedId {
-    command: Option<String>,
-    git_op: Option<&'static str>,
-    /// `orig-head` of a rebase, `MERGE_HEAD` of a merge.
-    origin: Option<String>,
-}
-
-impl PausedId {
-    /// The paused operation `main.rs` blocks other commands on, if any.
-    fn load(git_dir: &std::path::Path) -> Option<PausedId> {
-        let command = transaction::load(git_dir).ok().flatten().map(|s| s.command);
-        let (git_op, origin) = if git::rebase_is_in_progress(git_dir) {
-            let origin = ["rebase-merge", "rebase-apply"]
-                .iter()
-                .find_map(|d| std::fs::read_to_string(git_dir.join(d).join("orig-head")).ok());
-            (Some("rebase"), origin)
-        } else if git::merge_is_in_progress(git_dir) {
-            let origin = std::fs::read_to_string(git_dir.join("MERGE_HEAD")).ok();
-            (Some("merge"), origin)
-        } else {
-            (None, None)
-        };
-        if command.is_none() && git_op.is_none() {
-            return None;
-        }
-        Some(PausedId {
-            command,
-            git_op,
-            origin: origin.map(|o| o.trim().to_string()),
-        })
-    }
-}
-
 impl Paused {
     fn load(workdir: &std::path::Path, git_dir: &std::path::Path) -> Option<Paused> {
-        let id = PausedId::load(git_dir)?;
-        let (command, git_op) = (id.command.clone(), id.git_op);
-        let step = match git_op {
-            Some("rebase") => git::rebase_progress(git_dir),
-            _ => None,
-        };
-        let files = git2::Repository::open(workdir)
-            .ok()
-            .and_then(|r| repo::get_working_changes(&r).ok())
-            .unwrap_or_default();
-        // `AUTO_MERGE` outlives the resolution until the step is committed, so
-        // with no conflict left it covers `rerere` and the user's own alike.
-        // Conflicts first: a `merge` pauses on its own replay with no git
-        // operation behind it (Spec 005).
-        let headline = if files.iter().any(is_conflicted) {
-            "Conflicts — resolve them, stage each with Space, then c to continue"
-        } else if git_op.is_none() {
-            "No rebase is in progress — c wraps the operation up, a discards it"
-        } else if git::auto_merge_id(workdir).is_some() {
-            "No conflicts left — review the result, then c to continue"
-        } else {
-            "Stopped part-way — t shows why; c carries on once it is fixed"
+        let op = PausedOp::load(workdir, git_dir)?;
+        let headline = match op.state {
+            PausedState::Conflicts => {
+                "Conflicts — resolve them, stage each with Space, then c to continue"
+            }
+            PausedState::NoGitOp => {
+                "No rebase is in progress — c wraps the operation up, a discards it"
+            }
+            PausedState::Resolved => "No conflicts left — review the result, then c to continue",
+            PausedState::Stopped => "Stopped part-way — t shows why; c carries on once it is fixed",
         };
         Some(Paused {
-            command,
-            git_op,
-            step,
+            op,
             headline,
-            files,
             cursor: 0,
             list: ListPane::new(PAUSED_HEADER_ROWS),
-            id,
         })
-    }
-
-    /// What is paused, as the pane title and the abort question name it.
-    fn subject(&self) -> String {
-        match (&self.command, self.git_op) {
-            (Some(command), _) => format!("`loom {}`", command),
-            (None, op) => format!("git {}", op.unwrap_or("rebase")),
-        }
-    }
-
-    fn title(&self) -> String {
-        let step = self
-            .step
-            .map(|(current, total)| format!(" — step {}/{}", current, total))
-            .unwrap_or_default();
-        format!(" Paused: {}{} ", self.subject().replace('`', ""), step)
-    }
-
-    fn abort_question(&self) -> String {
-        match &self.command {
-            Some(_) => format!(
-                "Abort the paused {}?\nIt rolls back to where the command started.",
-                self.subject()
-            ),
-            None => format!(
-                "Abort the {} in progress?\nNo loom state describes it: only git's own abort runs.",
-                self.subject()
-            ),
-        }
     }
 
     fn current(&self) -> Option<&FileChange> {
-        self.files.get(self.cursor)
+        self.op.files.get(self.cursor)
     }
 
     fn move_cursor(&mut self, dir: isize) {
-        let last = self.files.len().saturating_sub(1);
+        let last = self.op.files.len().saturating_sub(1);
         self.cursor = self.cursor.saturating_add_signed(dir).min(last);
     }
-}
-
-fn is_conflicted(change: &FileChange) -> bool {
-    graph::file_group(change.index, change.worktree) == graph::FileGroup::Conflicted
 }
 
 /// What is drawn over the panes and owns the keyboard.
@@ -734,13 +642,6 @@ fn execute_action(
 }
 
 // ── App state ────────────────────────────────────────────────────────────
-
-/// What auto-reload compares: the repo files a reload reads, and the paused operation.
-type RepoStamp = (watch::FsStamp, Option<PausedId>);
-
-fn repo_stamp(git_dir: &std::path::Path) -> RepoStamp {
-    (watch::fs_stamp(git_dir), PausedId::load(git_dir))
-}
 
 /// Marks the tree and paused panes while auto-reload is on.
 fn auto_reload_badge(
@@ -1297,7 +1198,7 @@ impl<'a> App<'a> {
             .as_ref()
             .and_then(Paused::current)
             .map(|f| f.path.clone());
-        if let Some(i) = path.and_then(|p| paused.files.iter().position(|f| f.path == p)) {
+        if let Some(i) = path.and_then(|p| paused.op.files.iter().position(|f| f.path == p)) {
             paused.cursor = i;
         }
         self.mode = Mode::Normal;
@@ -1627,11 +1528,11 @@ impl<'a> App<'a> {
                 None
             }
             KeyCode::Char('c') => Some(Action::Continue {
-                paused: paused.id.clone(),
+                paused: paused.op.id.clone(),
             }),
             KeyCode::Char('a') => Some(Action::Abort {
-                question: paused.abort_question(),
-                paused: paused.id.clone(),
+                question: paused.op.abort_question(),
+                paused: paused.op.id.clone(),
             }),
             KeyCode::Char('L') => {
                 self.open_log();
@@ -1657,7 +1558,7 @@ impl<'a> App<'a> {
             _ => {
                 self.notice = Some(format!(
                     "{} is paused: c to continue, a to abort",
-                    paused.subject()
+                    paused.op.subject()
                 ));
                 None
             }
@@ -1688,7 +1589,7 @@ impl<'a> App<'a> {
             } else {
                 // Staged back to HEAD, it left the list: the next file took
                 // its index.
-                paused.cursor = index.min(paused.files.len().saturating_sub(1));
+                paused.cursor = index.min(paused.op.files.len().saturating_sub(1));
             }
             self.diff.reset();
         }
@@ -3249,11 +3150,12 @@ impl<'a> App<'a> {
             ))),
             ListItem::new(""),
         ];
-        if paused.files.is_empty() {
+        if paused.op.files.is_empty() {
             items.push(ListItem::new(Span::styled("  no changes", theme.dim)));
         }
         items.extend(
             paused
+                .op
                 .files
                 .iter()
                 .map(|file| ListItem::new(paused_file_line(file, theme))),
@@ -3262,12 +3164,15 @@ impl<'a> App<'a> {
         // nothing.
         let cursor = PAUSED_HEADER_ROWS + paused.cursor;
         paused.list.set_cursor(cursor);
-        let highlight = if paused.files.is_empty() {
+        let highlight = if paused.op.files.is_empty() {
             ratatui::style::Style::default()
         } else {
             theme.file_selected
         };
-        let block = auto_reload_badge(pane_block(&paused.title(), theme, focused), auto_reload);
+        let block = auto_reload_badge(
+            pane_block(&format!(" {} ", paused.op.title()), theme, focused),
+            auto_reload,
+        );
         paused.list.render(frame, area, items, block, highlight);
     }
 
@@ -3430,7 +3335,7 @@ impl ShellApp for App<'_> {
                         .list
                         .hit_test(area, pos.y)
                         .and_then(|row| row.checked_sub(PAUSED_HEADER_ROWS))
-                        .filter(|i| *i < paused.files.len());
+                        .filter(|i| *i < paused.op.files.len());
                     if let Some(i) = file {
                         paused.cursor = i;
                         self.diff.reset();

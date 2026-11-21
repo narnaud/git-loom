@@ -3,6 +3,8 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
+use crate::session::paused::PausedId;
+
 const INTERVAL: Duration = Duration::from_secs(2);
 
 /// Polls a fingerprint at a fixed interval while on, so a reload is due at most once per interval.
@@ -98,6 +100,13 @@ fn walk(dir: &Path, out: &mut FsStamp) {
             out.push(content(path));
         }
     }
+}
+
+/// What auto-reload compares: the repo files a reload reads, and the paused operation.
+pub(crate) type RepoStamp = (FsStamp, Option<PausedId>);
+
+pub(crate) fn repo_stamp(git_dir: &Path) -> RepoStamp {
+    (fs_stamp(git_dir), PausedId::load(git_dir))
 }
 
 #[cfg(test)]
