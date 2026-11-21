@@ -164,7 +164,7 @@ pub fn save(git_dir: &Path, state: &LoomState) -> Result<()> {
 
 /// Load the state file. Returns `None` if the file does not exist.
 ///
-/// Errors carry their cause in the outermost message, the only one `main.rs`
+/// Errors carry their cause in the outermost message, the only one `cli.rs`
 /// prints. No `exists()` check first: a file removed in between, by a
 /// `loom continue` finishing elsewhere, would read as unreadable.
 pub fn load(git_dir: &Path) -> Result<Option<LoomState>> {
@@ -627,7 +627,7 @@ fn restore_skipped_fixups(workdir: &Path, fixups: &[String]) -> Result<()> {
 /// Undo a saved operation whose rebase failed, and remove its state file.
 ///
 /// The rebase is normally over by the time this runs, so what is left is
-/// `loom abort`'s half of the undo; the state goes with it, or `main.rs`
+/// `loom abort`'s half of the undo; the state goes with it, or `cli.rs`
 /// refuses every later command as paused. A rebase still in progress is the
 /// exception: rolling back on top of one makes the mess worse, so the state
 /// stays for `loom abort`. `cause` is returned either way — the top-level

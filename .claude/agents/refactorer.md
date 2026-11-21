@@ -55,7 +55,7 @@ do not turn those reads into an unsolicited audit of other modules.
   After each module, record files read and candidate findings with
   `file:line`. Keep incomplete reads and unverified candidates explicit.
 2. **Intake.** Read `Cargo.toml`, the scoped entry points, and relevant specs
-  (all specs and `src/main.rs` for a whole-codebase review). List in-scope
+  (all specs and `src/cli.rs` for a whole-codebase review). List in-scope
   non-test source files with line counts, largest first, and build a
   one-screen dependency sketch from imports and call sites. Use the tools
   and shell actually available; prefer `rg` for searches when available.

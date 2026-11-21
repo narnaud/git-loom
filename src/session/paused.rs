@@ -23,7 +23,7 @@ pub(crate) struct PausedId {
 }
 
 impl PausedId {
-    /// The paused operation `main.rs` blocks other commands on, if any.
+    /// The paused operation `cli.rs` blocks other commands on, if any.
     pub(crate) fn load(git_dir: &Path) -> Option<PausedId> {
         let command = transaction::load(git_dir).ok().flatten().map(|s| s.command);
         let (git_op, origin) = if git::rebase_is_in_progress(git_dir) {

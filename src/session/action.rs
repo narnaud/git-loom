@@ -160,7 +160,7 @@ pub(crate) fn execute_action(
     // As on the CLI, resuming adds to the trace of the command that paused.
     let resuming = matches!(action, Action::Continue { .. } | Action::Abort { .. });
     trace_log::init(git_dir, trace, resuming);
-    // The `main.rs` guard, which `tui` is exempt from: an operation paused
+    // The `cli.rs` guard, which `tui` is exempt from: an operation paused
     // since the tree was shown, or a state file gone unreadable, would
     // otherwise be saved over.
     if !resuming && let Err(e) = transaction::refuse_if_paused(git_dir) {
