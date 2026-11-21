@@ -3,13 +3,12 @@
 
 use std::io::Write as _;
 use std::path::Path;
-use std::process::Command;
 use std::time::Instant;
 
 use anyhow::{Result, anyhow, bail};
 use git2::Repository;
 
-use crate::core::{msg, trace_log};
+use crate::core::{msg, process, trace_log};
 use crate::git;
 
 /// Remote type detected for the push operation.
@@ -419,7 +418,7 @@ pub fn run_gh(gh: &Gh, args: &[&str], stdin: Option<&str>) -> Option<String> {
     use std::process::Stdio;
 
     let start = Instant::now();
-    let mut cmd = Command::new("gh");
+    let mut cmd = process::command("gh");
     cmd.current_dir(gh.workdir).args(args);
     if let Some(token) = &gh.token {
         cmd.env("GH_TOKEN", token);

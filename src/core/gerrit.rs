@@ -9,6 +9,7 @@ use std::time::Instant;
 use anyhow::{Context, Result, bail};
 use git2::{Oid, Repository};
 
+use crate::core::process;
 use crate::core::repo::RepoInfo;
 use crate::core::trace_log;
 use crate::git;
@@ -315,7 +316,7 @@ impl SshProgram {
             SshProgram::Shell(cmd) => cmd.clone(),
             SshProgram::Path(program) => format!("'{}'", program.replace('\'', r"'\''")),
         };
-        let mut command = Command::new("git");
+        let mut command = process::command("git");
         command.args(["-c", &format!("alias.{ALIAS}=!{alias}"), ALIAS]);
         command
     }

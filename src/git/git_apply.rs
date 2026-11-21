@@ -1,6 +1,5 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
@@ -224,7 +223,7 @@ fn run_apply(
     args.extend(flags);
 
     let start = Instant::now();
-    let mut command = Command::new("git");
+    let mut command = crate::core::process::command("git");
     command
         .current_dir(workdir)
         .args(super::FORCED_CONFIG)

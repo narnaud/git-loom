@@ -53,7 +53,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 
-use crate::core::trace_log;
+use crate::core::{process, trace_log};
 
 /// Config forced on every git command loom drives itself and reads back or
 /// feeds patches to: [`run_git`] and friends, `git apply`, and the rebases.
@@ -141,7 +141,7 @@ pub fn reaches_from_head(workdir: &Path, rev: &str) -> bool {
 /// `GIT_SEQUENCE_EDITOR` falls back to it, so a captured `rebase -i` must set
 /// its own sequence editor (`weave` runs its own `Command` and sets both).
 fn captured_command(workdir: &Path, args: &[&str]) -> Command {
-    let mut command = Command::new("git");
+    let mut command = process::command("git");
     command
         .current_dir(workdir)
         .args(FORCED_CONFIG)
@@ -245,7 +245,7 @@ fn git_version_output() -> String {
     static OUTPUT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     OUTPUT
         .get_or_init(|| {
-            Command::new("git")
+            process::command("git")
                 .arg("--version")
                 .output()
                 .ok()
@@ -311,6 +311,10 @@ fn run_interactive(workdir: &Path, args: &[&str], ok: fn(ExitStatus) -> bool) ->
 
     let start = Instant::now();
     let terminal = crate::core::ui::suspend()?;
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "an editor needs the console it is given"
+    )]
     let mut command = Command::new("git");
     command.current_dir(workdir).args(&full_args);
     // The test binary's fake editor is repository config, which an inherited

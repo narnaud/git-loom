@@ -6,10 +6,12 @@ integration branch and rewrites/manages them without leaving that branch.
 ## Code Map
 
 - `src/cli.rs`: clap CLI/dispatch; command modules are `src/<command>.rs`.
-- `src/lib.rs`: the crate, a library listing the modules and exporting
-  `cli::run`; `src/bin/git-loom.rs` is the executable calling it.
+- `src/lib.rs`: the crate, a library listing the modules and exporting the
+  entry points `cli::run` and, with the `gui` feature, `gui::run`; `src/bin/`
+  holds the executables calling them, `git-loom` and `git-loom-gui`.
 - `src/core/`: graph, short IDs, repository, remotes, transaction, agent mode, TUI
-  mode (`ui.rs`: `msg` prompts/messages redirected to `loom tui`), weave.
+  mode (`ui.rs`: `msg` prompts/messages redirected to `loom tui`), weave, child
+  processes (`process.rs`: clippy refuses any other `Command::new`).
 - `src/git/`: low-level Git operations.
 - `src/session/`: an interactive session apart from its front-end: how one
   opens (`mod.rs`), snapshot and previews, row model (`tree.rs`), what each
@@ -17,6 +19,8 @@ integration branch and rewrites/manages them without leaving that branch.
   actions (`action.rs`) and the worker running them (`worker.rs`), fold/move
   rules (`targets.rs`), diff text, paused operation, auto-reload watch.
 - `src/tui/`: status tree, shell, hunk selector, widgets, theme.
+- `src/gui/` (feature `gui`, Slint): the window. `state.rs` decides what it
+  shows, with no window; `ui/*.slint` draws it; `mod.rs` starts it.
 - `src/agent/`: `agent install`; embedded source is `skills/git-loom/SKILL.md`.
 - Tests are sibling `*_test.rs` files; shared fixtures are in
   `src/core/test_helpers.rs`; integration tests are in `tests/integration/`.
@@ -51,6 +55,7 @@ keep it terse and normative, and do not duplicate rules, docs, or examples.
 | `specs/021-git-args.md` | Forwarding arguments to git after a `--` separator |
 | `specs/022-worktree.md` | Worktrees, each holding its own integration branch |
 | `specs/023-mtime.md` | Working-tree mtimes kept across a rebase for files whose bytes are unchanged |
+| `specs/024-gui.md` | GUI: the `git-loom-gui` window on the integration branch |
 
 ## Commands
 
@@ -64,6 +69,11 @@ copy the binary first, because a concurrent build swaps
 `target/debug/git-loom(.exe)` mid-run, then
 `GL_BIN=<copy> bash tests/integration/test_<cmd>.sh`; run the full suite
 before pushing.
+
+`git-loom-gui` and its tests exist only with `--features gui`: a change under
+`src/gui/` or `src/session/` is built, linted and tested with it too. `cargo
+gui` (`.cargo/config.toml`) builds the window and runs it on the current
+directory. GUI tests drive `gui::state::State` and never open a window.
 
 Keep `tests/bin_is_built.rs`: it makes `cargo test` build the binary used as the
 sequence editor by rebase tests. Removing it breaks rebase tests in an unbuilt tree.

@@ -3,6 +3,7 @@ name = "git-loom"
 version = "1.2.0"
 edition = "2024"
 rust-version = "1.88"
+default-run = "git-loom"
 description = "A Git CLI tool that weaves together multiple feature branches into integration branches"
 license = "MIT"
 repository = "https://github.com/narnaud/git-loom"
@@ -23,6 +24,13 @@ path = "src/bin/git-loom.rs"
 test = false
 doc = false
 
+[[bin]]
+name = "git-loom-gui"
+path = "src/bin/git-loom-gui.rs"
+required-features = [ "gui" ]
+test = false
+doc = false
+
 [dependencies]
 anyhow = "1"
 chrono = "0.4"
@@ -39,6 +47,12 @@ ratatui = "0.30.0"
 crossterm = "0.29.0"
 terminal-colorsaurus = "1"
 terminal_size = "0.4"
+# Slint 1.19 needs Rust 1.95, above `rust-version`: only `--features gui`
+# builds it, so the CLI keeps its own minimum.
+slint = { version = "1.19", optional = true }
+
+[build-dependencies]
+slint-build = { version = "1.19", optional = true }
 
 [profile.release]
 lto = true
@@ -46,3 +60,6 @@ strip = true
 
 [features]
 vendored-openssl = [ "git2/vendored-openssl" ]
+# The window and its executable, `git-loom-gui`: off by default, so that a
+# plain build needs no GUI toolchain.
+gui = [ "dep:slint", "dep:slint-build" ]

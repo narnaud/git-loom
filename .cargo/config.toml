@@ -1,0 +1,4 @@
+[alias]
+# The window on the repository of the current directory. `cargo run -- gui`
+# builds no `git-loom-gui`, and would start one an older build left.
+gui = "run --features gui --bin git-loom-gui"

@@ -2,7 +2,7 @@
 
 use crate::agent::AgentKind;
 use crate::core::hunk_select::HunkArgs;
-use crate::core::{agent_mode, graph, msg, repo, trace_log, transaction};
+use crate::core::{agent_mode, graph, msg, repo, trace_log, transaction, weave};
 use crate::{
     absorb, add, agent, branch, commit, completions, diff, drop, fold, git, init, merge, push,
     reword, show, split, status, swap, switch, trace, tui, unmerge, update, worktree,
@@ -438,7 +438,7 @@ enum Command {
         shell: String,
     },
     /// Internal: used as GIT_SEQUENCE_EDITOR to write a pre-generated todo file
-    #[command(hide = true)]
+    #[command(name = weave::SEQUENCE_EDITOR, hide = true)]
     InternalWriteTodo {
         /// Path to the source file containing the todo content
         #[arg(long = "source")]

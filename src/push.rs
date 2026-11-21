@@ -13,6 +13,7 @@ use crate::core::gerrit;
 use crate::core::graph;
 use crate::core::hidden;
 use crate::core::msg;
+use crate::core::process;
 use crate::core::push_json::{PrReport, PrState, PushReport};
 use crate::core::remote::{
     Gh, RemoteType, extract_gh_repo, integration_remote, on_github_com, resolve_push_remote,
@@ -430,7 +431,7 @@ pub fn run(
     // Probed before the push, so an unsupported stack or draft is refused untouched.
     let has_cli = !no_pr
         && match remote_type {
-            RemoteType::GitHub => cli_available("gh", Command::new("gh")),
+            RemoteType::GitHub => cli_available("gh", process::command("gh")),
             RemoteType::AzureDevOps => cli_available("az", az_command()),
             _ => true,
         };
@@ -747,7 +748,7 @@ fn push_hint(err: anyhow::Error, branch: &str, rerun: &str, force: bool) -> anyh
 /// to the user via [`append_remote_urls`].
 fn run_push_capture(workdir: &Path, args: &[&str]) -> Result<String> {
     let start = Instant::now();
-    let mut command = Command::new("git");
+    let mut command = process::command("git");
     command.current_dir(workdir).args(args);
     git::no_terminal_prompt_under_tui(&mut command);
     let output = command.output()?;
@@ -1698,7 +1699,7 @@ fn azure_location_args(azure: Option<&AzureRemote>) -> Vec<&str> {
 /// `cmd.exe` with every argument escaped, where a hand-rolled `cmd /C az`
 /// would let cmd expand `%VAR%` and reparse quotes inside PR titles.
 fn az_command() -> Command {
-    Command::new(az_program())
+    process::command(az_program())
 }
 
 fn az_program() -> &'static str {
