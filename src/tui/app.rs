@@ -1427,11 +1427,7 @@ impl<'a> App<'a> {
     fn enter_commit_target(&mut self, source: CommitSource, source_rows: Sources, origin: String) {
         // The destinations are read off the drawn tree, so their order is the
         // order `↑`/`↓` walk them in.
-        let mut dests = vec![CommitDest::Integration];
-        dests.extend(self.rows.iter().filter_map(|r| match &r.kind {
-            RowKind::BranchName { name, .. } => Some(CommitDest::Branch(name.clone())),
-            _ => None,
-        }));
+        let dests = targets::commit_dests(&self.rows);
         self.mode = Mode::CommitTarget {
             source,
             source_rows,
