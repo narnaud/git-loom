@@ -223,3 +223,7 @@ fn move_signature(
         })
         .collect()
 }
+
+#[cfg(test)]
+#[path = "targets_test.rs"]
+mod tests;
