@@ -1,4 +1,4 @@
-//! Flat row model for the interactive status tree of `loom tui`.
+//! Flat row model for the interactive status tree of a session.
 //!
 //! Rows are rebuilt from the graph sections whenever the expansion state
 //! changes; the expansion and selection states are keyed by [`Row::key`] so
@@ -360,6 +360,18 @@ fn push_commit_rows(
     }
 }
 
+/// The focusable row at or above `index`, else the first focusable one.
+pub(crate) fn nearest_focusable(rows: &[Row], index: usize) -> Option<usize> {
+    if rows.is_empty() {
+        return None;
+    }
+    let start = index.min(rows.len() - 1);
+    rows[..=start]
+        .iter()
+        .rposition(|r| r.focusable)
+        .or_else(|| rows.iter().position(|r| r.focusable))
+}
+
 #[cfg(test)]
-#[path = "status_tree_test.rs"]
+#[path = "tree_test.rs"]
 mod tests;

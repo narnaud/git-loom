@@ -37,14 +37,14 @@ use crate::core::trace_log;
 use crate::core::transaction;
 use crate::core::ui::{self, Answer, Cancelled, Level, Request};
 use crate::git;
+use crate::session::tree::{
+    self, LOCAL_CHANGES_KEY, PENDING_COMMIT_OID, Row, RowKind, RowMark, SelectionClass, branch_key,
+    commit_file_key, nearest_focusable, working_file_key,
+};
+use crate::session::watch::{self, Watch};
 use crate::tui::hunk_selector::run_hunk_selector_nested;
 use crate::tui::shell::{KeyResult, PaneId, Shell, ShellApp, ShellConfig, Tick};
-use crate::tui::status_tree::{
-    self, LOCAL_CHANGES_KEY, PENDING_COMMIT_OID, Row, RowKind, RowMark, SelectionClass, branch_key,
-    commit_file_key, working_file_key,
-};
 use crate::tui::theme::TuiTheme;
-use crate::tui::watch::{self, Watch};
 use crate::tui::widgets::common::{colorize_diff, highlight_backticks, pane_block};
 use crate::tui::widgets::diff_pane::DiffPane;
 use crate::tui::widgets::list_pane::ListPane;
@@ -1211,7 +1211,7 @@ impl<'a> App<'a> {
             _ => None,
         };
         let sections = self.snapshot.sections(preview);
-        status_tree::build_rows(&sections, &self.snapshot.ids, &self.expanded)
+        tree::build_rows(&sections, &self.snapshot.ids, &self.expanded)
     }
 
     /// How many working files `files` (short IDs, or `zz`) stand for.
@@ -2999,7 +2999,7 @@ impl<'a> App<'a> {
             oid: commit,
             slot: slot.clone(),
         }));
-        status_tree::build_rows(&sections, &self.snapshot.ids, &self.expanded)
+        tree::build_rows(&sections, &self.snapshot.ids, &self.expanded)
             .into_iter()
             .map(|r| match r.kind {
                 RowKind::Spacer(text) => text.to_string(),
@@ -4068,18 +4068,6 @@ fn scroll_popup(scroll: &mut DiffPane, code: KeyCode) {
         KeyCode::PageDown => scroll.scroll_page(1),
         _ => {}
     }
-}
-
-/// The focusable row at or above `index`, else the first focusable one.
-fn nearest_focusable(rows: &[Row], index: usize) -> Option<usize> {
-    if rows.is_empty() {
-        return None;
-    }
-    let start = index.min(rows.len() - 1);
-    rows[..=start]
-        .iter()
-        .rposition(|r| r.focusable)
-        .or_else(|| rows.iter().position(|r| r.focusable))
 }
 
 /// Index of the target a fold starts on: the nearest `[NOOP]` one, so commit
