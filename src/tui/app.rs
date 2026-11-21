@@ -33,6 +33,7 @@ use crate::core::transaction;
 use crate::core::ui::{Answer, Level};
 use crate::git;
 use crate::session::action::{self, Action, CommitSource, Stamp, Summary};
+use crate::session::commands::{self, Reword, Split};
 use crate::session::diff_text::{
     diff_text, pending_commit_diff, staged_commit_diff, working_file_diff,
 };
@@ -1100,13 +1101,8 @@ impl<'a> App<'a> {
                 self.stage_paused_file();
                 None
             }
-            KeyCode::Char('c') => Some(Action::Continue {
-                paused: paused.op.id.clone(),
-            }),
-            KeyCode::Char('a') => Some(Action::Abort {
-                question: paused.op.abort_question(),
-                paused: paused.op.id.clone(),
-            }),
+            KeyCode::Char('c') => Some(commands::resume(&paused.op)),
+            KeyCode::Char('a') => Some(commands::abort(&paused.op)),
             KeyCode::Char('L') => {
                 self.open_log();
                 None
@@ -1422,11 +1418,13 @@ impl<'a> App<'a> {
         let Some(origin) = self.current_row().map(|r| r.key.clone()) else {
             return;
         };
-        let mut sources: Vec<String> = rows.iter().filter_map(|r| r.target.clone()).collect();
-        if sources.is_empty() || sources.len() != rows.len() {
-            self.notice = Some("fold: select source rows first".to_string());
-            return;
-        }
+        let mut sources = match commands::fold_sources(&rows) {
+            Ok(sources) => sources,
+            Err(reason) => {
+                self.notice = Some(format!("fold: {}", reason));
+                return;
+            }
+        };
         let commit = match rows[0].kind {
             RowKind::Commit { oid, .. } => Some(oid),
             RowKind::LocalChanges { .. } | RowKind::WorkingFile { .. } => None,
@@ -1496,35 +1494,12 @@ impl<'a> App<'a> {
     /// no row to stand on.
     fn commit_sources(&mut self) -> Option<(Vec<String>, Sources, String)> {
         let rows = self.picked_rows();
-        if rows.is_empty()
-            || !rows.iter().all(|r| {
-                matches!(
-                    r.kind,
-                    RowKind::WorkingFile { .. } | RowKind::LocalChanges { .. }
-                )
-            })
-        {
-            self.notice = Some("commit: move to local changes or select files".to_string());
-            return None;
-        }
-        if rows
-            .iter()
-            .any(|r| matches!(r.kind, RowKind::LocalChanges { count: 0 }))
-        {
-            self.notice = Some("commit: no local changes".to_string());
-            return None;
-        }
-        // A row of these kinds always carries a target; refuse rather than
-        // fall through to an argument-less `loom commit`, which would commit
-        // the index — the one thing `c` must never do. An unnamed row is the
-        // same refusal: `loom commit -l ""` is not an improvement.
-        let Some(files) = rows
-            .iter()
-            .map(|r| r.target.clone().filter(|t| !t.is_empty()))
-            .collect::<Option<Vec<String>>>()
-        else {
-            self.notice = Some("commit: this row has nothing to commit".to_string());
-            return None;
+        let files = match commands::commit_files(&rows) {
+            Ok(files) => files,
+            Err(reason) => {
+                self.notice = Some(format!("commit: {}", reason));
+                return None;
+            }
         };
         let source_rows = self.mark_sources(&rows);
         let origin = self.current_row().map(|r| r.key.clone())?;
@@ -1759,11 +1734,13 @@ impl<'a> App<'a> {
         let Some(origin) = self.current_row().map(|r| r.key.clone()) else {
             return;
         };
-        let sources: Vec<String> = rows.iter().filter_map(|r| r.target.clone()).collect();
-        if sources.is_empty() || sources.len() != rows.len() {
-            self.notice = Some("fold: select source rows first".to_string());
-            return;
-        }
+        let sources = match commands::fold_sources(&rows) {
+            Ok(sources) => sources,
+            Err(reason) => {
+                self.notice = Some(format!("fold: {}", reason));
+                return;
+            }
+        };
         let source_rows = self.mark_sources(&rows);
         let targets = match self.fold_targets(&rows, false) {
             Ok(targets) => targets,
@@ -1953,17 +1930,13 @@ impl<'a> App<'a> {
     /// and nothing runs until one is confirmed.
     fn action_move_start(&mut self) {
         let rows = self.picked_rows();
-        let commit = match rows.as_slice() {
-            [row] => match row.kind {
-                RowKind::Commit { oid, .. } if row.target.is_some() => oid,
-                _ => {
-                    self.notice = Some("move: move to a commit".to_string());
-                    return;
-                }
-            },
-            [] => return,
-            _ => {
-                self.notice = Some("move: one commit at a time".to_string());
+        if rows.is_empty() {
+            return;
+        }
+        let commit = match commands::move_source(&rows) {
+            Ok(commit) => commit,
+            Err(reason) => {
+                self.notice = Some(format!("move: {}", reason));
                 return;
             }
         };
@@ -2052,19 +2025,7 @@ impl<'a> App<'a> {
             return;
         };
         let origin = row.key.clone();
-        let info = &self.snapshot.info;
-        let (target, tip) = match &row.kind {
-            RowKind::Commit { oid, .. } => (row.target.clone(), *oid),
-            RowKind::BranchName { name, .. } => {
-                let tip = info
-                    .branches
-                    .iter()
-                    .find(|b| b.name == *name)
-                    .map_or(info.upstream.merge_base_oid, |b| b.tip_oid);
-                (row.target.clone(), tip)
-            }
-            _ => (None, info.upstream.merge_base_oid),
-        };
+        let (target, tip) = commands::branch_base(&self.snapshot.info, row);
         self.mode = Mode::NewBranch {
             target,
             tip,
@@ -2137,64 +2098,34 @@ impl<'a> App<'a> {
     /// `s`: the selected commit files (else the cursor's) become the first
     /// commit, the rest of their commit the second; a commit row is `S`.
     fn action_split(&mut self) -> Option<Action> {
-        let rows = self.picked_rows();
-        let commit = match targets::split_source(&rows) {
-            Ok(commit) => commit,
-            Err(notice) => {
-                self.notice = Some(format!("split: {}", notice));
-                return None;
+        let split = commands::split(&self.snapshot, &self.picked_rows());
+        match self.or_refuse("split", split)? {
+            Split::Files(action) => Some(action),
+            // As `S` does.
+            Split::Hunks(commit) => {
+                self.start_split_pick(commit);
+                None
             }
-        };
-        let files: Vec<String> = rows
-            .iter()
-            .filter_map(|r| match &r.kind {
-                RowKind::CommitFile { path, .. } => {
-                    Some(repo::cwd_relative_path(path, &self.snapshot.cwd_prefix))
-                }
-                _ => None,
-            })
-            .collect();
-        // A commit row names no files to take out: pick its hunks, as `S` does.
-        if files.is_empty() {
-            self.action_split_patch_start();
-            return None;
         }
-        let total = self
-            .snapshot
-            .info
-            .commits
-            .iter()
-            .find(|c| c.oid == commit)
-            .map_or(0, |c| c.files.len());
-        if total < 2 {
-            self.notice = Some("split: one file only, split its hunks with S".to_string());
-            return None;
-        }
-        if files.len() >= total {
-            self.notice = Some("split: leave at least one file for the second commit".to_string());
-            return None;
-        }
-        Some(Action::Split {
-            commit: commit.to_string(),
-            files,
-            hunks: None,
-        })
     }
 
     /// `S`: `s` with the hunks picked first, over the commit's whole diff
     /// whatever the cursor or selection, as `C` shows every local change. The
     /// press starts the read on a worker, as `C` does.
     fn action_split_patch_start(&mut self) {
-        let rows = self.picked_rows();
+        if self.current_row().is_none() {
+            return;
+        }
+        let commit = targets::split_source(&self.picked_rows());
+        if let Some(commit) = self.or_refuse("split", commit) {
+            self.start_split_pick(commit);
+        }
+    }
+
+    /// Read the hunks of `commit` for a split of them.
+    fn start_split_pick(&mut self, commit: git2::Oid) {
         let Some(origin) = self.current_row().map(|r| r.key.clone()) else {
             return;
-        };
-        let commit = match targets::split_source(&rows) {
-            Ok(commit) => commit,
-            Err(notice) => {
-                self.notice = Some(format!("split: {}", notice));
-                return;
-            }
         };
         let command = format!("loom split -p {}", self.sid_of(&commit.to_string()));
         self.start_pick(command, origin, PickFor::Split { commit }, move |workdir| {
@@ -2258,71 +2189,34 @@ impl<'a> App<'a> {
     /// commit, branch, working file, or the `[local changes]` header for
     /// `drop zz`). Only files can go together, as in the CLI.
     fn action_drop(&mut self) -> Option<Action> {
-        let rows = self.picked_rows();
-        let droppable = |row: &Row| {
-            matches!(
-                row.kind,
-                RowKind::Commit { .. }
-                    | RowKind::BranchName { .. }
-                    | RowKind::WorkingFile { .. }
-                    | RowKind::LocalChanges { .. }
-            ) && row.target.is_some()
-        };
-        if rows.is_empty() || !rows.iter().all(|r| droppable(r)) {
-            self.notice =
-                Some("drop: move to a commit, branch, file, or local changes".to_string());
-            return None;
-        }
-        if rows.len() > 1
-            && !rows
-                .iter()
-                .all(|r| matches!(r.kind, RowKind::WorkingFile { .. }))
-        {
-            self.notice = Some("drop: only files can be dropped together".to_string());
-            return None;
-        }
-        let targets = rows.iter().filter_map(|r| r.target.clone()).collect();
-        Some(Action::Drop { targets })
+        let dropped = commands::drop(&self.picked_rows());
+        self.or_refuse("drop", dropped)
     }
 
     /// `a`: absorb the selected working files, else the cursor's, else every
     /// local change. The command itself shows its plan to confirm.
     fn action_absorb(&mut self) -> Option<Action> {
-        if self.snapshot.info.working_changes.is_empty() {
-            self.notice = Some("absorb: no local changes".to_string());
-            return None;
-        }
-        let rows = self.picked_rows();
-        let is_file = |r: &&Row| matches!(r.kind, RowKind::WorkingFile { .. });
-        if !self.selected.is_empty()
-            && !rows
-                .iter()
-                .all(|r| is_file(r) || matches!(r.kind, RowKind::LocalChanges { .. }))
-        {
-            self.notice = Some("absorb: select files or local changes".to_string());
-            return None;
-        }
-        let files = if rows.iter().all(is_file) {
-            rows.iter().filter_map(|r| r.target.clone()).collect()
-        } else {
-            Vec::new()
-        };
-        Some(Action::Absorb { files })
+        let absorbed = commands::absorb(
+            &self.snapshot.info,
+            &self.picked_rows(),
+            !self.selected.is_empty(),
+        );
+        self.or_refuse("absorb", absorbed)
+    }
+
+    /// What `command` made of the picked rows, or `None` after a notice
+    /// saying why it takes nothing from them.
+    fn or_refuse<T>(&mut self, command: &str, made: Result<T, commands::Refusal>) -> Option<T> {
+        made.map_err(|reason| self.notice = Some(format!("{}: {}", command, reason)))
+            .ok()
     }
 
     /// The one branch `command` takes: the selected branch, else the cursor's,
     /// else `Some(None)`. Any other selection is refused, with a notice, as
     /// `None`.
     fn picked_branch(&mut self, command: &str) -> Option<Option<String>> {
-        let rows = self.picked_rows();
-        match rows.as_slice() {
-            [row] if matches!(row.kind, RowKind::BranchName { .. }) => Some(row.target.clone()),
-            _ if !self.selected.is_empty() => {
-                self.notice = Some(format!("{command}: select one branch"));
-                None
-            }
-            _ => Some(None),
-        }
+        let branch = commands::one_branch(&self.picked_rows(), !self.selected.is_empty());
+        self.or_refuse(command, branch)
     }
 
     /// `U`: unmerge the picked branch, else let unmerge pick one.
@@ -2336,21 +2230,7 @@ impl<'a> App<'a> {
     /// taking that branch's remote version, which replaces its commits
     /// (Spec 020).
     fn action_update(&mut self) -> Option<Action> {
-        let branch = match self.picked_rows().as_slice() {
-            [row]
-                if matches!(
-                    row.kind,
-                    RowKind::BranchName {
-                        remote: Some(_),
-                        ..
-                    }
-                ) =>
-            {
-                row.target.clone()
-            }
-            _ => None,
-        };
-        let Some(branch) = branch else {
+        let Some(branch) = commands::remote_branch(&self.picked_rows()) else {
             return Some(Action::Update);
         };
         let menu = Menu::new(
@@ -2376,33 +2256,18 @@ impl<'a> App<'a> {
     /// while `P` refuses, a force naming the branch it overwrites.
     fn action_push(&mut self, force: bool) -> Option<Action> {
         let branch = self.picked_branch("push")?;
-        match (branch, force) {
-            (branch, false) => Some(Action::Push { branch }),
-            (Some(branch), true) => Some(Action::ForcePush { branch }),
-            (None, true) => {
-                self.notice = Some("push -f: move to a branch".to_string());
-                None
-            }
-        }
+        self.or_refuse("push -f", commands::push(branch, force))
     }
 
     /// `r`: reword the commit under the cursor, or start editing the branch
     /// name in place.
     fn action_reword(&mut self) -> Option<Action> {
-        let row = self.current_row()?;
-        let target = row.target.clone();
-        match (&row.kind, target) {
-            (RowKind::Commit { .. }, Some(target)) => Some(Action::Reword { target, name: None }),
-            (RowKind::BranchName { name, .. }, Some(target)) => {
-                let field = TextField::new(name);
-                self.mode = Mode::RenameBranch {
-                    branch: target,
-                    field,
-                };
-                None
-            }
-            _ => {
-                self.notice = Some("reword: move to a commit or branch".to_string());
+        let reword = commands::reword(self.current_row()?);
+        match self.or_refuse("reword", reword)? {
+            Reword::Commit(action) => Some(action),
+            Reword::Branch { branch, name } => {
+                let field = TextField::new(&name);
+                self.mode = Mode::RenameBranch { branch, field };
                 None
             }
         }
