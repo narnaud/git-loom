@@ -63,8 +63,8 @@ pub(crate) struct PausedOp {
     /// state describes.
     pub(crate) command: Option<String>,
     /// `rebase` or `merge`; `None` when git has neither left.
-    pub(crate) git_op: Option<&'static str>,
-    pub(crate) step: Option<(usize, usize)>,
+    git_op: Option<&'static str>,
+    step: Option<(usize, usize)>,
     pub(crate) state: PausedState,
     pub(crate) files: Vec<FileChange>,
     pub(crate) id: PausedId,

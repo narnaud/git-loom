@@ -12,7 +12,7 @@ use crate::core::repo::{self, BranchInfo, CommitInfo, FileChange, RepoInfo};
 use crate::core::shortid::IdAllocator;
 use crate::session::tree::PENDING_COMMIT_OID;
 
-/// Everything gathered from the repo for one TUI round.
+/// Everything gathered from the repo for one round.
 pub(crate) struct Snapshot {
     pub(crate) workdir: PathBuf,
     pub(crate) git_dir: PathBuf,
@@ -169,7 +169,7 @@ pub(crate) fn is_staged(change: &FileChange) -> bool {
 /// in. Each is ranked by the first of its names `base` places, one it lacks
 /// by the section before it; the sort is stable, so a group or stack a
 /// preview splits keeps its own order. An empty group is split by place.
-pub(crate) fn keep_branch_places(base: &[Section], mut preview: Vec<Section>) -> Vec<Section> {
+fn keep_branch_places(base: &[Section], mut preview: Vec<Section>) -> Vec<Section> {
     let place: HashMap<&str, usize> = base
         .iter()
         .enumerate()
@@ -229,7 +229,7 @@ pub(crate) fn keep_branch_places(base: &[Section], mut preview: Vec<Section>) ->
 /// newest on the integration line, or at the branch's tip with the branch
 /// advanced onto it and whatever was stacked on that tip re-parented, so the
 /// ownership walk in `graph` draws the stack as the relocation will leave it.
-pub(crate) fn place_pending_commit(info: &mut RepoInfo, dest: &CommitDest, file_count: usize) {
+fn place_pending_commit(info: &mut RepoInfo, dest: &CommitDest, file_count: usize) {
     let oid = PENDING_COMMIT_OID;
     let mut pending = CommitInfo {
         oid,
@@ -261,7 +261,7 @@ pub(crate) fn place_pending_commit(info: &mut RepoInfo, dest: &CommitDest, file_
 /// Put `commit` on top of branch `name`, advancing that name alone, with
 /// whatever was stacked on the old tip re-parented onto it. A no-op when the
 /// branch is not there.
-pub(crate) fn push_onto_branch(info: &mut RepoInfo, mut commit: CommitInfo, name: &str) {
+fn push_onto_branch(info: &mut RepoInfo, mut commit: CommitInfo, name: &str) {
     let Some(branch) = info.branches.iter_mut().find(|b| b.name == name) else {
         return;
     };
@@ -279,7 +279,7 @@ pub(crate) fn push_onto_branch(info: &mut RepoInfo, mut commit: CommitInfo, name
         .insert(at.unwrap_or(info.commits.len()), commit);
 }
 
-pub(crate) fn reparent_children(info: &mut RepoInfo, from: git2::Oid, to: git2::Oid) {
+fn reparent_children(info: &mut RepoInfo, from: git2::Oid, to: git2::Oid) {
     for commit in &mut info.commits {
         if commit.parent_oid == Some(from) {
             commit.parent_oid = Some(to);

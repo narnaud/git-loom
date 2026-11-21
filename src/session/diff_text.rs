@@ -1,4 +1,5 @@
-//! The text a session shows beside its tree: the diff of a row, read from git.
+//! The text a session shows beside its tree: the diff of a row, read from
+//! git, and what each of its lines is.
 
 use anyhow::Result;
 
