@@ -12,7 +12,7 @@ For `/update-docs <command>`, follow existing command-page conventions.
 Read all before editing:
 
 1. `specs/0NN-<command>.md` (list `specs/` if needed): behavioral authority.
-2. `src/<command>.rs` and its `src/main.rs` variant: exact arguments, flags,
+2. `src/<command>.rs` and its `src/cli.rs` variant: exact arguments, flags,
    aliases, help, and `GROUPED_COMMANDS`.
 3. Existing `docs/src/commands/<command>.md`, if any.
 4. Two structurally similar pages: prefer `drop.md` plus `reword.md` or `show.md`.
@@ -43,7 +43,7 @@ Use these sections in order; omit only where stated:
 
 Style: terse, practical, present tense; `git-loom` in code and loom in prose.
 Treat short IDs as first-class in argument descriptions. Copy CLI names,
-aliases, and defaults verbatim from `src/main.rs`. Exclude design rationale.
+aliases, and defaults verbatim from `src/cli.rs`. Exclude design rationale.
 Use `# !` warnings and `# ✓` successes in conflict blocks. Use relative links.
 
 ## Command lists (always)

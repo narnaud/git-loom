@@ -4912,7 +4912,7 @@ Press R to look at it again"),
     );
 }
 
-/// `tui` is exempt from the `main.rs` guard (#382): an action must not save
+/// `tui` is exempt from the `cli.rs` guard (#382): an action must not save
 /// its own state over one it cannot read.
 #[test]
 fn an_action_keeps_a_corrupt_state_file() {

@@ -332,7 +332,7 @@ pub fn run(theme: graph::Theme) -> Result<()> {
     let workdir = repo::require_workdir(&repo, "display status")?.to_path_buf();
     let git_dir = repo.path().to_path_buf();
     // `Paused::load` reads an unreadable state as none: say so before the
-    // terminal is taken over, as the `main.rs` guard does.
+    // terminal is taken over, as the `cli.rs` guard does.
     transaction::load(&git_dir)?;
     let stamp = repo_stamp(&git_dir);
     let paused = Paused::load(&workdir, &git_dir);

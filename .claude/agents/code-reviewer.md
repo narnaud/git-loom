@@ -144,7 +144,7 @@ Repo-specific checks first, drawn from bugs this codebase has actually had:
   Captured commands never open an editor. Non-ASCII paths, renames,
   deletions, typechanges, submodules and binary files survive any path or
   hunk parsing; binary detection is locale-independent.
-- **Errors.** No git stderr in `bail!` (`main.rs` points to `loom trace`).
+- **Errors.** No git stderr in `bail!` (`cli.rs` points to `loom trace`).
   Errors say what to do next. A stopped rebase is not always a conflict, and
   a paused one is not completed: report what git actually did.
 - **Output.** User-facing text goes through `core::msg` (so `loom tui` and

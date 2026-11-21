@@ -536,7 +536,7 @@ pub const REPLAYS_EMPTY: &str = "is redundant — the history below it already h
 /// `stopped-sha` so a caller whose own undo removes that commit can replace a
 /// hint that would then name nothing.
 ///
-/// `main.rs` prints only the outermost message, so the text above stays what
+/// `cli.rs` prints only the outermost message, so the text above stays what
 /// the user reads. The sha is whatever git wrote, abbreviated on older
 /// versions, so it is only ever handed back to git to resolve.
 #[derive(Debug)]

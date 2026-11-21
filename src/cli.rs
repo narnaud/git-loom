@@ -1,33 +1,12 @@
-mod absorb;
-mod add;
-mod agent;
-mod branch;
-mod commit;
-mod completions;
-mod core;
-mod diff;
-mod drop;
-mod fold;
-mod git;
-mod init;
-mod merge;
-mod push;
-mod reword;
-mod session;
-mod show;
-mod split;
-mod status;
-mod swap;
-mod switch;
-mod trace;
-mod tui;
-mod unmerge;
-mod update;
-mod worktree;
+//! The command line: its clap definition and the dispatch to the commands.
 
 use crate::agent::AgentKind;
 use crate::core::hunk_select::HunkArgs;
 use crate::core::{agent_mode, graph, msg, repo, trace_log, transaction};
+use crate::{
+    absorb, add, agent, branch, commit, completions, diff, drop, fold, git, init, merge, push,
+    reword, show, split, status, swap, switch, trace, tui, unmerge, update, worktree,
+};
 
 use std::ffi::OsString;
 use std::io::IsTerminal;
@@ -522,7 +501,8 @@ enum WorktreeAction {
     },
 }
 
-fn main() {
+/// Run `git-loom` on the arguments of the process, and exit with its status.
+pub fn run() -> ! {
     let cli = parse_cli(&std::env::args_os().collect::<Vec<_>>());
 
     // Explicit opt-in only — never inferred from a missing terminal. The
@@ -787,7 +767,7 @@ fn finish_and_exit(result: anyhow::Result<()>) -> ! {
 
 /// Build the CLI and parse `args`. The help text is generated here rather than
 /// in the derive attributes because clap renders it while parsing, before
-/// `main` gets a chance to look at `--no-color` or the terminal background.
+/// `run` gets a chance to look at `--no-color` or the terminal background.
 fn parse_cli(args: &[OsString]) -> Cli {
     // Clap renders help on stdout whatever agent mode does with the rest.
     let color = colors_enabled(
@@ -795,7 +775,7 @@ fn parse_cli(args: &[OsString]) -> Cli {
         std::io::stdout().is_terminal(),
     );
     // Only a colored help needs a theme. Resolving it unconditionally would
-    // also pin the one-shot detection here, before `main` has read `--agent`,
+    // also pin the one-shot detection here, before `run` has read `--agent`,
     // and make every piped run pay a terminal query for a color it discards.
     let mode = if color {
         resolve_theme_mode(early_theme(args))
@@ -916,5 +896,5 @@ fn handle_write_todo(source: &str, todo_file: &str) -> anyhow::Result<()> {
 }
 
 #[cfg(test)]
-#[path = "main_test.rs"]
+#[path = "cli_test.rs"]
 mod tests;

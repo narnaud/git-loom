@@ -23,7 +23,7 @@ static GRAPH: Mutex<Option<Box<RawValue>>> = Mutex::new(None);
 /// What `loom push` did, stored by it and emitted by `finish`.
 static PUSH: Mutex<Option<Box<RawValue>>> = Mutex::new(None);
 
-/// Enable or disable agent mode. Called once from `main()` before dispatch.
+/// Enable or disable agent mode. Called once from `cli::run` before dispatch.
 pub fn set(enabled: bool) {
     ENABLED.store(enabled, Ordering::SeqCst);
 }
@@ -34,7 +34,7 @@ pub fn enabled() -> bool {
 }
 
 /// Marker error carried when a prompt was answered structurally instead of
-/// interactively. `main()` maps it to exit code 10 and suppresses the usual
+/// interactively. `cli::run` maps it to exit code 10 and suppresses the usual
 /// human error line (the stored response is the message).
 #[derive(Debug)]
 pub struct NeedsInput;
@@ -230,7 +230,7 @@ pub fn note_paused(message: &str, hint: &str) {
 
 /// Emit the final JSON status line to stdout and return the exit code.
 ///
-/// Called exactly once, at the very end of `main()`, when agent mode is on.
+/// Called exactly once, at the very end of `cli::run`, when agent mode is on.
 /// Stdout is the machine stream: this line is its last, and for most commands
 /// its only one (spec 019). What the command was asked for (`show`, `diff`,
 /// `trace`, `absorb`) prints there first.

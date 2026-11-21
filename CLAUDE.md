@@ -5,7 +5,9 @@ integration branch and rewrites/manages them without leaving that branch.
 
 ## Code Map
 
-- `src/main.rs`: clap CLI/dispatch; command modules are `src/<command>.rs`.
+- `src/cli.rs`: clap CLI/dispatch; command modules are `src/<command>.rs`.
+- `src/lib.rs`: the crate, a library listing the modules and exporting
+  `cli::run`; `src/bin/git-loom.rs` is the executable calling it.
 - `src/core/`: graph, short IDs, repository, remotes, transaction, agent mode, TUI
   mode (`ui.rs`: `msg` prompts/messages redirected to `loom tui`), weave.
 - `src/git/`: low-level Git operations.
@@ -150,7 +152,7 @@ flag a non-obvious fixture trick. Same for `tests/integration/*.sh`, where
 ## Error Convention
 
 `run_git`/`run_git_stdout` failures log stderr only to trace. Never put Git
-stderr in `bail!`; `main.rs` already tells users to run `loom trace`.
+stderr in `bail!`; `cli.rs` already tells users to run `loom trace`.
 
 ## Required Validation
 

@@ -12,6 +12,17 @@ keywords = [ "git", "cli", "branches", "workflow" ]
 categories = [ "command-line-utilities", "development-tools" ]
 exclude = [ ".claude/", ".github/", "docs/demo/", "docs/src/assets/*.mp4" ]
 
+[lib]
+# The doc comments draw graphs and command lines: none is Rust to compile.
+doctest = false
+
+[[bin]]
+name = "git-loom"
+path = "src/bin/git-loom.rs"
+# Its code and its tests are the library's.
+test = false
+doc = false
+
 [dependencies]
 anyhow = "1"
 chrono = "0.4"
