@@ -148,6 +148,11 @@ pub(crate) enum Action {
 /// for a pick that stages at once or reads a commit.
 pub(crate) type Stamp = Vec<Option<git2::Oid>>;
 
+/// The name of the trace `command`, a line of the log, runs under.
+pub(crate) fn trace_name(command: &str) -> String {
+    format!("loom tui: {}", command)
+}
+
 /// Run the loom command for `action`. Runs on the worker thread: the trace
 /// logger is thread-local, so each action gets its own log file, named after
 /// the command line the log shows.
@@ -157,7 +162,7 @@ pub(crate) fn execute_action(
     git_dir: &std::path::Path,
     theme: &graph::Theme,
 ) -> Result<()> {
-    let trace_name = format!("loom tui: {}", command);
+    let trace_name = trace_name(command);
     // As on the CLI, resuming adds to the trace of the command that paused.
     let resuming = matches!(action, Action::Continue { .. } | Action::Abort { .. });
     trace_log::init(git_dir, &trace_name, resuming);

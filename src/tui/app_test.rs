@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::mpsc::channel;
+use std::time::Duration;
 
 use crossterm::event::{Event, KeyEvent, MouseEvent};
 use ratatui::style::Style;
@@ -10,7 +11,8 @@ use crate::core::repo::{
     BranchInfo, CommitInfo, ContextCommit, FileChange, RepoInfo, UpstreamInfo,
 };
 use crate::core::shortid::IdAllocator;
-use crate::core::ui::PromptKind;
+use crate::core::ui::{Cancelled, PromptKind, Request};
+use crate::session::action::{LogEntry, execute_action};
 use crate::session::diff_text::{diff_line, untracked_file_text};
 use crate::session::paused::is_conflicted;
 use crate::session::snapshot::place_moved_commit;
@@ -170,17 +172,23 @@ fn tree_line<'a>(lines: &'a [String], needle: &str) -> &'a str {
 /// (so finishing it touches no repository).
 fn blocked_worker(app: &mut App) -> std::sync::mpsc::Sender<()> {
     let (release, wait) = channel::<()>();
-    let handle = std::thread::spawn(move || {
+    app.worker.run("loom reword a1".to_string(), move || {
         let _ = wait.recv();
         Err(Cancelled.into())
     });
-    app.running = Some(Running {
-        handle,
-        command: "loom reword a1".to_string(),
-        spinner: None,
-        ticks: 0,
-    });
     release
+}
+
+/// End the action as its worker would on `result`; whether to refresh.
+fn finish(app: &mut App, result: Result<()>) -> bool {
+    let ended = app.worker.close(result);
+    app.finish_action(ended)
+}
+
+/// Send `request` as a worker thread would, and let the loop take it.
+fn deliver(app: &mut App, request: Request) {
+    app.worker.sender().send(request).unwrap();
+    app.poll_background();
 }
 
 /// Poll until the worker has been reaped, within [`deadline`].
@@ -188,7 +196,7 @@ fn poll_until_idle(app: &mut App) {
     let deadline = deadline();
     loop {
         app.poll_background();
-        if app.running.is_none() {
+        if app.worker.running().is_none() {
             return;
         }
         assert!(
@@ -445,7 +453,7 @@ fn commit_collects_the_selected_working_files_and_lands_on_integration() {
     // A failed commit leaves no new row to land on, and the placeholder is
     // gone after the reload: go back to where `c` was pressed — the row
     // Space advanced onto after the last selected file.
-    app.finish_action(Err(anyhow::anyhow!("boom")));
+    finish(&mut app, Err(anyhow::anyhow!("boom")));
     assert_eq!(app.next_cursor.as_deref(), Some("br:feature-a"));
     assert_eq!(app.fallback_cursor, None);
 }
@@ -537,7 +545,7 @@ fn commit_with_hunks_reads_the_working_tree_off_the_loop() {
     };
     assert_eq!(origin, "wf:a.rs");
     assert_eq!(
-        app.log.last().unwrap().command,
+        app.worker.log.last().unwrap().command,
         format!("loom add -p {}", app.snapshot.ids.get_unstaged())
     );
     assert!(app.modal_active(), "no key may start anything meanwhile");
@@ -552,7 +560,7 @@ fn commit_with_hunks_reads_the_working_tree_off_the_loop() {
         panic!("the pick is not ready");
     };
     assert_eq!(
-        app.log.len(),
+        app.worker.log.len(),
         1,
         "the read reports into the entry the press opened, not a later one"
     );
@@ -650,9 +658,9 @@ fn a_collecting_pick_is_cancelled_by_esc() {
     assert_eq!(app.notice.as_deref(), Some("commit cancelled"));
     assert!(matches!(app.mode, Mode::Normal), "no destination is placed");
     // The entry the press opened says what became of it.
-    assert_eq!(app.log.len(), 1);
+    assert_eq!(app.worker.log.len(), 1);
     assert_eq!(
-        app.log[0].lines,
+        app.worker.log[0].lines,
         vec![(Level::Warn, "Cancelled".to_string())]
     );
 }
@@ -666,20 +674,20 @@ fn every_pick_outcome_says_so_in_its_entry() {
     let theme = make_theme();
 
     let mut app = app_on(&repo, &theme);
-    app.log.push(LogEntry {
+    app.worker.log.push(LogEntry {
         command: "loom add -p zz".to_string(),
         lines: Vec::new(),
     });
     app.finish_pick(Ok(false), LOCAL_CHANGES_KEY.to_string());
     assert_eq!(
-        app.log[0].lines,
+        app.worker.log[0].lines,
         vec![(Level::Warn, "Cancelled".to_string())],
         "a selector that kept nothing"
     );
     assert_eq!(app.notice.as_deref(), Some("commit cancelled"));
 
     let mut app = app_on(&repo, &theme);
-    app.log.push(LogEntry {
+    app.worker.log.push(LogEntry {
         command: "loom add -p zz".to_string(),
         lines: Vec::new(),
     });
@@ -688,7 +696,7 @@ fn every_pick_outcome_says_so_in_its_entry() {
         LOCAL_CHANGES_KEY.to_string(),
     );
     assert_eq!(
-        app.log[0].lines,
+        app.worker.log[0].lines,
         vec![(Level::Error, "could not stage".to_string())],
         "a staging that failed"
     );
@@ -768,7 +776,13 @@ fn a_pick_that_cannot_read_the_working_tree_reports_and_stops() {
     ));
     // Into the entry the press opened, as a failed action reports.
     assert_eq!(
-        app.log.last().unwrap().lines.first().map(|(l, _)| *l),
+        app.worker
+            .log
+            .last()
+            .unwrap()
+            .lines
+            .first()
+            .map(|(l, _)| *l),
         Some(Level::Error),
         "the failure is on record, not only on screen"
     );
@@ -788,7 +802,7 @@ fn commit_with_hunks_picks_from_every_local_change() {
     press(&mut app, KeyCode::Char('C'));
     assert!(matches!(app.pick, Some(Pick::Collecting { .. })));
     assert_eq!(
-        app.log.last().unwrap().command,
+        app.worker.log.last().unwrap().command,
         format!("loom add -p {}", app.snapshot.ids.get_unstaged()),
         "the pick covers every local change, not the cursor row"
     );
@@ -924,13 +938,17 @@ fn a_pick_stages_the_hunks_it_kept() {
     let mut app = app_on(&repo, &theme);
 
     let picked = picked_entries(&repo, true);
-    let logged = app.log.len();
+    let logged = app.worker.log.len();
     assert!(app.apply_pick(picked).unwrap());
 
     let status = repo.status_porcelain();
     assert!(status.contains("M  tracked.txt"), "{status}");
     // The press opens the entry; staging reports into it rather than a second.
-    assert_eq!(app.log.len(), logged, "no second `loom add -p` entry");
+    assert_eq!(
+        app.worker.log.len(),
+        logged,
+        "no second `loom add -p` entry"
+    );
 }
 
 /// Keeping nothing is not a failure and not a write: the index is left exactly
@@ -1971,7 +1989,7 @@ fn reword_on_a_branch_renames_it_in_the_tree() {
     assert_eq!(app.next_cursor.as_deref(), Some("br:feature-b"));
 
     // A failed rename leaves the cursor on the row that kept its name.
-    app.finish_action(Err(anyhow::anyhow!("boom")));
+    finish(&mut app, Err(anyhow::anyhow!("boom")));
     assert_eq!(app.next_cursor, None);
 }
 
@@ -2078,7 +2096,7 @@ fn new_branch_on_a_tip_commit_is_drawn_co_located_with_its_branch() {
 
     // A failed create has no `qb` row to land on and the fake row is gone
     // too: go back to where `b` was pressed.
-    app.finish_action(Err(anyhow::anyhow!("boom")));
+    finish(&mut app, Err(anyhow::anyhow!("boom")));
     assert_eq!(
         app.next_cursor.as_deref(),
         Some(oid('a').to_string().as_str())
@@ -2133,7 +2151,7 @@ fn new_branch_on_a_branch_row_targets_that_branch() {
             .is_some()
     );
     // Success follows the new branch; the fallback is not used.
-    app.finish_action(Ok(()));
+    finish(&mut app, Ok(()));
     assert_eq!(app.next_cursor.as_deref(), Some("br:fb"));
     assert_eq!(app.fallback_cursor, None);
 }
@@ -2377,12 +2395,15 @@ fn prompt_request_opens_a_popup_that_owns_the_keys_and_replies() {
     let theme = make_theme();
     let mut app = make_app(make_snapshot(), &theme);
     let (reply, answer) = channel();
-    app.handle_request(Request::Prompt {
-        kind: PromptKind::Input { placeholder: None },
-        prompt: "Branch name".to_string(),
-        error: None,
-        reply,
-    });
+    deliver(
+        &mut app,
+        Request::Prompt {
+            kind: PromptKind::Input { placeholder: None },
+            prompt: "Branch name".to_string(),
+            error: None,
+            reply,
+        },
+    );
     assert!(app.modal_active());
     let Some(Popup::Prompt { prompt, .. }) = &app.popup else {
         panic!("expected a prompt popup");
@@ -2405,12 +2426,15 @@ fn prompt_request_opens_a_popup_that_owns_the_keys_and_replies() {
     );
 
     let (reply, answer) = channel();
-    app.handle_request(Request::Prompt {
-        kind: PromptKind::Confirm,
-        prompt: "Drop?".to_string(),
-        error: None,
-        reply,
-    });
+    deliver(
+        &mut app,
+        Request::Prompt {
+            kind: PromptKind::Confirm,
+            prompt: "Drop?".to_string(),
+            error: None,
+            reply,
+        },
+    );
     press(&mut app, KeyCode::Esc);
     assert_eq!(answer.recv().unwrap(), None);
     assert!(app.popup.is_none());
@@ -2420,39 +2444,45 @@ fn prompt_request_opens_a_popup_that_owns_the_keys_and_replies() {
 fn messages_land_in_the_current_log_entry() {
     let theme = make_theme();
     let mut app = make_app(make_snapshot(), &theme);
-    app.log.push(LogEntry {
+    app.worker.log.push(LogEntry {
         command: "loom reword a1".to_string(),
         lines: Vec::new(),
     });
-    app.handle_request(Request::Message {
-        level: Level::Success,
-        text: "Reworded `a1`".to_string(),
-    });
+    deliver(
+        &mut app,
+        Request::Message {
+            level: Level::Success,
+            text: "Reworded `a1`".to_string(),
+        },
+    );
     assert_eq!(
-        app.log[0].lines,
+        app.worker.log[0].lines,
         vec![(Level::Success, "Reworded `a1`".to_string())]
     );
 
     // Success: the last ✓ line becomes the status-bar notice.
-    assert!(app.finish_action(Ok(())));
+    assert!(finish(&mut app, Ok(())));
     assert_eq!(app.notice.as_deref(), Some("✓ Reworded `a1`"));
     assert!(app.popup.is_none());
 
     // Several ✓ lines (`drop a b`): the last one, with a count of the rest.
     for text in ["Restored `a`", "Deleted `b`"] {
-        app.handle_request(Request::Message {
-            level: Level::Success,
-            text: text.to_string(),
-        });
+        deliver(
+            &mut app,
+            Request::Message {
+                level: Level::Success,
+                text: text.to_string(),
+            },
+        );
     }
-    assert!(app.finish_action(Ok(())));
+    assert!(finish(&mut app, Ok(())));
     assert_eq!(
         app.notice.as_deref(),
         Some("✓ Deleted `b` (+2 more, L: log)")
     );
 
     // Failure: an error popup, and the line is logged.
-    assert!(!app.finish_action(Err(anyhow::anyhow!("Nothing to commit"))));
+    assert!(!finish(&mut app, Err(anyhow::anyhow!("Nothing to commit"))));
     assert!(matches!(
         app.popup,
         Some(Popup::Notice {
@@ -2461,7 +2491,7 @@ fn messages_land_in_the_current_log_entry() {
         })
     ));
     assert_eq!(
-        app.log[0].lines.last(),
+        app.worker.log[0].lines.last(),
         Some(&(Level::Error, "Nothing to commit".to_string()))
     );
     press(&mut app, KeyCode::Char('x'));
@@ -2469,7 +2499,7 @@ fn messages_land_in_the_current_log_entry() {
 
     // A cancelled prompt is not an error.
     app.popup = None;
-    assert!(!app.finish_action(Err(Cancelled.into())));
+    assert!(!finish(&mut app, Err(Cancelled.into())));
     assert_eq!(app.notice.as_deref(), Some("cancelled"));
     assert!(app.popup.is_none());
 }
@@ -2480,16 +2510,16 @@ fn messages_land_in_the_current_log_entry() {
 fn a_failure_keeps_an_open_log() {
     let theme = make_theme();
     let mut app = make_app(make_snapshot(), &theme);
-    app.log.push(LogEntry {
+    app.worker.log.push(LogEntry {
         command: "loom drop a1".to_string(),
         lines: Vec::new(),
     });
     app.open_log();
 
-    assert!(app.finish_action(Err(anyhow::anyhow!("Nothing to commit"))));
+    assert!(finish(&mut app, Err(anyhow::anyhow!("Nothing to commit"))));
     assert!(matches!(app.popup, Some(Popup::Log { .. })));
     assert_eq!(
-        app.log[0].lines.last(),
+        app.worker.log[0].lines.last(),
         Some(&(Level::Error, "Nothing to commit".to_string()))
     );
 }
@@ -2526,14 +2556,14 @@ fn suspend_request_reaches_the_shell_and_resume_ends_the_wait() {
     let mut app = make_app(make_snapshot(), &theme);
     let release = blocked_worker(&mut app);
     let (ack, acked) = channel();
-    app.request_tx.send(Request::Suspend(ack)).unwrap();
+    app.worker.sender().send(Request::Suspend(ack)).unwrap();
     let Tick::Suspend(ack) = app.poll_background() else {
         panic!("expected a suspend tick");
     };
     ack.send(()).unwrap();
     assert!(acked.recv().is_ok());
 
-    app.request_tx.send(Request::Resume).unwrap();
+    app.worker.sender().send(Request::Resume).unwrap();
     app.wait_for_resume();
 
     // A worker gone without a Resume ends the wait too.
@@ -2584,15 +2614,18 @@ fn popups_render_over_the_panes() {
     let theme = make_theme();
     let mut app = make_app(make_snapshot(), &theme);
     let (reply, _answer) = channel();
-    app.handle_request(Request::Prompt {
-        kind: PromptKind::Select {
-            items: vec!["feature-a".to_string()],
-            allow_other: true,
+    deliver(
+        &mut app,
+        Request::Prompt {
+            kind: PromptKind::Select {
+                items: vec!["feature-a".to_string()],
+                allow_other: true,
+            },
+            prompt: "Target branch".to_string(),
+            error: None,
+            reply,
         },
-        prompt: "Target branch".to_string(),
-        error: None,
-        reply,
-    });
+    );
     let mut shell = Shell::new(app);
     let backend = ratatui::backend::TestBackend::new(100, 30);
     let mut terminal = ratatui::Terminal::new(backend).unwrap();
@@ -4460,7 +4493,7 @@ fn update_asks_only_on_one_pushed_branch() {
 
     press(&mut app, KeyCode::Esc);
     assert!(app.popup.is_none());
-    assert!(app.running.is_none());
+    assert!(app.worker.running().is_none());
     assert_eq!(app.notice.as_deref(), Some("update cancelled"));
 }
 
@@ -4488,11 +4521,12 @@ fn update_menu_updates_or_takes_the_remote_version() {
             }
             poll_until_idle(&mut app);
             let lines = app
+                .worker
                 .log
                 .last()
                 .map(|e| e.lines.iter().map(|(_, t)| t.clone()).collect::<Vec<_>>());
             assert!(app.popup.is_none(), "{lines:?}");
-            app.log.last().unwrap().command.clone()
+            app.worker.log.last().unwrap().command.clone()
         };
 
         assert_eq!(run(&[KeyCode::Enter]), "loom update");
@@ -4605,7 +4639,7 @@ fn tree_actions_are_refused_while_paused() {
     let mut app = paused_app(&repo, &theme);
 
     press(&mut app, KeyCode::Char('f'));
-    assert!(app.running.is_none());
+    assert!(app.worker.running().is_none());
     assert_eq!(
         app.notice.as_deref(),
         Some("`loom drop` is paused: c to continue, a to abort")
@@ -4645,7 +4679,7 @@ fn staging_the_resolution_then_continuing_finishes_the_operation() {
         assert!(paused.headline.starts_with("No conflicts left"));
 
         press(&mut app, KeyCode::Char('c'));
-        assert_eq!(app.log.last().unwrap().command, "loom continue");
+        assert_eq!(app.worker.log.last().unwrap().command, "loom continue");
         poll_until_idle(&mut app);
         assert!(app.paused.is_none(), "back on the tree");
         assert!(app.popup.is_none(), "the tree loaded");
@@ -4734,7 +4768,7 @@ fn abort_refuses_once_the_paused_operation_changed() {
         crate::git::run_git(&repo.workdir(), &["rebase", "--abort"]).unwrap();
         press(&mut app, KeyCode::Enter);
         poll_until_idle(&mut app);
-        let lines = &app.log.last().unwrap().lines;
+        let lines = &app.worker.log.last().unwrap().lines;
         assert!(
             lines
                 .iter()
@@ -4763,7 +4797,7 @@ fn continue_refuses_once_the_paused_operation_changed() {
         crate::git::run_git(&repo.workdir(), &["rebase", "--abort"]).unwrap();
         press(&mut app, KeyCode::Char('c'));
         poll_until_idle(&mut app);
-        let lines = &app.log.last().unwrap().lines;
+        let lines = &app.worker.log.last().unwrap().lines;
         assert!(
             lines
                 .iter()
