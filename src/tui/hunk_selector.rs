@@ -321,8 +321,8 @@ impl HunkSelectorApp {
                     let any_selected = (dir_start..=dir_end)
                         .any(|i| self.files[i].hunks.iter().any(|h| h.selected));
                     let new_state = !any_selected;
-                    for i in dir_start..=dir_end {
-                        for h in &mut self.files[i].hunks {
+                    for file in &mut self.files[dir_start..=dir_end] {
+                        for h in &mut file.hunks {
                             h.selected = new_state;
                         }
                     }

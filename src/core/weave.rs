@@ -1081,8 +1081,8 @@ impl Weave {
         let mut section_commits = Vec::new();
         let mut indices_to_remove = Vec::new();
 
-        for i in 0..=branch_idx {
-            if let IntegrationEntry::Pick(commit) = &self.integration_line[i] {
+        for (i, entry) in self.integration_line[..=branch_idx].iter().enumerate() {
+            if let IntegrationEntry::Pick(commit) = entry {
                 let mut commit = commit.clone();
                 commit.update_refs.retain(|r| r != branch_name);
                 section_commits.push(commit);

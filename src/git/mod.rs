@@ -610,10 +610,10 @@ pub fn short_hash(hash: &str) -> &str {
 
 /// Resolve the path to the git-loom binary.
 ///
-/// During `cargo test`, `current_exe()` returns the test harness binary in
-/// `target/<profile>/deps/`, while the binary itself sits one level up in
-/// `target/<profile>/` — put there by cargo because `tests/bin_is_built.rs`
-/// makes the package's binaries part of the test build.
+/// During `cargo test`, `current_exe()` returns the test harness binary,
+/// below `target/<profile>/` (see [`harness_profile_dir`]), while the binary
+/// itself sits in `target/<profile>/` — put there by cargo because
+/// `tests/bin_is_built.rs` makes the package's binaries part of the test build.
 pub fn loom_exe_path() -> Result<PathBuf> {
     resolve_loom_exe(&std::env::current_exe()?)
 }
@@ -625,19 +625,13 @@ pub fn loom_exe_path() -> Result<PathBuf> {
 /// `Unrecognized option` and exit 101, so git aborts with "there was a problem
 /// with the editor" and the caller reports nothing but `git rebase failed`.
 fn resolve_loom_exe(exe: &Path) -> Result<PathBuf> {
-    // A `deps` directory only means a harness under `cargo test`. An installed
-    // binary that happens to sit in one is just a binary, and telling its user
-    // to run `cargo build` would be nonsense.
+    // A harness directory only means a harness under `cargo test`. An
+    // installed binary that happens to sit in one is just a binary, and
+    // telling its user to run `cargo build` would be nonsense.
     if !cfg!(test) {
         return Ok(exe.to_path_buf());
     }
-    let Some(parent) = exe.parent() else {
-        return Ok(exe.to_path_buf());
-    };
-    if parent.file_name().and_then(|n| n.to_str()) != Some("deps") {
-        return Ok(exe.to_path_buf());
-    }
-    let Some(profile_dir) = parent.parent() else {
+    let Some(profile_dir) = harness_profile_dir(exe) else {
         return Ok(exe.to_path_buf());
     };
 
@@ -649,6 +643,24 @@ fn resolve_loom_exe(exe: &Path) -> Result<PathBuf> {
         );
     }
     Ok(actual)
+}
+
+/// The `target/<profile>` directory of a `cargo test` harness at `exe`, which
+/// cargo puts in `deps/` or, in its per-unit layout, in
+/// `build/<package>/<hash>/out/`; `None` for any other path.
+fn harness_profile_dir(exe: &Path) -> Option<&Path> {
+    fn name(dir: &Path) -> Option<&str> {
+        dir.file_name().and_then(|n| n.to_str())
+    }
+    let dir = exe.parent()?;
+    match name(dir)? {
+        "deps" => dir.parent(),
+        "out" => {
+            let build = dir.parent()?.parent()?.parent()?;
+            (name(build) == Some("build")).then(|| build.parent())?
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]
