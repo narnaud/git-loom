@@ -25,6 +25,30 @@ fn a_test_harness_resolves_to_the_built_binary() {
     assert_eq!(resolved, built);
 }
 
+/// Cargo's per-unit layout keeps the harness four levels below the binary.
+#[test]
+fn a_test_harness_in_the_per_unit_layout_resolves_to_the_built_binary() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("build/git-loom/0123456789abcdef/out");
+    std::fs::create_dir_all(&out).unwrap();
+    let built = dir
+        .path()
+        .join(format!("git-loom{}", std::env::consts::EXE_SUFFIX));
+    std::fs::write(&built, "").unwrap();
+
+    let resolved = resolve_loom_exe(&out.join("git_loom-0123456789abcdef")).unwrap();
+
+    assert_eq!(resolved, built);
+}
+
+/// An `out` directory that is not cargo's is no harness.
+#[test]
+fn a_binary_in_some_other_out_directory_resolves_to_itself() {
+    let exe = std::path::Path::new("/opt/tools/a/b/out/git-loom");
+
+    assert_eq!(resolve_loom_exe(exe).unwrap(), exe);
+}
+
 /// Without that binary the harness must not be offered in its place: git would
 /// run it as the rebase sequence editor and get an argument parser instead.
 #[test]
