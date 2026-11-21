@@ -369,3 +369,7 @@ pub(crate) fn command_line(action: &Action, sid: impl Fn(&str) -> String) -> Str
     }
     words.join(" ")
 }
+
+#[cfg(test)]
+#[path = "action_test.rs"]
+mod tests;
