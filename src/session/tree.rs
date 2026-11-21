@@ -372,6 +372,83 @@ pub(crate) fn nearest_focusable(rows: &[Row], index: usize) -> Option<usize> {
         .or_else(|| rows.iter().position(|r| r.focusable))
 }
 
+/// Rows built by hand, for the tests of what reads rows.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+    use crate::core::test_helpers::oid;
+
+    /// A focusable row, keyed by its `target`.
+    pub(crate) fn row(kind: RowKind, target: Option<&str>) -> Row {
+        Row {
+            kind,
+            sid: String::new(),
+            target: target.map(str::to_string),
+            key: target.unwrap_or_default().to_string(),
+            focusable: true,
+            expandable: false,
+            expanded: false,
+        }
+    }
+
+    pub(crate) fn local_changes(count: usize) -> Row {
+        row(RowKind::LocalChanges { count }, Some("zz"))
+    }
+
+    /// A working file, named by its path.
+    pub(crate) fn working_file(path: &str) -> Row {
+        let kind = RowKind::WorkingFile {
+            path: path.to_string(),
+            index: ' ',
+            worktree: 'M',
+        };
+        row(kind, Some(path))
+    }
+
+    /// The commit `oid(byte)`, named by its hash.
+    pub(crate) fn commit_row(byte: u8) -> Row {
+        let kind = RowKind::Commit {
+            oid: oid(byte),
+            message: String::new(),
+            dot_color: None,
+            file_count: 1,
+        };
+        row(kind, Some(&oid(byte).to_string()))
+    }
+
+    /// A file of the commit `oid(byte)`, named by its path.
+    pub(crate) fn commit_file(byte: u8, path: &str) -> Row {
+        let kind = RowKind::CommitFile {
+            oid: oid(byte),
+            path: path.to_string(),
+            index: 'M',
+            worktree: ' ',
+            on_branch: false,
+        };
+        row(kind, Some(path))
+    }
+
+    pub(crate) fn branch_row(name: &str, remote: Option<RemoteStatus>) -> Row {
+        let kind = RowKind::BranchName {
+            name: name.to_string(),
+            remote,
+            connector: "│╭─",
+            range: None,
+        };
+        row(kind, Some(name))
+    }
+
+    pub(crate) fn upstream_row() -> Row {
+        let kind = RowKind::Upstream {
+            label: "origin/main".to_string(),
+            base_short_id: String::new(),
+            base_message: String::new(),
+            commits_ahead: 0,
+        };
+        row(kind, None)
+    }
+}
+
 #[cfg(test)]
 #[path = "tree_test.rs"]
 mod tests;
