@@ -2,7 +2,9 @@
 //! command takes, the `Action` it makes of them, and why a pick has none.
 //!
 //! `rows` is the selection in tree order, else the row under the cursor;
-//! `selecting` says which of the two.
+//! `selecting` says which of the two. Where the rows can go from there is
+//! `targets`; a place walked to or a name typed is the front-end's to add
+//! to the `Action`.
 
 use crate::core::repo::{self, RepoInfo};
 use crate::session::Refusal;

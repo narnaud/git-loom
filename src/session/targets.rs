@@ -1,12 +1,12 @@
 //! Where a session's rows can go: the rows a fold lands on, the places a
-//! commit moves to, the commit a split takes.
+//! commit moves to or a new one is put, the commit a split takes.
 
 use std::collections::HashSet;
 use std::path::Path;
 
 use crate::core::repo::RepoInfo;
 use crate::session::Refusal;
-use crate::session::snapshot::{MoveSlot, Preview, Snapshot};
+use crate::session::snapshot::{CommitDest, MoveSlot, Preview, Snapshot};
 use crate::session::tree::{self, Row, RowKind};
 
 /// What folding the sources into a target does, tagged on the tree.
@@ -117,6 +117,17 @@ pub(crate) fn fold_targets(
         return Err("nothing to fold into");
     }
     Ok(targets)
+}
+
+/// Where a new commit can be put, in the order `tree` lists them: the
+/// integration line, then each branch.
+pub(crate) fn commit_dests(tree: &[Row]) -> Vec<CommitDest> {
+    let mut dests = vec![CommitDest::Integration];
+    dests.extend(tree.iter().filter_map(|r| match &r.kind {
+        RowKind::BranchName { name, .. } => Some(CommitDest::Branch(name.clone())),
+        _ => None,
+    }));
+    dests
 }
 
 /// The one commit a split of `rows` takes: the commit the rows are, or the one

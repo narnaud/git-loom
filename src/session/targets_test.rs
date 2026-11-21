@@ -1,5 +1,6 @@
 use super::*;
 use crate::core::test_helpers::{base_info, branch, commit, oid};
+use crate::session::tree::test_support::{branch_row, commit_row, local_changes, upstream_row};
 
 const A: u8 = 0x01;
 const B: u8 = 0x02;
@@ -22,6 +23,27 @@ fn info() -> RepoInfo {
         branches: vec![branch("top", C, None)],
         ..base_info()
     }
+}
+
+#[test]
+fn a_new_commit_goes_on_the_integration_line_or_a_branch_of_the_tree() {
+    let tree = [
+        local_changes(1),
+        branch_row("top", None),
+        commit_row(C),
+        branch_row("below", None),
+        commit_row(A),
+        upstream_row(),
+    ];
+
+    assert_eq!(
+        commit_dests(&tree),
+        [
+            CommitDest::Integration,
+            CommitDest::Branch("top".to_string()),
+            CommitDest::Branch("below".to_string()),
+        ]
+    );
 }
 
 #[test]
