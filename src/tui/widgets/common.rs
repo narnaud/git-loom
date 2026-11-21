@@ -9,6 +9,7 @@ use ratatui::{
     widgets::{Block, Borders, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
 
+use crate::session::diff_text::{self, DiffLine, expand_tabs};
 use crate::tui::theme::TuiTheme;
 
 /// Bordered block for a pane, with the active border style when focused.
@@ -99,75 +100,26 @@ pub(crate) fn render_scrollbar(
     );
 }
 
-/// `line` with each tab shown as `width` spaces: the terminal grid has no
-/// tab stops, and a diff's one-column prefix would shift them anyway.
-pub(crate) fn expand_tabs(line: &str, width: usize) -> String {
-    let mut out = String::with_capacity(line.len());
-    for c in line.chars() {
-        match c {
-            '\t' => out.extend(std::iter::repeat_n(' ', width)),
-            c => out.push(c),
-        }
-    }
-    out
-}
-
-/// Colorize plain diff text by line prefix, tabs expanded per the theme.
-///
-/// `git show` output opens with a header (commit line, author, date, the
-/// commit message, diffstat) whose lines would otherwise be styled as dim
-/// context — the message is indented like context lines. Everything from
-/// the start of a `commit `-led text up to the first `diff --git` renders
-/// in normal terminal colors instead, with only the commit line dimmed.
+/// Colorize plain diff text by line kind, tabs expanded per the theme.
 pub(crate) fn colorize_diff(text: &str, theme: &TuiTheme) -> Vec<Line<'static>> {
-    let mut in_header = text.starts_with("commit ");
-    text.lines()
-        .map(|raw| {
-            if in_header && raw.starts_with("diff --git") {
-                in_header = false;
-            }
-            let style = if in_header {
-                if raw.starts_with("commit ") {
-                    theme.dim
-                } else {
-                    Style::default()
-                }
-            } else {
-                diff_line_style(raw, theme)
-            };
-            Line::from(Span::styled(expand_tabs(raw, theme.tab_width), style))
+    diff_text::classify(text)
+        .map(|(kind, raw)| {
+            Line::from(Span::styled(
+                expand_tabs(raw, theme.tab_width),
+                diff_style(kind, theme),
+            ))
         })
         .collect()
 }
 
-/// Style for one line of full `git diff`/`git show` output.
-pub(crate) fn diff_line_style(line: &str, theme: &TuiTheme) -> Style {
-    if line.starts_with("+++") || line.starts_with("---") || line.starts_with("diff --git") {
-        theme.message.add_modifier(Modifier::BOLD)
-    } else if line.starts_with("index ") {
-        theme.dim
-    } else if line.starts_with('+') {
-        theme.added
-    } else if line.starts_with('-') {
-        theme.removed
-    } else if line.starts_with("@@") {
-        theme.hunk_header
-    } else {
-        theme.context
-    }
-}
-
-/// Style for one line inside a hunk body. Distinct from [`diff_line_style`]:
-/// hunk bodies carry no file headers, so a body line whose content begins
-/// with `++` (from an added line reading `++ x`) must stay an added line.
-pub(crate) fn hunk_line_style(line: &str, theme: &TuiTheme) -> Style {
-    if line.starts_with('+') {
-        theme.added
-    } else if line.starts_with('-') {
-        theme.removed
-    } else if line.starts_with("@@") {
-        theme.hunk_header
-    } else {
-        theme.context
+pub(crate) fn diff_style(kind: DiffLine, theme: &TuiTheme) -> Style {
+    match kind {
+        DiffLine::FileHeader => theme.message.add_modifier(Modifier::BOLD),
+        DiffLine::Index | DiffLine::CommitLine => theme.dim,
+        DiffLine::Added => theme.added,
+        DiffLine::Removed => theme.removed,
+        DiffLine::HunkHeader => theme.hunk_header,
+        DiffLine::Context => theme.context,
+        DiffLine::CommitHeader => Style::default(),
     }
 }

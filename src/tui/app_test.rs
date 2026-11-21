@@ -11,10 +11,10 @@ use crate::core::repo::{
 };
 use crate::core::shortid::IdAllocator;
 use crate::core::ui::PromptKind;
-use crate::session::diff_text::untracked_file_text;
+use crate::session::diff_text::{diff_line, untracked_file_text};
 use crate::session::paused::is_conflicted;
 use crate::session::snapshot::place_moved_commit;
-use crate::tui::widgets::common::diff_line_style;
+use crate::tui::widgets::common::diff_style;
 
 fn oid(hex_char: char) -> git2::Oid {
     git2::Oid::from_str(&hex_char.to_string().repeat(40)).unwrap()
@@ -3243,12 +3243,15 @@ fn untracked_file_text_caps_line_count() {
 #[test]
 fn diff_line_styles_map_prefixes() {
     let theme = make_theme();
-    assert_eq!(diff_line_style("+added", &theme), theme.added);
-    assert_eq!(diff_line_style("-removed", &theme), theme.removed);
-    assert_eq!(diff_line_style("@@ -1 +1 @@", &theme), theme.hunk_header);
-    assert_eq!(diff_line_style(" context", &theme), theme.context);
-    assert_ne!(diff_line_style("+++ b/file", &theme), theme.added);
-    assert_ne!(diff_line_style("--- a/file", &theme), theme.removed);
+    assert_eq!(diff_style(diff_line("+added"), &theme), theme.added);
+    assert_eq!(diff_style(diff_line("-removed"), &theme), theme.removed);
+    assert_eq!(
+        diff_style(diff_line("@@ -1 +1 @@"), &theme),
+        theme.hunk_header
+    );
+    assert_eq!(diff_style(diff_line(" context"), &theme), theme.context);
+    assert_ne!(diff_style(diff_line("+++ b/file"), &theme), theme.added);
+    assert_ne!(diff_style(diff_line("--- a/file"), &theme), theme.removed);
 }
 
 #[test]

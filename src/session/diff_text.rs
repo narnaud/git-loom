@@ -8,6 +8,86 @@ use crate::git;
 use crate::session::snapshot::{NEW_BRANCH_NAME, Snapshot};
 use crate::session::tree::{PENDING_COMMIT_OID, Row, RowKind, branch_key};
 
+/// What a line of `git diff`/`git show` output is, for coloring.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DiffLine {
+    /// `diff --git`, `+++`, `---`.
+    FileHeader,
+    /// `index …`.
+    Index,
+    Added,
+    Removed,
+    /// `@@ … @@`.
+    HunkHeader,
+    Context,
+    /// The `commit <hash>` line opening `git show` output.
+    CommitLine,
+    /// The rest of that opening: author, date, message, diffstat.
+    CommitHeader,
+}
+
+/// Classify one line of full `git diff`/`git show` output.
+pub(crate) fn diff_line(line: &str) -> DiffLine {
+    if line.starts_with("+++") || line.starts_with("---") || line.starts_with("diff --git") {
+        DiffLine::FileHeader
+    } else if line.starts_with("index ") {
+        DiffLine::Index
+    } else {
+        hunk_line(line)
+    }
+}
+
+/// Classify one line inside a hunk body. Distinct from [`diff_line`]: hunk
+/// bodies carry no file headers, so a body line whose content begins with
+/// `++` (from an added line reading `++ x`) must stay an added line.
+pub(crate) fn hunk_line(line: &str) -> DiffLine {
+    if line.starts_with('+') {
+        DiffLine::Added
+    } else if line.starts_with('-') {
+        DiffLine::Removed
+    } else if line.starts_with("@@") {
+        DiffLine::HunkHeader
+    } else {
+        DiffLine::Context
+    }
+}
+
+/// Each line of diff text with its kind.
+///
+/// `git show` output opens with a header (commit line, author, date, the
+/// commit message, diffstat) whose lines would otherwise read as context —
+/// the message is indented like context lines. Everything from the start of
+/// a `commit `-led text up to the first `diff --git` is header instead.
+pub(crate) fn classify(text: &str) -> impl Iterator<Item = (DiffLine, &str)> {
+    let mut in_header = text.starts_with("commit ");
+    text.lines().map(move |raw| {
+        if in_header && raw.starts_with("diff --git") {
+            in_header = false;
+        }
+        let kind = if !in_header {
+            diff_line(raw)
+        } else if raw.starts_with("commit ") {
+            DiffLine::CommitLine
+        } else {
+            DiffLine::CommitHeader
+        };
+        (kind, raw)
+    })
+}
+
+/// `line` with each tab shown as `width` spaces: the terminal grid has no
+/// tab stops, and a diff's one-column prefix would shift them anyway.
+pub(crate) fn expand_tabs(line: &str, width: usize) -> String {
+    let mut out = String::with_capacity(line.len());
+    for c in line.chars() {
+        match c {
+            '\t' => out.extend(std::iter::repeat_n(' ', width)),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 /// Produce the raw diff text for a row by shelling out to git.
 pub(crate) fn diff_text(snapshot: &Snapshot, row: &Row) -> String {
     let workdir = &snapshot.workdir;
