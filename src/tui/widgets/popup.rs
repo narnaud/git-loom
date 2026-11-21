@@ -11,6 +11,7 @@ use ratatui::{
 };
 
 use crate::core::ui::{Answer, Level, PromptKind};
+use crate::session::action::LogEntry;
 use crate::tui::theme::TuiTheme;
 use crate::tui::widgets::common::{centered, highlight_backticks};
 use crate::tui::widgets::diff_pane::DiffPane;
@@ -514,13 +515,6 @@ impl Notice {
 }
 
 // ── Log ──────────────────────────────────────────────────────────────────
-
-/// One action in the TUI log: the equivalent command line and the message
-/// lines it produced.
-pub(crate) struct LogEntry {
-    pub command: String,
-    pub lines: Vec<(Level, String)>,
-}
 
 /// Draw the log over `area`; `scroll` persists across frames.
 pub(crate) fn render_log(
