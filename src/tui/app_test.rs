@@ -11,6 +11,7 @@ use crate::core::repo::{
 };
 use crate::core::shortid::IdAllocator;
 use crate::core::ui::PromptKind;
+use crate::session::paused::is_conflicted;
 use crate::session::snapshot::place_moved_commit;
 use crate::tui::widgets::common::diff_line_style;
 
@@ -4550,7 +4551,7 @@ fn a_merge_paused_on_its_replay_headlines_the_conflicts() {
     let app = paused_app(&repo, &theme);
 
     let paused = app.paused.as_ref().unwrap();
-    assert_eq!(paused.command.as_deref(), Some("merge"));
+    assert_eq!(paused.op.command.as_deref(), Some("merge"));
     assert!(
         paused.headline.starts_with("Conflicts"),
         "{}",
@@ -4571,7 +4572,7 @@ fn a_paused_operation_replaces_the_tree() {
     let app = paused_app(&repo, &theme);
 
     let paused = app.paused.as_ref().unwrap();
-    assert_eq!(paused.command.as_deref(), Some("drop"));
+    assert_eq!(paused.op.command.as_deref(), Some("drop"));
     assert!(
         paused.headline.starts_with("Conflicts"),
         "{}",
@@ -4636,7 +4637,7 @@ fn staging_the_resolution_then_continuing_finishes_the_operation() {
         press(&mut app, KeyCode::Char(' '));
         assert_eq!(app.notice.as_deref(), Some("staged f.txt"));
         let paused = app.paused.as_ref().expect("still paused");
-        assert!(!paused.files.iter().any(is_conflicted));
+        assert!(!paused.op.files.iter().any(is_conflicted));
         assert!(paused.headline.starts_with("No conflicts left"));
 
         press(&mut app, KeyCode::Char('c'));
@@ -4680,7 +4681,7 @@ fn staging_a_file_out_of_the_paused_list_moves_on_to_the_next_one() {
         press(&mut app, KeyCode::Char(' '));
         assert_eq!(app.notice.as_deref(), Some("staged c.txt"));
         let paused = app.paused.as_ref().expect("still paused");
-        assert!(!paused.files.iter().any(|f| f.path == "c.txt"));
+        assert!(!paused.op.files.iter().any(|f| f.path == "c.txt"));
         assert_eq!(paused.current().map(|f| f.path.as_str()), Some("d.txt"));
     });
 }

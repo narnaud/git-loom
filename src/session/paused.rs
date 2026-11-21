@@ -1,0 +1,140 @@
+//! A paused operation as a session reads it off the repo: HEAD is detached
+//! mid-rebase, so no tree can be gathered until the operation ends.
+
+use std::path::Path;
+
+use crate::core::graph;
+use crate::core::repo::{self, FileChange};
+use crate::core::transaction;
+use crate::git;
+
+/// What tells one paused operation from the next, even of the same command:
+/// the commit git started it from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PausedId {
+    pub(crate) command: Option<String>,
+    pub(crate) git_op: Option<&'static str>,
+    /// `orig-head` of a rebase, `MERGE_HEAD` of a merge.
+    pub(crate) origin: Option<String>,
+}
+
+impl PausedId {
+    /// The paused operation `main.rs` blocks other commands on, if any.
+    pub(crate) fn load(git_dir: &Path) -> Option<PausedId> {
+        let command = transaction::load(git_dir).ok().flatten().map(|s| s.command);
+        let (git_op, origin) = if git::rebase_is_in_progress(git_dir) {
+            let origin = ["rebase-merge", "rebase-apply"]
+                .iter()
+                .find_map(|d| std::fs::read_to_string(git_dir.join(d).join("orig-head")).ok());
+            (Some("rebase"), origin)
+        } else if git::merge_is_in_progress(git_dir) {
+            let origin = std::fs::read_to_string(git_dir.join("MERGE_HEAD")).ok();
+            (Some("merge"), origin)
+        } else {
+            (None, None)
+        };
+        if command.is_none() && git_op.is_none() {
+            return None;
+        }
+        Some(PausedId {
+            command,
+            git_op,
+            origin: origin.map(|o| o.trim().to_string()),
+        })
+    }
+}
+
+/// Where a paused operation stands, for the headline a front-end words.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PausedState {
+    /// Unmerged paths are left to resolve.
+    Conflicts,
+    /// Git has neither a rebase nor a merge left: the user finished it by hand.
+    NoGitOp,
+    /// No conflict left, `AUTO_MERGE` present: resolved, by `rerere` or by hand.
+    Resolved,
+    /// Stopped part-way for another reason; the trace says which.
+    Stopped,
+}
+
+/// A paused operation and the working files it leaves to look at.
+pub(crate) struct PausedOp {
+    /// The command the loom state names; `None` for a git rebase or merge no
+    /// state describes.
+    pub(crate) command: Option<String>,
+    /// `rebase` or `merge`; `None` when git has neither left.
+    pub(crate) git_op: Option<&'static str>,
+    pub(crate) step: Option<(usize, usize)>,
+    pub(crate) state: PausedState,
+    pub(crate) files: Vec<FileChange>,
+    pub(crate) id: PausedId,
+}
+
+impl PausedOp {
+    pub(crate) fn load(workdir: &Path, git_dir: &Path) -> Option<PausedOp> {
+        let id = PausedId::load(git_dir)?;
+        let (command, git_op) = (id.command.clone(), id.git_op);
+        let step = match git_op {
+            Some("rebase") => git::rebase_progress(git_dir),
+            _ => None,
+        };
+        let files = git2::Repository::open(workdir)
+            .ok()
+            .and_then(|r| repo::get_working_changes(&r).ok())
+            .unwrap_or_default();
+        // `AUTO_MERGE` outlives the resolution until the step is committed, so
+        // with no conflict left it covers `rerere` and the user's own alike.
+        // Conflicts first: a `merge` pauses on its own replay with no git
+        // operation behind it (Spec 005).
+        let state = if files.iter().any(is_conflicted) {
+            PausedState::Conflicts
+        } else if git_op.is_none() {
+            PausedState::NoGitOp
+        } else if git::auto_merge_id(workdir).is_some() {
+            PausedState::Resolved
+        } else {
+            PausedState::Stopped
+        };
+        Some(PausedOp {
+            command,
+            git_op,
+            step,
+            state,
+            files,
+            id,
+        })
+    }
+
+    /// What is paused, as the title and the abort question name it.
+    pub(crate) fn subject(&self) -> String {
+        match (&self.command, self.git_op) {
+            (Some(command), _) => format!("`loom {}`", command),
+            (None, op) => format!("git {}", op.unwrap_or("rebase")),
+        }
+    }
+
+    pub(crate) fn title(&self) -> String {
+        let step = self
+            .step
+            .map(|(current, total)| format!(" — step {}/{}", current, total))
+            .unwrap_or_default();
+        format!("Paused: {}{}", self.subject().replace('`', ""), step)
+    }
+
+    pub(crate) fn abort_question(&self) -> String {
+        match &self.command {
+            Some(_) => format!(
+                "Abort the paused {}?\nIt rolls back to where the command started.",
+                self.subject()
+            ),
+            None => format!(
+                "Abort the {} in progress?\nNo loom state describes it: only git's own abort runs.",
+                self.subject()
+            ),
+        }
+    }
+}
+
+pub(crate) fn is_conflicted(change: &FileChange) -> bool {
+    graph::file_group(change.index, change.worktree) == graph::FileGroup::Conflicted
+}
