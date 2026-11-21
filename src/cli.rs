@@ -4,8 +4,8 @@ use crate::agent::AgentKind;
 use crate::core::hunk_select::HunkArgs;
 use crate::core::{agent_mode, graph, msg, repo, trace_log, transaction, weave};
 use crate::{
-    absorb, add, agent, branch, commit, completions, diff, drop, fold, git, init, merge, push,
-    reword, show, split, status, swap, switch, trace, tui, unmerge, update, worktree,
+    absorb, add, agent, branch, commit, completions, diff, drop, fold, git, gui_launch, init,
+    merge, push, reword, show, split, status, swap, switch, trace, tui, unmerge, update, worktree,
 };
 
 use std::ffi::OsString;
@@ -383,6 +383,10 @@ enum Command {
     // -- Inspection --
     /// Interactive status TUI: browse the tree, view diffs, and run actions
     Tui,
+    /// Open the window on the integration branch (`git-loom-gui`)
+    // Hidden while the window shows nothing to work with.
+    #[command(hide = true)]
+    Gui,
     /// Show the branch-aware status
     Status {
         /// Show files changed in each commit (optionally filtered to specific commits)
@@ -535,6 +539,11 @@ pub fn run() -> ! {
             AgentAction::Install { kind, project, dir } => agent::install::run(kind, project, dir),
         };
         finish_and_exit(result);
+    }
+
+    // The window is another executable, which checks git and the repo itself.
+    if let Some(Command::Gui) = cli.command {
+        finish_and_exit(gui_launch::run());
     }
 
     if let Err(e) = git::check_git_version() {
@@ -729,7 +738,9 @@ pub fn run() -> ! {
         Some(Command::Trace) => trace::run(),
         Some(Command::Continue) => transaction::continue_run(),
         Some(Command::Abort) => transaction::abort_run(),
-        Some(Command::Completions { .. }) | Some(Command::Agent(_)) => unreachable!(),
+        Some(Command::Completions { .. }) | Some(Command::Agent(_)) | Some(Command::Gui) => {
+            unreachable!()
+        }
         Some(Command::InternalWriteTodo { source, todo_file }) => {
             handle_write_todo(&source, &todo_file)
         }

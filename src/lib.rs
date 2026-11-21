@@ -20,6 +20,7 @@ mod fold;
 mod git;
 #[cfg(feature = "gui")]
 mod gui;
+mod gui_launch;
 mod init;
 mod merge;
 mod push;

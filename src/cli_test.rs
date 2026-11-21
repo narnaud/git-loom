@@ -12,6 +12,23 @@ fn assert_no_markers(rendered: &str) {
 }
 
 #[test]
+fn gui_is_a_hidden_subcommand_taking_nothing() {
+    let args = |words: &[&str]| words.iter().map(OsString::from).collect::<Vec<_>>();
+
+    let cli = parse_cli(&args(&["git-loom", "gui"]));
+
+    assert!(matches!(cli.command, Some(Command::Gui)));
+    let command = Cli::command();
+    let gui = command.find_subcommand("gui").unwrap();
+    assert!(gui.is_hide_set());
+    assert!(
+        command
+            .try_get_matches_from(["git-loom", "gui", "anything"])
+            .is_err()
+    );
+}
+
+#[test]
 fn styles_are_substituted_in_help_templates() {
     let styles = help_styles(ThemeMode::Dark, true);
     for template in [ABOUT, HELP_TEMPLATE, GROUPED_COMMANDS] {

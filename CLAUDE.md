@@ -5,7 +5,8 @@ integration branch and rewrites/manages them without leaving that branch.
 
 ## Code Map
 
-- `src/cli.rs`: clap CLI/dispatch; command modules are `src/<command>.rs`.
+- `src/cli.rs`: clap CLI/dispatch; command modules are `src/<command>.rs`, but
+  `gui`'s is `src/gui_launch.rs`, the window being `src/gui/`.
 - `src/lib.rs`: the crate, a library listing the modules and exporting the
   entry points `cli::run` and, with the `gui` feature, `gui::run`; `src/bin/`
   holds the executables calling them, `git-loom` and `git-loom-gui`.
