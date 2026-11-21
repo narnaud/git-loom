@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::core::repo::RepoInfo;
+use crate::session::Refusal;
 use crate::session::snapshot::{MoveSlot, Preview, Snapshot};
 use crate::session::tree::{self, Row, RowKind};
 
@@ -53,7 +54,7 @@ pub(crate) fn fold_targets(
     workdir: &Path,
     rows: &[&Row],
     hunks: bool,
-) -> Result<Vec<FoldTarget>, &'static str> {
+) -> Result<Vec<FoldTarget>, Refusal> {
     let target = |row: &Row, effect| {
         row.target.clone().map(|arg| FoldTarget {
             key: row.key.clone(),
@@ -120,7 +121,7 @@ pub(crate) fn fold_targets(
 
 /// The one commit a split of `rows` takes: the commit the rows are, or the one
 /// the commit files among them belong to.
-pub(crate) fn split_source(rows: &[&Row]) -> Result<git2::Oid, &'static str> {
+pub(crate) fn split_source(rows: &[&Row]) -> Result<git2::Oid, Refusal> {
     let mut commits = HashSet::new();
     for row in rows {
         match row.kind {

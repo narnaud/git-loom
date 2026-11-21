@@ -5,15 +5,12 @@
 //! `selecting` says which of the two.
 
 use crate::core::repo::{self, RepoInfo};
+use crate::session::Refusal;
 use crate::session::action::Action;
 use crate::session::paused::PausedOp;
 use crate::session::snapshot::Snapshot;
 use crate::session::targets;
 use crate::session::tree::{Row, RowKind};
-
-/// Why a command takes nothing from the rows it was given, worded to follow
-/// the command's name.
-pub(crate) type Refusal = &'static str;
 
 /// The working files `loom commit` takes from `rows`, as its arguments.
 pub(crate) fn commit_files(rows: &[&Row]) -> Result<Vec<String>, Refusal> {

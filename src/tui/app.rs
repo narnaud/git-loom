@@ -31,6 +31,7 @@ use crate::core::trace_log;
 use crate::core::transaction;
 use crate::core::ui::{Answer, Level};
 use crate::git;
+use crate::session::Refusal;
 use crate::session::action::{self, Action, CommitSource, Stamp, Summary};
 use crate::session::commands::{self, Reword, Split};
 use crate::session::diff_text::{
@@ -593,7 +594,7 @@ impl<'a> App<'a> {
     }
 
     /// `targets::fold_targets` over the drawn tree.
-    fn fold_targets(&self, rows: &[&Row], hunks: bool) -> Result<Vec<FoldTarget>, &'static str> {
+    fn fold_targets(&self, rows: &[&Row], hunks: bool) -> Result<Vec<FoldTarget>, Refusal> {
         targets::fold_targets(&self.rows, &self.snapshot.workdir, rows, hunks)
     }
 
@@ -2021,12 +2022,18 @@ impl<'a> App<'a> {
 
     /// Whether a read leaves `purpose` nothing to pick, after saying so.
     fn refuse_empty_pick(&mut self, purpose: &PickFor, entries: &[FileEntry]) -> bool {
-        let Some((line, reason)) = purpose.nothing_to_pick(entries) else {
+        let Some(why) = purpose.nothing_to_pick(entries) else {
             return false;
         };
-        self.worker.log_line(Level::Warn, line);
-        self.notice = Some(format!("{}: {}", purpose.label(), reason));
+        self.stop_pick(purpose.label(), why);
         true
+    }
+
+    /// Say why the pick for `command` goes no further: a line in the entry
+    /// the press opened, and the notice.
+    fn stop_pick(&mut self, command: &str, (line, reason): (&'static str, Refusal)) {
+        self.worker.log_line(Level::Warn, line);
+        self.notice = Some(format!("{}: {}", command, reason));
     }
 
     /// The split an `S` pick confirms, handed to `loom split -p` by id (Spec
@@ -2051,12 +2058,9 @@ impl<'a> App<'a> {
                 return None;
             }
         };
-        let split = pick::split(commit, &picked);
-        if split.is_err() {
-            self.worker
-                .log_line(Level::Warn, "Nothing left for the second commit");
-        }
-        self.or_refuse("split", split)
+        pick::split(commit, &picked)
+            .map_err(|why| self.stop_pick("split", why))
+            .ok()
     }
 
     /// `d`: drop the selected working files together, else the cursor row (a
@@ -2080,7 +2084,7 @@ impl<'a> App<'a> {
 
     /// What `command` made of the picked rows, or `None` after a notice
     /// saying why it takes nothing from them.
-    fn or_refuse<T>(&mut self, command: &str, made: Result<T, commands::Refusal>) -> Option<T> {
+    fn or_refuse<T>(&mut self, command: &str, made: Result<T, Refusal>) -> Option<T> {
         made.map_err(|reason| self.notice = Some(format!("{}: {}", command, reason)))
             .ok()
     }

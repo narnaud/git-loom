@@ -15,3 +15,7 @@ pub(crate) mod targets;
 pub(crate) mod tree;
 pub(crate) mod watch;
 pub(crate) mod worker;
+
+/// Why a command takes nothing from the rows it was given, worded to follow
+/// the command's name.
+pub(crate) type Refusal = &'static str;
