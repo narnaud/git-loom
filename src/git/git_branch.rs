@@ -1,5 +1,4 @@
 use std::path::Path;
-use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 
@@ -10,7 +9,7 @@ use super::run_git;
 /// Runs in `workdir` so it does not depend on the process-global cwd (which
 /// git reads even for `--branch`; a deleted cwd makes it fail).
 pub fn branch_validate_name(workdir: &Path, name: &str) -> Result<()> {
-    let output = Command::new("git")
+    let output = crate::core::process::command("git")
         .current_dir(workdir)
         .args(["check-ref-format", "--branch", name])
         .output()

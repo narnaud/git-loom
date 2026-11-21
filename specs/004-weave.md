@@ -70,6 +70,8 @@ Emit branch sections first in dependency order. Each resets to its fork and ends
 
 Replay the complete base-to-HEAD range with `--rebase-merges`. Preserve/create merge topology, branch refs, uncommitted changes, and empty commits.
 
+Git takes the todo from its sequence editor, which is the running executable called as `<executable> internal-write-todo --source <file> <todo>`. Every loom executable MUST answer that call as `git-loom` does, by writing `<file>` over `<todo>`, and open no window (Spec 024).
+
 Conflict policy belongs to the caller, except for a stop `rerere` resolved in full under `rerere.autoUpdate`: every weave rebase carries past that one itself (Spec 014), so no caller ever sees it.
 
 - Resumable owners (`update`, `commit`, `absorb`, `drop commit`, `swap`, `merge`, supported `reword` replay, and simple supported `fold` paths) return `Stopped`, save `.git/loom/state.json`, and allow `loom continue` or `loom abort`.

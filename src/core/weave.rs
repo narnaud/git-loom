@@ -5,6 +5,7 @@ use anyhow::{Result, bail};
 use git2::{Oid, Repository};
 
 use crate::core::msg;
+use crate::core::process;
 use crate::core::repo;
 use crate::git;
 
@@ -1768,6 +1769,10 @@ pub fn not_in_the_weave(oid: Oid) -> anyhow::Error {
     )
 }
 
+/// The subcommand git runs a loom executable with as its sequence editor
+/// (`git::loom_exe_path`): every executable has to answer it.
+pub const SEQUENCE_EDITOR: &str = "internal-write-todo";
+
 /// Execute a weave-based rebase, writing the todo to a temp file and running
 /// `git rebase` with `internal-write-todo` as the sequence editor.
 ///
@@ -1799,7 +1804,6 @@ fn run_rebase_with_empty(
     empty: &str,
 ) -> Result<RebaseOutcome> {
     use std::io::Write;
-    use std::process::Command;
     use std::time::Instant;
 
     use crate::core::trace_log;
@@ -1832,8 +1836,9 @@ fn run_rebase_with_empty(
     let source_path = temp_path.display().to_string().replace('\\', "/");
 
     let sequence_editor = format!(
-        "{} internal-write-todo --source {} ",
+        "{} {} --source {} ",
         shell_escape::unix::escape(exe_str.into()),
+        SEQUENCE_EDITOR,
         shell_escape::unix::escape(source_path.into()),
     );
 
@@ -1843,7 +1848,7 @@ fn run_rebase_with_empty(
         "rebase --interactive --autostash --keep-empty {empty_arg} --no-autosquash --rebase-merges --update-refs {upstream_arg}"
     );
 
-    let mut cmd = Command::new("git");
+    let mut cmd = process::command("git");
     cmd.current_dir(workdir)
         .args(crate::git::FORCED_CONFIG)
         .args([
