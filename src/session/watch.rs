@@ -62,7 +62,7 @@ pub(crate) type FsStamp = Vec<(PathBuf, Option<Stamp>)>;
 
 /// Content of `HEAD` and every file under `refs/`; modification time and size
 /// of the index and `packed-refs`. Linked worktrees keep refs in the common dir.
-pub(crate) fn fs_stamp(git_dir: &Path) -> FsStamp {
+fn fs_stamp(git_dir: &Path) -> FsStamp {
     let common = std::fs::read_to_string(git_dir.join("commondir"))
         .map(|rel| git_dir.join(rel.trim()))
         .unwrap_or_else(|_| git_dir.to_path_buf());
