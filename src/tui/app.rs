@@ -10,9 +10,8 @@
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
-use std::sync::mpsc::{Receiver, Sender, channel};
-use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::sync::mpsc::Sender;
+use std::time::Instant;
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEventKind};
@@ -31,11 +30,9 @@ use crate::core::repo::{self, BranchInfo, FileChange, RemoteStatus};
 use crate::core::staging;
 use crate::core::trace_log;
 use crate::core::transaction;
-use crate::core::ui::{self, Answer, Cancelled, Level, Request};
+use crate::core::ui::{Answer, Level};
 use crate::git;
-use crate::session::action::{
-    self, Action, CommitSource, LogEntry, Stamp, Summary, execute_action,
-};
+use crate::session::action::{self, Action, CommitSource, Stamp, Summary};
 use crate::session::diff_text::{
     diff_text, pending_commit_diff, staged_commit_diff, working_file_diff,
 };
@@ -49,6 +46,7 @@ use crate::session::tree::{
     commit_file_key, nearest_focusable, working_file_key,
 };
 use crate::session::watch::{RepoStamp, Watch, repo_stamp};
+use crate::session::worker::{Ask, Ended, Event, Job, Worker};
 use crate::tui::hunk_selector::run_hunk_selector_nested;
 use crate::tui::shell::{KeyResult, PaneId, Shell, ShellApp, ShellConfig, Tick};
 use crate::tui::theme::TuiTheme;
@@ -169,7 +167,7 @@ impl PickFor {
 /// that follows needs the terminal, and only that half runs on the loop.
 enum Pick {
     Collecting {
-        handle: JoinHandle<Result<(Vec<FileEntry>, Stamp)>>,
+        job: Job<(Vec<FileEntry>, Stamp)>,
         /// Key of the row `C` or `F` was pressed on, to go back to on cancel.
         origin: String,
         purpose: PickFor,
@@ -200,16 +198,6 @@ enum FoldHunks {
     },
     /// Hunks of the source commit, handed to `loom fold -p` by id (Spec 019).
     Commit(Vec<FileEntry>),
-}
-
-/// The action currently running on its worker thread.
-struct Running {
-    handle: JoinHandle<Result<()>>,
-    command: String,
-    /// Text of the command's active spinner, if any.
-    spinner: Option<String>,
-    /// Ticks so far, for the status-bar animation.
-    ticks: usize,
 }
 
 /// What stands in for the tree while an operation is paused: HEAD is detached
@@ -462,13 +450,9 @@ struct App<'a> {
     notice: Option<String>,
     /// Exit value set by deep handlers, drained after each key.
     outcome: Option<Outcome>,
-    /// Requests from the running action (`core::ui`); `request_tx` is what
-    /// each worker gets a clone of.
-    requests: Receiver<Request>,
-    request_tx: Sender<Request>,
-    running: Option<Running>,
+    /// The action in flight, its requests and the log.
+    worker: Worker,
     popup: Option<Popup>,
-    log: Vec<LogEntry>,
     /// Set while an operation is paused: the view replacing the tree.
     paused: Option<Paused>,
     /// Auto-reload (`A`), holding the fingerprint taken before the last load.
@@ -483,7 +467,6 @@ impl<'a> App<'a> {
         expanded: HashSet<String>,
         context: usize,
     ) -> Self {
-        let (request_tx, requests) = channel();
         // `run` replaces it with one stamped before the first load.
         let watch = Watch::new((Vec::new(), None), false, Instant::now());
         let mut app = App {
@@ -505,11 +488,8 @@ impl<'a> App<'a> {
             quit_after_pick: false,
             notice: None,
             outcome: None,
-            requests,
-            request_tx,
-            running: None,
+            worker: Worker::new(),
             popup: None,
-            log: Vec::new(),
             paused: None,
             watch,
         };
@@ -695,76 +675,26 @@ impl<'a> App<'a> {
     /// prompts.
     fn start_action(&mut self, action: Action) {
         let command = self.command_line(&action);
-        self.log.push(LogEntry {
-            command: command.clone(),
-            lines: Vec::new(),
-        });
         self.clear_selection();
         self.mode = Mode::Normal;
         self.notice = None;
-
-        let tx = self.request_tx.clone();
-        let git_dir = self.snapshot.git_dir.clone();
-        let theme = self.graph_theme.clone();
-        let trace_name = command.clone();
-        let handle = std::thread::spawn(move || {
-            ui::install(tx);
-            let result = execute_action(action, &trace_name, &git_dir, &theme);
-            ui::uninstall();
-            result
-        });
-        self.running = Some(Running {
-            handle,
-            command,
-            spinner: None,
-            ticks: 0,
-        });
+        self.worker
+            .start(action, command, &self.snapshot.git_dir, &self.graph_theme);
     }
 
-    /// One request from the running action. `Suspend` is the shell's to
-    /// handle and never reaches here.
-    fn handle_request(&mut self, request: Request) {
-        match request {
-            Request::Prompt {
-                kind,
-                prompt,
-                error,
-                reply,
-            } => {
-                let command = self.running.as_ref().map_or("", |r| r.command.as_str());
-                self.popup = Some(Popup::Prompt {
-                    prompt: Prompt::new(kind, prompt, error, command),
-                    reply,
-                });
-            }
-            Request::Message { level, text } => {
-                if let Some(entry) = self.log.last_mut() {
-                    entry.lines.push((level, text));
-                }
-            }
-            Request::Spinner(text) => {
-                if let Some(running) = &mut self.running {
-                    running.spinner = text;
-                }
-            }
-            Request::Suspend(_) | Request::Resume => {}
-        }
-    }
-
-    /// The worker is done: report in the status bar (success), a popup
+    /// The action is over: report in the status bar (success), a popup
     /// (failure), or nothing (cancelled prompt). Returns whether the repo may
     /// have changed, so the caller runs [`App::refresh`].
-    fn finish_action(&mut self, result: Result<()>) -> bool {
-        if result.is_err() {
+    fn finish_action(&mut self, ended: Ended) -> bool {
+        if ended != Ended::Done {
             // Nothing was renamed or created: aim at the preview's origin row,
             // or at nothing, since the old key is still the live one.
             self.next_cursor = self.fallback_cursor.take();
         }
         self.fallback_cursor = None;
-        match result {
-            Ok(()) => {
-                let summary = self.log.last().map_or(Summary::Done, LogEntry::summary);
-                self.notice = Some(match summary {
+        match ended {
+            Ended::Done => {
+                self.notice = Some(match self.worker.summary() {
                     Summary::Done => "✓ done".to_string(),
                     Summary::Warned(warning) => format!("! {}", warning),
                     Summary::Succeeded { last, more: 0 } => format!("✓ {}", last),
@@ -774,14 +704,11 @@ impl<'a> App<'a> {
                 });
                 true
             }
-            Err(e) if e.downcast_ref::<Cancelled>().is_some() => {
-                self.log_line(Level::Warn, "Cancelled");
+            Ended::Cancelled => {
                 self.notice = Some("cancelled".to_string());
                 false
             }
-            Err(e) => {
-                let text = e.to_string();
-                self.log_line(Level::Error, &text);
+            Ended::Failed(text) => {
                 // An open log already shows the error line, so reload behind
                 // it instead of replacing what the reader is looking at.
                 if matches!(self.popup, Some(Popup::Log { .. })) {
@@ -790,12 +717,6 @@ impl<'a> App<'a> {
                 self.show_error(&text, AfterNotice::Reload);
                 false
             }
-        }
-    }
-
-    fn log_line(&mut self, level: Level, text: &str) {
-        if let Some(entry) = self.log.last_mut() {
-            entry.lines.push((level, text.to_string()));
         }
     }
 
@@ -1554,29 +1475,14 @@ impl<'a> App<'a> {
         purpose: PickFor,
         read: impl FnOnce(&std::path::Path) -> Result<(Vec<FileEntry>, Stamp)> + Send + 'static,
     ) {
-        // Pushed before the worker starts, not when the staging happens: the
-        // read is part of this command and its messages have to land here.
-        self.log.push(LogEntry {
-            command: command.clone(),
-            lines: Vec::new(),
-        });
         // The repository is opened here rather than from the process cwd: this
         // runs off the loop, and the tree it must agree with is the snapshot's.
         let workdir = self.snapshot.workdir.clone();
-        let git_dir = self.snapshot.git_dir.clone();
-        let tx = self.request_tx.clone();
-        let handle = std::thread::spawn(move || {
-            // Without the sink `msg` prints, and this thread would write onto
-            // the screen the loop is drawing at the same moment.
-            ui::install(tx);
-            trace_log::init(&git_dir, &format!("loom tui: {command}"), false);
-            let result = read(&workdir);
-            trace_log::finalize();
-            ui::uninstall();
-            result
-        });
+        let job = self
+            .worker
+            .read(command, &self.snapshot.git_dir, move || read(&workdir));
         self.pick = Some(Pick::Collecting {
-            handle,
+            job,
             origin,
             purpose,
             ticks: 0,
@@ -1672,14 +1578,14 @@ impl<'a> App<'a> {
                 PickTick::Ready { first: false }
             }
             Some(Pick::Collecting {
-                handle,
+                job,
                 origin,
                 purpose,
                 ticks,
                 cancelled,
-            }) if !handle.is_finished() => {
+            }) if !job.is_finished() => {
                 self.pick = Some(Pick::Collecting {
-                    handle,
+                    job,
                     origin,
                     purpose,
                     ticks: ticks + 1,
@@ -1688,21 +1594,17 @@ impl<'a> App<'a> {
                 PickTick::Redraw
             }
             Some(Pick::Collecting {
-                handle,
+                job,
                 origin,
                 purpose,
                 cancelled,
                 ..
             }) => {
-                let read = handle.join().unwrap_or_else(|_| {
-                    Err(anyhow::anyhow!(
-                        "reading the hunks crashed — run `loom trace` for what it did"
-                    ))
-                });
+                let read = job.join("reading the hunks");
                 if cancelled {
                     // Waited for on purpose: the result is dropped, but not the
                     // worker, so nothing of it outlives the pick.
-                    self.log_line(Level::Warn, "Cancelled");
+                    self.worker.log_line(Level::Warn, "Cancelled");
                     self.notice = Some(format!("{} cancelled", purpose.label()));
                     if self.quit_after_pick {
                         self.outcome = Some(Outcome::Quit);
@@ -1724,7 +1626,7 @@ impl<'a> App<'a> {
                         // opened, and without taking an open log off the reader
                         // who is already seeing the line.
                         let text = e.to_string();
-                        self.log_line(Level::Error, &text);
+                        self.worker.log_line(Level::Error, &text);
                         if !matches!(self.popup, Some(Popup::Log { .. })) {
                             self.show_error(&text, AfterNotice::Nothing);
                         }
@@ -1750,12 +1652,12 @@ impl<'a> App<'a> {
             // opened is the only record of what `C` did, and one that ends
             // mute cannot be told from one that ran and said nothing.
             Ok(false) => {
-                self.log_line(Level::Warn, "Cancelled");
+                self.worker.log_line(Level::Warn, "Cancelled");
                 self.notice = Some("commit cancelled".to_string());
             }
             Err(e) => {
                 let text = e.to_string();
-                self.log_line(Level::Error, &text);
+                self.worker.log_line(Level::Error, &text);
                 // `apply_selections` writes the index in several steps, so a
                 // failure can leave it part-way: reload before reporting, or
                 // the tree describes an index that is no longer there.
@@ -1791,12 +1693,10 @@ impl<'a> App<'a> {
             return Ok(false);
         }
         // Into the entry the press opened, so both halves of `loom add -p`
-        // report under it. Nothing under `apply_selections` may prompt: the
-        // thread that would answer is the one sitting here.
-        ui::install(self.request_tx.clone());
-        let applied =
-            staging::apply_selections(&self.snapshot.workdir, &picked, staging::LeftOut::Unstaged);
-        ui::uninstall();
+        // report under it.
+        let applied = self.worker.inline(|| {
+            staging::apply_selections(&self.snapshot.workdir, &picked, staging::LeftOut::Unstaged)
+        });
         // `C` then commits the index, so an untick unstages, as in `add -p`.
         applied.map(|_| true)
     }
@@ -1910,13 +1810,13 @@ impl<'a> App<'a> {
         let picked = match picked {
             Ok(Some(picked)) if picked.iter().any(|f| f.hunks.iter().any(|h| h.selected)) => picked,
             Ok(_) => {
-                self.log_line(Level::Warn, "Cancelled");
+                self.worker.log_line(Level::Warn, "Cancelled");
                 self.notice = Some("fold cancelled".to_string());
                 return;
             }
             Err(e) => {
                 let text = e.to_string();
-                self.log_line(Level::Error, &text);
+                self.worker.log_line(Level::Error, &text);
                 self.show_error(&text, AfterNotice::Nothing);
                 return;
             }
@@ -2311,7 +2211,7 @@ impl<'a> App<'a> {
             1 => ("Only one hunk", "split: one hunk only, nothing to split"),
             _ => return false,
         };
-        self.log_line(Level::Warn, line);
+        self.worker.log_line(Level::Warn, line);
         self.notice = Some(notice.to_string());
         true
     }
@@ -2327,19 +2227,20 @@ impl<'a> App<'a> {
         let picked = match picked {
             Ok(Some(picked)) if picked.iter().any(|f| f.hunks.iter().any(|h| h.selected)) => picked,
             Ok(_) => {
-                self.log_line(Level::Warn, "Cancelled");
+                self.worker.log_line(Level::Warn, "Cancelled");
                 self.notice = Some("split cancelled".to_string());
                 return None;
             }
             Err(e) => {
                 let text = e.to_string();
-                self.log_line(Level::Error, &text);
+                self.worker.log_line(Level::Error, &text);
                 self.show_error(&text, AfterNotice::Nothing);
                 return None;
             }
         };
         if picked.iter().all(|f| f.hunks.iter().all(|h| h.selected)) {
-            self.log_line(Level::Warn, "Nothing left for the second commit");
+            self.worker
+                .log_line(Level::Warn, "Nothing left for the second commit");
             self.notice = Some("split: leave at least one hunk for the second commit".to_string());
             return None;
         }
@@ -2762,7 +2663,7 @@ impl ShellApp for App<'_> {
             if let Some(action) = self.handle_name_key(code, modifiers) {
                 self.start_action(action);
             }
-        } else if self.running.is_some() {
+        } else if self.worker.running().is_some() {
             // The log, help and trace are read-only; everything else waits.
             match code {
                 KeyCode::Char('L') => self.open_log(),
@@ -2894,7 +2795,7 @@ impl ShellApp for App<'_> {
             Some(Popup::Choice { menu, .. }) => menu.render(frame, area, self.theme),
             Some(Popup::Notice { notice, .. }) => notice.render(frame, area, self.theme),
             Some(Popup::Log { scroll }) => {
-                popup::render_log(frame, area, &self.log, scroll, self.theme)
+                popup::render_log(frame, area, &self.worker.log, scroll, self.theme)
             }
             Some(Popup::Help { scroll }) => {
                 popup::render_help(frame, area, HELP, scroll, self.theme)
@@ -2910,20 +2811,21 @@ impl ShellApp for App<'_> {
 
     fn modal_active(&self) -> bool {
         // A name field owns the keyboard too: `q` and Tab must reach it.
-        self.popup.is_some() || self.running.is_some() || self.editing_name() || self.pick.is_some()
+        self.popup.is_some()
+            || self.worker.running().is_some()
+            || self.editing_name()
+            || self.pick.is_some()
     }
 
     fn poll_background(&mut self) -> Tick<Outcome> {
         let mut changed = false;
-        loop {
-            match self.requests.try_recv() {
-                Ok(Request::Suspend(ack)) => return Tick::Suspend(ack),
-                Ok(request) => {
-                    self.handle_request(request);
-                    changed = true;
-                }
-                Err(_) => break,
+        while let Some(event) = self.worker.poll() {
+            match event {
+                Event::Suspend(ack) => return Tick::Suspend(ack),
+                Event::Ask(ask) => self.popup = Some(prompt_popup(ask)),
+                Event::Filed => {}
             }
+            changed = true;
         }
         // After the drain, never before: what the pick's own worker reported
         // reaches its log entry before the selector covers the screen. A line
@@ -2944,18 +2846,11 @@ impl ShellApp for App<'_> {
             PickTick::Redraw => changed = true,
             PickTick::Nothing => {}
         }
-        if let Some(running) = &mut self.running {
-            running.ticks += 1;
-            if running.handle.is_finished() {
-                let running = self.running.take().expect("checked above");
-                let result = running.handle.join().unwrap_or_else(|_| {
-                    Err(anyhow::anyhow!(
-                        "the action crashed — run `loom trace` for what it did"
-                    ))
-                });
-                if self.finish_action(result) {
-                    self.refresh();
-                }
+        if self.worker.running().is_some() {
+            if let Some(ended) = self.worker.reap()
+                && self.finish_action(ended)
+            {
+                self.refresh();
             }
             changed = true;
         }
@@ -3012,7 +2907,7 @@ impl ShellApp for App<'_> {
                 commit,
             } => {
                 if entries.is_empty() {
-                    self.log_line(Level::Warn, "No changes to pick");
+                    self.worker.log_line(Level::Warn, "No changes to pick");
                     self.notice = Some("fold: no hunks to pick".to_string());
                     return;
                 }
@@ -3023,22 +2918,11 @@ impl ShellApp for App<'_> {
         }
     }
 
-    /// The worker holds the terminal (an editor); its `Resume` ends the wait.
-    /// A worker that dies without one ends it too.
+    /// The worker holds the terminal (an editor) until it hands it back.
     fn wait_for_resume(&mut self) {
-        loop {
-            match self.requests.recv_timeout(Duration::from_millis(100)) {
-                Ok(Request::Resume) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    return;
-                }
-                Ok(request) => self.handle_request(request),
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    if self.running.as_ref().is_none_or(|r| r.handle.is_finished()) {
-                        return;
-                    }
-                }
-            }
-        }
+        let popup = &mut self.popup;
+        self.worker
+            .wait_for_resume(|ask| *popup = Some(prompt_popup(ask)));
     }
 
     fn notice(&self) -> Option<&str> {
@@ -3050,7 +2934,7 @@ impl ShellApp for App<'_> {
     }
 
     fn mode_hint(&self) -> Option<String> {
-        if let Some(running) = &self.running {
+        if let Some(running) = self.worker.running() {
             let frame = SPINNER_FRAMES[(running.ticks / 2) % SPINNER_FRAMES.len()];
             let detail = running
                 .spinner
@@ -3116,6 +3000,14 @@ impl ShellApp for App<'_> {
             "Help: ?".into(),
             "Quit: q".into(),
         ]
+    }
+}
+
+/// The popup a prompt from the running command is answered in.
+fn prompt_popup(ask: Ask) -> Popup {
+    Popup::Prompt {
+        prompt: Prompt::new(ask.kind, ask.prompt, ask.error, &ask.command),
+        reply: ask.reply,
     }
 }
 
