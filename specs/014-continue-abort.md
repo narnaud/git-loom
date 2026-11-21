@@ -205,6 +205,7 @@ check before each action (Spec 020).
 
 - `Completions` — does not interact with the repo
 - `InternalWriteTodo` — runs as a git subprocess during rebase
+- `gui` — only starts the window, which opens on the paused operation (Spec 024)
 
 Error message format, when git still has a rebase or merge in progress:
 

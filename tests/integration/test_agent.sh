@@ -157,6 +157,12 @@ assert_eq "1" "$CODE" "tui_rejected_exit"
 assert_contains "$OUT" '"status":"error"' "tui_rejected_status"
 assert_contains "$OUT" "the TUI is interactive" "tui_rejected_msg"
 
+describe "agent mode: gui is rejected with a structured error"
+gl_capture gui --agent
+assert_eq "1" "$CODE" "gui_rejected_exit"
+assert_contains "$OUT" '"status":"error"' "gui_rejected_status"
+assert_contains "$OUT" "the GUI is interactive" "gui_rejected_msg"
+
 # ── error: normal failures still end with a JSON status ───────────────────────
 
 describe "agent mode: a failing command reports status error"
