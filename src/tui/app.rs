@@ -33,7 +33,9 @@ use crate::core::trace_log;
 use crate::core::transaction;
 use crate::core::ui::{self, Answer, Cancelled, Level, Request};
 use crate::git;
-use crate::session::action::{self, Action, CommitSource, LogEntry, Stamp, execute_action};
+use crate::session::action::{
+    self, Action, CommitSource, LogEntry, Stamp, Summary, execute_action,
+};
 use crate::session::diff_text::{
     diff_text, pending_commit_diff, staged_commit_diff, working_file_diff,
 };
@@ -761,34 +763,13 @@ impl<'a> App<'a> {
         self.fallback_cursor = None;
         match result {
             Ok(()) => {
-                // A multi-target command (`drop a b`) prints one ✓ per target;
-                // the bar shows the last and says how many it stands for.
-                let successes: Vec<&str> = self.log.last().map_or_else(Vec::new, |entry| {
-                    entry
-                        .lines
-                        .iter()
-                        .filter(|(level, _)| *level == Level::Success)
-                        .filter_map(|(_, text)| text.lines().next())
-                        .collect()
-                });
-                // A command that paused, or a continue that stopped again,
-                // says so in a warning instead.
-                let warning = self.log.last().and_then(|entry| {
-                    entry
-                        .lines
-                        .iter()
-                        .rev()
-                        .find(|(level, _)| *level == Level::Warn)
-                        .and_then(|(_, text)| text.lines().next())
-                });
-                self.notice = Some(match successes.as_slice() {
-                    [] => match warning {
-                        Some(warning) => format!("! {}", warning),
-                        None => "✓ done".to_string(),
-                    },
-                    [one] => format!("✓ {}", one),
-                    [.., last] => {
-                        format!("✓ {} (+{} more, L: log)", last, successes.len() - 1)
+                let summary = self.log.last().map_or(Summary::Done, LogEntry::summary);
+                self.notice = Some(match summary {
+                    Summary::Done => "✓ done".to_string(),
+                    Summary::Warned(warning) => format!("! {}", warning),
+                    Summary::Succeeded { last, more: 0 } => format!("✓ {}", last),
+                    Summary::Succeeded { last, more } => {
+                        format!("✓ {} (+{} more, L: log)", last, more)
                     }
                 });
                 true

@@ -22,6 +22,41 @@ pub(crate) struct LogEntry {
     pub lines: Vec<(Level, String)>,
 }
 
+/// The one line an action that succeeded is summed up in.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Summary<'a> {
+    /// It said nothing worth showing.
+    Done,
+    /// It paused, or a continue stopped again: its last warning says so.
+    Warned(&'a str),
+    /// Its last `✓` line and how many more it stands for: a multi-target
+    /// command (`drop a b`) prints one per target.
+    Succeeded { last: &'a str, more: usize },
+}
+
+impl LogEntry {
+    pub(crate) fn summary(&self) -> Summary<'_> {
+        let successes: Vec<&str> = self
+            .lines
+            .iter()
+            .filter(|(level, _)| *level == Level::Success)
+            .filter_map(|(_, text)| text.lines().next())
+            .collect();
+        if let [.., last] = successes.as_slice() {
+            return Summary::Succeeded {
+                last,
+                more: successes.len() - 1,
+            };
+        }
+        self.lines
+            .iter()
+            .rev()
+            .find(|(level, _)| *level == Level::Warn)
+            .and_then(|(_, text)| text.lines().next())
+            .map_or(Summary::Done, Summary::Warned)
+    }
+}
+
 /// What a commit being placed takes with it.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum CommitSource {
