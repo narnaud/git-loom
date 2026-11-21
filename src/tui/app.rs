@@ -38,6 +38,7 @@ use crate::session::paused::{PausedOp, PausedState};
 use crate::session::snapshot::{
     CommitDest, MoveSlot, NEW_BRANCH_NAME, Preview, Snapshot, is_staged, load_snapshot,
 };
+use crate::session::targets::{self, FoldEffect, FoldTarget};
 use crate::session::tree::{
     self, LOCAL_CHANGES_KEY, PENDING_COMMIT_OID, Row, RowKind, RowMark, SelectionClass, branch_key,
     commit_file_key, nearest_focusable, working_file_key,
@@ -51,41 +52,6 @@ use crate::tui::widgets::diff_pane::DiffPane;
 use crate::tui::widgets::list_pane::ListPane;
 use crate::tui::widgets::menu::{Menu, MenuItem, MenuOutcome};
 use crate::tui::widgets::popup::{self, Notice, Prompt, PromptOutcome, TextField};
-
-// ── Data model ───────────────────────────────────────────────────────────
-
-/// What folding the sources into a target does, tagged on the tree.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FoldEffect {
-    /// Working changes or a fixup go into the target commit.
-    Amend,
-    /// The target is a source, or the commit a source file already sits in.
-    Noop,
-    /// The source commit or commit file goes back to the working tree.
-    Uncommit,
-    /// A commit file, or a commit's picked hunks, move into the target commit.
-    MoveFile,
-}
-
-impl FoldEffect {
-    fn tag(self) -> &'static str {
-        match self {
-            FoldEffect::Amend => "[AMEND]",
-            FoldEffect::Noop => "[NOOP]",
-            FoldEffect::Uncommit => "[UNCOMMIT]",
-            FoldEffect::MoveFile => "[MOVE]",
-        }
-    }
-}
-
-/// A row a pending fold can land on.
-#[derive(Debug, Clone)]
-struct FoldTarget {
-    key: String,
-    /// The row's command argument.
-    arg: String,
-    effect: FoldEffect,
-}
 
 // ── Modes ────────────────────────────────────────────────────────────────
 
@@ -675,6 +641,16 @@ impl<'a> App<'a> {
     /// `action::command_line` with the short IDs the tree shows.
     fn command_line(&self, action: &Action) -> String {
         action::command_line(action, |target| self.sid_of(target))
+    }
+
+    /// `targets::fold_targets` over the drawn tree.
+    fn fold_targets(&self, rows: &[&Row], hunks: bool) -> Result<Vec<FoldTarget>, &'static str> {
+        targets::fold_targets(&self.rows, &self.snapshot.workdir, rows, hunks)
+    }
+
+    /// `targets::move_slots` over the drawn tree.
+    fn move_slots(&self, commit: git2::Oid) -> Vec<MoveSlot> {
+        targets::move_slots(&self.snapshot, &self.rows, &self.expanded, commit)
     }
 
     /// The short ID the tree shows for `target`, or `target` itself when no
@@ -2001,81 +1977,6 @@ impl<'a> App<'a> {
         }
     }
 
-    /// The rows `rows` can fold into, in tree order, as `loom fold` accepts
-    /// them (Spec 007); the error is the notice for sources with none. Moving
-    /// commits to a branch is not a fold here: the tree keeps fold to one
-    /// thing going into another.
-    ///
-    /// With `hunks`, a commit's picked hunks move out of it rather than the
-    /// whole commit folding: `[MOVE]` where `f` would say `[AMEND]`.
-    fn fold_targets(&self, rows: &[&Row], hunks: bool) -> Result<Vec<FoldTarget>, &'static str> {
-        let target = |row: &Row, effect| {
-            row.target.clone().map(|arg| FoldTarget {
-                key: row.key.clone(),
-                arg,
-                effect,
-            })
-        };
-        let targets: Vec<FoldTarget> = match rows[0].kind {
-            RowKind::LocalChanges { count: 0 } => return Err("no local changes"),
-            RowKind::LocalChanges { .. } | RowKind::WorkingFile { .. } => self
-                .rows
-                .iter()
-                .filter(|r| matches!(r.kind, RowKind::Commit { .. }))
-                .filter_map(|r| target(r, FoldEffect::Amend))
-                .collect(),
-            RowKind::Commit { oid: source, .. } => {
-                if rows.len() > 1 {
-                    return Err("one commit at a time");
-                }
-                // Opened once for the fixup check; a repo that cannot answer
-                // leaves the check to the command.
-                let repo = git2::Repository::open(&self.snapshot.workdir).ok();
-                let older = |oid: git2::Oid| {
-                    repo.as_ref()
-                        .is_none_or(|repo| repo.graph_descendant_of(source, oid).unwrap_or(true))
-                };
-                self.rows
-                    .iter()
-                    .filter_map(|r| match r.kind {
-                        RowKind::LocalChanges { .. } => target(r, FoldEffect::Uncommit),
-                        RowKind::Commit { oid, .. } if oid == source => target(r, FoldEffect::Noop),
-                        // A fixup goes into a commit the source descends from.
-                        RowKind::Commit { oid, .. } if older(oid) => target(
-                            r,
-                            if hunks {
-                                FoldEffect::MoveFile
-                            } else {
-                                FoldEffect::Amend
-                            },
-                        ),
-                        _ => None,
-                    })
-                    .collect()
-            }
-            RowKind::CommitFile { oid: owner, .. } => {
-                if rows.len() > 1 {
-                    return Err("one commit file at a time");
-                }
-                self.rows
-                    .iter()
-                    .filter_map(|r| match r.kind {
-                        RowKind::LocalChanges { .. } => target(r, FoldEffect::Uncommit),
-                        RowKind::Commit { oid, .. } if oid == owner => target(r, FoldEffect::Noop),
-                        RowKind::Commit { .. } => target(r, FoldEffect::MoveFile),
-                        _ => None,
-                    })
-                    .collect()
-            }
-            RowKind::BranchName { .. } => return Err("a branch cannot be folded"),
-            _ => return Err("move to a file, commit, or commit file"),
-        };
-        if targets.iter().all(|t| t.effect == FoldEffect::Noop) {
-            return Err("nothing to fold into");
-        }
-        Ok(targets)
-    }
-
     /// Redraw the tree for the current fold target and put the cursor on it.
     fn show_fold_target(&mut self) {
         let Mode::FoldTarget { targets, index, .. } = &self.mode else {
@@ -2198,76 +2099,6 @@ impl<'a> App<'a> {
             index,
         };
         self.show_move_target();
-    }
-
-    /// Every distinct place `commit` can be moved to, in tree order, `Stay`
-    /// among them. The candidates are `--above`/`--below` every other commit
-    /// and every branch's tip, ranked by the row they sit next to; candidates
-    /// drawing the same tree are one place, spelled the first way.
-    fn move_slots(&self, commit: git2::Oid) -> Vec<MoveSlot> {
-        let info = &self.snapshot.info;
-        let parent_of = |oid: git2::Oid| {
-            info.commits
-                .iter()
-                .find(|c| c.oid == oid)
-                .and_then(|c| c.parent_oid)
-        };
-        let parent = parent_of(commit);
-        // Three ranks per row: above it, the row itself, below it. A branch
-        // tip ranks with the row after its name, behind an `--above` there.
-        let mut candidates: Vec<(usize, MoveSlot)> = Vec::new();
-        for (i, row) in self.rows.iter().enumerate() {
-            match &row.kind {
-                RowKind::Commit { oid, .. } if *oid == commit => {
-                    candidates.push((3 * i + 1, MoveSlot::Stay));
-                }
-                RowKind::Commit { oid, .. } if row.target.is_some() => {
-                    // `fold --above/--below` refuses the commit's own place,
-                    // even where the move would carry a branch name along.
-                    if parent != Some(*oid) {
-                        candidates.push((3 * i, MoveSlot::Above(*oid)));
-                    }
-                    if parent_of(*oid) != Some(commit) {
-                        candidates.push((3 * i + 2, MoveSlot::Below(*oid)));
-                    }
-                }
-                RowKind::BranchName { name, .. }
-                    if !info
-                        .branches
-                        .iter()
-                        .any(|b| b.name == *name && b.tip_oid == commit) =>
-                {
-                    candidates.push((3 * i + 3, MoveSlot::Branch(name.clone())));
-                }
-                _ => {}
-            }
-        }
-        candidates.sort_by_key(|(rank, slot)| (*rank, matches!(slot, MoveSlot::Branch(_))));
-
-        let mut seen = HashSet::from([self.move_signature(commit, &MoveSlot::Stay)]);
-        candidates
-            .into_iter()
-            .map(|(_, slot)| slot)
-            .filter(|slot| {
-                *slot == MoveSlot::Stay || seen.insert(self.move_signature(commit, slot))
-            })
-            .collect()
-    }
-
-    /// The tree `commit` at `slot` draws, as row keys and connectors: two
-    /// slots with the same one are the same move as far as the tree shows.
-    fn move_signature(&self, commit: git2::Oid, slot: &MoveSlot) -> Vec<String> {
-        let sections = self.snapshot.sections(Some(Preview::Move {
-            oid: commit,
-            slot: slot.clone(),
-        }));
-        tree::build_rows(&sections, &self.snapshot.ids, &self.expanded)
-            .into_iter()
-            .map(|r| match r.kind {
-                RowKind::Spacer(text) => text.to_string(),
-                _ => r.key,
-            })
-            .collect()
     }
 
     /// Redraw the tree with the commit at the current slot and put the cursor
@@ -2419,32 +2250,11 @@ impl<'a> App<'a> {
         Some(Action::Branch { name, target })
     }
 
-    /// The one commit `s` or `S` splits: the commit the rows are, or the one
-    /// the commit files among them belong to.
-    fn split_source(&self, rows: &[&Row]) -> Result<git2::Oid, &'static str> {
-        let mut commits = HashSet::new();
-        for row in rows {
-            match row.kind {
-                RowKind::Commit { oid, .. } | RowKind::CommitFile { oid, .. }
-                    if row.target.is_some() =>
-                {
-                    commits.insert(oid);
-                }
-                _ => return Err("move to a commit or commit file"),
-            }
-        }
-        match commits.into_iter().collect::<Vec<_>>()[..] {
-            [commit] => Ok(commit),
-            [] => Err("move to a commit or commit file"),
-            _ => Err("one commit at a time"),
-        }
-    }
-
     /// `s`: the selected commit files (else the cursor's) become the first
     /// commit, the rest of their commit the second; a commit row is `S`.
     fn action_split(&mut self) -> Option<Action> {
         let rows = self.picked_rows();
-        let commit = match self.split_source(&rows) {
+        let commit = match targets::split_source(&rows) {
             Ok(commit) => commit,
             Err(notice) => {
                 self.notice = Some(format!("split: {}", notice));
@@ -2495,7 +2305,7 @@ impl<'a> App<'a> {
         let Some(origin) = self.current_row().map(|r| r.key.clone()) else {
             return;
         };
-        let commit = match self.split_source(&rows) {
+        let commit = match targets::split_source(&rows) {
             Ok(commit) => commit,
             Err(notice) => {
                 self.notice = Some(format!("split: {}", notice));
