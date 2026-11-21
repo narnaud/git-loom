@@ -9,7 +9,7 @@ use crate::core::hunks::FileEntry;
 use crate::core::msg;
 use crate::core::trace_log;
 use crate::core::transaction;
-use crate::core::ui::Level;
+use crate::core::ui::{self, Hint, Level};
 use crate::git;
 use crate::session::paused::PausedId;
 use crate::session::snapshot::{CommitDest, MoveSlot};
@@ -148,24 +148,18 @@ pub(crate) enum Action {
 /// for a pick that stages at once or reads a commit.
 pub(crate) type Stamp = Vec<Option<git2::Oid>>;
 
-/// The name of the trace `command`, a line of the log, runs under.
-pub(crate) fn trace_name(command: &str) -> String {
-    format!("loom tui: {}", command)
-}
-
 /// Run the loom command for `action`. Runs on the worker thread: the trace
-/// logger is thread-local, so each action gets its own log file, named after
-/// the command line the log shows.
+/// logger is thread-local, so each action gets its own log file, `trace`
+/// naming it.
 pub(crate) fn execute_action(
     action: Action,
-    command: &str,
+    trace: &str,
     git_dir: &std::path::Path,
     theme: &graph::Theme,
 ) -> Result<()> {
-    let trace_name = trace_name(command);
     // As on the CLI, resuming adds to the trace of the command that paused.
     let resuming = matches!(action, Action::Continue { .. } | Action::Abort { .. });
-    trace_log::init(git_dir, &trace_name, resuming);
+    trace_log::init(git_dir, trace, resuming);
     // The `main.rs` guard, which `tui` is exempt from: an operation paused
     // since the tree was shown, or a state file gone unreadable, would
     // otherwise be saved over.
@@ -243,7 +237,8 @@ pub(crate) fn execute_action(
         // The shown view can lag the repo.
         Action::Continue { paused } if PausedId::load(git_dir).as_ref() != Some(&paused) => {
             Err(anyhow::anyhow!(
-                "The paused operation changed since it was shown\nPress R to look at it again"
+                "The paused operation changed since it was shown\n{}",
+                ui::hint(Hint::Reload).unwrap_or("Look at it again")
             ))
         }
         Action::Continue { .. } => transaction::continue_run(),

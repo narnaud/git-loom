@@ -713,30 +713,31 @@ fn rerun_command(branch: &str, no_pr: bool, draft: bool) -> String {
 /// later push and nothing done locally helps; git's own "pull first" hint
 /// only merges back content the branch already carries. Whether the force is
 /// warranted is the user's call, so they have to type it, or under `loom tui`
-/// press `P` and confirm it.
+/// ask for it the way the TUI says (`Hint::ForcePush`) and confirm it.
 fn push_hint(err: anyhow::Error, branch: &str, rerun: &str, force: bool) -> anyhow::Error {
+    use crate::core::ui;
     let failed = err.downcast_ref::<PushFailed>().copied();
-    let refused = failed == Some(PushFailed::Refused) && !force;
-    match (refused, crate::core::ui::active()) {
-        (true, true) => anyhow!(
-            "{}\nIf `{}` has diverged on the remote, force-push it with `P` on its row",
-            err,
-            branch
-        ),
-        (true, false) => anyhow!(
-            "{}\nIf `{}` has diverged on the remote, push again with `{} -f`",
+    if failed == Some(PushFailed::Refused) && !force {
+        let way = match ui::hint(ui::Hint::ForcePush) {
+            Some(words) => words.to_string(),
+            None => format!("push again with `{} -f`", rerun),
+        };
+        return anyhow!(
+            "{}\nIf `{}` has diverged on the remote, {}",
             err,
             branch,
-            rerun
-        ),
-        // Git may not prompt under the TUI (Spec 020).
-        (false, true) if failed == Some(PushFailed::NoRefStatus) => anyhow!(
+            way
+        );
+    }
+    // Git may not prompt under the TUI (Spec 020).
+    if ui::active() && failed == Some(PushFailed::NoRefStatus) {
+        return anyhow!(
             "{}\nIf the remote needs credentials, run `loom push` in a terminal, \
              or set up a credential helper or ssh-agent",
             err
-        ),
-        _ => err,
+        );
     }
+    err
 }
 
 /// Run a `git push …`, trace-log it, bail on failure, and return its stderr.

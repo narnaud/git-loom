@@ -107,7 +107,7 @@ fn unmerge_names_the_co_located_branches_leaving_with_it() {
     let (question, success) = test_repo.in_dir(|| {
         let (tx, rx) = std::sync::mpsc::channel();
         let worker = std::thread::spawn(move || {
-            ui::install(tx);
+            ui::install(tx, ui::test_words);
             let result = super::run(Some("feature-b".to_string()));
             ui::uninstall();
             result
@@ -172,7 +172,7 @@ fn a_picked_branch_taking_others_with_it_is_confirmed() {
     let kinds = test_repo.in_dir(|| {
         let (tx, rx) = std::sync::mpsc::channel();
         let worker = std::thread::spawn(move || {
-            ui::install(tx);
+            ui::install(tx, ui::test_words);
             let result = super::run(None);
             ui::uninstall();
             result
@@ -263,7 +263,7 @@ fn the_picker_leaves_out_stacked_branches() {
     let kinds = test_repo.in_dir(|| {
         let (tx, rx) = std::sync::mpsc::channel();
         let worker = std::thread::spawn(move || {
-            ui::install(tx);
+            ui::install(tx, ui::test_words);
             let result = super::run(None);
             ui::uninstall();
             result
@@ -319,7 +319,7 @@ fn a_branch_picked_in_the_menu_is_not_confirmed_again() {
     let kinds = test_repo.in_dir(|| {
         let (tx, rx) = std::sync::mpsc::channel();
         let worker = std::thread::spawn(move || {
-            ui::install(tx);
+            ui::install(tx, ui::test_words);
             let result = super::run(None);
             ui::uninstall();
             result

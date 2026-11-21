@@ -10,7 +10,7 @@ fn with_sink<T: Send + 'static>(
 ) -> (Receiver<Request>, thread::JoinHandle<T>) {
     let (tx, rx) = channel();
     let handle = thread::spawn(move || {
-        install(tx);
+        install(tx, test_words);
         let out = f();
         uninstall();
         out
@@ -37,11 +37,23 @@ fn next_prompt(
 #[test]
 fn sink_is_thread_local() {
     let (tx, _rx) = channel();
-    install(tx);
+    install(tx, test_words);
     assert!(active());
     assert!(!thread::spawn(active).join().unwrap());
     uninstall();
     assert!(!active());
+}
+
+#[test]
+fn a_hint_is_worded_by_the_front_end_running_the_command() {
+    assert_eq!(hint(Hint::Reload), None, "the CLI words its own");
+
+    let (_rx, handle) = with_sink(|| (hint(Hint::ForcePush), hint(Hint::Reload)));
+
+    assert_eq!(
+        handle.join().unwrap(),
+        (Some("<force push>"), Some("<reload>"))
+    );
 }
 
 #[test]

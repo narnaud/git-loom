@@ -11,8 +11,27 @@ use std::sync::mpsc::{Sender, channel};
 use std::time::Duration;
 
 thread_local! {
-    static SINK: RefCell<Option<Sender<Request>>> = const { RefCell::new(None) };
+    static SINK: RefCell<Option<Sink>> = const { RefCell::new(None) };
 }
+
+struct Sink {
+    sender: Sender<Request>,
+    words: Words,
+}
+
+/// Something a command tells the user to do in the front-end running it,
+/// which alone knows its keys and menus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hint {
+    /// How to force-push the branch a push was refused for: what follows
+    /// "If `<branch>` has diverged on the remote, ".
+    ForcePush,
+    /// How to look at the repository again: a sentence of its own.
+    Reload,
+}
+
+/// A front-end's words for each hint.
+pub type Words = fn(Hint) -> &'static str;
 
 /// Severity of a message line, mirroring `msg::success/warn/error`; `Plain`
 /// is `msg::human` text, such as git's fetch summary, shown as is.
@@ -84,9 +103,10 @@ impl std::fmt::Display for Cancelled {
 
 impl std::error::Error for Cancelled {}
 
-/// Redirect this thread's `msg` output and prompts to the TUI.
-pub fn install(sender: Sender<Request>) {
-    SINK.with(|s| *s.borrow_mut() = Some(sender));
+/// Redirect this thread's `msg` output and prompts to the TUI, which words
+/// the hints of the commands run here with `words`.
+pub fn install(sender: Sender<Request>, words: Words) {
+    SINK.with(|s| *s.borrow_mut() = Some(Sink { sender, words }));
 }
 
 pub fn uninstall() {
@@ -97,10 +117,24 @@ pub fn active() -> bool {
     SINK.with(|s| s.borrow().is_some())
 }
 
+/// The front-end's words for `hint`; `None` when the command runs under none.
+pub fn hint(hint: Hint) -> Option<&'static str> {
+    SINK.with(|s| s.borrow().as_ref().map(|sink| (sink.words)(hint)))
+}
+
+/// Words for a test installing a sink by hand: each hint by name.
+#[cfg(test)]
+pub fn test_words(hint: Hint) -> &'static str {
+    match hint {
+        Hint::ForcePush => "<force push>",
+        Hint::Reload => "<reload>",
+    }
+}
+
 /// `false` when no sink is installed or the TUI is gone.
 fn send(request: Request) -> bool {
     SINK.with(|s| match s.borrow().as_ref() {
-        Some(sender) => sender.send(request).is_ok(),
+        Some(sink) => sink.sender.send(request).is_ok(),
         None => false,
     })
 }

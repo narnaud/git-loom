@@ -10,8 +10,8 @@ use anyhow::Result;
 
 use crate::core::graph;
 use crate::core::trace_log;
-use crate::core::ui::{self, Answer, Cancelled, Level, PromptKind, Request};
-use crate::session::action::{self, Action, LogEntry, Summary, execute_action};
+use crate::core::ui::{self, Answer, Cancelled, Level, PromptKind, Request, Words};
+use crate::session::action::{Action, LogEntry, Summary, execute_action};
 
 /// Work on a thread of its own, its `msg` output and prompts sent to the
 /// session.
@@ -77,6 +77,10 @@ pub(crate) enum Ended {
 /// starts no action and no read while another runs, or two loom commands
 /// would work on one repository and report into one log entry.
 pub(crate) struct Worker {
+    /// The front-end's subcommand, which its traces are named by.
+    front: &'static str,
+    /// The front-end's words for what the commands hint at.
+    words: Words,
     requests: Receiver<Request>,
     /// What each job's thread gets a clone of.
     request_tx: Sender<Request>,
@@ -86,9 +90,11 @@ pub(crate) struct Worker {
 }
 
 impl Worker {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(front: &'static str, words: Words) -> Self {
         let (request_tx, requests) = channel();
         Worker {
+            front,
+            words,
             requests,
             request_tx,
             running: None,
@@ -101,15 +107,21 @@ impl Worker {
         work: impl FnOnce() -> Result<T> + Send + 'static,
     ) -> Job<T> {
         let tx = self.request_tx.clone();
+        let words = self.words;
         let handle = std::thread::spawn(move || {
             // Without the sink `msg` prints, onto whatever the front-end is
             // drawing at the same moment.
-            ui::install(tx);
+            ui::install(tx, words);
             let result = work();
             ui::uninstall();
             result
         });
         Job { handle }
+    }
+
+    /// The name of the trace `command`, a line of the log, runs under.
+    fn trace_name(&self, command: &str) -> String {
+        format!("loom {}: {}", self.front, command)
     }
 
     fn open(&mut self, command: &str) {
@@ -129,9 +141,9 @@ impl Worker {
     ) {
         let git_dir = git_dir.to_path_buf();
         let theme = theme.clone();
-        let name = command.clone();
+        let trace = self.trace_name(&command);
         self.run(command, move || {
-            execute_action(action, &name, &git_dir, &theme)
+            execute_action(action, &trace, &git_dir, &theme)
         });
     }
 
@@ -167,8 +179,9 @@ impl Worker {
     ) -> Job<T> {
         self.open(&command);
         let git_dir = git_dir.to_path_buf();
+        let trace = self.trace_name(&command);
         self.spawn(move || {
-            trace_log::init(&git_dir, &action::trace_name(&command), false);
+            trace_log::init(&git_dir, &trace, false);
             let result = read();
             trace_log::finalize();
             result
@@ -178,7 +191,7 @@ impl Worker {
     /// Run `work` on the calling thread, its messages filed as a job's are.
     /// Nothing under it may prompt: the thread that would answer is this one.
     pub(crate) fn inline<T>(&self, work: impl FnOnce() -> T) -> T {
-        ui::install(self.request_tx.clone());
+        ui::install(self.request_tx.clone(), self.words);
         let result = work();
         ui::uninstall();
         result

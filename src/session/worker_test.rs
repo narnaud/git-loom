@@ -36,7 +36,7 @@ fn lines(worker: &Worker) -> Vec<(Level, &str)> {
 
 #[test]
 fn an_action_reports_into_the_entry_its_command_opened() {
-    let mut worker = Worker::new();
+    let mut worker = Worker::new("tui", ui::test_words);
     worker.run("loom drop a1".to_string(), || {
         ui::spinner(Some("Rebasing"));
         ui::message(Level::Success, "Dropped `a1`");
@@ -76,7 +76,7 @@ fn an_action_reports_into_the_entry_its_command_opened() {
 
 #[test]
 fn a_dismissed_prompt_ends_the_action_as_cancelled() {
-    let mut worker = Worker::new();
+    let mut worker = Worker::new("tui", ui::test_words);
     worker.run("loom drop a1".to_string(), || {
         ui::prompt(PromptKind::Confirm, "Drop?", None).map(|_| ())
     });
@@ -91,7 +91,7 @@ fn a_dismissed_prompt_ends_the_action_as_cancelled() {
 
 #[test]
 fn a_failure_is_filed_and_handed_back() {
-    let mut worker = Worker::new();
+    let mut worker = Worker::new("tui", ui::test_words);
     worker.run("loom drop a1".to_string(), || {
         anyhow::bail!("Nothing to drop")
     });
@@ -105,7 +105,7 @@ fn a_failure_is_filed_and_handed_back() {
 
 #[test]
 fn a_thread_that_panicked_reads_as_a_failure() {
-    let mut worker = Worker::new();
+    let mut worker = Worker::new("tui", ui::test_words);
     // Unwinds without the panic hook, which would print into the test output.
     worker.run("loom drop a1".to_string(), || {
         std::panic::resume_unwind(Box::new(()))
@@ -119,7 +119,7 @@ fn a_thread_that_panicked_reads_as_a_failure() {
 #[test]
 fn a_read_opens_the_entry_of_the_command_it_prepares() {
     let git_dir = tempfile::tempdir().unwrap();
-    let mut worker = Worker::new();
+    let mut worker = Worker::new("tui", ui::test_words);
     let job = worker.read("loom add -p zz".to_string(), git_dir.path(), || {
         ui::message(Level::Warn, "Skipped a binary file");
         Ok(3)
@@ -133,8 +133,32 @@ fn a_read_opens_the_entry_of_the_command_it_prepares() {
 }
 
 #[test]
+fn work_runs_under_the_name_and_the_words_of_its_front_end() {
+    fn words(hint: ui::Hint) -> &'static str {
+        match hint {
+            ui::Hint::ForcePush => "from its menu",
+            ui::Hint::Reload => "Reload",
+        }
+    }
+    let git_dir = tempfile::tempdir().unwrap();
+    let mut worker = Worker::new("gui", words);
+
+    let job = worker.read("loom add -p zz".to_string(), git_dir.path(), || {
+        // A trace with no command in it is not written.
+        trace_log::log_command("git", "status", 1, true, "");
+        Ok(ui::hint(ui::Hint::ForcePush))
+    });
+    assert_eq!(job.join("reading").unwrap(), Some("from its menu"));
+    assert_eq!(worker.inline(|| ui::hint(ui::Hint::Reload)), Some("Reload"));
+
+    let trace = trace_log::latest_log_path(git_dir.path()).expect("a trace");
+    let trace = std::fs::read_to_string(trace).unwrap();
+    assert!(trace.contains("loom gui: loom add -p zz"), "{trace}");
+}
+
+#[test]
 fn inline_work_reports_as_a_job_does() {
-    let mut worker = Worker::new();
+    let mut worker = Worker::new("tui", ui::test_words);
     worker.log.push(LogEntry {
         command: "loom add -p zz".to_string(),
         lines: Vec::new(),
@@ -153,7 +177,7 @@ fn inline_work_reports_as_a_job_does() {
 
 #[test]
 fn the_wait_for_the_terminal_hands_prompts_over() {
-    let mut worker = Worker::new();
+    let mut worker = Worker::new("tui", ui::test_words);
     let (reply, _answer) = channel();
     let sender = worker.sender();
     sender

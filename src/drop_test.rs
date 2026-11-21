@@ -1249,7 +1249,7 @@ fn drop_abort_preserves_working_state() {
 fn declining_the_confirm_is_cancelled() {
     let (tx, rx) = std::sync::mpsc::channel();
     let worker = std::thread::spawn(move || {
-        ui::install(tx);
+        ui::install(tx, ui::test_words);
         let result = super::confirm_or_bail(false, "Drop commit `a1`?");
         ui::uninstall();
         result
