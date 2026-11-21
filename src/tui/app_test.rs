@@ -6,8 +6,12 @@ use crossterm::event::{Event, KeyEvent, MouseEvent};
 use ratatui::style::Style;
 
 use super::*;
-use crate::core::repo::{BranchInfo, CommitInfo, ContextCommit, FileChange, UpstreamInfo};
+use crate::core::repo::{
+    BranchInfo, CommitInfo, ContextCommit, FileChange, RepoInfo, UpstreamInfo,
+};
+use crate::core::shortid::IdAllocator;
 use crate::core::ui::PromptKind;
+use crate::session::snapshot::place_moved_commit;
 use crate::tui::widgets::common::diff_line_style;
 
 fn oid(hex_char: char) -> git2::Oid {

@@ -9,8 +9,8 @@ integration branch and rewrites/manages them without leaving that branch.
 - `src/core/`: graph, short IDs, repository, remotes, transaction, agent mode, TUI
   mode (`ui.rs`: `msg` prompts/messages redirected to `loom tui`), weave.
 - `src/git/`: low-level Git operations.
-- `src/session/`: an interactive session apart from its front-end: row model
-  (`tree.rs`), auto-reload watch.
+- `src/session/`: an interactive session apart from its front-end: snapshot
+  and previews, row model (`tree.rs`), auto-reload watch.
 - `src/tui/`: status tree, shell, hunk selector, widgets, theme.
 - `src/agent/`: `agent install`; embedded source is `skills/git-loom/SKILL.md`.
 - Tests are sibling `*_test.rs` files; shared fixtures are in
