@@ -5,50 +5,17 @@ use crate::core::diff::DiffHunk;
 use crate::core::hunks::{HunkEntry, HunkOrigin};
 use crate::core::repo::FileChange;
 use crate::core::test_helpers::{base_info, oid};
+use crate::session::tree::test_support::{branch_row, commit_row, local_changes, working_file};
 
 const A: u8 = 0x01;
 const B: u8 = 0x02;
 
-fn row(kind: RowKind, key: &str, target: Option<&str>) -> Row {
-    Row {
-        kind,
-        sid: String::new(),
-        target: target.map(str::to_string),
-        key: key.to_string(),
-        focusable: true,
-        expandable: false,
-        expanded: false,
-    }
-}
-
-fn commit_row(byte: u8) -> Row {
-    let kind = RowKind::Commit {
-        oid: oid(byte),
-        message: String::new(),
-        dot_color: None,
-        file_count: 1,
-    };
-    let hash = oid(byte).to_string();
-    row(kind, &hash, Some(&hash))
-}
-
-/// `[local changes]` with one file, over commits `B` and `A`.
+/// `[local changes]` with one file, over branch `top` and commits `B` and `A`.
 fn tree() -> Vec<Row> {
-    let file = RowKind::WorkingFile {
-        path: "a.rs".to_string(),
-        index: ' ',
-        worktree: 'M',
-    };
-    let branch = RowKind::BranchName {
-        name: "top".to_string(),
-        remote: None,
-        connector: "│╭─",
-        range: None,
-    };
     vec![
-        row(RowKind::LocalChanges { count: 1 }, "zz", Some("zz")),
-        row(file, "f:a.rs", Some("a.rs")),
-        row(branch, "br:top", Some("top")),
+        local_changes(1),
+        working_file("a.rs"),
+        branch_row("top", None),
         commit_row(B),
         commit_row(A),
     ]

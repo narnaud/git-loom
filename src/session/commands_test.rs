@@ -4,76 +4,12 @@ use super::*;
 use crate::core::repo::{FileChange, RemoteStatus};
 use crate::core::shortid::IdAllocator;
 use crate::core::test_helpers::{base_info, branch, commit, oid};
+use crate::session::tree::test_support::{
+    branch_row, commit_file, commit_row, local_changes, row, upstream_row, working_file,
+};
 
 const A: u8 = 0x01;
 const B: u8 = 0x02;
-
-fn row(kind: RowKind, target: Option<&str>) -> Row {
-    Row {
-        kind,
-        sid: String::new(),
-        target: target.map(str::to_string),
-        key: String::new(),
-        focusable: true,
-        expandable: false,
-        expanded: false,
-    }
-}
-
-fn local_changes(count: usize) -> Row {
-    row(RowKind::LocalChanges { count }, Some("zz"))
-}
-
-/// A working file, named by its path.
-fn working_file(path: &str) -> Row {
-    let kind = RowKind::WorkingFile {
-        path: path.to_string(),
-        index: ' ',
-        worktree: 'M',
-    };
-    row(kind, Some(path))
-}
-
-fn commit_row(byte: u8) -> Row {
-    let kind = RowKind::Commit {
-        oid: oid(byte),
-        message: String::new(),
-        dot_color: None,
-        file_count: 2,
-    };
-    row(kind, Some(&oid(byte).to_string()))
-}
-
-fn commit_file(byte: u8, path: &str) -> Row {
-    let kind = RowKind::CommitFile {
-        oid: oid(byte),
-        path: path.to_string(),
-        index: 'M',
-        worktree: ' ',
-        on_branch: false,
-    };
-    row(kind, Some(path))
-}
-
-fn branch_row(name: &str, remote: Option<RemoteStatus>) -> Row {
-    let kind = RowKind::BranchName {
-        name: name.to_string(),
-        remote,
-        connector: "│╭─",
-        range: None,
-    };
-    row(kind, Some(name))
-}
-
-fn upstream_row() -> Row {
-    let kind = RowKind::Upstream {
-        label: "origin/main".to_string(),
-        base_short_id: String::new(),
-        base_message: String::new(),
-        commits_ahead: 0,
-    };
-    row(kind, None)
-}
 
 fn change(path: &str) -> FileChange {
     FileChange {
