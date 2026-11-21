@@ -151,7 +151,7 @@ fn git_never_prompts_on_the_terminal_under_the_tui() {
     assert_eq!(prompt_env(), None);
 
     let (sender, _receiver) = std::sync::mpsc::channel();
-    ui::install(sender);
+    ui::install(sender, ui::test_words);
     let under_tui = prompt_env();
     ui::uninstall();
     assert_eq!(under_tui.as_deref(), Some(OsStr::new("0")));

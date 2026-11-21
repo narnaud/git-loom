@@ -1252,7 +1252,7 @@ fn the_picker_leaves_out_a_remote_branch_head_already_holds() {
     let kinds = test_repo.in_dir(|| {
         let (tx, rx) = std::sync::mpsc::channel();
         let worker = std::thread::spawn(move || {
-            ui::install(tx);
+            ui::install(tx, ui::test_words);
             let result = super::run(None, true);
             ui::uninstall();
             result

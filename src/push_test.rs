@@ -296,9 +296,9 @@ fn a_refused_push_names_the_flag_that_gets_past_it() {
 }
 
 #[test]
-fn a_refused_push_under_the_tui_names_its_key() {
+fn a_refused_push_under_a_front_end_is_worded_by_it() {
     let (tx, _rx) = std::sync::mpsc::channel();
-    crate::core::ui::install(tx);
+    crate::core::ui::install(tx, crate::core::ui::test_words);
     let hint = |failed: super::PushFailed, force| {
         super::push_hint(failed.into(), "feature-a", "loom push feature-a", force).to_string()
     };
@@ -307,11 +307,15 @@ fn a_refused_push_under_the_tui_names_its_key() {
     let declined = hint(super::PushFailed::ServerRejected, false);
     let forced = hint(super::PushFailed::Refused, true);
     crate::core::ui::uninstall();
-    assert!(refused.contains("`P`"), "{}", refused);
+    assert!(
+        refused.ends_with("If `feature-a` has diverged on the remote, <force push>"),
+        "{}",
+        refused
+    );
     assert!(!refused.contains("loom push"), "{}", refused);
     // Credentials, not a moved remote, are what git cannot ask for here.
     assert!(no_status.contains("credentials"), "{}", no_status);
-    assert!(!no_status.contains("`P`"), "{}", no_status);
+    assert!(!no_status.contains("<force push>"), "{}", no_status);
     // The server took these, credentials and all.
     assert_eq!(declined, super::PUSH_FAILED);
     assert_eq!(forced, super::PUSH_FAILED);
@@ -854,7 +858,7 @@ fn a_draft_pr_is_named_on_its_line() {
     let (tx, rx) = std::sync::mpsc::channel();
     let success = std::thread::scope(|scope| {
         scope.spawn(|| {
-            ui::install(tx);
+            ui::install(tx, ui::test_words);
             let mut report = super::PushReport::new("origin", &super::RemoteType::GitLab);
             let url = Some("https://gitlab.example.com/g/r/-/merge_requests/2");
             report.pr(&layer, super::PrState::Created, url, false, true);
@@ -927,7 +931,7 @@ fn a_wip_gerrit_push_uploads_to_refs_for_wip() {
     let (tx, rx) = std::sync::mpsc::channel();
     let (success, report) = std::thread::scope(|scope| {
         let worker = scope.spawn(|| {
-            ui::install(tx);
+            ui::install(tx, ui::test_words);
             let mut report = Default::default();
             let result = super::push_gerrit(
                 &workdir,
@@ -1252,7 +1256,7 @@ fn force_push_under_tui_of(
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::scope(|scope| {
             let worker = scope.spawn(move || {
-                ui::install(tx);
+                ui::install(tx, ui::test_words);
                 let result = super::run(Some(pushed_branch.to_string()), false, true, None, false);
                 ui::uninstall();
                 result
@@ -1298,7 +1302,7 @@ fn a_gerrit_review_push_never_asks_about_a_force() {
     // With the receiver gone a prompt is cancelled at once instead of waiting.
     let (tx, rx) = std::sync::mpsc::channel();
     drop(rx);
-    crate::core::ui::install(tx);
+    crate::core::ui::install(tx, crate::core::ui::test_words);
     let gerrit = super::RemoteType::Gerrit {
         target_branch: "main".to_string(),
     };
@@ -1416,7 +1420,7 @@ fn a_gerrit_push_as_wip_shows_the_links_and_sets_the_upstream() {
     let (tx, rx) = std::sync::mpsc::channel();
     let (success, result) = std::thread::scope(|scope| {
         let worker = scope.spawn(|| {
-            ui::install(tx);
+            ui::install(tx, ui::test_words);
             let mut report = Default::default();
             let result =
                 super::push_gerrit_no_pr(&workdir, "origin", "feature-a", false, &mut report)

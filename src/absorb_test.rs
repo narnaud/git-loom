@@ -576,7 +576,7 @@ fn run_in_tui(test_repo: &TestRepo, yes: bool) -> (String, anyhow::Result<()>) {
     test_repo.in_dir(|| {
         let (tx, rx) = std::sync::mpsc::channel();
         let worker = std::thread::spawn(move || {
-            ui::install(tx);
+            ui::install(tx, ui::test_words);
             let result = super::run(false, vec![], vec![]);
             ui::uninstall();
             result
@@ -639,7 +639,7 @@ fn tui_absorb_with_nothing_to_absorb_says_why_without_asking() {
 
     let result = test_repo.in_dir(|| {
         let (tx, _rx) = std::sync::mpsc::channel();
-        crate::core::ui::install(tx);
+        crate::core::ui::install(tx, crate::core::ui::test_words);
         let result = super::run(false, vec![], vec![]);
         crate::core::ui::uninstall();
         result

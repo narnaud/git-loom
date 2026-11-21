@@ -2418,6 +2418,15 @@ fn command_line_uses_the_short_ids_the_tree_shows() {
 }
 
 #[test]
+fn hints_name_the_keys_of_the_tui() {
+    assert_eq!(
+        hint_words(Hint::ForcePush),
+        "force-push it with `P` on its row"
+    );
+    assert_eq!(hint_words(Hint::Reload), "Press R to look at it again");
+}
+
+#[test]
 fn prompt_request_opens_a_popup_that_owns_the_keys_and_replies() {
     let theme = make_theme();
     let mut app = make_app(make_snapshot(), &theme);
@@ -4582,6 +4591,11 @@ fn update_menu_updates_or_takes_the_remote_version() {
 
         assert_eq!(run(&[KeyCode::Enter]), "loom update");
         assert!(!test_repo.workdir().join("a2.txt").exists());
+        // Spec 020: an action's trace is named after the TUI and its command.
+        let trace = trace_log::latest_log_path(test_repo.repo.path()).expect("a trace");
+        let trace = std::fs::read_to_string(trace).unwrap();
+        let header = trace.lines().next().unwrap_or_default();
+        assert!(header.ends_with("loom tui: loom update"), "{header}");
 
         let command = run(&[KeyCode::Down, KeyCode::Enter]);
         assert!(command.starts_with("loom update "), "{command}");
@@ -4883,9 +4897,9 @@ fn continue_refuses_once_the_paused_operation_changed() {
         poll_until_idle(&mut app);
         let lines = &app.worker.log.last().unwrap().lines;
         assert!(
-            lines
-                .iter()
-                .any(|(_, l)| l.contains("The paused operation changed")),
+            lines.iter().any(|(_, l)| l
+                == "The paused operation changed since it was shown
+Press R to look at it again"),
             "{lines:?}"
         );
     });

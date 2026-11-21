@@ -1630,7 +1630,7 @@ fn run_under_tui(
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::scope(|scope| {
             let worker = scope.spawn(move || {
-                ui::install(tx);
+                ui::install(tx, ui::test_words);
                 let result = super::run(None, false);
                 ui::uninstall();
                 result
@@ -1727,7 +1727,7 @@ fn a_failed_fetch_under_the_tui_hints_at_credentials() {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::scope(|scope| {
             let worker = scope.spawn(move || {
-                ui::install(tx);
+                ui::install(tx, ui::test_words);
                 let result = super::run(None, false);
                 ui::uninstall();
                 result

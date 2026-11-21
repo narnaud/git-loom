@@ -153,7 +153,7 @@ fn resolve_remote_type_under_tui(
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::scope(|scope| {
         let worker = scope.spawn(|| {
-            ui::install(tx);
+            ui::install(tx, ui::test_words);
             let repo = git2::Repository::open(&workdir).unwrap();
             let result = super::resolve_remote_type(&repo, &workdir, "origin", "main");
             ui::uninstall();
@@ -241,7 +241,7 @@ fn resolve_remote_type_saves_nothing_when_the_menu_is_cancelled() {
     let (tx, rx) = std::sync::mpsc::channel();
     let result = std::thread::scope(|scope| {
         let worker = scope.spawn(|| {
-            ui::install(tx);
+            ui::install(tx, ui::test_words);
             let repo = git2::Repository::open(&workdir).unwrap();
             let result = super::resolve_remote_type(&repo, &workdir, "origin", "main");
             ui::uninstall();

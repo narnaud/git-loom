@@ -29,7 +29,7 @@ use crate::core::repo::{self, BranchInfo, FileChange, RemoteStatus};
 use crate::core::staging;
 use crate::core::trace_log;
 use crate::core::transaction;
-use crate::core::ui::{Answer, Level};
+use crate::core::ui::{Answer, Hint, Level};
 use crate::git;
 use crate::session::Refusal;
 use crate::session::action::{self, Action, CommitSource, Stamp, Summary};
@@ -452,7 +452,7 @@ impl<'a> App<'a> {
             quit_after_pick: false,
             notice: None,
             outcome: None,
-            worker: Worker::new(),
+            worker: Worker::new("tui", hint_words),
             ticks: 0,
             popup: None,
             paused: None,
@@ -2733,6 +2733,14 @@ impl ShellApp for App<'_> {
             "Help: ?".into(),
             "Quit: q".into(),
         ]
+    }
+}
+
+/// What a command hints at, in the TUI's keys.
+fn hint_words(hint: Hint) -> &'static str {
+    match hint {
+        Hint::ForcePush => "force-push it with `P` on its row",
+        Hint::Reload => "Press R to look at it again",
     }
 }
 
