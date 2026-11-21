@@ -413,6 +413,8 @@ struct App<'a> {
     outcome: Option<Outcome>,
     /// The action in flight, its requests and the log.
     worker: Worker,
+    /// Ticks since the action started, for the status-bar animation.
+    ticks: usize,
     popup: Option<Popup>,
     /// Set while an operation is paused: the view replacing the tree.
     paused: Option<Paused>,
@@ -450,6 +452,7 @@ impl<'a> App<'a> {
             notice: None,
             outcome: None,
             worker: Worker::new(),
+            ticks: 0,
             popup: None,
             paused: None,
             watch,
@@ -639,6 +642,7 @@ impl<'a> App<'a> {
         self.clear_selection();
         self.mode = Mode::Normal;
         self.notice = None;
+        self.ticks = 0;
         self.worker
             .start(action, command, &self.snapshot.git_dir, &self.graph_theme);
     }
@@ -2582,6 +2586,7 @@ impl ShellApp for App<'_> {
             PickTick::Nothing => {}
         }
         if self.worker.running().is_some() {
+            self.ticks += 1;
             if let Some(ended) = self.worker.reap()
                 && self.finish_action(ended)
             {
@@ -2665,7 +2670,7 @@ impl ShellApp for App<'_> {
 
     fn mode_hint(&self) -> Option<String> {
         if let Some(running) = self.worker.running() {
-            let frame = SPINNER_FRAMES[(running.ticks / 2) % SPINNER_FRAMES.len()];
+            let frame = SPINNER_FRAMES[(self.ticks / 2) % SPINNER_FRAMES.len()];
             let detail = running
                 .spinner
                 .as_deref()
