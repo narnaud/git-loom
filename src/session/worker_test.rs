@@ -58,7 +58,6 @@ fn an_action_reports_into_the_entry_its_command_opened() {
     assert_eq!(ask.command, "loom drop a1");
     assert_eq!(ask.prompt, "Drop the branch too?");
     assert_eq!(worker.reap(), None, "it waits for the answer");
-    assert_eq!(worker.running().unwrap().ticks, 1);
 
     ask.reply.send(Some(Answer::Bool(true))).unwrap();
     assert_eq!(reap(&mut worker), Ended::Done);

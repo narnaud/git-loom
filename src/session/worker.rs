@@ -41,9 +41,6 @@ pub(crate) struct Running {
     pub(crate) command: String,
     /// Text of the command's active spinner, if any.
     pub(crate) spinner: Option<String>,
-    /// Calls to [`Worker::reap`] since it started: the clock of a front-end
-    /// animating the wait.
-    pub(crate) ticks: usize,
 }
 
 /// A prompt from the running command; replying `None` cancels it.
@@ -59,8 +56,8 @@ pub(crate) struct Ask {
 
 /// What a request leaves the front-end to do.
 pub(crate) enum Event {
-    /// Nothing: a message or a spinner, taken in. What is shown may have
-    /// changed.
+    /// Nothing: a message, a spinner or a hand-back, taken in. What is shown
+    /// may have changed.
     Filed,
     Ask(Ask),
     /// The command wants the terminal for a subprocess; ack once it is free.
@@ -76,6 +73,9 @@ pub(crate) enum Ended {
     Failed(String),
 }
 
+/// The work a session has in flight. One thing at a time: its front-end
+/// starts no action and no read while another runs, or two loom commands
+/// would work on one repository and report into one log entry.
 pub(crate) struct Worker {
     requests: Receiver<Request>,
     /// What each job's thread gets a clone of.
@@ -135,19 +135,20 @@ impl Worker {
         });
     }
 
-    /// Run `work` as the action `command`.
+    /// Run `work` as the action `command`: `start` for work that is no
+    /// `Action`, which tests use to run one touching no repository.
     pub(crate) fn run(
         &mut self,
         command: String,
         work: impl FnOnce() -> Result<()> + Send + 'static,
     ) {
+        debug_assert!(self.running.is_none(), "one action at a time");
         self.open(&command);
         let job = self.spawn(work);
         self.running = Some(Running {
             job,
             command,
             spinner: None,
-            ticks: 0,
         });
     }
 
@@ -246,16 +247,15 @@ impl Worker {
 
     /// How the action ended, once its thread is done.
     pub(crate) fn reap(&mut self) -> Option<Ended> {
-        let running = self.running.as_mut()?;
-        running.ticks += 1;
-        if !running.job.is_finished() {
+        if !self.running.as_ref()?.job.is_finished() {
             return None;
         }
         let running = self.running.take()?;
         Some(self.close(running.job.join("the action")))
     }
 
-    /// File how an action that returned `result` ended.
+    /// File how an action that returned `result` ended: the second half of
+    /// `reap`, which tests drive an ending through.
     pub(crate) fn close(&mut self, result: Result<()>) -> Ended {
         match result {
             Ok(()) => Ended::Done,
