@@ -13,6 +13,7 @@ mod init;
 mod merge;
 mod push;
 mod reword;
+mod session;
 mod show;
 mod split;
 mod status;
