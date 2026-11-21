@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.1](https://github.com/narnaud/git-loom/compare/v1.1.0...v1.1.1) (2026-11-21)
+
+
+### Tests
+
+* find the binary from cargo's per-unit harness directory ([e78c059](https://github.com/narnaud/git-loom/commit/e78c059abe72d24ccc660852a5ae4560db6b2874)) by @narnaud
+
+
+### Other
+
+* **deps:** bump inquire from 0.9.4 to 0.9.5 ([7c5540d](https://github.com/narnaud/git-loom/commit/7c5540dacd05bc6fa378a3ff1cc527e96f01d2fa)) by @dependabot[bot]
+
 ## [1.1.0](https://github.com/narnaud/git-loom/compare/v1.0.0...v1.1.0) (2026-11-11)
 
 
