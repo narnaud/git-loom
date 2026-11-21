@@ -11,6 +11,7 @@ use crate::core::repo::{
 };
 use crate::core::shortid::IdAllocator;
 use crate::core::ui::PromptKind;
+use crate::session::diff_text::untracked_file_text;
 use crate::session::paused::is_conflicted;
 use crate::session::snapshot::place_moved_commit;
 use crate::tui::widgets::common::diff_line_style;
