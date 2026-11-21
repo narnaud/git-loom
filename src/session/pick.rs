@@ -9,8 +9,9 @@ use crate::core::hunk_select::{self, HunkArgs};
 use crate::core::hunks::FileEntry;
 use crate::core::repo::RepoInfo;
 use crate::core::staging;
+use crate::session::Refusal;
 use crate::session::action::{Action, Stamp};
-use crate::session::commands::{self, Refusal};
+use crate::session::commands;
 use crate::session::targets::{self, FoldEffect, FoldTarget};
 use crate::session::tree::{Row, RowKind};
 
@@ -203,10 +204,17 @@ pub(crate) fn fold(sources: Vec<String>, target: FoldTarget, hunks: Option<FoldH
 }
 
 /// `loom split -p` of `commit` at the hunks `picked` keeps, handed over by id
-/// (Spec 019). Both halves must keep something, as `split -p` checks.
-pub(crate) fn split(commit: git2::Oid, picked: &[FileEntry]) -> Result<Action, Refusal> {
+/// (Spec 019). Both halves must keep something, as `split -p` checks: the
+/// error is the line for the log, then the refusal.
+pub(crate) fn split(
+    commit: git2::Oid,
+    picked: &[FileEntry],
+) -> Result<Action, (&'static str, Refusal)> {
     if picked.iter().all(|f| f.hunks.iter().all(|h| h.selected)) {
-        return Err("leave at least one hunk for the second commit");
+        return Err((
+            "Nothing left for the second commit",
+            "leave at least one hunk for the second commit",
+        ));
     }
     let commit = commit.to_string();
     let from = hunk_select::fingerprint(&commit, None, picked);
