@@ -46,6 +46,19 @@ jobs:
       - if: runner.os == 'Linux'
         run: bash test-integration.sh
 
+  gui:
+    name: Test (gui feature)
+    # The one platform `git-loom-gui` has been built on.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      # The feature is opt-in: no other job compiles the window.
+      - run: cargo clippy --locked --features gui --all-targets -- -Dwarnings
+      - run: cargo test --locked --features gui
+
   msrv:
     name: Check (rust-version)
     runs-on: ubuntu-latest
