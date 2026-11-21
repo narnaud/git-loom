@@ -11,9 +11,9 @@ integration branch and rewrites/manages them without leaving that branch.
 - `src/git/`: low-level Git operations.
 - `src/session/`: an interactive session apart from its front-end: snapshot
   and previews, row model (`tree.rs`), what each command takes of the picked
-  rows (`commands.rs`), actions (`action.rs`) and the worker running them
-  (`worker.rs`), fold/move rules (`targets.rs`), diff text, paused operation,
-  auto-reload watch.
+  rows (`commands.rs`), hunk picks (`pick.rs`), actions (`action.rs`) and the
+  worker running them (`worker.rs`), fold/move rules (`targets.rs`), diff
+  text, paused operation, auto-reload watch.
 - `src/tui/`: status tree, shell, hunk selector, widgets, theme.
 - `src/agent/`: `agent install`; embedded source is `skills/git-loom/SKILL.md`.
 - Tests are sibling `*_test.rs` files; shared fixtures are in
