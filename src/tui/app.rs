@@ -24,7 +24,6 @@ use ratatui::{
 };
 
 use crate::core::graph;
-use crate::core::hunk_select::{self, HunkArgs};
 use crate::core::hunks::FileEntry;
 use crate::core::repo::{self, BranchInfo, FileChange, RemoteStatus};
 use crate::core::staging;
@@ -38,6 +37,7 @@ use crate::session::diff_text::{
     diff_text, pending_commit_diff, staged_commit_diff, working_file_diff,
 };
 use crate::session::paused::{PausedOp, PausedState};
+use crate::session::pick::{self, FoldHunks, PickFor};
 use crate::session::snapshot::{
     CommitDest, MoveSlot, NEW_BRANCH_NAME, Preview, Snapshot, is_staged, load_snapshot,
 };
@@ -136,33 +136,6 @@ enum PickTick {
     },
 }
 
-/// What a pick's selection goes to.
-enum PickFor {
-    /// `C`: staged at once, then committed.
-    Commit,
-    /// `F`: folded into one of `targets`, read off the tree at the press so a
-    /// pick with nowhere to go never opens. `commit` is the source commit when
-    /// the hunks are its own rather than the working tree's.
-    Fold {
-        sources: Vec<String>,
-        targets: Vec<FoldTarget>,
-        commit: Option<git2::Oid>,
-    },
-    /// `S`: the hunks of `commit` that make the first of its two halves.
-    Split { commit: git2::Oid },
-}
-
-impl PickFor {
-    /// The command the pick is for, as notices and the status bar name it.
-    fn label(&self) -> &'static str {
-        match self {
-            PickFor::Commit => "commit",
-            PickFor::Fold { .. } => "fold",
-            PickFor::Split { .. } => "split",
-        }
-    }
-}
-
 /// The two halves of a `C` or `F` pick. Reading the hunks is a git per changed
 /// file, so it waits on a worker like any other slow work; only the selector
 /// that follows needs the terminal, and only that half runs on the loop.
@@ -186,19 +159,6 @@ enum Pick {
         origin: String,
         purpose: PickFor,
     },
-}
-
-/// The hunks `F` picked, folded instead of its source rows whole.
-enum FoldHunks {
-    /// Working-tree hunks, staged only once the target is confirmed, so a
-    /// cancelled fold leaves the index as it was; `stamp` lets the fold
-    /// refuse a pick the tree has moved away from by then.
-    Worktree {
-        picked: Vec<FileEntry>,
-        stamp: Stamp,
-    },
-    /// Hunks of the source commit, handed to `loom fold -p` by id (Spec 019).
-    Commit(Vec<FileEntry>),
 }
 
 /// What stands in for the tree while an operation is paused: HEAD is detached
@@ -1392,21 +1352,14 @@ impl<'a> App<'a> {
     /// rewrite. The press starts the read on a worker; the selector that
     /// follows is what asks the shell for the terminal.
     fn action_commit_patch_start(&mut self) {
-        if self.snapshot.info.working_changes.is_empty() {
-            self.notice = Some("commit: no local changes".to_string());
+        let purpose = PickFor::commit(&self.snapshot.info);
+        let Some(purpose) = self.or_refuse("commit", purpose) else {
             return;
-        }
+        };
         let Some(origin) = self.current_row().map(|r| r.key.clone()) else {
             return;
         };
-        let files = vec![self.snapshot.ids.get_unstaged().to_string()];
-        let command = format!("loom add -p {}", files.join(" "));
-        self.start_pick(command, origin, PickFor::Commit, move |workdir| {
-            let repo = git2::Repository::open(workdir)?;
-            let filter = staging::filter_paths(&repo, &files)?;
-            let entries = staging::collect_file_entries(&repo, workdir, filter.as_deref())?;
-            Ok((entries, Vec::new()))
-        });
+        self.start_pick(origin, purpose);
     }
 
     /// `F`: `f` with the hunks picked first — out of one commit's own diff,
@@ -1414,71 +1367,30 @@ impl<'a> App<'a> {
     /// `C` shows them whatever the cursor or selection. The press starts the
     /// read on a worker, as `C` does.
     fn action_fold_patch_start(&mut self) {
-        let rows = self.picked_rows();
         let Some(origin) = self.current_row().map(|r| r.key.clone()) else {
             return;
         };
-        let mut sources = match commands::fold_sources(&rows) {
-            Ok(sources) => sources,
-            Err(reason) => {
-                self.notice = Some(format!("fold: {}", reason));
-                return;
-            }
-        };
-        let commit = match rows[0].kind {
-            RowKind::Commit { oid, .. } => Some(oid),
-            RowKind::LocalChanges { .. } | RowKind::WorkingFile { .. } => None,
-            _ => {
-                self.notice = Some("fold: move to a file, local changes, or a commit".to_string());
-                return;
-            }
-        };
-        let targets = match self.fold_targets(&rows, true) {
-            Ok(targets) => targets,
-            Err(notice) => {
-                self.notice = Some(format!("fold: {}", notice));
-                return;
-            }
-        };
-        if commit.is_none() {
-            sources = vec![self.snapshot.ids.get_unstaged().to_string()];
-        }
-        let shown: Vec<String> = sources.iter().map(|s| self.sid_of(s)).collect();
-        let command = format!("loom fold -p {}", shown.join(" "));
-        let purpose = PickFor::Fold {
-            sources: sources.clone(),
-            targets,
-            commit,
-        };
-        match commit {
-            Some(oid) => self.start_pick(command, origin, purpose, move |workdir| {
-                let entries = staging::collect_commit_hunks(workdir, &oid.to_string(), &[])?;
-                Ok((entries, Vec::new()))
-            }),
-            None => self.start_pick(command, origin, purpose, move |workdir| {
-                let repo = git2::Repository::open(workdir)?;
-                let entries = staging::collect_file_entries(&repo, workdir, None)?;
-                let stamp = staging::binary_stamp(workdir, &entries);
-                Ok((entries, stamp))
-            }),
+        let purpose = PickFor::fold(
+            &self.rows,
+            &self.snapshot.workdir,
+            &self.picked_rows(),
+            self.snapshot.ids.get_unstaged(),
+        );
+        if let Some(purpose) = self.or_refuse("fold", purpose) {
+            self.start_pick(origin, purpose);
         }
     }
 
-    /// Open `command`'s log entry and start `read` on a worker, over the
-    /// snapshot's working tree.
-    fn start_pick(
-        &mut self,
-        command: String,
-        origin: String,
-        purpose: PickFor,
-        read: impl FnOnce(&std::path::Path) -> Result<(Vec<FileEntry>, Stamp)> + Send + 'static,
-    ) {
-        // The repository is opened here rather than from the process cwd: this
-        // runs off the loop, and the tree it must agree with is the snapshot's.
+    /// Open the log entry of the read `purpose` needs and start it on a
+    /// worker, over the snapshot's working tree.
+    fn start_pick(&mut self, origin: String, purpose: PickFor) {
+        let all = self.snapshot.ids.get_unstaged();
+        let command = purpose.command_line(all, |target| self.sid_of(target));
+        let read = purpose.read(all);
         let workdir = self.snapshot.workdir.clone();
         let job = self
             .worker
-            .read(command, &self.snapshot.git_dir, move || read(&workdir));
+            .read(command, &self.snapshot.git_dir, move || read.run(&workdir));
         self.pick = Some(Pick::Collecting {
             job,
             origin,
@@ -1661,10 +1573,7 @@ impl<'a> App<'a> {
     /// split from the selector, which is the only part needing a terminal.
     /// `Ok(false)` when nothing was kept, which leaves the index as it was.
     fn apply_pick(&mut self, picked: Vec<FileEntry>) -> Result<bool> {
-        if !picked
-            .iter()
-            .any(|file| file.hunks.iter().any(|hunk| hunk.selected))
-        {
+        if !pick::any_picked(&picked) {
             return Ok(false);
         }
         // Into the entry the press opened, so both halves of `loom add -p`
@@ -1785,7 +1694,7 @@ impl<'a> App<'a> {
         origin: String,
     ) {
         let picked = match picked {
-            Ok(Some(picked)) if picked.iter().any(|f| f.hunks.iter().any(|h| h.selected)) => picked,
+            Ok(Some(picked)) if pick::any_picked(&picked) => picked,
             Ok(_) => {
                 self.worker.log_line(Level::Warn, "Cancelled");
                 self.notice = Some("fold cancelled".to_string());
@@ -1876,31 +1785,7 @@ impl<'a> App<'a> {
         else {
             return None;
         };
-        Some(match hunks {
-            None => Action::Fold {
-                sources,
-                target: target.arg,
-                hunks: None,
-            },
-            Some(FoldHunks::Worktree { picked, stamp }) => Action::FoldHunks {
-                sources,
-                picked,
-                stamp,
-                target: target.arg,
-            },
-            Some(FoldHunks::Commit(picked)) => {
-                // Numbered against the commit and where its hunks land, as
-                // `fold -p` re-reads them; `zz` names no commit.
-                let into = (target.effect != FoldEffect::Uncommit).then_some(target.arg.as_str());
-                let from = hunk_select::fingerprint(&sources[0], into, &picked);
-                let ids = hunk_select::picked_ids(&picked);
-                Action::Fold {
-                    sources,
-                    target: target.arg,
-                    hunks: Some(HunkArgs::new(ids, Some(from))),
-                }
-            }
-        })
+        Some(pick::fold(sources, target, hunks))
     }
 
     fn cancel_fold_target(&mut self) {
@@ -2127,23 +2012,16 @@ impl<'a> App<'a> {
         let Some(origin) = self.current_row().map(|r| r.key.clone()) else {
             return;
         };
-        let command = format!("loom split -p {}", self.sid_of(&commit.to_string()));
-        self.start_pick(command, origin, PickFor::Split { commit }, move |workdir| {
-            let entries = staging::collect_commit_hunks(workdir, &commit.to_string(), &[])?;
-            Ok((entries, Vec::new()))
-        });
+        self.start_pick(origin, PickFor::Split { commit });
     }
 
-    /// Whether an `S` read leaves nothing to split, after saying so: with fewer
-    /// than two entries no pick can keep something on each side.
-    fn refuse_split_pick(&mut self, entries: &[FileEntry]) -> bool {
-        let (line, notice) = match entries.iter().map(|f| f.hunks.len()).sum::<usize>() {
-            0 => ("No changes to pick", "split: no hunks to pick"),
-            1 => ("Only one hunk", "split: one hunk only, nothing to split"),
-            _ => return false,
+    /// Whether a read leaves `purpose` nothing to pick, after saying so.
+    fn refuse_empty_pick(&mut self, purpose: &PickFor, entries: &[FileEntry]) -> bool {
+        let Some((line, reason)) = purpose.nothing_to_pick(entries) else {
+            return false;
         };
         self.worker.log_line(Level::Warn, line);
-        self.notice = Some(notice.to_string());
+        self.notice = Some(format!("{}: {}", purpose.label(), reason));
         true
     }
 
@@ -2156,7 +2034,7 @@ impl<'a> App<'a> {
         commit: git2::Oid,
     ) -> Option<Action> {
         let picked = match picked {
-            Ok(Some(picked)) if picked.iter().any(|f| f.hunks.iter().any(|h| h.selected)) => picked,
+            Ok(Some(picked)) if pick::any_picked(&picked) => picked,
             Ok(_) => {
                 self.worker.log_line(Level::Warn, "Cancelled");
                 self.notice = Some("split cancelled".to_string());
@@ -2169,20 +2047,12 @@ impl<'a> App<'a> {
                 return None;
             }
         };
-        if picked.iter().all(|f| f.hunks.iter().all(|h| h.selected)) {
+        let split = pick::split(commit, &picked);
+        if split.is_err() {
             self.worker
                 .log_line(Level::Warn, "Nothing left for the second commit");
-            self.notice = Some("split: leave at least one hunk for the second commit".to_string());
-            return None;
         }
-        let commit = commit.to_string();
-        let from = hunk_select::fingerprint(&commit, None, &picked);
-        let ids = hunk_select::picked_ids(&picked);
-        Some(Action::Split {
-            commit,
-            files: Vec::new(),
-            hunks: Some(HunkArgs::new(ids, Some(from))),
-        })
+        self.or_refuse("split", split)
     }
 
     /// `d`: drop the selected working files together, else the cursor row (a
@@ -2751,15 +2621,15 @@ impl ShellApp for App<'_> {
                 return;
             }
         };
+        if self.refuse_empty_pick(&purpose, &entries) {
+            return;
+        }
         match purpose {
             PickFor::Commit => {
                 let staged = self.select_and_stage(entries, terminal);
                 self.finish_pick(staged, origin);
             }
             PickFor::Split { commit } => {
-                if self.refuse_split_pick(&entries) {
-                    return;
-                }
                 let picked =
                     run_hunk_selector_nested(entries, self.theme.clone(), "SPLIT", terminal);
                 if let Some(action) = self.finish_split_pick(picked, commit) {
@@ -2771,11 +2641,6 @@ impl ShellApp for App<'_> {
                 targets,
                 commit,
             } => {
-                if entries.is_empty() {
-                    self.worker.log_line(Level::Warn, "No changes to pick");
-                    self.notice = Some("fold: no hunks to pick".to_string());
-                    return;
-                }
                 let picked =
                     run_hunk_selector_nested(entries, self.theme.clone(), "FOLD", terminal);
                 self.finish_fold_pick(picked, stamp, sources, targets, commit, origin);

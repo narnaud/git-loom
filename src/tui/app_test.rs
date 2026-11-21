@@ -7,6 +7,7 @@ use crossterm::event::{Event, KeyEvent, MouseEvent};
 use ratatui::style::Style;
 
 use super::*;
+use crate::core::hunk_select::HunkArgs;
 use crate::core::repo::{
     BranchInfo, CommitInfo, ContextCommit, FileChange, RepoInfo, UpstreamInfo,
 };
@@ -4227,7 +4228,7 @@ fn a_split_pick_must_leave_something_on_each_side() {
         for hunk in entries.iter_mut().flat_map(|f| &mut f.hunks) {
             hunk.selected = keep;
         }
-        assert!(!app.refuse_split_pick(&entries));
+        assert!(!app.refuse_empty_pick(&PickFor::Split { commit: source }, &entries));
         assert_eq!(
             app.finish_split_pick(Ok(Some(entries)), source),
             None,
@@ -4245,12 +4246,13 @@ fn a_split_pick_with_fewer_than_two_hunks_never_opens() {
     let mut app = app_over_repo(&repo, &theme);
 
     let entries = staging::collect_commit_hunks(&repo.workdir(), &one.to_string(), &[]).unwrap();
-    assert!(app.refuse_split_pick(&entries));
+    let purpose = PickFor::Split { commit: one };
+    assert!(app.refuse_empty_pick(&purpose, &entries));
     assert_eq!(
         app.notice.as_deref(),
         Some("split: one hunk only, nothing to split")
     );
-    assert!(app.refuse_split_pick(&[]));
+    assert!(app.refuse_empty_pick(&purpose, &[]));
     assert_eq!(app.notice.as_deref(), Some("split: no hunks to pick"));
 }
 
