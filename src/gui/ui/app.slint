@@ -2,14 +2,15 @@
 
 import { Button, Palette, Spinner } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { LocalChanges, ChangeKind, ChangeRow, Piece, PieceKind, BoardLine, Strand, Remote, TextRow, TextKind, MenuEntry, Tone, Choice, Dialog, DialogInput } from "types.slint";
+import { LocalChanges, ChangeKind, ChangeRow, Piece, PieceKind, BoardLine, Strand, Remote, TextRow, TextKind, MenuEntry, Tone, Choice, Dialog, DialogInput, Picking, HunkFile, HunkLine } from "types.slint";
 import { ChangesView } from "changes.slint";
 import { BoardView } from "board.slint";
 import { InspectorView } from "inspector.slint";
 import { ToolButton } from "controls.slint";
 import { DialogView, LogView } from "dialogs.slint";
+import { HunkPicker } from "hunks.slint";
 
-export { Theme, LocalChanges, ChangeKind, ChangeRow, Piece, PieceKind, BoardLine, Strand, Remote, TextRow, TextKind, MenuEntry, Tone, Choice, Dialog, DialogInput }
+export { Theme, LocalChanges, ChangeKind, ChangeRow, Piece, PieceKind, BoardLine, Strand, Remote, TextRow, TextKind, MenuEntry, Tone, Choice, Dialog, DialogInput, Picking, HunkFile, HunkLine }
 
 export component AppWindow inherits Window {
     // The directory of the working tree.
@@ -57,6 +58,15 @@ export component AppWindow inherits Window {
     in property <[TextRow]> log;
     in property <int> log-columns;
 
+    // The hunk picker over everything else: the files picked from, the one
+    // whose hunks show and its lines.
+    in property <bool> picker-open;
+    in property <Picking> picking;
+    in property <[HunkFile]> hunk-files;
+    in property <int> hunk-file;
+    in property <[HunkLine]> hunk-lines;
+    in property <int> hunk-columns;
+
     callback board-resized(room: length);
     callback board-toggled(row: int);
     // The left button went down on a line of the local changes or a piece
@@ -75,6 +85,12 @@ export component AppWindow inherits Window {
     callback dialog-toggled(index: int);
     callback log-opened();
     callback log-closed();
+    callback hunk-file-picked(index: int);
+    callback hunk-file-toggled(index: int);
+    callback hunk-toggled(index: int);
+    callback hunks-kept(keep: bool);
+    callback hunks-confirmed();
+    callback hunks-cancelled();
 
     public function reveal-in-changes(index: int) {
         changes-pane.reveal(index);
@@ -102,6 +118,15 @@ export component AppWindow inherits Window {
 
     public function open-log() {
         log-view.open();
+    }
+
+    public function open-picker() {
+        picker.open();
+    }
+
+    // Back to the first hunk, for another file's.
+    public function hunks-to-top() {
+        picker.to-top();
     }
 
     // The keyboard back to the panes, once what was over them closed.
@@ -169,7 +194,7 @@ export component AppWindow inherits Window {
 
         keys := FocusScope {
             // What is over the panes keeps the keyboard.
-            focus-on-tab-navigation: !root.dialog-open && !root.log-open;
+            focus-on-tab-navigation: !root.dialog-open && !root.log-open && !root.picker-open;
 
             key-pressed(event) => {
                 root.key-pressed(event.text) ? accept : reject
@@ -350,6 +375,33 @@ export component AppWindow inherits Window {
         columns: root.log-columns;
         closed => {
             root.log-closed();
+        }
+    }
+
+    picker := HunkPicker {
+        visible: root.picker-open;
+        picking: root.picking;
+        files: root.hunk-files;
+        current: root.hunk-file;
+        lines: root.hunk-lines;
+        columns: root.hunk-columns;
+        file-picked(index) => {
+            root.hunk-file-picked(index);
+        }
+        file-toggled(index) => {
+            root.hunk-file-toggled(index);
+        }
+        hunk-toggled(index) => {
+            root.hunk-toggled(index);
+        }
+        all-kept(keep) => {
+            root.hunks-kept(keep);
+        }
+        confirmed => {
+            root.hunks-confirmed();
+        }
+        cancelled => {
+            root.hunks-cancelled();
         }
     }
 

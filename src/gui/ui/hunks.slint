@@ -1,0 +1,345 @@
+import { Button, ListView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { ChangeKind, HunkFile, HunkLine, Picking, TextKind } from "types.slint";
+import { Icon, IconKind } from "icons.slint";
+import { Tick } from "controls.slint";
+
+// A hunk's box, which `Tab` reaches and `Space` toggles.
+component HunkTick inherits FocusScope {
+    in property <bool> checked;
+
+    callback toggled();
+
+    width: 16px;
+    // A click leaves the keyboard on the picker, for its keys.
+    focus-on-click: false;
+
+    key-pressed(event) => {
+        if event.text == " " {
+            root.toggled();
+            return accept;
+        }
+        reject
+    }
+
+    Rectangle {
+        x: -3px;
+        y: (parent.height - self.height) / 2;
+        width: 20px;
+        height: 20px;
+        border-radius: 5px;
+        border-width: root.has-focus ? 2px : 0;
+        border-color: Theme.accent;
+    }
+
+    Tick {
+        checked: root.checked;
+        toggled => {
+            root.toggled();
+        }
+    }
+}
+
+// The hunk picker, over the window: the files on the left, the hunks of one
+// on the right, each kept or left out.
+export component HunkPicker inherits Rectangle {
+    in property <Picking> picking;
+    in property <[HunkFile]> files;
+    in property <int> current;
+    in property <[HunkLine]> lines;
+    // How many characters the longest line has.
+    in property <int> columns;
+
+    // The file at `index` was clicked: its hunks show.
+    callback file-picked(index: int);
+    // The box of the file at `index`: all its hunks kept, or none.
+    callback file-toggled(index: int);
+    // The hunk at `index` of the file shown was clicked.
+    callback hunk-toggled(index: int);
+    callback all-kept(keep: bool);
+    callback confirmed();
+    callback cancelled();
+
+    // Take the keyboard, and show the first files and hunks.
+    public function open() {
+        keys.focus();
+        file-list.content-y = 0;
+        root.to-top();
+    }
+
+    // Back to the first line, for another file's, the keyboard back on the
+    // picker: a hunk's box that had it went with its file.
+    public function to-top() {
+        keys.focus();
+        hunks.content-x = 0;
+        hunks.content-y = 0;
+    }
+
+    property <length> file-height: 26px;
+
+    // Scroll the files no further than it takes to show the one shown.
+    changed current => {
+        if root.current * root.file-height < -file-list.content-y {
+            file-list.content-y = -root.current * root.file-height;
+        } else if (root.current + 1) * root.file-height > file-list.visible-height - file-list.content-y {
+            file-list.content-y = file-list.visible-height - (root.current + 1) * root.file-height;
+        }
+    }
+
+    background: Theme.background;
+
+    // Nothing under the picker takes the pointer.
+    TouchArea { }
+
+    // Ten characters of the font, to measure one by.
+    probe := Text {
+        visible: false;
+        text: "0000000000";
+        font-family: Theme.mono-family;
+        font-size: 13px;
+    }
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                root.cancelled();
+                return accept;
+            }
+            if event.text == Key.Return {
+                root.confirmed();
+                return accept;
+            }
+            if event.text == Key.DownArrow && root.current + 1 < root.files.length {
+                root.file-picked(root.current + 1);
+                return accept;
+            }
+            if event.text == Key.UpArrow && root.current > 0 {
+                root.file-picked(root.current - 1);
+                return accept;
+            }
+            if event.text == " " {
+                root.file-toggled(root.current);
+                return accept;
+            }
+            reject
+        }
+
+        VerticalLayout {
+            Rectangle {
+                height: 44px;
+                background: Theme.panel;
+
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    spacing: 12px;
+
+                    Text {
+                        text: root.picking.title;
+                        color: Theme.text;
+                        font-size: 15px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    Text {
+                        text: root.picking.summary;
+                        color: Theme.dim;
+                        vertical-alignment: center;
+                        horizontal-alignment: right;
+                        horizontal-stretch: 1;
+                    }
+                }
+            }
+
+            Rectangle {
+                height: 1px;
+                background: Theme.border;
+            }
+
+            HorizontalLayout {
+                vertical-stretch: 1;
+
+                Rectangle {
+                    width: 260px;
+                    background: Theme.panel;
+
+                    file-list := ListView {
+                        for file[i] in root.files: area := TouchArea {
+                            height: root.file-height;
+                            clicked => {
+                                root.file-picked(i);
+                            }
+
+                            Rectangle {
+                                x: 4px;
+                                width: parent.width - 8px;
+                                border-radius: 5px;
+                                background: i == root.current ? Theme.selection : area.has-hover ? Theme.hover : transparent;
+                            }
+
+                            HorizontalLayout {
+                                padding-left: 14px;
+                                padding-right: 10px;
+                                spacing: 8px;
+
+                                Tick {
+                                    checked: file.checked;
+                                    mixed: file.mixed;
+                                    toggled => {
+                                        root.file-toggled(i);
+                                    }
+                                }
+
+                                Rectangle {
+                                    width: 18px;
+
+                                    if file.kind == ChangeKind.tracked: HorizontalLayout {
+                                        alignment: start;
+
+                                        Text {
+                                            width: 7px;
+                                            text: file.staged;
+                                            color: Theme.added;
+                                            font-family: Theme.mono-family;
+                                            font-size: 12px;
+                                            vertical-alignment: center;
+                                        }
+
+                                        Text {
+                                            width: 7px;
+                                            text: file.unstaged;
+                                            color: Theme.removed;
+                                            font-family: Theme.mono-family;
+                                            font-size: 12px;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    if file.kind == ChangeKind.untracked: Icon {
+                                        x: 1px;
+                                        kind: IconKind.asterisk;
+                                        ink: Theme.untracked;
+                                    }
+                                }
+
+                                Text {
+                                    text: file.path;
+                                    color: Theme.text;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                    horizontal-stretch: 1;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: 1px;
+                    background: Theme.border;
+                }
+
+                hunks := ListView {
+                    horizontal-stretch: 1;
+
+                    // As in `TextView`: each row is as wide as the longest
+                    // line, for the list to scroll sideways that far.
+                    for line in root.lines: HorizontalLayout {
+                        Rectangle {
+                            min-width: Math.max(text.preferred-width, root.columns * probe.preferred-width / 10) + 48px;
+                            height: line.first ? 26px : 18px;
+                            background: line.first ? Theme.panel
+                                : !line.kept ? transparent
+                                : line.kind == TextKind.added ? Theme.added-bg
+                                : line.kind == TextKind.removed ? Theme.removed-bg
+                                : transparent;
+
+                            TouchArea {
+                                clicked => {
+                                    root.hunk-toggled(line.hunk);
+                                }
+                            }
+
+                            if line.first: HunkTick {
+                                x: 10px;
+                                checked: line.kept;
+                                toggled => {
+                                    root.hunk-toggled(line.hunk);
+                                }
+                            }
+
+                            text := Text {
+                                x: 34px;
+                                text: line.text;
+                                font-family: Theme.mono-family;
+                                font-size: 13px;
+                                vertical-alignment: center;
+                                opacity: line.kept ? 1 : 0.5;
+                                color: line.kind == TextKind.added ? Theme.added
+                                    : line.kind == TextKind.removed ? Theme.removed
+                                    : line.kind == TextKind.hunk-header ? Theme.hunk
+                                    : line.kind == TextKind.index ? Theme.dim
+                                    : Theme.text;
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                height: 1px;
+                background: Theme.border;
+            }
+
+            Rectangle {
+                height: 52px;
+                background: Theme.panel;
+
+                HorizontalLayout {
+                    padding: 10px;
+                    padding-left: 16px;
+                    spacing: 8px;
+
+                    Text {
+                        text: root.picking.error;
+                        color: Theme.removed;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+
+                    Button {
+                        text: "Keep all";
+                        clicked => {
+                            root.all-kept(true);
+                        }
+                    }
+
+                    Button {
+                        text: "Keep none";
+                        clicked => {
+                            root.all-kept(false);
+                        }
+                    }
+
+                    Button {
+                        text: "Cancel";
+                        clicked => {
+                            root.cancelled();
+                        }
+                    }
+
+                    Button {
+                        text: root.picking.confirm;
+                        primary: true;
+                        clicked => {
+                            root.confirmed();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

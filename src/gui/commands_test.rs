@@ -9,6 +9,14 @@ fn target(state: &State, text: &str) -> String {
     state.rows[index].target.clone().unwrap()
 }
 
+/// The action `cmd` makes of the selection; none picks hunks.
+fn action(state: &State, cmd: Cmd) -> Result<Action, Refusal> {
+    state.make(cmd).map(|made| match made {
+        Made::Run(action) => action,
+        Made::Pick(_) => panic!("{cmd:?} picks hunks"),
+    })
+}
+
 /// The titles of the menu of the selection, `-` between its groups, and
 /// `(…)` around what the selection does not take.
 fn menu_of(state: &State) -> Vec<String> {
@@ -40,6 +48,7 @@ fn each_class_of_piece_has_a_menu_of_its_own() {
         menu(&mut state, "On a"),
         [
             "Reword…",
+            "Split…",
             "-",
             "Uncommit",
             "-",
@@ -82,6 +91,7 @@ fn a_menu_greys_out_what_the_selection_does_not_take() {
         menu_of(&state),
         [
             "(Reword…)",
+            "(Split…)",
             "-",
             "(Uncommit)",
             "-",
@@ -157,31 +167,31 @@ fn each_command_makes_the_action_the_tui_makes_of_the_same_rows() {
 
     select(&mut state, "a.rs", &["b.rs"]);
     assert_eq!(
-        state.make(Cmd::Absorb),
+        action(&state, Cmd::Absorb),
         Ok(Action::Absorb {
             files: vec![a.clone(), b.clone()]
         })
     );
     assert_eq!(
-        state.make(Cmd::Drop),
+        action(&state, Cmd::Drop),
         Ok(Action::Drop {
             targets: vec![a, b]
         })
     );
     select(&mut state, "local changes", &[]);
     assert_eq!(
-        state.make(Cmd::Absorb),
+        action(&state, Cmd::Absorb),
         Ok(Action::Absorb { files: vec![] })
     );
     assert_eq!(
-        state.make(Cmd::Drop),
+        action(&state, Cmd::Drop),
         Ok(Action::Drop {
             targets: vec![zz.clone()]
         })
     );
     select(&mut state, "On a", &[]);
     assert_eq!(
-        state.make(Cmd::Uncommit),
+        action(&state, Cmd::Uncommit),
         Ok(Action::Fold {
             sources: vec![on_a],
             target: zz,
@@ -191,26 +201,26 @@ fn each_command_makes_the_action_the_tui_makes_of_the_same_rows() {
     select(&mut state, "feature-a", &[]);
     let branch = Some("feature-a".to_string());
     assert_eq!(
-        state.make(Cmd::Push),
+        action(&state, Cmd::Push),
         Ok(Action::Push {
             branch: branch.clone()
         })
     );
     assert_eq!(
-        state.make(Cmd::ForcePush),
+        action(&state, Cmd::ForcePush),
         Ok(Action::ForcePush {
             branch: "feature-a".to_string()
         })
     );
     assert_eq!(
-        state.make(Cmd::TakeRemote),
+        action(&state, Cmd::TakeRemote),
         Ok(Action::UpdateBranch {
             branch: "feature-a".to_string()
         })
     );
-    assert_eq!(state.make(Cmd::Unmerge), Ok(Action::Unmerge { branch }));
+    assert_eq!(action(&state, Cmd::Unmerge), Ok(Action::Unmerge { branch }));
     select(&mut state, "upstream", &[]);
-    assert_eq!(state.make(Cmd::Update), Ok(Action::Update));
+    assert_eq!(action(&state, Cmd::Update), Ok(Action::Update));
 }
 
 #[test]
@@ -220,7 +230,7 @@ fn the_bar_makes_and_merges_a_branch_whatever_is_selected() {
     let bar: Vec<(&str, bool)> = state.bar().iter().map(|e| (e.title, e.enabled)).collect();
 
     assert_eq!(bar, [("New branch…", true), ("Merge a branch…", true)]);
-    assert_eq!(state.make(Cmd::Merge), Ok(Action::Merge));
+    assert_eq!(action(&state, Cmd::Merge), Ok(Action::Merge));
 }
 
 #[test]
@@ -292,8 +302,8 @@ fn a_command_is_named_to_the_window_by_its_id() {
 
 /// Open the form `cmd` asks the selection with.
 fn ask_for(state: &mut State, cmd: Cmd) -> &Form {
-    let action = state.make(cmd).unwrap();
-    let Ok(form) = state.ask(action) else {
+    let made = action(state, cmd).unwrap();
+    let Ok(form) = state.ask(made) else {
         panic!("{cmd:?} asks nothing");
     };
     state.open_form(form);
@@ -541,4 +551,22 @@ fn the_buttons_under_the_local_changes_take_the_ones_selected() {
     assert_eq!(buttons(&state), all(true));
     select(&mut state, "Loose", &[]);
     assert_eq!(buttons(&state), all(false));
+}
+
+/// `Tab` still reaches the panes under what is over them.
+#[test]
+fn nothing_starts_under_a_dialog_or_the_log() {
+    let mut state = state();
+    select(&mut state, "Loose", &[]);
+    let drop = |state: &mut State| state.prepare(Cmd::Drop);
+
+    state.open_log();
+    assert_eq!(drop(&mut state), None);
+    assert!(!state.row_menu(row(&state, "Loose")));
+    state.close_log();
+    assert_eq!(state.prepare(Cmd::Reword), None, "its dialog opens");
+    assert_eq!(drop(&mut state), None);
+    state.form_cancelled();
+
+    assert!(matches!(drop(&mut state), Some(Action::Drop { .. })));
 }

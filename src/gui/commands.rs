@@ -10,6 +10,7 @@ use crate::gui::state::State;
 use crate::session::Refusal;
 use crate::session::action::{Action, CommitSource};
 use crate::session::commands::{self, Reword, Split};
+use crate::session::pick::PickFor;
 use crate::session::snapshot::CommitDest;
 use crate::session::tree::{self, Row, RowKind};
 
@@ -29,12 +30,15 @@ pub(crate) enum Cmd {
     /// A commit's message, or a branch's name.
     Reword,
     Branch,
+    /// The files of a commit, out into their own.
     Split,
+    /// A commit, at the hunks picked.
+    SplitHunks,
 }
 
 impl Cmd {
     /// Every command, each at the index the window names it by.
-    const ALL: [Cmd; 13] = [
+    const ALL: [Cmd; 14] = [
         Cmd::Absorb,
         Cmd::Drop,
         Cmd::Uncommit,
@@ -48,6 +52,7 @@ impl Cmd {
         Cmd::Reword,
         Cmd::Branch,
         Cmd::Split,
+        Cmd::SplitHunks,
     ];
 
     pub(crate) fn id(self) -> i32 {
@@ -72,9 +77,16 @@ impl Cmd {
             Cmd::Commit => "commit",
             Cmd::Reword => "reword",
             Cmd::Branch => "branch",
-            Cmd::Split => "split",
+            Cmd::Split | Cmd::SplitHunks => "split",
         }
     }
+}
+
+/// What a command makes of the selection.
+enum Made {
+    Run(Action),
+    /// The hunks to read and pick, which make the action.
+    Pick(PickFor),
 }
 
 /// A command as a menu, a button or the bar shows it.
@@ -101,7 +113,7 @@ fn groups(row: &Row) -> &'static [&'static [(Cmd, &'static str)]] {
             &[(Cmd::Drop, "Drop")],
         ],
         RowKind::Commit { .. } => &[
-            &[(Cmd::Reword, "Reword…")],
+            &[(Cmd::Reword, "Reword…"), (Cmd::SplitHunks, "Split…")],
             &[(Cmd::Uncommit, "Uncommit")],
             &[(Cmd::Branch, "New branch here…")],
             &[(Cmd::Drop, "Drop")],
@@ -193,7 +205,7 @@ impl State {
     /// alone first. False when it opens no menu, as while a command runs:
     /// the reload that ends it would move the selection from under it.
     pub(crate) fn row_menu(&mut self, index: usize) -> bool {
-        if self.busy() || !self.selectable().any(|row| row == index) {
+        if self.held() || !self.selectable().any(|row| row == index) {
             return false;
         }
         if self.is_selected(&self.rows[index]) {
@@ -215,17 +227,21 @@ impl State {
     /// [`State::command`] short of running anything: the action to start at
     /// once, if any. Tests go through this.
     pub(super) fn prepare(&mut self, cmd: Cmd) -> Option<Action> {
-        if self.busy() {
+        if self.held() {
             return None;
         }
         match self.make(cmd) {
-            Ok(action) => match self.ask(action) {
+            Ok(Made::Run(action)) => match self.ask(action) {
                 Ok(form) => {
                     self.open_form(form);
                     None
                 }
                 Err(action) => Some(action),
             },
+            Ok(Made::Pick(purpose)) => {
+                self.start_pick(purpose);
+                None
+            }
             Err(reason) => {
                 self.say(Level::Warn, format!("{}: {}", cmd.name(), reason));
                 None
@@ -233,14 +249,20 @@ impl State {
         }
     }
 
-    /// The action `cmd` makes of the selection: with no message or name yet,
-    /// which the window asks for.
-    fn make(&self, cmd: Cmd) -> Result<Action, Refusal> {
+    /// What `cmd` makes of the selection: an action with no message or name
+    /// yet, which the window asks for, or the hunks to pick to make one.
+    fn make(&self, cmd: Cmd) -> Result<Made, Refusal> {
         if self.paused.is_some() {
             return Err("an operation is paused");
         }
         let rows = self.selection();
-        match cmd {
+        let action = match cmd {
+            Cmd::SplitHunks => {
+                return match commands::split(&self.snapshot, &rows)? {
+                    Split::Hunks(commit) => Ok(Made::Pick(PickFor::Split { commit })),
+                    Split::Files(_) => Err("select one commit"),
+                };
+            }
             Cmd::Absorb => commands::absorb(&self.snapshot.info, &rows, true),
             Cmd::Drop => commands::drop(&rows),
             Cmd::Uncommit => self.uncommit(&rows),
@@ -283,12 +305,13 @@ impl State {
                 Split::Files(action) => Ok(action),
                 Split::Hunks(_) => Err("select the files to split out"),
             },
-        }
+        };
+        action.map(Made::Run)
     }
 
     /// The form that asks what `action` needs before it runs, or `action`
     /// itself when it needs nothing: the window opens no editor.
-    fn ask(&self, action: Action) -> Result<Form, Action> {
+    pub(super) fn ask(&self, action: Action) -> Result<Form, Action> {
         let sid = |target: &str| tree::short_id(&self.rows, target);
         let mut form = match &action {
             Action::Commit {
@@ -334,12 +357,17 @@ impl State {
                 form.placeholder = "Name".to_string();
                 form
             }
-            Action::Split { commit, .. } => {
+            Action::Split { commit, hunks, .. } => {
                 let body = format!("Split {}", sid(commit));
                 let mut form = Form::complete(body, Input::Text, "Split");
-                form.detail = "The files selected make the first commit, under this message; the \
-                               rest of the commit stays in the second, under its own."
-                    .to_string();
+                let taken = match hunks {
+                    Some(_) => "The hunks kept",
+                    None => "The files selected",
+                };
+                form.detail = format!(
+                    "{taken} make the first commit, under this message; the rest of the commit \
+                     stays in the second, under its own."
+                );
                 form.placeholder = "Message of the first commit".to_string();
                 form
             }

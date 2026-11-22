@@ -99,7 +99,8 @@ pub(crate) enum Action {
     /// <branch>`; never `MoveSlot::Stay`.
     Move { commit: git2::Oid, slot: MoveSlot },
     /// `loom split <commit> [files...]`, or `loom split -p <commit> --hunks
-    /// <id>... --hunks-from <fingerprint>` with the hunks `S` picked. `files`
+    /// <id>... --hunks-from <fingerprint>` with the hunks picked (the TUI's
+    /// `S`, the window's `Split…`). `files`
     /// are cwd-relative, as the CLI takes them. Without a message the editor
     /// asks for the first commit's.
     Split {

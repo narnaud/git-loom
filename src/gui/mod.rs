@@ -3,6 +3,7 @@
 mod board;
 mod commands;
 mod forms;
+mod hunks;
 mod model;
 mod state;
 mod window;

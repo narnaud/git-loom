@@ -1,4 +1,44 @@
 import { Theme } from "theme.slint";
+import { Icon, IconKind } from "icons.slint";
+
+// A check box of a list, drawn from what Rust says alone: a clicked one
+// stays as it was until the model changes.
+export component Tick inherits Rectangle {
+    in property <bool> checked;
+    // Some of what it stands for are checked, not all.
+    in property <bool> mixed;
+
+    callback toggled();
+
+    width: 16px;
+
+    box := Rectangle {
+        y: (parent.height - self.height) / 2;
+        width: 14px;
+        height: 14px;
+        border-radius: 3px;
+        border-width: root.checked || root.mixed ? 0 : 1px;
+        border-color: area.has-hover ? Theme.text : Theme.dim;
+        background: root.checked || root.mixed ? Theme.accent : transparent;
+
+        if root.checked: Icon {
+            x: 1px;
+            kind: IconKind.check;
+            ink: Theme.background;
+        }
+        if root.mixed && !root.checked: Rectangle {
+            width: 8px;
+            height: 2px;
+            background: Theme.background;
+        }
+    }
+
+    area := TouchArea {
+        clicked => {
+            root.toggled();
+        }
+    }
+}
 
 // A flat button of a bar or a pane: its label, tinted under the pointer.
 export component ToolButton inherits Rectangle {

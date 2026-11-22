@@ -10,6 +10,7 @@ use crate::core::repo;
 use crate::core::ui::{Hint, Level};
 use crate::gui::board::{Board, Rect};
 use crate::gui::forms::{Draft, Form};
+use crate::gui::hunks::Pick;
 use crate::session;
 use crate::session::action::{self, Action, LogEntry, Summary};
 use crate::session::diff_text::{self, diff_text};
@@ -79,6 +80,9 @@ pub(crate) struct State {
     log_open: bool,
     /// What the next commit's dialog starts from.
     pub(super) draft: Draft,
+    /// The hunks being read for a command, then picked over the window.
+    pub(super) pick: Option<Pick>,
+    pub(super) picks_opened: u64,
     /// The row the reload after a command selects: the branch it creates or
     /// renames.
     pub(super) next_cursor: Option<String>,
@@ -124,6 +128,8 @@ impl State {
             forms_opened: 0,
             log_open: false,
             draft: Draft::new(),
+            pick: None,
+            picks_opened: 0,
             next_cursor: None,
         };
         state.rebuild_rows();
@@ -470,9 +476,17 @@ impl State {
 
     // ── Commands ──
 
-    /// Whether a command runs: no other starts until it ends.
+    /// Whether a command runs, or the hunks of one are read: no other starts
+    /// until it ends.
     pub(crate) fn busy(&self) -> bool {
-        self.worker.running().is_some()
+        self.worker.running().is_some() || self.reading().is_some()
+    }
+
+    /// Whether the panes start nothing: while busy, and while a dialog, the
+    /// log or the hunk picker is over them, whose widgets `Tab` still
+    /// reaches.
+    pub(super) fn held(&self) -> bool {
+        self.busy() || self.form.is_some() || self.log_open || self.pick.is_some()
     }
 
     /// What the status bar says: what was refused since the last command
@@ -480,6 +494,9 @@ impl State {
     pub(crate) fn status(&self) -> (Level, String) {
         if let Some(notice) = &self.notice {
             return (notice.level, notice.text.clone());
+        }
+        if let Some(command) = self.reading() {
+            return (Level::Plain, format!("{command} — reading the hunks"));
         }
         let Some(running) = self.worker.running() else {
             return (Level::Plain, String::new());
@@ -496,6 +513,11 @@ impl State {
         self.notice = Some(Notice { level, text });
     }
 
+    /// Forget what the status bar says: a command starts.
+    pub(super) fn clear_notice(&mut self) {
+        self.notice = None;
+    }
+
     /// Run `action` on the worker: the window goes on, and asks what the
     /// command asks.
     pub(super) fn start(&mut self, action: Action) {
@@ -503,7 +525,7 @@ impl State {
             return;
         }
         let command = action::command_line(&action, |target| tree::short_id(&self.rows, target));
-        self.notice = None;
+        self.clear_notice();
         // What the theme is for, a picker drawn in a terminal, no command
         // the window runs draws.
         let theme = graph::Theme::dark();
@@ -511,9 +533,8 @@ impl State {
         self.worker.start(action, command, git_dir, &theme);
     }
 
-    /// Take in what the running command sent, and how it ended; whether
-    /// anything shown changed.
-    pub(crate) fn tick(&mut self) -> bool {
+    /// Take in what the worker's threads sent; whether they sent anything.
+    pub(super) fn take_requests(&mut self) -> bool {
         let mut changed = false;
         while let Some(event) = self.worker.poll() {
             match event {
@@ -527,6 +548,14 @@ impl State {
             }
             changed = true;
         }
+        changed
+    }
+
+    /// Take in what the running command sent, and how it ended; whether
+    /// anything shown changed.
+    pub(crate) fn tick(&mut self) -> bool {
+        let mut changed = self.take_requests();
+        changed |= self.advance_pick();
         if let Some(ended) = self.worker.reap() {
             if ended != Ended::Done {
                 self.next_cursor = None;
