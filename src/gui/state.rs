@@ -9,12 +9,12 @@ use crate::core::graph;
 use crate::core::repo;
 use crate::core::ui::{Hint, Level};
 use crate::gui::board::{Board, Rect};
-use crate::gui::forms::Form;
+use crate::gui::forms::{Draft, Form};
 use crate::session;
 use crate::session::action::{self, Action, LogEntry, Summary};
 use crate::session::diff_text::{self, diff_text};
 use crate::session::paused::PausedOp;
-use crate::session::snapshot::{CommitDest, Snapshot, load_snapshot};
+use crate::session::snapshot::{Snapshot, load_snapshot};
 use crate::session::tree::{self, Row, RowKind, SelectionClass};
 use crate::session::worker::{Ended, Event, Worker};
 
@@ -77,8 +77,8 @@ pub(crate) struct State {
     pub(super) forms_opened: u64,
     /// Whether the log is shown over everything else.
     log_open: bool,
-    /// Where the last commit went, offered first for the next one.
-    pub(super) last_dest: Option<CommitDest>,
+    /// What the next commit's dialog starts from.
+    pub(super) draft: Draft,
     /// The row the reload after a command selects: the branch it creates or
     /// renames.
     pub(super) next_cursor: Option<String>,
@@ -123,7 +123,7 @@ impl State {
             form: None,
             forms_opened: 0,
             log_open: false,
-            last_dest: None,
+            draft: Draft::new(),
             next_cursor: None,
         };
         state.rebuild_rows();
@@ -531,11 +531,15 @@ impl State {
             if ended != Ended::Done {
                 self.next_cursor = None;
             }
+            let committed = std::mem::take(&mut self.draft.running) && ended == Ended::Done;
             // What a command that failed did on the way is shown too. A
             // repository that cannot be read is said in place of how the
             // command went, which the log has.
             if ended == Ended::Cancelled || self.reload() {
                 self.report(ended);
+            }
+            if committed {
+                self.draft.message.clear();
             }
             changed = true;
         }

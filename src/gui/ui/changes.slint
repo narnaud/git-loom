@@ -1,18 +1,22 @@
-import { ListView } from "std-widgets.slint";
+import { Button, ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { ChangeRow, ChangeKind, LocalChanges } from "types.slint";
+import { ChangeRow, ChangeKind, LocalChanges, MenuEntry } from "types.slint";
 import { Icon, IconKind } from "icons.slint";
 
 // The local changes pane: a header standing for all of them, then a line
-// per file.
+// per file, then the buttons that take the ones selected.
 export component ChangesView inherits Rectangle {
     in property <LocalChanges> local;
     in property <[ChangeRow]> changes;
+    in property <[MenuEntry]> buttons;
+    in property <bool> busy;
 
     // The left button went down on the line standing for `row`.
     callback pressed(row: int, control: bool, shift: bool);
     // The right button did, at `x`, `y` of the window.
     callback menu-asked(row: int, x: length, y: length);
+    // The command `id` of a button.
+    callback command(id: int);
 
     property <length> line-height: 26px;
 
@@ -73,6 +77,8 @@ export component ChangesView inherits Rectangle {
         }
 
         list := ListView {
+            vertical-stretch: 1;
+
             for change in root.changes: area := TouchArea {
                 height: root.line-height;
 
@@ -92,7 +98,7 @@ export component ChangesView inherits Rectangle {
                 }
 
                 HorizontalLayout {
-                    padding-left: 12px;
+                    padding-left: 14px;
                     padding-right: 10px;
                     spacing: 8px;
 
@@ -147,6 +153,28 @@ export component ChangesView inherits Rectangle {
                         overflow: elide;
                         horizontal-stretch: 1;
                     }
+                }
+            }
+        }
+
+        // None while an operation is paused.
+        if root.local.row >= 0: Rectangle {
+            height: 1px;
+            background: Theme.border;
+        }
+        if root.local.row >= 0: HorizontalLayout {
+            vertical-stretch: 0;
+            padding: 12px;
+            spacing: 8px;
+            alignment: end;
+
+            for entry[index] in root.buttons: Button {
+                text: entry.title;
+                // The last, `Commit…`.
+                primary: index == root.buttons.length - 1;
+                enabled: entry.enabled && !root.busy;
+                clicked => {
+                    root.command(entry.id);
                 }
             }
         }

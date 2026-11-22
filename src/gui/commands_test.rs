@@ -522,3 +522,23 @@ fn a_new_branch_on_a_branch_names_it() {
         "New branch on feature-a"
     );
 }
+
+#[test]
+fn the_buttons_under_the_local_changes_take_the_ones_selected() {
+    let mut state = state();
+    let buttons = |state: &State| {
+        let entries = state.commit_buttons().into_iter();
+        entries
+            .map(|entry| (entry.title, entry.enabled))
+            .collect::<Vec<_>>()
+    };
+    let all = |enabled| [("Absorb", enabled), ("Commit…", enabled)];
+
+    assert_eq!(buttons(&state), all(false), "nothing selected");
+    select(&mut state, "b.rs", &[]);
+    assert_eq!(buttons(&state), all(true));
+    select(&mut state, "local changes", &[]);
+    assert_eq!(buttons(&state), all(true));
+    select(&mut state, "Loose", &[]);
+    assert_eq!(buttons(&state), all(false));
+}

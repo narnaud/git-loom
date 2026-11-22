@@ -8,6 +8,7 @@ use crate::core::ui::{Answer, Level, PromptKind};
 use crate::gui::state::State;
 use crate::session::action::Action;
 use crate::session::snapshot::CommitDest;
+use crate::session::targets;
 use crate::session::tree::branch_key;
 use crate::session::worker::Ask;
 
@@ -50,6 +51,26 @@ enum Purpose {
     /// The action to run, its message, name or destination what is typed
     /// and picked; one that asks only a yes runs as it is.
     Complete(Action),
+}
+
+/// What the next commit dialog starts from.
+pub(crate) struct Draft {
+    /// Where the last commit went.
+    pub(super) dest: CommitDest,
+    /// The message of the last commit, until it goes through.
+    pub(super) message: String,
+    /// The command running is that commit.
+    pub(super) running: bool,
+}
+
+impl Draft {
+    pub(super) fn new() -> Draft {
+        Draft {
+            dest: CommitDest::Integration,
+            message: String::new(),
+            running: false,
+        }
+    }
 }
 
 pub(crate) struct Form {
@@ -172,16 +193,32 @@ impl Form {
         }
     }
 
-    /// Ask what `action` needs, or a yes: it runs once answered.
+    /// Ask what `action` needs, or a yes: it runs once answered, unless with
+    /// the input left as it started. A commit's message is new, whatever it
+    /// starts from.
     pub(crate) fn complete_with(&mut self, action: Action) {
+        if !matches!(action, Action::Commit { .. }) {
+            self.was = self.initial.clone();
+        }
         self.purpose = Purpose::Complete(action);
-        self.was = self.initial.clone();
     }
 }
 
 impl State {
     pub(crate) fn form(&self) -> Option<&Form> {
         self.form.as_ref()
+    }
+
+    /// Where a commit can go, in the order of the board.
+    pub(crate) fn commit_dests(&self) -> Vec<CommitDest> {
+        targets::commit_dests(&self.rows)
+    }
+
+    /// Which of [`State::commit_dests`] the last commit went to; none when
+    /// its branch is gone.
+    pub(crate) fn commit_dest(&self) -> Option<usize> {
+        let dests = self.commit_dests();
+        dests.iter().position(|dest| *dest == self.draft.dest)
     }
 
     /// How many forms opened, so the window fills each in once.
@@ -278,10 +315,7 @@ impl State {
                     Action::Commit {
                         dest: to, message, ..
                     } => {
-                        if let Some(picked) = form.dests.get(dest) {
-                            to.clone_from(picked);
-                        }
-                        self.last_dest = Some(to.clone());
+                        *to = self.drafted(&form.dests, dest, &typed);
                         *message = Some(typed);
                     }
                     Action::Split { message, .. } => *message = Some(typed),
@@ -302,6 +336,17 @@ impl State {
             }
         }
         None
+    }
+
+    /// A commit is typed, under `message` to the destination at `dest` of
+    /// `dests`: where the next starts from, until it goes through.
+    fn drafted(&mut self, dests: &[CommitDest], dest: usize, message: &str) -> CommitDest {
+        if let Some(picked) = dests.get(dest) {
+            self.draft.dest = picked.clone();
+        }
+        self.draft.message = message.to_string();
+        self.draft.running = true;
+        self.draft.dest.clone()
     }
 }
 

@@ -917,7 +917,7 @@ fn the_width_of_a_tab_is_the_repositorys() {
 // ── Commands ──
 
 /// Take in what the worker sent until `done` holds.
-fn tick_until(state: &mut State, done: impl Fn(&State) -> bool) {
+pub(crate) fn tick_until(state: &mut State, done: impl Fn(&State) -> bool) {
     let deadline = Instant::now() + Duration::from_secs(10);
     while !done(state) {
         assert!(Instant::now() < deadline, "timed out");

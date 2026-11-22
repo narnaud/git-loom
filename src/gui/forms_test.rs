@@ -1,7 +1,9 @@
 use std::sync::mpsc::{Receiver, channel};
 
 use super::*;
-use crate::gui::state::tests::state;
+use crate::core::test_helpers::TestRepo;
+use crate::gui::commands::Cmd;
+use crate::gui::state::tests::{row, state, tick_until};
 
 /// What the running `loom drop a` asks, and where its answer arrives.
 fn ask(kind: PromptKind, prompt: &str) -> (Ask, Receiver<Option<Answer>>) {
@@ -161,4 +163,55 @@ fn a_notice_reads_its_first_line_over_the_hints_under_it() {
     assert_eq!(form.body, "Push refused");
     assert_eq!(form.detail, "If `a` has diverged, force it");
     assert_eq!((form.confirm, form.cancellable), ("Close", false));
+}
+
+/// The commit dialog asked for the row reading `text`.
+fn commit_form<'a>(state: &'a mut State, text: &str) -> Option<&'a Form> {
+    state.row_pressed(row(state, text), false, false);
+    assert_eq!(state.prepare(Cmd::Commit), None);
+    state.form()
+}
+
+#[test]
+fn a_commit_dialog_starts_where_the_last_commit_went() {
+    let mut state = state();
+    assert_eq!(commit_form(&mut state, "a.rs").unwrap().dest, 0);
+
+    state.accept("Add a", None, 2);
+
+    assert_eq!(state.commit_dest(), Some(2));
+    assert_eq!(commit_form(&mut state, "a.rs").unwrap().dest, 2);
+    state.form_cancelled();
+    state.draft.dest = CommitDest::Branch("gone".to_string());
+    assert_eq!(state.commit_dest(), None);
+    assert_eq!(
+        commit_form(&mut state, "a.rs").unwrap().dest,
+        0,
+        "the integration branch"
+    );
+}
+
+#[test]
+fn a_commit_dialog_starts_from_the_message_of_one_that_failed() {
+    let repo = TestRepo::new_with_remote();
+    repo.write_file("new.txt", "new\n");
+    let mut state = repo.in_dir(State::load).unwrap();
+    // The commit typed runs as `ended` does instead: started, it would run
+    // in the directory the tests run in.
+    let run = |state: &mut State, ended: fn() -> anyhow::Result<()>| {
+        commit_form(state, "new.txt");
+        assert!(
+            state.accept("Add it", None, 0).is_some(),
+            "as it started too"
+        );
+        state.worker.run("loom commit".to_string(), ended);
+        repo.in_dir(|| tick_until(state, |state| !state.busy()));
+        state.form_cancelled();
+        let initial = commit_form(state, "new.txt").unwrap().initial.clone();
+        state.form_cancelled();
+        initial
+    };
+
+    assert_eq!(run(&mut state, || anyhow::bail!("refused")), "Add it");
+    assert_eq!(run(&mut state, || Ok(())), "");
 }
