@@ -128,6 +128,7 @@ fn a_split_by_file_leaves_something_for_the_second_commit() {
             commit: oid(A).to_string(),
             files: vec!["a.rs".to_string()],
             hunks: None,
+            message: None,
         })),
         "the file as the CLI takes it, from the cwd"
     );
@@ -287,7 +288,7 @@ fn a_reword_asks_a_branch_for_its_name_first() {
         reword(&commit_row(A)),
         Ok(Reword::Commit(Action::Reword {
             target: oid(A).to_string(),
-            name: None,
+            message: None,
         }))
     );
     assert_eq!(

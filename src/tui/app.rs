@@ -1621,6 +1621,7 @@ impl<'a> App<'a> {
         Some(Action::Commit {
             source,
             dest: dests[index].clone(),
+            message: None,
         })
     }
 
@@ -2174,7 +2175,7 @@ impl<'a> App<'a> {
                 self.next_cursor = Some(branch_key(&name));
                 Some(Action::Reword {
                     target: branch,
-                    name: Some(name),
+                    message: Some(name),
                 })
             }
             KeyCode::Esc => {

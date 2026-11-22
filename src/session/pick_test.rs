@@ -296,6 +296,7 @@ fn a_split_keeps_something_on_each_side() {
                 vec!["a.rs:1".to_string()],
                 Some(hunk_select::fingerprint(&commit, None, &picked)),
             )),
+            message: None,
         })
     );
     assert_eq!(

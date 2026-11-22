@@ -442,7 +442,7 @@ fn commit_collects_the_selected_working_files_and_lands_on_integration() {
     let branch = app.rows.iter().position(|r| r.key == "br:feature-a");
     assert_eq!(branch, Some(at + 2), "one spacer between the two sections");
 
-    let Some(Action::Commit { source, dest }) = app.confirm_commit_target() else {
+    let Some(Action::Commit { source, dest, .. }) = app.confirm_commit_target() else {
         panic!("expected a commit action");
     };
     let CommitSource::Files(files) = source else {
@@ -886,6 +886,7 @@ fn a_staged_commit_counts_the_files_the_index_holds() {
         Action::Commit {
             source: CommitSource::Index,
             dest: CommitDest::Integration,
+            message: None,
         }
     );
     assert_eq!(app.command_line(&action), "loom commit -l");
@@ -1922,11 +1923,11 @@ fn drop_and_reword_require_an_actionable_row() {
 
     // Commit row: actionable.
     move_cursor_to(&mut app, &oid('a').to_string());
-    let Some(Action::Reword { target, name }) = app.action_reword() else {
+    let Some(Action::Reword { target, message }) = app.action_reword() else {
         panic!("expected a reword action");
     };
     assert_eq!(target, oid('a').to_string());
-    assert_eq!(name, None);
+    assert_eq!(message, None);
     assert_eq!(
         app.action_drop(),
         Some(Action::Drop {
@@ -2006,13 +2007,13 @@ fn reword_on_a_branch_renames_it_in_the_tree() {
         app.handle_rename_key(KeyCode::Char('b'), KeyModifiers::NONE)
             .is_none()
     );
-    let Some(Action::Reword { target, name }) =
+    let Some(Action::Reword { target, message }) =
         app.handle_rename_key(KeyCode::Enter, KeyModifiers::NONE)
     else {
         panic!("expected a reword action");
     };
     assert_eq!(target, "feature-a");
-    assert_eq!(name.as_deref(), Some("feature-b"));
+    assert_eq!(message.as_deref(), Some("feature-b"));
     assert!(matches!(app.mode, Mode::Normal));
     assert_eq!(app.next_cursor.as_deref(), Some("br:feature-b"));
 
@@ -2349,6 +2350,7 @@ fn command_line_uses_the_short_ids_the_tree_shows() {
         app.command_line(&Action::Commit {
             source: CommitSource::Files(vec![ids.get_unstaged().to_string()]),
             dest: CommitDest::Integration,
+            message: None,
         }),
         format!("loom commit -l {}", ids.get_unstaged())
     );
@@ -2356,8 +2358,13 @@ fn command_line_uses_the_short_ids_the_tree_shows() {
         app.command_line(&Action::Commit {
             source: CommitSource::Files(vec![file.clone()]),
             dest: CommitDest::Branch("feature-a".to_string()),
+            message: Some("Add a\n\nIts body".to_string()),
         }),
-        format!("loom commit -b {} {}", ids.get_branch("feature-a"), file)
+        format!(
+            "loom commit -b {} -m 'Add a' {}",
+            ids.get_branch("feature-a"),
+            file
+        )
     );
     assert_eq!(
         app.command_line(&Action::Branch {
@@ -2384,8 +2391,9 @@ fn command_line_uses_the_short_ids_the_tree_shows() {
             commit: oid('a').to_string(),
             files: vec!["src/a b.rs".to_string()],
             hunks: None,
+            message: Some("First".to_string()),
         }),
-        format!("loom split {} 'src/a b.rs'", commit)
+        format!("loom split {} -m First 'src/a b.rs'", commit)
     );
     assert_eq!(
         app.command_line(&Action::Split {
@@ -2395,6 +2403,7 @@ fn command_line_uses_the_short_ids_the_tree_shows() {
                 vec!["src/a b.rs:1".to_string()],
                 Some("0123abcd".to_string())
             )),
+            message: None,
         }),
         format!(
             "loom split -p {} --hunks 'src/a b.rs:1' --hunks-from 0123abcd",
@@ -2405,14 +2414,14 @@ fn command_line_uses_the_short_ids_the_tree_shows() {
     assert_eq!(
         app.command_line(&Action::Reword {
             target: "deadbeef".to_string(),
-            name: None,
+            message: None,
         }),
         "loom reword deadbeef"
     );
     assert_eq!(
         app.command_line(&Action::Reword {
             target: "feature-a".to_string(),
-            name: Some("feature-b".to_string()),
+            message: Some("feature-b".to_string()),
         }),
         format!("loom reword {} -m feature-b", ids.get_branch("feature-a"))
     );
@@ -4095,6 +4104,7 @@ fn split_on_a_commit_file_takes_that_file_only() {
             commit: oid('a').to_string(),
             files: vec!["parser.rs".to_string()],
             hunks: None,
+            message: None,
         })
     );
 }
