@@ -92,7 +92,8 @@ impl Snapshot {
         }
     }
 
-    /// Whether `files` (short IDs) is the `zz` that stands for every change.
+    /// Whether `files` (command arguments) is the `zz` that stands for every
+    /// change.
     pub(crate) fn is_all_changes(&self, files: &[String]) -> bool {
         files.iter().any(|f| f == self.ids.get_unstaged())
     }

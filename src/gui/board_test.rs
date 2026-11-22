@@ -20,7 +20,7 @@ fn rows_of(info: RepoInfo) -> Vec<Row> {
 fn rows_with_open(info: RepoInfo, open: &[u8]) -> Vec<Row> {
     let ids = IdAllocator::new(info.collect_entities());
     let expanded: HashSet<String> = open.iter().map(|byte| oid(*byte).to_string()).collect();
-    build_rows(&graph::build_sections(info), &ids, &expanded)
+    build_rows(&graph::build_sections(info), &ids, "", &expanded)
 }
 
 /// What a piece reads: a commit's message, a branch's name, a file's path;

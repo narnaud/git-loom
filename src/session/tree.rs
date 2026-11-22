@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 
 use crate::core::graph::{self, Section};
-use crate::core::repo::RemoteStatus;
+use crate::core::repo::{self, RemoteStatus};
 use crate::core::shortid::IdAllocator;
 
 /// Key of the local-changes section in the expansion set.
@@ -136,7 +136,8 @@ pub(crate) struct Row {
     /// Loom short ID shown on the row (empty when the row has none).
     pub sid: String,
     /// Argument to pass to loom commands for this row: a full commit hash, a
-    /// branch name, or a short ID for files. `None` = not actionable.
+    /// branch name, `zz`, the short ID of a commit's file, or a working
+    /// file's [`file_arg`]. `None` = not actionable.
     pub target: Option<String>,
     /// Stable identity across rebuilds, used for expansion and selection.
     pub key: String,
@@ -183,11 +184,13 @@ impl Row {
     }
 }
 
-/// Build the flat row list from graph sections. `expanded` holds the keys of
-/// currently expanded rows.
+/// Build the flat row list from graph sections. `cwd_prefix` is the directory
+/// the session started in, which commands take paths from; `expanded` holds
+/// the keys of currently expanded rows.
 pub(crate) fn build_rows(
     sections: &[Section],
     ids: &IdAllocator,
+    cwd_prefix: &str,
     expanded: &HashSet<String>,
 ) -> Vec<Row> {
     let mut rows: Vec<Row> = Vec::new();
@@ -219,7 +222,7 @@ pub(crate) fn build_rows(
                                 worktree: change.worktree,
                             },
                             sid: ids.get_file(&change.path).to_string(),
-                            target: Some(ids.get_file(&change.path).to_string()),
+                            target: Some(file_arg(&change.path, cwd_prefix)),
                             key: working_file_key(&change.path),
                             focusable: true,
                             expandable: false,
@@ -361,6 +364,20 @@ fn push_commit_rows(
                 });
             }
         }
+    }
+}
+
+/// How a command names the working file at `path`: by its path from the
+/// directory the session started in, which resolves before any short ID, so a
+/// file come or gone since the tree was read cannot make it name another
+/// (Spec 002); and from `./` or `../`, so it is never read as `zz`, a ref or
+/// a hash.
+pub(crate) fn file_arg(path: &str, cwd_prefix: &str) -> String {
+    let relative = repo::cwd_relative_path(path, cwd_prefix);
+    if relative.starts_with("../") {
+        relative
+    } else {
+        format!("./{relative}")
     }
 }
 

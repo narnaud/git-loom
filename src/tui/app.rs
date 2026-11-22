@@ -497,10 +497,11 @@ impl<'a> App<'a> {
             _ => None,
         };
         let sections = self.snapshot.sections(preview);
-        tree::build_rows(&sections, &self.snapshot.ids, &self.expanded)
+        let (ids, prefix) = (&self.snapshot.ids, &self.snapshot.cwd_prefix);
+        tree::build_rows(&sections, ids, prefix, &self.expanded)
     }
 
-    /// How many working files `files` (short IDs, or `zz`) stand for.
+    /// How many working files `files` (their arguments, or `zz`) stand for.
     fn commit_file_count(&self, files: &[String]) -> usize {
         if self.snapshot.is_all_changes(files) {
             self.snapshot.info.working_changes.len()

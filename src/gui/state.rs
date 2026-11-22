@@ -387,7 +387,8 @@ impl State {
             None => Vec::new(),
         };
         let sections = self.snapshot.sections(None);
-        self.rows = tree::build_rows(&sections, &self.snapshot.ids, &self.expanded);
+        let (ids, prefix) = (&self.snapshot.ids, &self.snapshot.cwd_prefix);
+        self.rows = tree::build_rows(&sections, ids, prefix, &self.expanded);
         self.owned = close_branches(&mut self.rows, &self.collapsed);
         // A row that went away takes its selection with it.
         let present: HashSet<&str> = self.rows.iter().map(|row| row.key.as_str()).collect();

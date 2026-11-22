@@ -503,12 +503,18 @@ fn try_resolve_file(repo: &Repository, arg: &str) -> Result<Option<Target>> {
         cwd_to_repo_path(repo, arg).unwrap_or_else(|_| arg.to_string())
     };
     let full_path = workdir.join(&repo_path);
-    if full_path.exists() {
+    // symlink_metadata, not exists(): a broken symlink is still a file.
+    if full_path.symlink_metadata().is_ok() {
         return Ok(Some(Target::File(repo_path)));
     }
     // Check for deleted files (removed from disk but changed vs HEAD)
     let diff = crate::git::diff_head_file(workdir, &repo_path)?;
     if !diff.is_empty() {
+        return Ok(Some(Target::File(repo_path)));
+    }
+    // Staged as new, then deleted: in neither HEAD nor the working tree.
+    let status = repo.status_file(Path::new(&repo_path));
+    if status.is_ok_and(|status| !status.is_empty()) {
         return Ok(Some(Target::File(repo_path)));
     }
     Ok(None)
