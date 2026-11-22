@@ -151,6 +151,9 @@ pub(crate) fn drop(rows: &[&Row]) -> Result<Action, Refusal> {
     {
         return Err("only files can be dropped together");
     }
+    if matches!(rows[0].kind, RowKind::LocalChanges { count: 0 }) {
+        return Err("no local changes");
+    }
     let targets = rows.iter().filter_map(|r| r.target.clone()).collect();
     Ok(Action::Drop { targets })
 }
