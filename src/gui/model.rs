@@ -1,4 +1,4 @@
-//! The board as the window's models hold it.
+//! The board and diff text as the window's models hold them.
 
 use std::rc::Rc;
 
@@ -7,7 +7,8 @@ use slint::{Model, ModelRc, VecModel};
 use crate::core::repo::{self, RemoteStatus};
 use crate::gui::board::{self, Board, LineKind, PieceKind};
 use crate::gui::state::State;
-use crate::gui::ui::{BoardLine, Piece, PieceKind as Kind, Remote, Strand};
+use crate::gui::ui::{BoardLine, Piece, PieceKind as Kind, Remote, Strand, TextKind, TextRow};
+use crate::session::diff_text::{self, DiffLine, expand_tabs};
 use crate::session::tree::RowKind;
 
 /// The pieces of the board, each with what it reads.
@@ -122,6 +123,36 @@ fn line(drawn: &board::Line) -> BoardLine {
     }
 }
 
+/// Diff text as the lines the window colors, each tab shown as `tab_width`
+/// spaces.
+pub(crate) fn diff_rows(text: &str, tab_width: usize) -> Vec<TextRow> {
+    let lines = diff_text::classify(text);
+    let rows = lines.map(|(kind, raw)| TextRow {
+        text: expand_tabs(raw, tab_width).into(),
+        kind: match kind {
+            DiffLine::FileHeader => TextKind::FileHeader,
+            DiffLine::Index => TextKind::Index,
+            DiffLine::Added => TextKind::Added,
+            DiffLine::Removed => TextKind::Removed,
+            DiffLine::HunkHeader => TextKind::HunkHeader,
+            DiffLine::Context => TextKind::Context,
+            DiffLine::CommitLine => TextKind::CommitLine,
+            DiffLine::CommitHeader => TextKind::CommitHeader,
+        },
+    });
+    rows.collect()
+}
+
+/// How many characters the longest of `rows` has.
+pub(crate) fn columns(rows: &[TextRow]) -> i32 {
+    let longest = rows.iter().map(|row| row.text.chars().count()).max();
+    i32::try_from(longest.unwrap_or(0)).unwrap_or(i32::MAX)
+}
+
+pub(crate) fn model_of<T: Clone + 'static>(items: Vec<T>) -> ModelRc<T> {
+    Rc::new(VecModel::from(items)).into()
+}
+
 /// Give `model` the rows `items`: in place when their count is unchanged, so
 /// the window keeps what it drew each with; `replace` installs a new model
 /// otherwise.
@@ -131,7 +162,7 @@ pub(crate) fn update_model<T: Clone + PartialEq + 'static>(
     replace: impl FnOnce(ModelRc<T>),
 ) {
     if model.row_count() != items.len() {
-        return replace(Rc::new(VecModel::from(items)).into());
+        return replace(model_of(items));
     }
     for (i, item) in items.into_iter().enumerate() {
         if model.row_data(i).as_ref() != Some(&item) {

@@ -1,0 +1,64 @@
+import { Theme } from "theme.slint";
+import { TextRow } from "types.slint";
+import { TextView } from "text.slint";
+
+// The inspector's pane: one piece of the board, named, and its diff.
+export component InspectorView inherits Rectangle {
+    // Empty with nothing to show.
+    in property <string> title;
+    in property <[TextRow]> diff;
+    // How many characters the longest line of the diff has.
+    in property <int> columns;
+    // What it says with nothing to show.
+    in property <string> placeholder;
+
+    // Back to the top of the diff, for another piece's.
+    public function to-top() {
+        diff-view.to-start();
+    }
+
+    background: Theme.background;
+
+    if root.title == "": Text {
+        x: 14px;
+        width: parent.width - 28px;
+        height: parent.height;
+        text: root.placeholder;
+        color: Theme.dim;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        wrap: word-wrap;
+    }
+
+    Rectangle {
+        visible: root.title != "";
+
+        VerticalLayout {
+            Rectangle {
+                height: 40px;
+                background: Theme.panel;
+
+                Text {
+                    x: 14px;
+                    width: parent.width - 28px;
+                    height: parent.height;
+                    text: root.title;
+                    color: Theme.text;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+
+            Rectangle {
+                height: 1px;
+                background: Theme.border;
+            }
+
+            diff-view := TextView {
+                lines: root.diff;
+                columns: root.columns;
+            }
+        }
+    }
+}

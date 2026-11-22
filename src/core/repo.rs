@@ -174,8 +174,8 @@ pub fn tui_auto_reload(repo: &Repository) -> bool {
         .unwrap_or(true)
 }
 
-/// Read git config `loom.tuiTabWidth`: the spaces each tab in a TUI diff
-/// shows as (spec 020). Values below 1 and unparsable ones are ignored,
+/// Read git config `loom.tuiTabWidth`: the spaces each tab in a diff of the
+/// TUI or the window shows as (spec 020). Values below 1 and unparsable ones are ignored,
 /// leaving the built-in default.
 pub fn tui_tab_width(repo: &Repository) -> Option<usize> {
     let width = repo.config().ok()?.get_i32("loom.tuiTabWidth").ok()?;

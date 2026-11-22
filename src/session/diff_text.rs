@@ -76,6 +76,14 @@ pub(crate) fn classify(text: &str) -> impl Iterator<Item = (DiffLine, &str)> {
     })
 }
 
+/// Spaces a tab shows as when `loom.tuiTabWidth` is unset.
+pub(crate) const DEFAULT_TAB_WIDTH: usize = 4;
+
+/// Spaces each tab of a diff shows as in `repo` (Spec 020).
+pub(crate) fn tab_width(repo: &git2::Repository) -> usize {
+    repo::tui_tab_width(repo).unwrap_or(DEFAULT_TAB_WIDTH)
+}
+
 /// `line` with each tab shown as `width` spaces: the terminal grid has no
 /// tab stops, and a diff's one-column prefix would shift them anyway.
 pub(crate) fn expand_tabs(line: &str, width: usize) -> String {
@@ -267,3 +275,7 @@ pub(crate) fn untracked_file_text(workdir: &std::path::Path, path: &str) -> Stri
     }
     out
 }
+
+#[cfg(test)]
+#[path = "diff_text_test.rs"]
+mod tests;
