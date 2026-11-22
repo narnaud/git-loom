@@ -1,0 +1,320 @@
+import { Button, CheckBox, LineEdit, ListView, ScrollView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Dialog, TextRow } from "types.slint";
+import { TextView } from "text.slint";
+
+// The dimmed layer a dialog sits on: the panes take no pointer under it.
+component Backdrop inherits Rectangle {
+    background: #00000066;
+
+    TouchArea { }
+
+    @children
+}
+
+component Panel inherits Rectangle {
+    background: Theme.panel;
+    border-width: 1px;
+    border-color: Theme.border;
+    border-radius: 8px;
+    drop-shadow-blur: 24px;
+    drop-shadow-color: #00000080;
+
+    // What a click on the panel misses stays on it.
+    TouchArea { }
+
+    @children
+}
+
+// A question over the window: a prompt of the command running, or what
+// went wrong.
+export component DialogView inherits Rectangle {
+    in property <Dialog> dialog;
+
+    // Confirmed with `text` typed and the choice at `choice` picked, -1 for
+    // none.
+    callback accepted(text: string, choice: int);
+    callback cancelled();
+    // The choice at `index` was ticked, or unticked.
+    callback toggled(index: int);
+
+    property <int> current: -1;
+    property <bool> ready: root.dialog.multi || root.dialog.choices.length == 0 || root.current >= 0 || (root.dialog.line && line.text != "");
+
+    // Fill it in and take the keyboard: once for each dialog opened.
+    public function open(initial: string, choice: int) {
+        line.text = initial;
+        root.current = choice;
+        if root.dialog.line {
+            line.focus();
+            line.select-all();
+        } else {
+            keys.focus();
+        }
+    }
+
+    function submit() {
+        if root.ready {
+            root.accepted(root.dialog.line ? line.text : "", root.current);
+        }
+    }
+
+    pure function listed(index: int) -> bool {
+        index >= 0 && index < root.dialog.choices.length
+    }
+
+    // Move the current choice `delta` items on, over a heading: only an item
+    // can be picked.
+    function step(delta: int) {
+        if root.listed(root.current + delta) && !root.dialog.choices[root.current + delta].heading {
+            root.current += delta;
+        } else if root.listed(root.current + 2 * delta) {
+            root.current += 2 * delta;
+        }
+    }
+
+    Backdrop { }
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                if root.dialog.cancellable {
+                    root.cancelled();
+                } else {
+                    root.submit();
+                }
+                return accept;
+            }
+            if event.text == Key.Return {
+                root.submit();
+                return accept;
+            }
+            if !root.dialog.multi && event.text == Key.DownArrow {
+                root.step(1);
+                return accept;
+            }
+            if !root.dialog.multi && event.text == Key.UpArrow {
+                root.step(-1);
+                return accept;
+            }
+            reject
+        }
+
+        Panel {
+            x: (parent.width - self.width) / 2;
+            y: Math.max(20px, (parent.height - self.height) / 2);
+            width: Math.min(560px, parent.width - 40px);
+            height: Math.min(content.preferred-height, parent.height - 40px);
+
+            content := VerticalLayout {
+                padding: 18px;
+                spacing: 10px;
+
+                if root.dialog.title != "": Text {
+                    text: root.dialog.title;
+                    color: Theme.dim;
+                    font-family: Theme.mono-family;
+                    overflow: elide;
+                }
+
+                Text {
+                    text: root.dialog.body;
+                    color: Theme.text;
+                    font-size: 14px;
+                    font-weight: 600;
+                    wrap: word-wrap;
+                }
+
+                // A long one, as a failure's can be, scrolls rather than push
+                // the buttons out of the window.
+                if root.dialog.detail != "": ScrollView {
+                    preferred-height: detail.preferred-height;
+                    min-height: Math.min(self.preferred-height, 60px);
+                    content-height: detail.preferred-height;
+
+                    detail := Text {
+                        width: parent.width;
+                        text: root.dialog.detail;
+                        color: Theme.dim;
+                        wrap: word-wrap;
+                    }
+                }
+
+                if root.dialog.choices.length > 0: ListView {
+                    // The current choice, kept in sight as it opens and as the
+                    // keys move it.
+                    property <int> shown: root.current;
+                    // Shorter at need, as the detail, to keep the buttons in.
+                    preferred-height: Math.min(300px, root.dialog.choices.length * 28px + 4px);
+                    min-height: Math.min(self.preferred-height, 88px);
+                    init => {
+                        self.ensure-row-visible(self.shown, ScrollBehavior.instant);
+                    }
+                    changed shown => {
+                        self.ensure-row-visible(self.shown, ScrollBehavior.instant);
+                    }
+
+                    for choice[i] in root.dialog.choices: Rectangle {
+                        height: 28px;
+                        border-radius: 4px;
+                        background: choice.heading ? transparent
+                            : !root.dialog.multi && i == root.current ? Theme.selection
+                            : pick.has-hover ? Theme.hover
+                            : transparent;
+
+                        pick := TouchArea {
+                            enabled: !choice.heading;
+                            clicked => {
+                                if root.dialog.multi {
+                                    root.toggled(i);
+                                } else {
+                                    root.current = i;
+                                }
+                            }
+                            double-clicked => {
+                                if !root.dialog.multi {
+                                    root.current = i;
+                                    root.submit();
+                                }
+                            }
+                        }
+
+                        HorizontalLayout {
+                            padding-left: choice.heading ? 4px : 10px;
+                            padding-right: 10px;
+                            spacing: 8px;
+
+                            if root.dialog.multi && !choice.heading: CheckBox {
+                                checked: choice.checked;
+                                toggled => {
+                                    root.toggled(i);
+                                }
+                            }
+
+                            Text {
+                                text: choice.text;
+                                color: choice.heading ? Theme.dim : Theme.text;
+                                font-weight: choice.heading ? 700 : 400;
+                                vertical-alignment: center;
+                                overflow: elide;
+                                horizontal-stretch: 1;
+                            }
+                        }
+                    }
+                }
+
+                line := LineEdit {
+                    visible: root.dialog.line;
+                    height: self.visible ? self.preferred-height : 0;
+                    placeholder-text: root.dialog.placeholder;
+                    accepted => {
+                        root.submit();
+                    }
+                }
+
+                if root.dialog.error != "": Text {
+                    text: root.dialog.error;
+                    color: Theme.removed;
+                    wrap: word-wrap;
+                }
+
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+
+                    if root.dialog.cancellable: Button {
+                        text: "Cancel";
+                        clicked => {
+                            root.cancelled();
+                        }
+                    }
+
+                    Button {
+                        text: root.dialog.confirm;
+                        primary: true;
+                        enabled: root.ready;
+                        clicked => {
+                            root.submit();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// The log of the commands run, over the window.
+export component LogView inherits Rectangle {
+    in property <[TextRow]> lines;
+    in property <int> columns;
+
+    callback closed();
+
+    // Take the keyboard, and show the latest lines.
+    public function open() {
+        keys.focus();
+        text.to-end();
+    }
+
+    Backdrop {
+        TouchArea {
+            clicked => {
+                root.closed();
+            }
+        }
+    }
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Escape || event.text == Key.Return {
+                root.closed();
+                return accept;
+            }
+            reject
+        }
+
+        Panel {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: Math.min(1000px, parent.width - 60px);
+            height: parent.height - 60px;
+
+            VerticalLayout {
+                padding: 14px;
+                spacing: 10px;
+
+                Text {
+                    text: "Log";
+                    color: Theme.text;
+                    font-size: 15px;
+                    font-weight: 700;
+                }
+
+                Rectangle {
+                    vertical-stretch: 1;
+                    background: Theme.background;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    border-radius: 4px;
+                    clip: true;
+
+                    text := TextView {
+                        lines: root.lines;
+                        columns: root.columns;
+                    }
+                }
+
+                HorizontalLayout {
+                    alignment: end;
+
+                    Button {
+                        text: "Close";
+                        clicked => {
+                            root.closed();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

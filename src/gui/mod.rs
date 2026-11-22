@@ -1,6 +1,8 @@
 //! The window of git-loom, which `git-loom-gui` runs (Spec 024).
 
 mod board;
+mod commands;
+mod forms;
 mod model;
 mod state;
 mod window;

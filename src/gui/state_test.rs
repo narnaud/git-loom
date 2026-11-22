@@ -1,9 +1,12 @@
 use std::path::PathBuf;
+use std::sync::mpsc::channel;
+use std::time::{Duration, Instant};
 
 use super::*;
 use crate::core::repo::{CommitInfo, FileChange, RemoteStatus, RepoInfo};
 use crate::core::shortid::IdAllocator;
 use crate::core::test_helpers::{TestRepo, base_info, branch, commit};
+use crate::core::ui::{self, Answer, Cancelled, PromptKind};
 use crate::gui::board::{LineKind, PieceKind};
 use crate::session::paused::test_support::repo_with_a_paused_drop;
 
@@ -62,16 +65,19 @@ pub(crate) fn state_of(info: RepoInfo) -> State {
 /// [`state_of`], the window started in the directory `cwd_prefix` of the
 /// repository.
 pub(crate) fn state_in(info: RepoInfo, cwd_prefix: &str) -> State {
+    State::new(snapshot_in(info, cwd_prefix), None, 1, 4)
+}
+
+fn snapshot_in(info: RepoInfo, cwd_prefix: &str) -> Snapshot {
     let ids = IdAllocator::new(info.collect_entities());
     let nowhere = PathBuf::from("gui-test-fixture-has-no-workdir");
-    let snapshot = Snapshot {
+    Snapshot {
         workdir: nowhere.clone(),
         git_dir: nowhere,
         cwd_prefix: cwd_prefix.to_string(),
         info,
         ids,
-    };
-    State::new(snapshot, None, 4)
+    }
 }
 
 pub(crate) fn state() -> State {
@@ -906,4 +912,186 @@ fn the_width_of_a_tab_is_the_repositorys() {
     let state = repo.in_dir(State::load).unwrap();
 
     assert_eq!(state.tab_width(), 2);
+}
+
+// ── Commands ──
+
+/// Take in what the worker sent until `done` holds.
+fn tick_until(state: &mut State, done: impl Fn(&State) -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !done(state) {
+        assert!(Instant::now() < deadline, "timed out");
+        state.tick();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[test]
+fn the_status_bar_names_the_command_running_and_the_step_it_is_at() {
+    let mut state = state();
+    let (go, wait) = channel::<()>();
+    state.worker.run("loom update".to_string(), move || {
+        ui::spinner(Some("Fetching"));
+        let _ = wait.recv();
+        Err(Cancelled.into())
+    });
+
+    tick_until(&mut state, |state| {
+        state.status().1 == "loom update — Fetching"
+    });
+    assert!(state.busy());
+    assert!(!state.may_close(), "its git would be killed mid-way");
+    assert_eq!(
+        state.status(),
+        (
+            Level::Warn,
+            "A command is running: wait for it to end".to_string()
+        )
+    );
+    go.send(()).unwrap();
+    tick_until(&mut state, |state| !state.busy());
+
+    assert_eq!(state.status(), (Level::Plain, "Cancelled".to_string()));
+    assert!(state.may_close());
+}
+
+#[test]
+fn what_the_command_running_asks_is_asked_over_the_window() {
+    let mut state = state();
+    let (seen, answers) = channel();
+    state.worker.run("loom drop a".to_string(), move || {
+        let answer = ui::prompt(PromptKind::Confirm, "Drop it?", None)?;
+        seen.send(answer).unwrap();
+        Err(Cancelled.into())
+    });
+
+    tick_until(&mut state, |state| state.form().is_some());
+    let form = state.form().unwrap();
+    assert_eq!(
+        (form.title.as_str(), form.body.as_str()),
+        ("loom drop a", "Drop it?")
+    );
+    state.form_accepted("", None);
+
+    assert_eq!(answers.recv().unwrap(), Answer::Bool(true));
+    tick_until(&mut state, |state| !state.busy());
+}
+
+#[test]
+fn a_command_that_went_through_is_summed_up_by_its_last_success() {
+    let mut state = state();
+    state.worker.log.push(LogEntry {
+        command: "loom drop a b".to_string(),
+        lines: vec![
+            (Level::Success, "Dropped `a`".to_string()),
+            (Level::Plain, "a note".to_string()),
+            (Level::Success, "Dropped `b`\nwith a hint".to_string()),
+        ],
+    });
+
+    state.report(Ended::Done);
+
+    assert_eq!(
+        state.status(),
+        (
+            Level::Success,
+            "Dropped `b` (and 1 more in the log)".to_string()
+        )
+    );
+    assert!(state.form().is_none());
+}
+
+#[test]
+fn a_command_that_failed_says_why_over_the_window_unless_the_log_shows_it() {
+    let mut state = state();
+    let error = "Push refused\nIf `a` has diverged on the remote, pick Force push in its menu";
+    state.worker.log.push(LogEntry {
+        command: "loom push a".to_string(),
+        lines: vec![(Level::Error, error.to_string())],
+    });
+
+    state.report(Ended::Failed(error.to_string()));
+
+    assert_eq!(state.status(), (Level::Error, "Push refused".to_string()));
+    let form = state.form().unwrap();
+    assert_eq!(
+        (form.title.as_str(), form.body.as_str()),
+        ("loom push a", "Push refused")
+    );
+    state.form_accepted("", None);
+    state.open_log();
+    state.report(Ended::Failed(error.to_string()));
+    assert!(state.form().is_none());
+}
+
+#[test]
+fn a_command_that_ended_shows_the_repository_as_it_left_it() {
+    let repo = TestRepo::new_with_remote();
+    repo.commit("Loose on the line", "loose.txt");
+    let mut state = repo.in_dir(State::load).unwrap();
+    select(&mut state, "Loose on the line", &[]);
+    state.worker.run("loom commit".to_string(), || Ok(()));
+    repo.write_file("made.txt", "by the command\n");
+
+    repo.in_dir(|| tick_until(&mut state, |state| !state.busy()));
+
+    assert_eq!(listed(&state), ["local changes", "made.txt"]);
+    assert_eq!(selected(&state), ["Loose on the line"]);
+    assert_eq!(state.status(), (Level::Success, "Done".to_string()));
+}
+
+#[test]
+fn a_selection_goes_to_the_cursor_row_after_a_command_else_to_its_place() {
+    let mut state = state();
+    select(&mut state, "feature-a", &[]);
+    state.apply(snapshot_in(info(), ""));
+    assert_eq!(selected(&state), ["feature-a"], "the same row");
+
+    select(&mut state, "On a", &[]);
+    let mut reworded = info();
+    reworded.commits[2] = commit(0xA2, "On a, reworded", Some(0xAA));
+    reworded.branches[1] = branch("feature-a", 0xA2, Some(RemoteStatus::Synced));
+    state.apply(snapshot_in(reworded, ""));
+    assert_eq!(selected(&state), ["On a, reworded"], "what is in its place");
+
+    select(&mut state, "a.rs", &["b.rs"]);
+    let mut committed = info();
+    committed
+        .working_changes
+        .retain(|change| change.path == "new.rs");
+    state.apply(snapshot_in(committed, ""));
+    assert_eq!(selected(&state), ["new.rs"], "the nearest above its place");
+}
+
+#[test]
+fn nothing_is_selected_after_a_command_run_with_nothing_selected() {
+    let mut state = state();
+    select(&mut state, "feature-a", &[]);
+    state.clear_selection();
+
+    state.apply(snapshot_in(info(), ""));
+
+    assert!(selected(&state).is_empty());
+}
+
+#[test]
+fn the_log_opens_over_the_window_and_closes_again() {
+    let mut state = state();
+    assert!(!state.log_open());
+
+    state.open_log();
+    assert!(state.log_open());
+    state.close_log();
+
+    assert!(!state.log_open());
+}
+
+#[test]
+fn each_read_of_the_repository_is_counted() {
+    let mut state = state();
+    let before = state.reads();
+
+    state.apply(snapshot_in(info(), ""));
+
+    assert_eq!(state.reads(), before + 1);
 }

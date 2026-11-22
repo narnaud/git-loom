@@ -21,7 +21,8 @@ integration branch and rewrites/manages them without leaving that branch.
   rules (`targets.rs`), diff text, paused operation, auto-reload watch.
 - `src/tui/`: status tree, shell, hunk selector, widgets, theme.
 - `src/gui/` (feature `gui`, Slint): the window. `state.rs` decides what it
-  shows and `board.rs` where, with no window; `window.rs` copies that onto the
+  shows and `board.rs` where, with no window, `commands.rs` what its menus
+  offer and `forms.rs` what its dialogs ask; `window.rs` copies that onto the
   window as `model.rs` words it; `ui/*.slint` draws it; `mod.rs` starts it.
 - `src/agent/`: `agent install`; embedded source is `skills/git-loom/SKILL.md`.
 - Tests are sibling `*_test.rs` files; shared fixtures are in

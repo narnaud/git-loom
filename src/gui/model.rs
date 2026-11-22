@@ -7,12 +7,16 @@ use slint::{Model, ModelRc, VecModel};
 
 use crate::core::graph::{self, FileGroup};
 use crate::core::repo::{self, RemoteStatus};
+use crate::core::ui::Level;
 use crate::gui::board::{self, Board, LineKind, PieceKind};
+use crate::gui::commands::Entry;
+use crate::gui::forms::Form;
 use crate::gui::state::State;
 use crate::gui::ui::{
-    BoardLine, ChangeKind, ChangeRow, LocalChanges, Piece, PieceKind as Kind, Remote, Strand,
-    TextKind, TextRow,
+    BoardLine, ChangeKind, ChangeRow, Choice, Dialog, LocalChanges, MenuEntry, Piece,
+    PieceKind as Kind, Remote, Strand, TextKind, TextRow, Tone,
 };
+use crate::session::action::LogEntry;
 use crate::session::diff_text::{self, DiffLine, expand_tabs};
 use crate::session::tree::RowKind;
 
@@ -208,6 +212,133 @@ pub(crate) fn diff_rows(text: &str, tab_width: usize) -> Vec<TextRow> {
 pub(crate) fn columns(rows: &[TextRow]) -> i32 {
     let longest = rows.iter().map(|row| row.text.chars().count()).max();
     i32::try_from(longest.unwrap_or(0)).unwrap_or(i32::MAX)
+}
+
+/// The context menu, a line between its groups.
+pub(crate) fn menu(menu: &[Option<Entry>]) -> Vec<MenuEntry> {
+    let line = MenuEntry {
+        id: -1,
+        ..Default::default()
+    };
+    let lines = menu
+        .iter()
+        .map(|entry| entry.as_ref().map_or(line.clone(), button));
+    lines.collect()
+}
+
+/// The entry of `menu` the keys go to from `from` (-1 for none), down or up:
+/// the next that can be picked, past lines and greyed entries, else `from`.
+pub(crate) fn menu_step(menu: &[MenuEntry], from: i32, down: bool) -> i32 {
+    let pickable = |&i: &usize| menu[i].id >= 0 && menu[i].enabled;
+    let next = match usize::try_from(from) {
+        Ok(from) if down => (from + 1..menu.len()).find(pickable),
+        Ok(from) => (0..from.min(menu.len())).rev().find(pickable),
+        Err(_) if down => (0..menu.len()).find(pickable),
+        Err(_) => (0..menu.len()).rev().find(pickable),
+    };
+    next.and_then(|i| i32::try_from(i).ok()).unwrap_or(from)
+}
+
+/// The buttons of the inspector, or of the bar.
+pub(crate) fn buttons(entries: &[Entry]) -> Vec<MenuEntry> {
+    entries.iter().map(button).collect()
+}
+
+fn button(entry: &Entry) -> MenuEntry {
+    MenuEntry {
+        id: entry.cmd.id(),
+        title: entry.title.into(),
+        enabled: entry.enabled,
+    }
+}
+
+pub(crate) fn tone(level: Level) -> Tone {
+    match level {
+        Level::Success => Tone::Success,
+        Level::Warn => Tone::Warn,
+        Level::Error => Tone::Error,
+        Level::Plain => Tone::Plain,
+    }
+}
+
+/// A message as the window words it: the CLI highlights what `msg` puts
+/// between backticks, which the window has no highlight for.
+pub(crate) fn plain(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find('`') {
+        let after = &rest[start + 1..];
+        let Some(end) = after.find('`') else {
+            break;
+        };
+        out.push_str(&rest[..start]);
+        out.push_str(&after[..end]);
+        rest = &after[end + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// What `form` asks, but for what its fields start with.
+pub(crate) fn dialog(form: &Form) -> Dialog {
+    Dialog {
+        title: form.title.as_str().into(),
+        body: plain(&form.body).into(),
+        detail: plain(&form.detail).into(),
+        error: plain(&form.error).into(),
+        line: form.line,
+        placeholder: form.placeholder.as_str().into(),
+        choices: model_of(choices(form)),
+        multi: form.multi,
+        confirm: form.confirm.into(),
+        cancellable: form.cancellable,
+    }
+}
+
+pub(crate) fn choices(form: &Form) -> Vec<Choice> {
+    let choices = form.choices.iter().map(|choice| Choice {
+        text: choice.text.as_str().into(),
+        heading: choice.heading,
+        checked: choice.checked,
+    });
+    choices.collect()
+}
+
+/// The log: each command's line, then what it said, a hint a line under
+/// what it hints at.
+pub(crate) fn log_rows(log: &[LogEntry]) -> Vec<TextRow> {
+    let row = |text: String, kind| TextRow {
+        text: text.into(),
+        kind,
+    };
+    let mut rows = Vec::new();
+    for entry in log {
+        if !rows.is_empty() {
+            rows.push(row(String::new(), TextKind::Context));
+        }
+        rows.push(row(format!("$ {}", entry.command), TextKind::Command));
+        for (level, text) in &entry.lines {
+            let (mark, kind) = match level {
+                Level::Success => ("• ", TextKind::Success),
+                Level::Warn => ("! ", TextKind::Warning),
+                Level::Error => ("! ", TextKind::Failure),
+                Level::Plain => ("", TextKind::Context),
+            };
+            for (n, line) in text.lines().enumerate() {
+                let hint = n > 0 && !mark.is_empty();
+                let (lead, kind) = if hint {
+                    ("  › ", TextKind::Index)
+                } else {
+                    (mark, kind)
+                };
+                rows.push(row(format!("{lead}{}", plain(line)), kind));
+            }
+        }
+    }
+    if rows.is_empty() {
+        rows.push(row("No command has run yet.".to_string(), TextKind::Index));
+    }
+    rows
 }
 
 pub(crate) fn model_of<T: Clone + 'static>(items: Vec<T>) -> ModelRc<T> {

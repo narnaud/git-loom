@@ -1,0 +1,37 @@
+import { Theme } from "theme.slint";
+
+// A flat button of a bar or a pane: its label, tinted under the pointer.
+export component ToolButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    // Drawn with a border, where it stands among others.
+    in property <bool> outlined;
+
+    callback clicked();
+
+    height: 26px;
+    min-width: label.preferred-width + 20px;
+    preferred-width: self.min-width;
+    horizontal-stretch: 0;
+    border-radius: 4px;
+    border-width: root.outlined ? 1px : 0;
+    border-color: Theme.border;
+    background: !root.enabled ? transparent : area.pressed ? Theme.selection : area.has-hover ? Theme.hover : transparent;
+
+    label := Text {
+        x: 10px;
+        width: parent.width - 20px;
+        text: root.text;
+        color: root.enabled ? Theme.text : Theme.dim;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+        overflow: elide;
+    }
+
+    area := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            root.clicked();
+        }
+    }
+}

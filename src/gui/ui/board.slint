@@ -233,6 +233,8 @@ export component BoardView inherits Rectangle {
     callback toggled(row: int);
     // The left button went down on the piece standing for `row`.
     callback pressed(row: int, control: bool, shift: bool);
+    // The right button did, at `x`, `y` of the window.
+    callback menu-asked(row: int, x: length, y: length);
 
     // Scroll no further than it takes to show what lies from `y` down to
     // `y + h` of the board; what is taller than the pane, from its top.
@@ -292,6 +294,8 @@ export component BoardView inherits Rectangle {
             pointer-event(event) => {
                 if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
                     root.pressed(piece.row, event.modifiers.control, event.modifiers.shift);
+                } else if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                    root.menu-asked(piece.row, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
                 }
             }
             double-clicked => {
