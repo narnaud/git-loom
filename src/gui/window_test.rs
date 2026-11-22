@@ -1,5 +1,5 @@
 use super::*;
-use crate::gui::state::tests::{selected, state};
+use crate::gui::state::tests::{select, selected, state};
 
 fn press(state: &mut State, key: Key) -> bool {
     key_pressed(state, &SharedString::from(key))
@@ -10,6 +10,8 @@ fn the_arrow_keys_and_escape_act_on_the_selection() {
     let mut state = state();
 
     assert!(press(&mut state, Key::DownArrow));
+    assert_eq!(selected(&state), ["local changes"]);
+    select(&mut state, "Loose", &[]);
     assert!(press(&mut state, Key::DownArrow));
     assert_eq!(selected(&state), ["feature-b"]);
 

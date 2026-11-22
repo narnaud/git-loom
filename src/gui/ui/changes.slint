@@ -1,0 +1,148 @@
+import { ListView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { ChangeRow, ChangeKind, LocalChanges } from "types.slint";
+import { Icon, IconKind } from "icons.slint";
+
+// The local changes pane: a header standing for all of them, then a line
+// per file.
+export component ChangesView inherits Rectangle {
+    in property <LocalChanges> local;
+    in property <[ChangeRow]> changes;
+
+    // The left button went down on the line standing for `row`.
+    callback pressed(row: int, control: bool, shift: bool);
+
+    property <length> line-height: 26px;
+
+    // Scroll no further than it takes to show the file at `index`.
+    public function reveal(index: int) {
+        if index * root.line-height < -list.content-y {
+            list.content-y = -index * root.line-height;
+        } else if (index + 1) * root.line-height > list.visible-height - list.content-y {
+            list.content-y = list.visible-height - (index + 1) * root.line-height;
+        }
+    }
+
+    background: Theme.panel;
+
+    VerticalLayout {
+        Rectangle {
+            height: 40px;
+            background: root.local.selected ? Theme.selection : header.has-hover ? Theme.hover : transparent;
+
+            header := TouchArea {
+                // Nothing stands for the changes while an operation is paused.
+                enabled: root.local.row >= 0;
+                pointer-event(event) => {
+                    if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                        root.pressed(root.local.row, event.modifiers.control, event.modifiers.shift);
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 12px;
+                spacing: 8px;
+
+                Text {
+                    text: "Local changes";
+                    color: Theme.text;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+
+                Text {
+                    text: root.local.hint;
+                    color: Theme.dim;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: Theme.border;
+        }
+
+        list := ListView {
+            for change in root.changes: area := TouchArea {
+                height: root.line-height;
+
+                pointer-event(event) => {
+                    if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                        root.pressed(change.row, event.modifiers.control, event.modifiers.shift);
+                    }
+                }
+
+                Rectangle {
+                    x: 4px;
+                    width: parent.width - 8px;
+                    border-radius: 5px;
+                    background: change.selected ? Theme.selection : area.has-hover ? Theme.hover : transparent;
+                }
+
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 10px;
+                    spacing: 8px;
+
+                    // The two status letters, or the mark standing for both.
+                    Rectangle {
+                        width: 18px;
+
+                        // A letter each, side by side as `loom status` prints them.
+                        if change.kind == ChangeKind.tracked: HorizontalLayout {
+                            alignment: start;
+
+                            Text {
+                                width: 7px;
+                                text: change.staged;
+                                color: Theme.added;
+                                font-family: Theme.mono-family;
+                                font-size: 12px;
+                                vertical-alignment: center;
+                            }
+
+                            Text {
+                                width: 7px;
+                                text: change.unstaged;
+                                color: Theme.removed;
+                                font-family: Theme.mono-family;
+                                font-size: 12px;
+                                vertical-alignment: center;
+                            }
+                        }
+                        if change.kind == ChangeKind.conflicted: Text {
+                            text: "!!";
+                            color: Theme.removed;
+                            font-family: Theme.mono-family;
+                            font-size: 12px;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                        }
+                        if change.kind == ChangeKind.untracked: Icon {
+                            // Under the middle of two letters.
+                            x: 1px;
+                            kind: IconKind.asterisk;
+                            ink: Theme.untracked;
+                        }
+                    }
+
+                    Text {
+                        text: change.path;
+                        color: change.kind == ChangeKind.conflicted ? Theme.removed : Theme.text;
+                        font-size: 12px;
+                        font-weight: change.kind == ChangeKind.conflicted ? 700 : 400;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                }
+            }
+        }
+    }
+}

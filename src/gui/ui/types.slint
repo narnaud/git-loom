@@ -1,3 +1,27 @@
+// The header of the local changes pane, which stands for them all.
+export struct LocalChanges {
+    // Index of its row in the tree, which every callback names it by; -1
+    // while an operation is paused.
+    row: int,
+    // How many files there are.
+    hint: string,
+    selected: bool,
+}
+
+// What a local change is; mirrors `graph::FileGroup`.
+export enum ChangeKind { tracked, conflicted, untracked }
+
+// A file of the local changes pane.
+export struct ChangeRow {
+    row: int,
+    kind: ChangeKind,
+    // Of a tracked file: the letter of its index, and of its working tree.
+    staged: string,
+    unstaged: string,
+    path: string,
+    selected: bool,
+}
+
 // How a branch stands against its remote one; mirrors `RemoteStatus`.
 export enum Remote { none, synced, different, gone }
 

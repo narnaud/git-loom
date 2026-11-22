@@ -60,7 +60,7 @@ impl Gui {
             }
         });
         let gui = self.clone();
-        window.on_board_pressed(move |row, control, shift| {
+        window.on_row_pressed(move |row, control, shift| {
             if let Ok(row) = usize::try_from(row) {
                 gui.update(|state| state.row_pressed(row, control, shift));
             }
@@ -72,11 +72,14 @@ impl Gui {
     /// A key pressed over the panes; false when it is not one of theirs.
     fn key(&self, text: &str) -> bool {
         let handled = key_pressed(&mut self.state.borrow_mut(), text);
-        if handled {
+        if handled && let Some(window) = self.window.upgrade() {
             self.sync();
             // Where a key put the selection may be out of view.
-            let rect = self.state.borrow().cursor_rect();
-            if let (Some(rect), Some(window)) = (rect, self.window.upgrade()) {
+            let state = self.state.borrow();
+            if let Some(index) = state.cursor_change() {
+                window.invoke_reveal_in_changes(index as i32);
+            }
+            if let Some(rect) = state.cursor_rect() {
                 window.invoke_reveal_on_board(rect.y, rect.h);
             }
         }
@@ -96,6 +99,10 @@ impl Gui {
         let mut state = self.state.borrow_mut();
         window.set_repository(state.repository().into());
         window.set_heading(state.heading().into());
+        window.set_local_changes(model::local_changes(&state));
+        update_model(&window.get_changes(), model::changes(&state), |changes| {
+            window.set_changes(changes)
+        });
         let board = state.board();
         update_model(&window.get_pieces(), model::pieces(&state), |pieces| {
             window.set_pieces(pieces)
