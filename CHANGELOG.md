@@ -5,51 +5,51 @@
 
 ### Features ✨
 
-* **tui:** turn auto-reload on by default ([673f567](https://github.com/narnaud/git-loom/commit/673f567ac440cd0b4c233794ee7717b1410967cf))
+* **tui:** turn auto-reload on by default ([673f567](https://github.com/narnaud/git-loom/commit/673f567ac440cd0b4c233794ee7717b1410967cf)) by @narnaud
 
 
 ### Bug Fixes 🐞
 
-* **session:** draw the move of a root commit without a cycle ([ceeaf9f](https://github.com/narnaud/git-loom/commit/ceeaf9ff7a08361549ffda65e34d06e5c4b2671c))
-* **session:** file an action's last lines before summing it up ([f1e7cfd](https://github.com/narnaud/git-loom/commit/f1e7cfd8744f6a94e839ba51343b2bc0f97d0f2b))
-* **session:** never start an action in place of the one running ([5f797fb](https://github.com/narnaud/git-loom/commit/5f797fbc5d22290efa4109a219e3c5471dd36422))
-* **session:** refuse a fold of no rows instead of panicking ([08ee8d3](https://github.com/narnaud/git-loom/commit/08ee8d378ce61b838b460fddc7d3a995f9419887))
-* **session:** refuse a split pick that keeps no hunk for the first commit ([bf0c32b](https://github.com/narnaud/git-loom/commit/bf0c32be182dad42539a894785cebc7d4c4e7095))
-* **session:** refuse an absorb of an empty selection or an unnamed file ([80abb95](https://github.com/narnaud/git-loom/commit/80abb9555743724cccfdabe49f679cf9d0e478d8))
-* **session:** tell a paused operation from one restarted on its commit ([6385a7d](https://github.com/narnaud/git-loom/commit/6385a7dde205c937f5f1464850f91892e626ae15))
+* **session:** draw the move of a root commit without a cycle ([ceeaf9f](https://github.com/narnaud/git-loom/commit/ceeaf9ff7a08361549ffda65e34d06e5c4b2671c)) by @narnaud
+* **session:** file an action's last lines before summing it up ([f1e7cfd](https://github.com/narnaud/git-loom/commit/f1e7cfd8744f6a94e839ba51343b2bc0f97d0f2b)) by @narnaud
+* **session:** never start an action in place of the one running ([5f797fb](https://github.com/narnaud/git-loom/commit/5f797fbc5d22290efa4109a219e3c5471dd36422)) by @narnaud
+* **session:** refuse a fold of no rows instead of panicking ([08ee8d3](https://github.com/narnaud/git-loom/commit/08ee8d378ce61b838b460fddc7d3a995f9419887)) by @narnaud
+* **session:** refuse a split pick that keeps no hunk for the first commit ([bf0c32b](https://github.com/narnaud/git-loom/commit/bf0c32be182dad42539a894785cebc7d4c4e7095)) by @narnaud
+* **session:** refuse an absorb of an empty selection or an unnamed file ([80abb95](https://github.com/narnaud/git-loom/commit/80abb9555743724cccfdabe49f679cf9d0e478d8)) by @narnaud
+* **session:** tell a paused operation from one restarted on its commit ([6385a7d](https://github.com/narnaud/git-loom/commit/6385a7dde205c937f5f1464850f91892e626ae15)) by @narnaud
 
 
 ### Changes
 
-* build git-loom as a library with a thin executable ([ed7016a](https://github.com/narnaud/git-loom/commit/ed7016aa04c84b864fe9f2ab04484e0bbca317eb))
-* **session:** keep to their module what only it uses ([0ff0d1f](https://github.com/narnaud/git-loom/commit/0ff0d1f73f80d77e3afc12712509aae06079c7fd))
-* **session:** leave the clock of the wait to the front-end ([b535ad2](https://github.com/narnaud/git-loom/commit/b535ad2df4d8164b353dedea2557e234a01c4f61))
-* **session:** list where a new commit can go in session::targets ([7729313](https://github.com/narnaud/git-loom/commit/772931332cba5289630bc6c4ac3f707686697025))
-* **session:** move action dispatch out of tui::app ([64c2620](https://github.com/narnaud/git-loom/commit/64c26203f1c63b5167b3b9501b1cd203dbf836ea))
-* **session:** move the diff text of a row out of tui::app ([e332db7](https://github.com/narnaud/git-loom/commit/e332db70877fcf301994cfe52f6dce00c026be9b))
-* **session:** move the fold, move and split targets out of tui::app ([4c72eeb](https://github.com/narnaud/git-loom/commit/4c72eeb81dc13f9b65f1f7e13db8ef2b7774ef3f))
-* **session:** move the paused operation out of tui::app ([51bfe4d](https://github.com/narnaud/git-loom/commit/51bfe4d835605353724eae183da55f52e38b7d3f))
-* **session:** move the row model and the reload watch out of tui ([f6b081d](https://github.com/narnaud/git-loom/commit/f6b081dbc4339c04042f1a50afc81b1f56b89cc0))
-* **session:** move the snapshot and its previews out of tui::app ([84947af](https://github.com/narnaud/git-loom/commit/84947af1bdafef6ce862565666373b38bb4229d5))
-* **session:** move what a hunk pick is for out of tui::app ([322dcf2](https://github.com/narnaud/git-loom/commit/322dcf288dfdb6025e512c4a2b2c4a55f47f20cb))
-* **session:** name a refusal once, and hand a refused split its log line ([a8f5b7b](https://github.com/narnaud/git-loom/commit/a8f5b7bbf34e226daed27a7368613929dd32f4ae))
-* **session:** run actions and hunk reads on one shared worker ([e5eaf3d](https://github.com/narnaud/git-loom/commit/e5eaf3d305ba5bb4a3944127731eb25aeeb8889c))
-* **session:** say in the session which rows each command takes ([00e88b0](https://github.com/narnaud/git-loom/commit/00e88b0b325decc2a1517ac8f807c23dd885c211))
-* **session:** say what a diff line is apart from how the TUI styles it ([c8f6e97](https://github.com/narnaud/git-loom/commit/c8f6e97cb52f44b0f989d6c3a91a49c9438f67c0))
-* **session:** sum an action's log up in LogEntry ([91a3b61](https://github.com/narnaud/git-loom/commit/91a3b612055472e87aed5f62d0d5cd5d50ac9c70))
-* **ui:** let the front-end word what a command hints at ([9133cb0](https://github.com/narnaud/git-loom/commit/9133cb070b61edf5b6a9206da239774843cb4a65))
+* build git-loom as a library with a thin executable ([ed7016a](https://github.com/narnaud/git-loom/commit/ed7016aa04c84b864fe9f2ab04484e0bbca317eb)) by @narnaud
+* **session:** keep to their module what only it uses ([0ff0d1f](https://github.com/narnaud/git-loom/commit/0ff0d1f73f80d77e3afc12712509aae06079c7fd)) by @narnaud
+* **session:** leave the clock of the wait to the front-end ([b535ad2](https://github.com/narnaud/git-loom/commit/b535ad2df4d8164b353dedea2557e234a01c4f61)) by @narnaud
+* **session:** list where a new commit can go in session::targets ([7729313](https://github.com/narnaud/git-loom/commit/772931332cba5289630bc6c4ac3f707686697025)) by @narnaud
+* **session:** move action dispatch out of tui::app ([64c2620](https://github.com/narnaud/git-loom/commit/64c26203f1c63b5167b3b9501b1cd203dbf836ea)) by @narnaud
+* **session:** move the diff text of a row out of tui::app ([e332db7](https://github.com/narnaud/git-loom/commit/e332db70877fcf301994cfe52f6dce00c026be9b)) by @narnaud
+* **session:** move the fold, move and split targets out of tui::app ([4c72eeb](https://github.com/narnaud/git-loom/commit/4c72eeb81dc13f9b65f1f7e13db8ef2b7774ef3f)) by @narnaud
+* **session:** move the paused operation out of tui::app ([51bfe4d](https://github.com/narnaud/git-loom/commit/51bfe4d835605353724eae183da55f52e38b7d3f)) by @narnaud
+* **session:** move the row model and the reload watch out of tui ([f6b081d](https://github.com/narnaud/git-loom/commit/f6b081dbc4339c04042f1a50afc81b1f56b89cc0)) by @narnaud
+* **session:** move the snapshot and its previews out of tui::app ([84947af](https://github.com/narnaud/git-loom/commit/84947af1bdafef6ce862565666373b38bb4229d5)) by @narnaud
+* **session:** move what a hunk pick is for out of tui::app ([322dcf2](https://github.com/narnaud/git-loom/commit/322dcf288dfdb6025e512c4a2b2c4a55f47f20cb)) by @narnaud
+* **session:** name a refusal once, and hand a refused split its log line ([a8f5b7b](https://github.com/narnaud/git-loom/commit/a8f5b7bbf34e226daed27a7368613929dd32f4ae)) by @narnaud
+* **session:** run actions and hunk reads on one shared worker ([e5eaf3d](https://github.com/narnaud/git-loom/commit/e5eaf3d305ba5bb4a3944127731eb25aeeb8889c)) by @narnaud
+* **session:** say in the session which rows each command takes ([00e88b0](https://github.com/narnaud/git-loom/commit/00e88b0b325decc2a1517ac8f807c23dd885c211)) by @narnaud
+* **session:** say what a diff line is apart from how the TUI styles it ([c8f6e97](https://github.com/narnaud/git-loom/commit/c8f6e97cb52f44b0f989d6c3a91a49c9438f67c0)) by @narnaud
+* **session:** sum an action's log up in LogEntry ([91a3b61](https://github.com/narnaud/git-loom/commit/91a3b612055472e87aed5f62d0d5cd5d50ac9c70)) by @narnaud
+* **ui:** let the front-end word what a command hints at ([9133cb0](https://github.com/narnaud/git-loom/commit/9133cb070b61edf5b6a9206da239774843cb4a65)) by @narnaud
 
 
 ### Tests
 
-* find the binary from cargo's per-unit harness directory ([e78c059](https://github.com/narnaud/git-loom/commit/e78c059abe72d24ccc660852a5ae4560db6b2874))
-* **session:** build the rows of the command tests in one place ([7acd51b](https://github.com/narnaud/git-loom/commit/7acd51be702f8f9028874546b280b2317c1cd8bf))
-* **session:** pin the summary of a log and where a commit may move ([3b4df8e](https://github.com/narnaud/git-loom/commit/3b4df8e25eb4c55c544b215c312d254828016e4c))
+* find the binary from cargo's per-unit harness directory ([e78c059](https://github.com/narnaud/git-loom/commit/e78c059abe72d24ccc660852a5ae4560db6b2874)) by @narnaud
+* **session:** build the rows of the command tests in one place ([7acd51b](https://github.com/narnaud/git-loom/commit/7acd51be702f8f9028874546b280b2317c1cd8bf)) by @narnaud
+* **session:** pin the summary of a log and where a commit may move ([3b4df8e](https://github.com/narnaud/git-loom/commit/3b4df8e25eb4c55c544b215c312d254828016e4c)) by @narnaud
 
 
 ### Other
 
-* **deps:** bump inquire from 0.9.4 to 0.9.5 ([7c5540d](https://github.com/narnaud/git-loom/commit/7c5540dacd05bc6fa378a3ff1cc527e96f01d2fa))
+* **deps:** bump inquire from 0.9.4 to 0.9.5 ([7c5540d](https://github.com/narnaud/git-loom/commit/7c5540dacd05bc6fa378a3ff1cc527e96f01d2fa)) by @dependabot[bot]
 
 ## [1.1.0](https://github.com/narnaud/git-loom/compare/v1.0.0...v1.1.0) (2026-11-11)
 
