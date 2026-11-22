@@ -20,6 +20,7 @@ export component AppWindow inherits Window {
     in property <length> board-height;
 
     callback board-resized(room: length);
+    callback board-toggled(row: int);
 
     title: root.repository + " — git-loom";
     preferred-width: 1100px;
@@ -56,6 +57,9 @@ export component AppWindow inherits Window {
             board-height: root.board-height;
             resized(room) => {
                 root.board-resized(room);
+            }
+            toggled(row) => {
+                root.board-toggled(row);
             }
         }
     }

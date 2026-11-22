@@ -2,24 +2,35 @@
 export enum Remote { none, synced, different, gone }
 
 // What a piece of the board stands for; mirrors `board::PieceKind`.
-export enum PieceKind { tip, tag, card, base }
+export enum PieceKind { tip, tag, card, chip, base }
 
 // Something the board names, placed on it.
 export struct Piece {
     kind: PieceKind,
+    // Index of its row in the tree, which every callback names it by; -1
+    // for the tip, which has none.
+    row: int,
     x: length,
     y: length,
     w: length,
     h: length,
+    // How high its own line is: an open card has its files under it.
+    line: length,
     // The name of a branch: the integration one, a woven one, the upstream.
     title: string,
     // Of a commit: its short ID and its subject. The base has those of the
-    // commit the integration branch stands on.
+    // commit the integration branch stands on. Of a file: its path.
     sid: string,
     text: string,
-    // What it holds: the files of a commit, the commits new upstream.
+    // What it holds: the commits of a branch, the files of a commit, the
+    // commits new upstream.
     hint: string,
+    // Of a file: the letter of what its commit does to it.
+    status: string,
     remote: Remote,
+    // Whether it opens: a card onto its files, a tag onto its commits.
+    expandable: bool,
+    expanded: bool,
 }
 
 // What a line of the board draws; mirrors `board::LineKind`.

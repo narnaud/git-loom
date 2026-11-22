@@ -1,7 +1,7 @@
 use super::*;
 use crate::core::repo::RepoInfo;
 use crate::core::test_helpers::{base_info, branch};
-use crate::gui::state::tests::{info, state, state_of};
+use crate::gui::state::tests::{info, row, state, state_in, state_of};
 
 fn find<'a>(pieces: &'a [Piece], reading: &str) -> &'a Piece {
     let found = pieces
@@ -50,6 +50,86 @@ fn a_tag_tells_a_branch_ahead_of_its_remote_from_one_whose_remote_is_gone() {
 
     assert_eq!(find(&pieces, "ahead").remote, Remote::Different);
     assert_eq!(find(&pieces, "orphan").remote, Remote::Gone);
+}
+
+#[test]
+fn a_tag_says_how_many_commits_its_branch_owns_and_whether_they_show() {
+    let mut state = state();
+    state.row_toggled(row(&state, "feature-a"));
+    let pieces = pieces(&state);
+
+    let open = find(&pieces, "feature-b");
+    let closed = find(&pieces, "feature-a");
+
+    assert_eq!(open.hint, "2 commits");
+    assert!(open.expandable && open.expanded);
+    assert_eq!(closed.hint, "1 commit");
+    assert!(closed.expandable && !closed.expanded);
+}
+
+#[test]
+fn the_tag_of_a_branch_owning_no_commit_says_so_and_does_not_open() {
+    let mut stale: RepoInfo = base_info();
+    stale.branches = vec![branch("stale", 0xAA, None)];
+    let pieces = pieces(&state_of(stale));
+
+    let tag = find(&pieces, "stale");
+
+    assert_eq!(tag.hint, "no commits");
+    assert!(!tag.expandable);
+}
+
+/// The window draws a card's own line `line` high, whatever the card holds
+/// under it.
+#[test]
+fn an_open_card_keeps_the_line_it_had_closed() {
+    let mut state = state();
+    let closed = find(&pieces(&state), "Second on b").clone();
+    assert!(closed.expandable && !closed.expanded);
+    assert_eq!(closed.line, closed.h);
+
+    state.row_toggled(row(&state, "Second on b"));
+    let pieces = pieces(&state);
+    let open = find(&pieces, "Second on b");
+
+    assert!(open.expanded);
+    assert_eq!(open.line, closed.line);
+    assert!(open.h > open.line);
+}
+
+#[test]
+fn a_chip_reads_the_status_and_the_path_of_a_file_of_its_commit() {
+    let mut state = state();
+    state.row_toggled(row(&state, "Second on b"));
+    let pieces = pieces(&state);
+
+    let chip = find(&pieces, "y.rs");
+
+    assert_eq!((chip.kind, chip.status.as_str()), (Kind::Chip, "M"));
+    assert!(!chip.expandable);
+    assert_eq!(chip.line, chip.h);
+}
+
+/// As `loom status` writes paths from where it runs (Spec 001).
+#[test]
+fn a_chip_reads_its_path_from_the_directory_the_window_started_in() {
+    let mut state = state_in(info(), "docs");
+    state.row_toggled(row(&state, "On a"));
+
+    let pieces = pieces(&state);
+
+    assert_eq!(find(&pieces, "../z.rs").kind, Kind::Chip);
+}
+
+#[test]
+fn a_piece_names_the_row_it_stands_for_and_the_tip_none() {
+    let state = state();
+    let pieces = pieces(&state);
+
+    let card = find(&pieces, "On a");
+
+    assert_eq!(card.row, row(&state, "On a") as i32);
+    assert_eq!(find(&pieces, "integration").row, -1);
 }
 
 #[test]

@@ -48,6 +48,12 @@ impl Gui {
     fn connect(self: &Rc<Self>, window: &AppWindow) {
         let gui = self.clone();
         window.on_board_resized(move |room| gui.update(|state| state.set_room(room)));
+        let gui = self.clone();
+        window.on_board_toggled(move |row| {
+            if let Ok(row) = usize::try_from(row) {
+                gui.update(|state| state.row_toggled(row));
+            }
+        });
     }
 
     fn update(&self, change: impl FnOnce(&mut State)) {

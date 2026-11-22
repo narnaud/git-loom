@@ -3,8 +3,11 @@
 
 use crate::session::tree::{Row, RowKind, STACK_JOINT};
 
-/// A commit's line.
-const CARD_H: f32 = 30.0;
+/// A commit's own line; an open card lists its files under it.
+pub(crate) const CARD_H: f32 = 30.0;
+// A file's line, and the room under the last one of a card.
+const CHIP_H: f32 = 24.0;
+const CARD_FOOT: f32 = 6.0;
 /// A name's line: a branch's at the top of its frame, and those at the two
 /// ends of the trunk.
 const HEAD_H: f32 = 30.0;
@@ -57,6 +60,8 @@ pub(crate) enum PieceKind {
     Tag,
     /// A commit.
     Card,
+    /// A file of an open commit: a line across its card.
+    Chip,
     /// The upstream, naming the base the line ends at.
     Base,
 }
@@ -106,10 +111,13 @@ pub(crate) struct Board {
     pub height: f32,
 }
 
+/// A commit and the files listed under it, as tree rows.
+type Card = (usize, Vec<usize>);
+
 /// What the trunk has beside it, as tree rows.
 enum Block {
     /// Commits no branch owns, newest first.
-    Loose(Vec<usize>),
+    Loose(Vec<Card>),
     /// The branches the tree lists as one stack, the upper one first.
     Stack(Vec<Section>),
 }
@@ -122,7 +130,7 @@ struct Section {
     /// Its names: several when branches are at the same commit.
     tags: Vec<usize>,
     /// Its commits, newest first.
-    cards: Vec<usize>,
+    cards: Vec<Card>,
 }
 
 /// The blocks `rows` list, top down, and the row of the upstream.
@@ -159,12 +167,21 @@ fn read(rows: &[Row]) -> (Vec<Block>, Option<usize>) {
             }
             (RowKind::Commit { .. }, Some(Block::Stack(sections))) => {
                 let section = sections.last_mut().expect("a stack has a section");
-                section.cards.push(i);
+                section.cards.push((i, Vec::new()));
             }
-            (RowKind::Commit { .. }, Some(Block::Loose(cards))) => cards.push(i),
+            (RowKind::Commit { .. }, Some(Block::Loose(cards))) => cards.push((i, Vec::new())),
             (RowKind::Commit { .. }, None) => {
-                blocks.push(Block::Loose(vec![i]));
+                blocks.push(Block::Loose(vec![(i, Vec::new())]));
                 open = true;
+            }
+            (RowKind::CommitFile { .. }, Some(block)) => {
+                let cards = match block {
+                    Block::Loose(cards) => cards.last_mut(),
+                    Block::Stack(sections) => sections.last_mut().and_then(|s| s.cards.last_mut()),
+                };
+                if let Some((_, files)) = cards {
+                    files.push(i);
+                }
             }
             // The stack goes on with the branch this one is stacked on.
             (RowKind::Spacer(STACK_JOINT), _) => {}
@@ -234,10 +251,9 @@ impl Board {
         for block in &blocks {
             let sections = match block {
                 Block::Loose(cards) => {
-                    for card in cards {
+                    for (card, files) in cards {
                         nodes.push(node(LineKind::Bead, trunk, y + CARD_H / 2.0, NODE, None));
-                        board.place(PieceKind::Card, Some(*card), left, y, frame_w, CARD_H);
-                        y += CARD_H + LOOSE_GAP;
+                        y += board.place_card(*card, files, left, y, frame_w) + LOOSE_GAP;
                     }
                     y += BLOCK_GAP - LOOSE_GAP;
                     continue;
@@ -265,10 +281,9 @@ impl Board {
                 }
                 y += HEAD_PAD;
                 if !section.cards.is_empty() {
-                    for card in &section.cards {
+                    for (card, files) in &section.cards {
                         marks.push((LineKind::Bead, y + CARD_H / 2.0));
-                        board.place(PieceKind::Card, Some(*card), x, y, w, CARD_H);
-                        y += CARD_H + GAP;
+                        y += board.place_card(*card, files, x, y, w) + GAP;
                     }
                     y += FRAME_PAD - GAP;
                 }
@@ -307,6 +322,22 @@ impl Board {
         board.lines.append(&mut threads);
         board.lines.append(&mut nodes);
         board
+    }
+
+    /// Put the card of the commit at row `card` at (`x`, `y`), `w` wide, the
+    /// `files` it lists inside it; returns its height.
+    fn place_card(&mut self, card: usize, files: &[usize], x: f32, y: f32, w: f32) -> f32 {
+        let h = match files.len() {
+            0 => CARD_H,
+            n => CARD_H + n as f32 * CHIP_H + CARD_FOOT,
+        };
+        self.place(PieceKind::Card, Some(card), x, y, w, h);
+        let mut line = y + CARD_H;
+        for file in files {
+            self.place(PieceKind::Chip, Some(*file), x, line, w, CHIP_H);
+            line += CHIP_H;
+        }
+        h
     }
 
     fn place(&mut self, kind: PieceKind, row: Option<usize>, x: f32, y: f32, w: f32, h: f32) {
