@@ -305,4 +305,11 @@ fn a_split_keeps_something_on_each_side() {
             "leave at least one hunk for the second commit"
         ))
     );
+    assert_eq!(
+        split(oid(A), &[file("a.rs", &[false, false])]),
+        Err((
+            "Nothing kept for the first commit",
+            "keep at least one hunk for the first commit"
+        ))
+    );
 }

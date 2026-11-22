@@ -210,6 +210,12 @@ pub(crate) fn split(
     commit: git2::Oid,
     picked: &[FileEntry],
 ) -> Result<Action, (&'static str, Refusal)> {
+    if !any_picked(picked) {
+        return Err((
+            "Nothing kept for the first commit",
+            "keep at least one hunk for the first commit",
+        ));
+    }
     if picked.iter().all(|f| f.hunks.iter().all(|h| h.selected)) {
         return Err((
             "Nothing left for the second commit",
