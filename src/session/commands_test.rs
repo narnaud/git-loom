@@ -178,6 +178,7 @@ fn a_drop_takes_one_row_or_files_together() {
         drop(&[]),
         Err("move to a commit, branch, file, or local changes")
     );
+    assert_eq!(drop(&[&local_changes(0)]), Err("no local changes"));
 }
 
 #[test]
