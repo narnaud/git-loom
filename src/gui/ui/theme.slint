@@ -1,0 +1,29 @@
+import { Palette } from "std-widgets.slint";
+
+// Colors and fonts shared by every component. Light and dark follow the
+// widget palette, which follows the system.
+export global Theme {
+    out property <bool> dark: Palette.color-scheme == ColorScheme.dark;
+
+    // The family of short IDs, which each platform names its own way.
+    in property <string> mono-family;
+
+    out property <color> panel: dark ? #161b22 : #f6f8fa;
+    out property <color> board: dark ? #0d1117 : #eef1f5;
+    out property <color> card: dark ? #1c2128 : #ffffff;
+    out property <color> frame: dark ? #151a21 : #f6f8fa;
+    out property <color> border: dark ? #30363d : #d0d7de;
+    out property <color> text: dark ? #e6edf3 : #1f2328;
+    out property <color> dim: dark ? #8b949e : #6e7781;
+    out property <color> graph: dark ? #6e7681 : #afb8c1;
+
+    out property <color> shortid: dark ? #79c0ff : #0550ae;
+    out property <color> added: dark ? #3fb950 : #1a7f37;
+    out property <color> removed: dark ? #f85149 : #cf222e;
+    out property <color> warn: dark ? #d29922 : #9a6700;
+
+    // Rotating colors of the threads of the branches.
+    out property <[color]> dots: dark
+        ? [#d29922, #39c5cf, #bc8cff, #58a6ff, #f85149, #3fb950]
+        : [#9a6700, #1b7c83, #8250df, #0969da, #cf222e, #1a7f37];
+}

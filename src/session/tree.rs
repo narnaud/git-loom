@@ -18,6 +18,10 @@ pub(crate) const LOCAL_CHANGES_KEY: &str = "local";
 /// not acted on.
 pub(crate) const PENDING_COMMIT_OID: git2::Oid = git2::Oid::ZERO_SHA1;
 
+/// The spacer between a branch and the one it is stacked on: the rows of a
+/// stack run on across it.
+pub(crate) const STACK_JOINT: &str = "││";
+
 /// [`Row::key`] of the row naming branch `name`.
 pub(crate) fn branch_key(name: &str) -> String {
     format!("br:{}", name)
@@ -269,7 +273,7 @@ pub(crate) fn build_rows(
                 push_commit_rows(&mut rows, commits, Some(dot_color), ids, expanded);
 
                 if next_stacked {
-                    rows.push(Row::structural(RowKind::Spacer("││")));
+                    rows.push(Row::structural(RowKind::Spacer(STACK_JOINT)));
                 } else {
                     rows.push(Row::structural(RowKind::Spacer("├╯")));
                     if idx < last_idx {

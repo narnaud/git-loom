@@ -2149,7 +2149,7 @@ fn new_branch_inside_a_branch_splits_it_into_a_stack() {
     assert_eq!(cursor_key(&app), pending_key());
     assert_eq!(app.rows[at + 1].key, oid('b').to_string());
     assert!(
-        matches!(app.rows[at - 1].kind, RowKind::Spacer("││")),
+        matches!(app.rows[at - 1].kind, RowKind::Spacer(tree::STACK_JOINT)),
         "stacked under feature-a"
     );
     assert_eq!(app.rows[at - 2].key, oid('a').to_string());

@@ -1,0 +1,40 @@
+// How a branch stands against its remote one; mirrors `RemoteStatus`.
+export enum Remote { none, synced, different, gone }
+
+// What a piece of the board stands for; mirrors `board::PieceKind`.
+export enum PieceKind { tip, tag, card, base }
+
+// Something the board names, placed on it.
+export struct Piece {
+    kind: PieceKind,
+    x: length,
+    y: length,
+    w: length,
+    h: length,
+    // The name of a branch: the integration one, a woven one, the upstream.
+    title: string,
+    // Of a commit: its short ID and its subject. The base has those of the
+    // commit the integration branch stands on.
+    sid: string,
+    text: string,
+    // What it holds: the files of a commit, the commits new upstream.
+    hint: string,
+    remote: Remote,
+}
+
+// What a line of the board draws; mirrors `board::LineKind`.
+export enum Strand { thread, bead, ring, frame }
+
+// Something the board draws without naming it.
+export struct BoardLine {
+    strand: Strand,
+    x: length,
+    y: length,
+    w: length,
+    h: length,
+    // Index into `Theme.dots`; -1 for the integration line's own color.
+    color: int,
+    // Of a frame: whether it is the first, and the last, of its stack.
+    first: bool,
+    last: bool,
+}

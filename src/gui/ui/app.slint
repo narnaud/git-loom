@@ -1,6 +1,11 @@
 // The windows of git-loom-gui.
 
 import { Button, Palette } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Piece, PieceKind, BoardLine, Strand, Remote } from "types.slint";
+import { BoardView } from "board.slint";
+
+export { Theme, Piece, PieceKind, BoardLine, Strand, Remote }
 
 export component AppWindow inherits Window {
     // The directory of the working tree.
@@ -8,30 +13,51 @@ export component AppWindow inherits Window {
     // The integration branch, or the operation paused on it.
     in property <string> heading;
 
+    // The board, which has nothing on it while an operation is paused.
+    in property <[Piece]> pieces;
+    in property <[BoardLine]> lines;
+    in property <length> board-width;
+    in property <length> board-height;
+
+    callback board-resized(room: length);
+
     title: root.repository + " — git-loom";
     preferred-width: 1100px;
     preferred-height: 720px;
     min-width: 480px;
     min-height: 320px;
-    background: Palette.background;
+    background: Theme.board;
 
     VerticalLayout {
         Rectangle {
             height: 44px;
-            background: Palette.alternate-background;
+            background: Theme.panel;
 
             Text {
                 x: 16px;
                 height: parent.height;
                 text: root.heading;
-                color: Palette.foreground;
+                color: Theme.text;
                 font-size: 15px;
-                font-weight: 600;
+                font-weight: 700;
                 vertical-alignment: center;
             }
         }
 
-        Rectangle { }
+        Rectangle {
+            height: 1px;
+            background: Theme.border;
+        }
+
+        BoardView {
+            pieces: root.pieces;
+            lines: root.lines;
+            board-width: root.board-width;
+            board-height: root.board-height;
+            resized(room) => {
+                root.board-resized(room);
+            }
+        }
     }
 }
 

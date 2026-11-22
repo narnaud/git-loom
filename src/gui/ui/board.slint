@@ -1,0 +1,175 @@
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Piece, PieceKind, BoardLine, Strand, Remote } from "types.slint";
+import { Icon, IconKind } from "icons.slint";
+
+// The name of a branch, as the pieces heading something write it.
+component Name inherits Text {
+    color: Theme.text;
+    font-size: 13px;
+    font-weight: 700;
+    vertical-alignment: center;
+}
+
+// What a piece holds, at its far end.
+component Hint inherits Text {
+    color: Theme.dim;
+    font-size: 11px;
+    vertical-alignment: center;
+}
+
+// A piece of the board, drawn for what it is in the rectangle it was given:
+// a name starts at its left edge.
+component PieceVisual inherits Rectangle {
+    in property <Piece> data;
+
+    // ── A commit: one line ──
+    if data.kind == PieceKind.card: Rectangle {
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: Theme.border;
+        background: Theme.card;
+
+        HorizontalLayout {
+            padding-left: 10px;
+            padding-right: 10px;
+            spacing: 10px;
+
+            Text {
+                text: data.sid;
+                color: Theme.shortid;
+                font-family: Theme.mono-family;
+                font-size: 12px;
+                vertical-alignment: center;
+            }
+
+            Text {
+                text: data.text;
+                color: Theme.text;
+                font-size: 13px;
+                vertical-alignment: center;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
+
+            Hint {
+                text: data.hint;
+            }
+        }
+    }
+
+    // ── A branch name, heading its frame ──
+    if data.kind == PieceKind.tag: HorizontalLayout {
+        spacing: 8px;
+
+        Name {
+            text: data.title;
+            overflow: elide;
+        }
+
+        if data.remote != Remote.none: Icon {
+            kind: data.remote == Remote.synced ? IconKind.check : data.remote == Remote.different ? IconKind.up : IconKind.cross;
+            ink: data.remote == Remote.synced ? Theme.added : data.remote == Remote.different ? Theme.warn : Theme.removed;
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+        }
+    }
+
+    // ── The integration branch, heading its line ──
+    if data.kind == PieceKind.tip: HorizontalLayout {
+        Name {
+            text: data.title;
+            overflow: elide;
+        }
+    }
+
+    // ── The upstream, and the commit the line stands on ──
+    if data.kind == PieceKind.base: HorizontalLayout {
+        spacing: 10px;
+
+        Name {
+            text: data.title;
+        }
+
+        Text {
+            text: data.sid;
+            color: Theme.dim;
+            font-family: Theme.mono-family;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: data.text;
+            color: Theme.dim;
+            font-size: 12px;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+
+        if data.hint != "": Hint {
+            text: data.hint;
+            color: Theme.warn;
+        }
+    }
+}
+
+// The board's pane: what `gui/board.rs` laid out, drawn where it put it.
+export component BoardView inherits Rectangle {
+    in property <[Piece]> pieces;
+    in property <[BoardLine]> lines;
+    in property <length> board-width;
+    in property <length> board-height;
+    // How wide the pane is, which the board is laid out to fill.
+    out property <length> room: scroll.visible-width;
+
+    callback resized(room: length);
+
+    changed room => {
+        root.resized(root.room);
+    }
+
+    background: Theme.board;
+    clip: true;
+
+    scroll := ScrollView {
+        content-width: Math.max(root.board-width, self.visible-width);
+        content-height: Math.max(root.board-height, self.visible-height);
+
+        for line in root.lines: Rectangle {
+            property <color> ink: line.color < 0 ? Theme.graph : Theme.dots[Math.mod(line.color, Theme.dots.length)];
+            // What a node is set off against: a branch's are in its frame.
+            property <color> ground: line.color < 0 ? Theme.board : Theme.frame;
+            property <bool> frame: line.strand == Strand.frame;
+            property <bool> ring: line.strand == Strand.ring;
+            property <bool> node: self.ring || line.strand == Strand.bead;
+            // A frame is round where its stack starts and ends.
+            property <length> top-radius: self.frame ? (line.first ? 8px : 0) : line.w / 2;
+            property <length> bottom-radius: self.frame ? (line.last ? 8px : 0) : line.w / 2;
+            // Joined frames share the line between them.
+            property <length> lap: self.frame && !line.first ? 1px : 0;
+
+            x: line.x;
+            y: line.y - self.lap;
+            width: line.w;
+            height: line.h + self.lap;
+            border-top-left-radius: self.top-radius;
+            border-top-right-radius: self.top-radius;
+            border-bottom-right-radius: self.bottom-radius;
+            border-bottom-left-radius: self.bottom-radius;
+            border-width: self.frame ? 1px : self.ring ? 2.5px : self.node ? 2px : 0;
+            border-color: self.frame ? Theme.border : self.ring ? self.ink : self.ground;
+            background: self.frame ? Theme.frame : self.ring ? self.ground : self.ink;
+        }
+
+        for piece in root.pieces: PieceVisual {
+            x: piece.x;
+            y: piece.y;
+            width: piece.w;
+            height: piece.h;
+            data: piece;
+        }
+    }
+}

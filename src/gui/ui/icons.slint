@@ -1,0 +1,25 @@
+// Small stroked icons, drawn rather than typed: the UI font has no glyph for
+// most of them.
+export enum IconKind { check, up, cross }
+
+export component Icon inherits Rectangle {
+    in property <IconKind> kind;
+    in property <color> ink;
+
+    width: 12px;
+
+    Path {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 10px;
+        height: 10px;
+        viewbox-width: 10;
+        viewbox-height: 10;
+        stroke: root.ink;
+        stroke-width: 1.5px;
+        fill: transparent;
+        commands: root.kind == IconKind.check ? "M 1.5 5.5 L 4 8 L 8.5 2"
+            : root.kind == IconKind.up ? "M 5 9 L 5 1.5 M 1.5 5 L 5 1.5 L 8.5 5"
+            : "M 2 2 L 8 8 M 8 2 L 2 8";
+    }
+}
