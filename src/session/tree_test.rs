@@ -257,3 +257,19 @@ fn upstream_row_is_focusable_but_not_selectable() {
     assert!(row.selection_class().is_none());
     assert!(row.target.is_none());
 }
+
+#[test]
+fn a_command_argument_is_named_by_the_short_id_its_row_shows() {
+    let rows = build_rows(&sample_sections(), &sample_ids(), &HashSet::new());
+    let commit = rows
+        .iter()
+        .find(|r| matches!(r.kind, RowKind::Commit { .. }))
+        .unwrap();
+
+    assert_eq!(short_id(&rows, &oid('a').to_string()), commit.sid);
+    assert_eq!(
+        short_id(&rows, "deadbeef"),
+        "deadbeef",
+        "an argument no row shows is passed through"
+    );
+}

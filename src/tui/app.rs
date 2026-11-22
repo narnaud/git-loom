@@ -601,14 +601,8 @@ impl<'a> App<'a> {
         targets::move_slots(&self.snapshot, &self.rows, &self.expanded, commit)
     }
 
-    /// The short ID the tree shows for `target`, or `target` itself when no
-    /// row carries one.
     fn sid_of(&self, target: &str) -> String {
-        self.rows
-            .iter()
-            .find(|r| r.target.as_deref() == Some(target) && !r.sid.is_empty())
-            .map(|r| r.sid.clone())
-            .unwrap_or_else(|| target.to_string())
+        tree::short_id(&self.rows, target)
     }
 
     /// `title` built from the sources' short IDs, or from a count when that
