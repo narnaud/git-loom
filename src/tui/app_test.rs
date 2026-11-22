@@ -2531,6 +2531,29 @@ fn messages_land_in_the_current_log_entry() {
     assert!(app.popup.is_none());
 }
 
+/// The thread can end before the loop has taken in its last line, which the
+/// notice then went without.
+#[test]
+fn the_notice_sums_up_the_last_line_of_an_action_that_ended() {
+    let theme = make_theme();
+    let mut app = make_app(make_snapshot(), &theme);
+    app.worker.run("loom reword a1".to_string(), || {
+        crate::core::ui::message(Level::Success, "Reworded `a1`");
+        Ok(())
+    });
+    let deadline = deadline();
+    let ended = loop {
+        if let Some(ended) = app.worker.reap() {
+            break ended;
+        }
+        assert!(std::time::Instant::now() < deadline, "never ended");
+        std::thread::sleep(Duration::from_millis(1));
+    };
+
+    assert!(app.finish_action(ended));
+    assert_eq!(app.notice.as_deref(), Some("✓ Reworded `a1`"));
+}
+
 /// A failure while the log is open must not yank the log out from under the
 /// reader; the reload happens behind it instead.
 #[test]

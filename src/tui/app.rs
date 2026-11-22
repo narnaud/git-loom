@@ -2567,11 +2567,9 @@ impl ShellApp for App<'_> {
             changed = true;
         }
         // After the drain, never before: what the pick's own worker reported
-        // reaches its log entry before the selector covers the screen. A line
-        // the action that just ended left queued lands in that entry too —
-        // accepted, since it is misfiled rather than lost. No action can still
-        // be running — `C` is a tree key — which the early return counts on: it
-        // skips the action's own tick and join.
+        // reaches its log entry before the selector covers the screen. No
+        // action can still be running — `C` is a tree key — which the early
+        // return counts on: it skips the action's own tick and join.
         match self.advance_pick() {
             // The shell hands the live terminal over without tearing it down,
             // so the selector draws straight onto this frame — which must be
