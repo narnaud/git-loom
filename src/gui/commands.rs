@@ -1,13 +1,18 @@
 //! What the context menu, the inspector and the bar offer: the commands of
 //! the selection, each made of it by the session's catalogue
-//! (`session::commands`), which the TUI's keys go through too.
+//! (`session::commands`), which the TUI's keys go through too, and what each
+//! asks before it runs.
 
+use crate::core::changeid;
 use crate::core::ui::Level;
+use crate::gui::forms::{Form, Input};
 use crate::gui::state::State;
 use crate::session::Refusal;
-use crate::session::action::Action;
-use crate::session::commands;
-use crate::session::tree::{Row, RowKind};
+use crate::session::action::{Action, CommitSource};
+use crate::session::commands::{self, Reword, Split};
+use crate::session::snapshot::CommitDest;
+use crate::session::targets;
+use crate::session::tree::{self, Row, RowKind};
 
 /// A command the window offers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,11 +26,16 @@ pub(crate) enum Cmd {
     Unmerge,
     Update,
     Merge,
+    Commit,
+    /// A commit's message, or a branch's name.
+    Reword,
+    Branch,
+    Split,
 }
 
 impl Cmd {
     /// Every command, each at the index the window names it by.
-    const ALL: [Cmd; 9] = [
+    const ALL: [Cmd; 13] = [
         Cmd::Absorb,
         Cmd::Drop,
         Cmd::Uncommit,
@@ -35,6 +45,10 @@ impl Cmd {
         Cmd::Unmerge,
         Cmd::Update,
         Cmd::Merge,
+        Cmd::Commit,
+        Cmd::Reword,
+        Cmd::Branch,
+        Cmd::Split,
     ];
 
     pub(crate) fn id(self) -> i32 {
@@ -56,6 +70,10 @@ impl Cmd {
             Cmd::TakeRemote | Cmd::Update => "update",
             Cmd::Unmerge => "unmerge",
             Cmd::Merge => "merge",
+            Cmd::Commit => "commit",
+            Cmd::Reword => "reword",
+            Cmd::Branch => "branch",
+            Cmd::Split => "split",
         }
     }
 }
@@ -74,19 +92,36 @@ pub(crate) struct Entry {
 fn groups(row: &Row) -> &'static [&'static [(Cmd, &'static str)]] {
     match row.kind {
         RowKind::LocalChanges { .. } => &[
+            &[(Cmd::Commit, "Commit…")],
             &[(Cmd::Absorb, "Absorb")],
             &[(Cmd::Drop, "Drop all local changes")],
         ],
-        RowKind::WorkingFile { .. } => &[&[(Cmd::Absorb, "Absorb")], &[(Cmd::Drop, "Drop")]],
-        RowKind::Commit { .. } => &[&[(Cmd::Uncommit, "Uncommit")], &[(Cmd::Drop, "Drop")]],
-        RowKind::CommitFile { .. } => &[&[(Cmd::Uncommit, "Uncommit")]],
+        RowKind::WorkingFile { .. } => &[
+            &[(Cmd::Commit, "Commit…")],
+            &[(Cmd::Absorb, "Absorb")],
+            &[(Cmd::Drop, "Drop")],
+        ],
+        RowKind::Commit { .. } => &[
+            &[(Cmd::Reword, "Reword…")],
+            &[(Cmd::Uncommit, "Uncommit")],
+            &[(Cmd::Branch, "New branch here…")],
+            &[(Cmd::Drop, "Drop")],
+        ],
+        RowKind::CommitFile { .. } => &[&[
+            (Cmd::Split, "Split into its own commit…"),
+            (Cmd::Uncommit, "Uncommit"),
+        ]],
         RowKind::BranchName { .. } => &[
             &[
                 (Cmd::Push, "Push"),
                 (Cmd::ForcePush, "Force push"),
-                (Cmd::TakeRemote, "Take the remote version"),
+                (Cmd::TakeRemote, "Take the remote version…"),
             ],
-            &[(Cmd::Unmerge, "Unmerge")],
+            &[
+                (Cmd::Reword, "Rename…"),
+                (Cmd::Branch, "New branch here…"),
+                (Cmd::Unmerge, "Unmerge"),
+            ],
             &[(Cmd::Drop, "Drop")],
         ],
         RowKind::Upstream { .. } => &[&[(Cmd::Update, "Update")]],
@@ -95,7 +130,10 @@ fn groups(row: &Row) -> &'static [&'static [(Cmd, &'static str)]] {
 }
 
 /// What the bar offers, whatever is selected.
-const BAR: [(Cmd, &str); 1] = [(Cmd::Merge, "Merge a branch…")];
+const BAR: [(Cmd, &str); 2] = [
+    (Cmd::Branch, "New branch…"),
+    (Cmd::Merge, "Merge a branch…"),
+];
 
 impl State {
     /// The context menu of the selection, `None` between its groups.
@@ -156,7 +194,8 @@ impl State {
         !self.menu().is_empty()
     }
 
-    /// Run `cmd` on the selection, or say why it takes nothing from it.
+    /// Run `cmd` on the selection, at once or once a form asked what it
+    /// needs, or say why it takes nothing from it.
     pub(crate) fn command(&mut self, cmd: Cmd) {
         if let Some(action) = self.prepare(cmd) {
             self.start(action);
@@ -170,7 +209,13 @@ impl State {
             return None;
         }
         match self.make(cmd) {
-            Ok(action) => Some(action),
+            Ok(action) => match self.ask(action) {
+                Ok(form) => {
+                    self.open_form(form);
+                    None
+                }
+                Err(action) => Some(action),
+            },
             Err(reason) => {
                 self.say(Level::Warn, format!("{}: {}", cmd.name(), reason));
                 None
@@ -178,7 +223,8 @@ impl State {
         }
     }
 
-    /// The action `cmd` makes of the selection.
+    /// The action `cmd` makes of the selection: with no message or name yet,
+    /// which the window asks for.
     fn make(&self, cmd: Cmd) -> Result<Action, Refusal> {
         if self.paused.is_some() {
             return Err("an operation is paused");
@@ -198,7 +244,128 @@ impl State {
             }
             Cmd::Update => Ok(Action::Update),
             Cmd::Merge => Ok(Action::Merge),
+            Cmd::Commit => commands::commit_files(&rows).map(|files| Action::Commit {
+                source: CommitSource::Files(files),
+                dest: CommitDest::Integration,
+                message: None,
+            }),
+            Cmd::Reword => match rows.as_slice() {
+                [row] => match commands::reword(row)? {
+                    Reword::Commit(action) => Ok(action),
+                    Reword::Branch { branch, .. } => Ok(Action::Reword {
+                        target: branch,
+                        message: None,
+                    }),
+                },
+                _ => Err("one commit or branch at a time"),
+            },
+            // On the commit or branch selected, else at the base.
+            Cmd::Branch => match rows.as_slice() {
+                [row] => Ok(commands::branch_base(&self.snapshot.info, row).0),
+                [] => Ok(None),
+                _ => Err("one commit or branch at a time"),
+            }
+            .map(|target| Action::Branch {
+                name: String::new(),
+                target,
+            }),
+            Cmd::Split => match commands::split(&self.snapshot, &rows)? {
+                Split::Files(action) => Ok(action),
+                Split::Hunks(_) => Err("select the files to split out"),
+            },
         }
+    }
+
+    /// The form that asks what `action` needs before it runs, or `action`
+    /// itself when it needs nothing: the window opens no editor.
+    fn ask(&self, action: Action) -> Result<Form, Action> {
+        let sid = |target: &str| tree::short_id(&self.rows, target);
+        let mut form = match &action {
+            Action::Commit {
+                source: CommitSource::Files(files),
+                ..
+            } => {
+                let what = match files.as_slice() {
+                    [zz] if *zz == self.snapshot.ids.get_unstaged() => {
+                        "every local change".to_string()
+                    }
+                    [_] => "1 file".to_string(),
+                    files => format!("{} files", files.len()),
+                };
+                let mut form = Form::complete(format!("Commit {what}"), Input::Text, "Commit");
+                form.placeholder = "Message".to_string();
+                form.dests = targets::commit_dests(&self.rows);
+                let last = self.last_dest.as_ref();
+                let dest = last.and_then(|last| form.dests.iter().position(|dest| dest == last));
+                form.dest = dest.unwrap_or(0);
+                form
+            }
+            Action::Reword { target, .. } => match self.selection().as_slice() {
+                [row] if matches!(row.kind, RowKind::BranchName { .. }) => {
+                    let mut form =
+                        Form::complete(format!("Rename {target}"), Input::Line, "Rename");
+                    form.initial = target.clone();
+                    form
+                }
+                _ => {
+                    let body = format!("Reword {}", sid(target));
+                    let mut form = Form::complete(body, Input::Text, "Reword");
+                    form.initial = self.message_of(target);
+                    form
+                }
+            },
+            Action::Branch { target, .. } => {
+                // A branch is named, as Rename names it; a commit by its ID.
+                let selection = self.selection();
+                let on_branch = matches!(
+                    selection.as_slice(),
+                    [row] if matches!(row.kind, RowKind::BranchName { .. })
+                );
+                let on = match target {
+                    Some(name) if on_branch => format!("on {name}"),
+                    Some(target) => format!("on {}", sid(target)),
+                    None => "at the base".to_string(),
+                };
+                let mut form = Form::complete(format!("New branch {on}"), Input::Line, "Create");
+                form.placeholder = "Name".to_string();
+                form
+            }
+            Action::Split { commit, .. } => {
+                let body = format!("Split {}", sid(commit));
+                let mut form = Form::complete(body, Input::Text, "Split");
+                form.detail = "The files selected make the first commit, under this message; the \
+                               rest of the commit stays in the second, under its own."
+                    .to_string();
+                form.placeholder = "Message of the first commit".to_string();
+                form
+            }
+            Action::UpdateBranch { branch } => {
+                let body = format!("Take the remote version of {branch}?");
+                let mut form = Form::complete(body, Input::None, "Take it");
+                form.detail =
+                    "Its commits are replaced by its remote's: what only the local branch \
+                               has goes, and the report names its old tip."
+                        .to_string();
+                form
+            }
+            _ => return Err(action),
+        };
+        form.complete_with(action);
+        Ok(form)
+    }
+
+    /// The message of the commit `target` names, to start a reword from;
+    /// empty when it cannot be read. Its `Change-Id` is left out: the reword
+    /// keeps it (Spec 003), and one typed over would be another commit's.
+    fn message_of(&self, target: &str) -> String {
+        let repo = git2::Repository::open(&self.snapshot.workdir);
+        let commit = repo.and_then(|repo| {
+            let oid = git2::Oid::from_str(target)?;
+            let message = repo.find_commit(oid)?.message().map(str::to_string);
+            Ok(message.unwrap_or_default())
+        });
+        let message = commit.unwrap_or_default();
+        changeid::strip(&message).trim_end().to_string()
     }
 
     /// `loom fold <source> zz`: the one commit or commit file of `rows` back

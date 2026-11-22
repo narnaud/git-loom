@@ -4,6 +4,7 @@ use crate::core::test_helpers::{base_info, branch};
 use crate::core::ui::Level;
 use crate::gui::state::tests::{info, row, select, state, state_in, state_of};
 use crate::session::paused::test_support::repo_with_a_paused_drop;
+use crate::session::snapshot::CommitDest;
 
 #[test]
 fn the_local_changes_are_headed_by_how_many_files_there_are() {
@@ -458,6 +459,8 @@ fn a_menu_draws_a_line_between_its_groups() {
     assert_eq!(
         read,
         [
+            ("Commit…", false),
+            ("", true),
             ("Absorb", false),
             ("", true),
             ("Drop all local changes", false)
@@ -469,7 +472,7 @@ fn a_menu_draws_a_line_between_its_groups() {
 fn a_dialog_reads_its_form_without_backticks_but_for_the_command() {
     let form = Form::notice("loom drop `a`", "Could not drop `a`\nRun `loom trace`");
 
-    let dialog = dialog(&form);
+    let dialog = dialog(&form, "integration");
 
     assert_eq!(dialog.title, "loom drop `a`");
     assert_eq!(dialog.body, "Could not drop a");
@@ -477,5 +480,24 @@ fn a_dialog_reads_its_form_without_backticks_but_for_the_command() {
     assert_eq!(
         (dialog.confirm.as_str(), dialog.cancellable),
         ("Close", false)
+    );
+}
+
+#[test]
+fn a_commit_dialog_names_where_a_commit_can_go() {
+    let mut form = Form::complete("Commit 1 file".to_string(), Input::Text, "Commit");
+    form.dests = vec![
+        CommitDest::Integration,
+        CommitDest::Branch("feature-b".to_string()),
+        CommitDest::Branch("feature-a".to_string()),
+    ];
+
+    let dialog = dialog(&form, "integration");
+
+    assert_eq!(dialog.input, DialogInput::Text);
+    let destinations: Vec<String> = dialog.destinations.iter().map(|d| d.to_string()).collect();
+    assert_eq!(
+        destinations,
+        ["integration (loose commit)", "feature-b", "feature-a"]
     );
 }

@@ -14,7 +14,7 @@ use crate::session;
 use crate::session::action::{self, Action, LogEntry, Summary};
 use crate::session::diff_text::{self, diff_text};
 use crate::session::paused::PausedOp;
-use crate::session::snapshot::{Snapshot, load_snapshot};
+use crate::session::snapshot::{CommitDest, Snapshot, load_snapshot};
 use crate::session::tree::{self, Row, RowKind, SelectionClass};
 use crate::session::worker::{Ended, Event, Worker};
 
@@ -77,6 +77,11 @@ pub(crate) struct State {
     pub(super) forms_opened: u64,
     /// Whether the log is shown over everything else.
     log_open: bool,
+    /// Where the last commit went, offered first for the next one.
+    pub(super) last_dest: Option<CommitDest>,
+    /// The row the reload after a command selects: the branch it creates or
+    /// renames.
+    pub(super) next_cursor: Option<String>,
 }
 
 impl State {
@@ -118,6 +123,8 @@ impl State {
             form: None,
             forms_opened: 0,
             log_open: false,
+            last_dest: None,
+            next_cursor: None,
         };
         state.rebuild_rows();
         state
@@ -521,6 +528,9 @@ impl State {
             changed = true;
         }
         if let Some(ended) = self.worker.reap() {
+            if ended != Ended::Done {
+                self.next_cursor = None;
+            }
             // What a command that failed did on the way is shown too. A
             // repository that cannot be read is said in place of how the
             // command went, which the log has.
@@ -563,8 +573,9 @@ impl State {
 
     /// Read the repository again, as a command left it. What is open stays
     /// open; a selection goes to the row of the cursor, else to the one now
-    /// in its place or the nearest above it. False when it could not be
-    /// read, and the window shows it as it was.
+    /// in its place or the nearest above it, and a branch the command
+    /// created or renamed is selected. False when it could not be read, and
+    /// the window shows it as it was.
     fn reload(&mut self) -> bool {
         let workdir = self.snapshot.workdir.clone();
         let git_dir = self.snapshot.git_dir.clone();
@@ -580,6 +591,7 @@ impl State {
                 true
             }
             Err(e) => {
+                self.next_cursor = None;
                 self.cannot_read(&e.to_string());
                 false
             }
@@ -594,9 +606,10 @@ impl State {
 
     /// Show `snapshot` in place of the one shown.
     fn apply(&mut self, snapshot: Snapshot) {
-        let key = self.cursor.clone();
+        let followed = self.next_cursor.take();
+        let selecting = followed.is_some() || !self.selected.is_empty();
+        let key = followed.or_else(|| self.cursor.clone());
         let place = self.cursor_index();
-        let selecting = !self.selected.is_empty();
         self.snapshot = snapshot;
         self.diffs.clear();
         self.selected.clear();

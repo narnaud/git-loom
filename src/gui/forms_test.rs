@@ -36,7 +36,7 @@ fn a_prompt_is_headed_by_the_command_asking_its_first_line_the_question() {
     assert_eq!(form.body, "Discard all local changes?");
     assert_eq!(form.detail, "restore `a.rs`\ndelete `b.rs`");
     assert_eq!((form.confirm, form.cancellable), ("Yes", true));
-    assert!(!form.line && form.choices.is_empty());
+    assert!(form.input == Input::None && form.choices.is_empty());
 }
 
 #[test]
@@ -45,7 +45,7 @@ fn a_confirmed_prompt_answers_yes_and_a_dismissed_one_cancels() {
     let (yes, answer) = ask(PromptKind::Confirm, "Drop it?");
     state.open_form(Form::prompt(yes));
 
-    state.form_accepted("", None);
+    state.form_accepted("", None, 0);
 
     assert_eq!(answer.recv().unwrap(), Some(Answer::Bool(true)));
     assert!(state.form().is_none());
@@ -79,10 +79,10 @@ fn an_input_starts_from_what_it_offers_and_answers_what_was_typed() {
     );
     state.open_form(Form::prompt(input));
     let form = state.form().unwrap();
-    assert!(form.line);
+    assert_eq!(form.input, Input::Line);
     assert_eq!(form.initial, "feature");
 
-    state.form_accepted("feature-x", None);
+    state.form_accepted("feature-x", None, 0);
 
     assert_eq!(
         answer.recv().unwrap(),
@@ -96,8 +96,8 @@ fn a_pick_answers_the_item_picked_or_what_was_typed_instead() {
     let (pick, answer) = ask(select(&["origin", "upstream"], false), "Which remote?");
     state.open_form(Form::prompt(pick));
     assert_eq!(state.form().unwrap().choice, Some(0));
-    assert!(!state.form().unwrap().line);
-    state.form_accepted("", Some(1));
+    assert_eq!(state.form().unwrap().input, Input::None);
+    state.form_accepted("", Some(1), 0);
     assert_eq!(
         answer.recv().unwrap(),
         Some(Answer::Text("upstream".to_string()))
@@ -105,8 +105,8 @@ fn a_pick_answers_the_item_picked_or_what_was_typed_instead() {
 
     let (other, answer) = ask(select(&["github"], true), "Which forge?");
     state.open_form(Form::prompt(other));
-    assert!(state.form().unwrap().line);
-    state.form_accepted(" gitea ", Some(0));
+    assert_eq!(state.form().unwrap().input, Input::Line);
+    state.form_accepted(" gitea ", Some(0), 0);
     assert_eq!(
         answer.recv().unwrap(),
         Some(Answer::Text("gitea".to_string()))
@@ -127,7 +127,7 @@ fn a_grouped_pick_starts_on_its_first_item_and_never_answers_a_heading() {
     assert_eq!(headings, [true, false, true, false]);
     assert_eq!(form.choice, Some(1));
 
-    state.form_accepted("", Some(2));
+    state.form_accepted("", Some(2), 0);
 
     assert_eq!(answer.recv().unwrap(), None, "a heading reads as no answer");
 }
@@ -139,13 +139,13 @@ fn a_tick_list_answers_every_item_ticked_and_at_least_one() {
     let (ticks, answer) = ask(PromptKind::MultiSelect { items }, "Which ones?");
     state.open_form(Form::prompt(ticks));
 
-    state.form_accepted("", None);
+    state.form_accepted("", None, 0);
     assert_eq!(state.form().unwrap().error, "Tick at least one");
     assert!(answer.try_recv().is_err(), "still asking");
     state.form_toggled(0);
     state.form_toggled(2);
     state.form_toggled(0);
-    state.form_accepted("", None);
+    state.form_accepted("", None, 0);
 
     assert_eq!(
         answer.recv().unwrap(),
