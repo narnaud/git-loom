@@ -11,7 +11,7 @@ Set them with `git config <setting> <value>`.
 | `loom.hideBranchPattern` | A prefix | `local-` | Branches hidden from `git loom status` |
 | `loom.statusContext` | An integer ≥ 1 | `1` | Commits shown at and before the base by `status` and `tui` |
 | `loom.pruneGoneBranches` | `true`, `false` | `false` | Let `git loom update` remove merged and gone branches without asking |
-| `loom.tuiAutoReload` | `true`, `false` | `false` | Start `git loom tui` with auto-reload on |
+| `loom.tuiAutoReload` | `true`, `false` | `true` | Start `git loom tui` with auto-reload on |
 | `loom.tuiTabWidth` | An integer ≥ 1 | `4` | Spaces each tab shows as in `git loom tui` diffs |
 | `loom.changeId` | `true`, `false` | `true` | Add a `Change-Id` trailer to the commits loom creates |
 
@@ -52,7 +52,7 @@ When `true`, `git loom update` removes branches that were fully merged upstream,
 
 ### `loom.tuiAutoReload`
 
-When `true`, `git loom tui` starts with auto-reload on: it reloads when `HEAD`, the index or the refs change from another terminal. `A` toggles it for the session and never writes this setting. See [tui](commands/tui.md).
+`git loom tui` starts with auto-reload on: it reloads when `HEAD`, the index or the refs change from another terminal. Set it to `false` to start with auto-reload off. `A` toggles it for the session and never writes this setting. See [tui](commands/tui.md).
 
 ### `loom.tuiTabWidth`
 

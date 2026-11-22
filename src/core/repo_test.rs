@@ -1030,6 +1030,16 @@ fn tui_tab_width_comes_from_config_or_is_unset() {
     }
 }
 
+#[test]
+fn tui_auto_reload_is_on_unless_config_is_false() {
+    let test_repo = TestRepo::new_with_remote();
+    assert!(repo::tui_auto_reload(&reopen(&test_repo)));
+    test_repo.set_config("loom.tuiAutoReload", "false");
+    assert!(!repo::tui_auto_reload(&reopen(&test_repo)));
+    test_repo.set_config("loom.tuiAutoReload", "maybe");
+    assert!(repo::tui_auto_reload(&reopen(&test_repo)));
+}
+
 // ── Hash-shaped persistent IDs (Spec 002) ────────────────────────────────
 
 #[test]
