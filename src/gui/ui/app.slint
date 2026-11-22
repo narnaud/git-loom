@@ -21,6 +21,13 @@ export component AppWindow inherits Window {
 
     callback board-resized(room: length);
     callback board-toggled(row: int);
+    callback board-pressed(row: int, control: bool, shift: bool);
+    // Whether the key was one of the window's.
+    callback key-pressed(text: string) -> bool;
+
+    public function reveal-on-board(y: length, h: length) {
+        board.reveal(y, h);
+    }
 
     title: root.repository + " — git-loom";
     preferred-width: 1100px;
@@ -28,6 +35,7 @@ export component AppWindow inherits Window {
     min-width: 480px;
     min-height: 320px;
     background: Theme.board;
+    forward-focus: keys;
 
     VerticalLayout {
         Rectangle {
@@ -50,16 +58,26 @@ export component AppWindow inherits Window {
             background: Theme.border;
         }
 
-        BoardView {
-            pieces: root.pieces;
-            lines: root.lines;
-            board-width: root.board-width;
-            board-height: root.board-height;
-            resized(room) => {
-                root.board-resized(room);
+        keys := FocusScope {
+            key-pressed(event) => {
+                root.key-pressed(event.text) ? accept : reject
             }
-            toggled(row) => {
-                root.board-toggled(row);
+
+            board := BoardView {
+                pieces: root.pieces;
+                lines: root.lines;
+                board-width: root.board-width;
+                board-height: root.board-height;
+                resized(room) => {
+                    root.board-resized(room);
+                }
+                toggled(row) => {
+                    root.board-toggled(row);
+                }
+                pressed(row, control, shift) => {
+                    keys.focus();
+                    root.board-pressed(row, control, shift);
+                }
             }
         }
     }

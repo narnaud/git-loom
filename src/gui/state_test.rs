@@ -91,6 +91,27 @@ pub(crate) fn row(state: &State, text: &str) -> usize {
     found.unwrap_or_else(|| panic!("no row reads {text}"))
 }
 
+/// Click the piece reading `first`, then `Ctrl` click each of `more`.
+pub(crate) fn select(state: &mut State, first: &str, more: &[&str]) {
+    state.row_pressed(row(state, first), false, false);
+    for text in more {
+        state.row_pressed(row(state, text), true, false);
+    }
+}
+
+/// What the selected rows read, in tree order.
+pub(crate) fn selected(state: &State) -> Vec<String> {
+    let rows = state.rows.iter().filter(|row| state.is_selected(row));
+    let reading = rows.map(|row| match &row.kind {
+        RowKind::CommitFile { path, .. } => path.clone(),
+        RowKind::BranchName { name, .. } => name.clone(),
+        RowKind::Commit { message, .. } => message.clone(),
+        RowKind::Upstream { .. } => "upstream".to_string(),
+        _ => "not on the board".to_string(),
+    });
+    reading.collect()
+}
+
 /// Whether a row of the tree reads `text`.
 fn shows(state: &State, text: &str) -> bool {
     state.rows.iter().any(|r| match &r.kind {
@@ -354,4 +375,287 @@ fn what_does_not_open_ignores_being_toggled() {
 
     assert_eq!(state.rows.len(), rows);
     assert!(state.expanded.is_empty() && state.collapsed.is_empty());
+}
+
+#[test]
+fn nothing_is_selected_when_the_window_opens() {
+    let state = state();
+
+    assert!(selected(&state).is_empty());
+    assert_eq!(state.cursor_rect(), None);
+}
+
+#[test]
+fn a_click_selects_one_piece_and_ctrl_click_adds_pieces_of_its_class() {
+    let mut state = state();
+
+    select(&mut state, "First on b", &["On a"]);
+    assert_eq!(selected(&state), ["First on b", "On a"]);
+
+    select(&mut state, "Second on b", &[]);
+    assert_eq!(
+        selected(&state),
+        ["Second on b"],
+        "a plain click starts over"
+    );
+}
+
+#[test]
+fn ctrl_click_takes_a_selected_piece_out_again() {
+    let mut state = state();
+
+    select(&mut state, "First on b", &["On a", "First on b"]);
+
+    assert_eq!(selected(&state), ["On a"]);
+}
+
+#[test]
+fn ctrl_click_on_a_piece_of_another_class_leaves_the_selection_as_it_is() {
+    let mut state = state();
+
+    select(&mut state, "First on b", &["feature-a", "upstream"]);
+
+    assert_eq!(selected(&state), ["First on b"]);
+}
+
+#[test]
+fn shift_click_selects_up_to_the_piece_keeping_to_the_class_of_the_first() {
+    let mut state = state();
+    select(&mut state, "Loose", &[]);
+
+    state.row_pressed(row(&state, "On a"), false, true);
+    assert_eq!(
+        selected(&state),
+        ["Loose", "Second on b", "First on b", "On a"],
+        "the names between are left out"
+    );
+
+    state.row_pressed(row(&state, "Second on b"), false, true);
+    assert_eq!(
+        selected(&state),
+        ["Loose", "Second on b"],
+        "still from the first one"
+    );
+}
+
+#[test]
+fn shift_click_with_nothing_selected_before_selects_that_piece_alone() {
+    let mut state = state();
+
+    state.row_pressed(row(&state, "On a"), false, true);
+
+    assert_eq!(selected(&state), ["On a"]);
+}
+
+#[test]
+fn shift_click_with_no_cursor_or_from_the_base_puts_the_cursor_on_the_piece() {
+    let mut state = state();
+
+    state.row_pressed(row(&state, "First on b"), false, true);
+    state.move_cursor(true);
+    assert_eq!(selected(&state), ["feature-a"], "with no cursor");
+
+    select(&mut state, "upstream", &[]);
+    state.row_pressed(row(&state, "Second on b"), false, true);
+    state.move_cursor(true);
+    assert_eq!(selected(&state), ["First on b"], "from the base");
+}
+
+#[test]
+fn shift_click_across_a_closed_branch_leaves_its_hidden_commits_out() {
+    let mut state = state();
+    state.row_toggled(row(&state, "feature-b"));
+    select(&mut state, "Loose", &[]);
+
+    state.row_pressed(row(&state, "On a"), false, true);
+
+    assert_eq!(selected(&state), ["Loose", "On a"]);
+}
+
+#[test]
+fn shift_click_upwards_selects_the_same_range() {
+    let mut state = state();
+    select(&mut state, "On a", &[]);
+
+    state.row_pressed(row(&state, "First on b"), false, true);
+
+    assert_eq!(selected(&state), ["First on b", "On a"]);
+}
+
+#[test]
+fn the_upstream_is_selected_alone() {
+    let mut state = state();
+
+    select(&mut state, "upstream", &["On a"]);
+    assert_eq!(selected(&state), ["upstream"]);
+
+    state.row_pressed(row(&state, "First on b"), false, true);
+    assert_eq!(selected(&state), ["First on b"]);
+}
+
+#[test]
+fn a_press_on_a_row_the_board_has_no_piece_for_selects_nothing() {
+    let mut state = state();
+    select(&mut state, "On a", &[]);
+
+    state.row_pressed(row(&state, "local changes"), false, false);
+    state.row_pressed(state.rows.len(), false, false);
+
+    assert_eq!(selected(&state), ["On a"]);
+}
+
+#[test]
+fn the_arrow_keys_step_through_the_pieces_of_the_board_and_stop_at_its_ends() {
+    let mut state = state();
+    let mut walk = Vec::new();
+
+    for _ in 0..8 {
+        state.move_cursor(true);
+        walk.extend(selected(&state));
+    }
+
+    assert_eq!(
+        walk,
+        [
+            "Loose",
+            "feature-b",
+            "Second on b",
+            "First on b",
+            "feature-a",
+            "On a",
+            "upstream",
+            "upstream",
+        ]
+    );
+    for _ in 0..8 {
+        state.move_cursor(false);
+    }
+    assert_eq!(selected(&state), ["Loose"]);
+}
+
+#[test]
+fn with_nothing_selected_the_up_arrow_starts_from_the_base() {
+    let mut state = state();
+
+    state.move_cursor(false);
+
+    assert_eq!(selected(&state), ["upstream"]);
+}
+
+#[test]
+fn an_arrow_key_narrows_a_selection_to_the_piece_it_moves_to() {
+    let mut state = state();
+    select(&mut state, "Second on b", &["On a"]);
+
+    state.move_cursor(false);
+
+    assert_eq!(selected(&state), ["feature-a"], "from the last one picked");
+}
+
+#[test]
+fn right_opens_and_left_closes_what_the_selection_was_last_put_on() {
+    let mut state = state();
+    select(&mut state, "Second on b", &[]);
+
+    state.expand_cursor();
+    assert!(shows(&state, "y.rs"));
+    state.expand_cursor();
+    assert!(shows(&state, "y.rs"), "open already");
+
+    state.collapse_cursor();
+    assert!(!shows(&state, "y.rs"));
+    assert_eq!(selected(&state), ["Second on b"]);
+
+    select(&mut state, "feature-a", &[]);
+    state.collapse_cursor();
+    assert!(!shows(&state, "On a"));
+    state.expand_cursor();
+    assert!(shows(&state, "On a"));
+}
+
+#[test]
+fn left_on_a_file_goes_up_to_its_commit() {
+    let mut state = state();
+    state.row_toggled(row(&state, "Second on b"));
+    select(&mut state, "y.rs", &[]);
+
+    state.collapse_cursor();
+
+    assert_eq!(selected(&state), ["Second on b"]);
+    assert!(shows(&state, "y.rs"), "which stays open");
+}
+
+#[test]
+fn what_is_closed_over_selected_rows_takes_them_out_of_the_selection() {
+    let mut state = state();
+    select(&mut state, "First on b", &["On a"]);
+
+    state.row_toggled(row(&state, "feature-b"));
+
+    assert_eq!(selected(&state), ["On a"]);
+    state.row_toggled(row(&state, "feature-b"));
+    assert_eq!(selected(&state), ["On a"], "and does not give them back");
+}
+
+#[test]
+fn escape_selects_nothing_and_remembers_where_the_selection_was() {
+    let mut state = state();
+    select(&mut state, "feature-a", &[]);
+
+    state.clear_selection();
+    assert!(selected(&state).is_empty());
+    assert_eq!(state.cursor_rect(), None, "nothing to keep in view");
+
+    state.move_cursor(true);
+    assert_eq!(selected(&state), ["On a"]);
+}
+
+#[test]
+fn the_window_is_told_where_the_selection_was_last_put() {
+    let mut state = state();
+    select(&mut state, "Loose", &["On a"]);
+
+    let rect = state.cursor_rect().unwrap();
+
+    let on_a = row(&state, "On a");
+    let piece = state.board().pieces.iter().find(|p| p.row == Some(on_a));
+    assert_eq!(rect, piece.unwrap().rect);
+}
+
+/// As in the TUI: the arrow keys go on from where they were.
+#[test]
+fn the_arrow_keys_go_on_from_the_piece_that_hid_the_one_they_were_on() {
+    let mut state = state();
+    select(&mut state, "First on b", &[]);
+
+    state.row_toggled(row(&state, "feature-b"));
+    state.move_cursor(true);
+
+    assert_eq!(selected(&state), ["feature-a"]);
+}
+
+#[test]
+fn closing_a_card_puts_the_arrow_keys_on_it_from_its_file() {
+    let mut state = state();
+    state.row_toggled(row(&state, "Second on b"));
+    select(&mut state, "y.rs", &[]);
+
+    state.row_toggled(row(&state, "Second on b"));
+    state.move_cursor(true);
+
+    assert_eq!(selected(&state), ["First on b"]);
+}
+
+#[test]
+fn an_arrow_key_at_either_end_selects_the_piece_it_is_on_alone() {
+    let mut state = state();
+    select(&mut state, "On a", &["Loose"]);
+
+    state.move_cursor(false);
+    assert_eq!(selected(&state), ["Loose"]);
+
+    select(&mut state, "upstream", &[]);
+    state.clear_selection();
+    state.move_cursor(true);
+    assert_eq!(selected(&state), ["upstream"]);
 }

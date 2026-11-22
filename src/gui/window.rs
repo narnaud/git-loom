@@ -5,7 +5,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use anyhow::Result;
-use slint::ComponentHandle;
+use slint::platform::Key;
+use slint::{ComponentHandle, SharedString};
 
 use crate::gui::model::{self, update_model};
 use crate::gui::state::State;
@@ -54,6 +55,28 @@ impl Gui {
                 gui.update(|state| state.row_toggled(row));
             }
         });
+        let gui = self.clone();
+        window.on_board_pressed(move |row, control, shift| {
+            if let Ok(row) = usize::try_from(row) {
+                gui.update(|state| state.row_pressed(row, control, shift));
+            }
+        });
+        let gui = self.clone();
+        window.on_key_pressed(move |text| gui.key(&text));
+    }
+
+    /// A key pressed over the panes; false when it is not one of theirs.
+    fn key(&self, text: &str) -> bool {
+        let handled = key_pressed(&mut self.state.borrow_mut(), text);
+        if handled {
+            self.sync();
+            // Where a key put the selection may be out of view.
+            let rect = self.state.borrow().cursor_rect();
+            if let (Some(rect), Some(window)) = (rect, self.window.upgrade()) {
+                window.invoke_reveal_on_board(rect.y, rect.h);
+            }
+        }
+        handled
     }
 
     fn update(&self, change: impl FnOnce(&mut State)) {
@@ -80,3 +103,27 @@ impl Gui {
         window.set_board_height(board.height);
     }
 }
+
+/// Do what the key `text` asks of the selection; false when it is not one of
+/// its keys.
+fn key_pressed(state: &mut State, text: &str) -> bool {
+    let is = |key: Key| text == SharedString::from(key).as_str();
+    if is(Key::DownArrow) {
+        state.move_cursor(true);
+    } else if is(Key::UpArrow) {
+        state.move_cursor(false);
+    } else if is(Key::RightArrow) {
+        state.expand_cursor();
+    } else if is(Key::LeftArrow) {
+        state.collapse_cursor();
+    } else if is(Key::Escape) {
+        state.clear_selection();
+    } else {
+        return false;
+    }
+    true
+}
+
+#[cfg(test)]
+#[path = "window_test.rs"]
+mod tests;
