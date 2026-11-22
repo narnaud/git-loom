@@ -110,9 +110,11 @@ impl Gui {
             }
         });
         let gui = self.clone();
-        window.on_dialog_accepted(move |text, choice| {
+        window.on_dialog_accepted(move |text, choice, dest| {
             let choice = usize::try_from(choice).ok();
-            gui.update(|state| state.form_accepted(&text, choice));
+            // None picked is refused, as one out of the list.
+            let dest = usize::try_from(dest).unwrap_or(usize::MAX);
+            gui.update(|state| state.form_accepted(&text, choice, dest));
         });
         let gui = self.clone();
         window.on_dialog_cancelled(move || gui.update(State::form_cancelled));
@@ -246,9 +248,18 @@ impl Gui {
         if let Some(form) = form {
             let opened = state.forms_opened();
             if self.shown_form.replace(opened) != opened {
-                window.set_dialog(model::dialog(form));
+                window.set_dialog(model::dialog(form, state.integration_branch()));
                 let choice = form.choice.map_or(-1, |choice| choice as i32);
-                window.invoke_open_dialog(form.initial.as_str().into(), choice);
+                let initial: SharedString = form.initial.as_str().into();
+                let dest = form.dest as i32;
+                // Once the event that opened it is done with: a menu closing
+                // under it would take the keyboard back to the panes.
+                let shown = window.as_weak();
+                Timer::single_shot(Duration::ZERO, move || {
+                    if let Some(window) = shown.upgrade() {
+                        window.invoke_open_dialog(initial, choice, dest);
+                    }
+                });
             } else {
                 // Only its ticks change while it is open.
                 let choices = window.get_dialog().choices;

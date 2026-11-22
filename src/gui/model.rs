@@ -3,17 +3,17 @@
 
 use std::rc::Rc;
 
-use slint::{Model, ModelRc, VecModel};
+use slint::{Model, ModelRc, SharedString, VecModel};
 
 use crate::core::graph::{self, FileGroup};
 use crate::core::repo::{self, RemoteStatus};
 use crate::core::ui::Level;
 use crate::gui::board::{self, Board, LineKind, PieceKind};
 use crate::gui::commands::Entry;
-use crate::gui::forms::Form;
+use crate::gui::forms::{self, Form, Input};
 use crate::gui::state::State;
 use crate::gui::ui::{
-    BoardLine, ChangeKind, ChangeRow, Choice, Dialog, LocalChanges, MenuEntry, Piece,
+    BoardLine, ChangeKind, ChangeRow, Choice, Dialog, DialogInput, LocalChanges, MenuEntry, Piece,
     PieceKind as Kind, Remote, Strand, TextKind, TextRow, Tone,
 };
 use crate::session::action::LogEntry;
@@ -279,17 +279,27 @@ pub(crate) fn plain(text: &str) -> String {
     out
 }
 
-/// What `form` asks, but for what its fields start with.
-pub(crate) fn dialog(form: &Form) -> Dialog {
+/// What `form` asks, but for what its fields start with; `integration`
+/// names a loose commit's destination.
+pub(crate) fn dialog(form: &Form, integration: &str) -> Dialog {
+    let dests = form.dests.iter();
+    let destinations: Vec<SharedString> = dests
+        .map(|dest| forms::dest_label(dest, integration).into())
+        .collect();
     Dialog {
         title: form.title.as_str().into(),
         body: plain(&form.body).into(),
         detail: plain(&form.detail).into(),
         error: plain(&form.error).into(),
-        line: form.line,
+        input: match form.input {
+            Input::None => DialogInput::None,
+            Input::Line => DialogInput::Line,
+            Input::Text => DialogInput::Text,
+        },
         placeholder: form.placeholder.as_str().into(),
         choices: model_of(choices(form)),
         multi: form.multi,
+        destinations: model_of(destinations),
         confirm: form.confirm.into(),
         cancellable: form.cancellable,
     }

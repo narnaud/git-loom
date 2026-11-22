@@ -971,7 +971,7 @@ fn what_the_command_running_asks_is_asked_over_the_window() {
         (form.title.as_str(), form.body.as_str()),
         ("loom drop a", "Drop it?")
     );
-    state.form_accepted("", None);
+    state.form_accepted("", None, 0);
 
     assert_eq!(answers.recv().unwrap(), Answer::Bool(true));
     tick_until(&mut state, |state| !state.busy());
@@ -1018,7 +1018,7 @@ fn a_command_that_failed_says_why_over_the_window_unless_the_log_shows_it() {
         (form.title.as_str(), form.body.as_str()),
         ("loom push a", "Push refused")
     );
-    state.form_accepted("", None);
+    state.form_accepted("", None, 0);
     state.open_log();
     state.report(Ended::Failed(error.to_string()));
     assert!(state.form().is_none());
@@ -1084,6 +1084,17 @@ fn the_log_opens_over_the_window_and_closes_again() {
     state.close_log();
 
     assert!(!state.log_open());
+}
+
+#[test]
+fn a_branch_a_command_created_or_renamed_is_selected_once_it_is_read() {
+    let mut state = state();
+    state.next_cursor = Some(tree::branch_key("feature-a"));
+
+    state.apply(snapshot_in(info(), ""));
+
+    assert_eq!(selected(&state), ["feature-a"]);
+    assert!(state.next_cursor.is_none());
 }
 
 #[test]

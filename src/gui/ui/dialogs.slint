@@ -1,6 +1,6 @@
-import { Button, CheckBox, LineEdit, ListView, ScrollView } from "std-widgets.slint";
+import { Button, CheckBox, ComboBox, LineEdit, ListView, ScrollView, TextEdit } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { Dialog, TextRow } from "types.slint";
+import { Dialog, DialogInput, TextRow } from "types.slint";
 import { TextView } from "text.slint";
 
 // The dimmed layer a dialog sits on: the panes take no pointer under it.
@@ -31,23 +31,28 @@ component Panel inherits Rectangle {
 export component DialogView inherits Rectangle {
     in property <Dialog> dialog;
 
-    // Confirmed with `text` typed and the choice at `choice` picked, -1 for
-    // none.
-    callback accepted(text: string, choice: int);
+    // Confirmed with `text` typed, the choice at `choice` picked, -1 for
+    // none, and the destination at `destination`.
+    callback accepted(text: string, choice: int, destination: int);
     callback cancelled();
     // The choice at `index` was ticked, or unticked.
     callback toggled(index: int);
 
     property <int> current: -1;
-    property <bool> ready: root.dialog.multi || root.dialog.choices.length == 0 || root.current >= 0 || (root.dialog.line && line.text != "");
+    property <string> typed: root.dialog.input == DialogInput.line ? line.text : root.dialog.input == DialogInput.text ? area.text : "";
+    property <bool> ready: root.dialog.multi || root.dialog.choices.length == 0 || root.current >= 0 || root.typed != "";
 
     // Fill it in and take the keyboard: once for each dialog opened.
-    public function open(initial: string, choice: int) {
+    public function open(initial: string, choice: int, destination: int) {
         line.text = initial;
+        area.text = initial;
         root.current = choice;
-        if root.dialog.line {
+        combo.current-index = destination;
+        if root.dialog.input == DialogInput.line {
             line.focus();
             line.select-all();
+        } else if root.dialog.input == DialogInput.text {
+            area.focus();
         } else {
             keys.focus();
         }
@@ -55,7 +60,7 @@ export component DialogView inherits Rectangle {
 
     function submit() {
         if root.ready {
-            root.accepted(root.dialog.line ? line.text : "", root.current);
+            root.accepted(root.typed, root.current, combo.current-index);
         }
     }
 
@@ -85,7 +90,8 @@ export component DialogView inherits Rectangle {
                 }
                 return accept;
             }
-            if event.text == Key.Return {
+            // A message takes its own new lines: `Ctrl+Enter` confirms it.
+            if event.text == Key.Return && (root.dialog.input != DialogInput.text || event.modifiers.control) {
                 root.submit();
                 return accept;
             }
@@ -137,6 +143,23 @@ export component DialogView inherits Rectangle {
                         text: root.dialog.detail;
                         color: Theme.dim;
                         wrap: word-wrap;
+                    }
+                }
+
+                HorizontalLayout {
+                    visible: root.dialog.destinations.length > 0;
+                    height: self.visible ? self.preferred-height : 0;
+                    spacing: 8px;
+
+                    Text {
+                        text: "To";
+                        color: Theme.dim;
+                        vertical-alignment: center;
+                    }
+
+                    combo := ComboBox {
+                        model: root.dialog.destinations;
+                        horizontal-stretch: 1;
                     }
                 }
 
@@ -204,12 +227,20 @@ export component DialogView inherits Rectangle {
                 }
 
                 line := LineEdit {
-                    visible: root.dialog.line;
-                    height: self.visible ? self.preferred-height : 0;
+                    visible: root.dialog.input == DialogInput.line;
+                    height: self.visible ? 32px : 0;
                     placeholder-text: root.dialog.placeholder;
                     accepted => {
                         root.submit();
                     }
+                }
+
+                area := TextEdit {
+                    visible: root.dialog.input == DialogInput.text;
+                    height: self.visible ? 160px : 0;
+                    font-family: Theme.mono-family;
+                    wrap: word-wrap;
+                    placeholder-text: root.dialog.placeholder;
                 }
 
                 if root.dialog.error != "": Text {

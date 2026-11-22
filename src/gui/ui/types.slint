@@ -98,6 +98,9 @@ export struct Choice {
     checked: bool,
 }
 
+// What a dialog has typed in it, if anything; mirrors `forms::Input`.
+export enum DialogInput { none, line, text }
+
 // A question over the window, or what went wrong.
 export struct Dialog {
     // The command asking.
@@ -106,12 +109,13 @@ export struct Dialog {
     detail: string,
     // Why the last answer was refused.
     error: string,
-    // Whether a line is typed.
-    line: bool,
+    input: DialogInput,
     placeholder: string,
     choices: [Choice],
     // Whether any number of the choices are ticked, rather than one picked.
     multi: bool,
+    // Where a commit can go.
+    destinations: [string],
     confirm: string,
     cancellable: bool,
 }

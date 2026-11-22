@@ -2,14 +2,14 @@
 
 import { Button, Palette, Spinner } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { LocalChanges, ChangeKind, ChangeRow, Piece, PieceKind, BoardLine, Strand, Remote, TextRow, TextKind, MenuEntry, Tone, Choice, Dialog } from "types.slint";
+import { LocalChanges, ChangeKind, ChangeRow, Piece, PieceKind, BoardLine, Strand, Remote, TextRow, TextKind, MenuEntry, Tone, Choice, Dialog, DialogInput } from "types.slint";
 import { ChangesView } from "changes.slint";
 import { BoardView } from "board.slint";
 import { InspectorView } from "inspector.slint";
 import { ToolButton } from "controls.slint";
 import { DialogView, LogView } from "dialogs.slint";
 
-export { Theme, LocalChanges, ChangeKind, ChangeRow, Piece, PieceKind, BoardLine, Strand, Remote, TextRow, TextKind, MenuEntry, Tone, Choice, Dialog }
+export { Theme, LocalChanges, ChangeKind, ChangeRow, Piece, PieceKind, BoardLine, Strand, Remote, TextRow, TextKind, MenuEntry, Tone, Choice, Dialog, DialogInput }
 
 export component AppWindow inherits Window {
     // The directory of the working tree.
@@ -67,7 +67,7 @@ export component AppWindow inherits Window {
     callback command(id: int);
     // The entry of the menu the keys go to from `from`, down or up.
     callback menu-step(from: int, down: bool) -> int;
-    callback dialog-accepted(text: string, choice: int);
+    callback dialog-accepted(text: string, choice: int, destination: int);
     callback dialog-cancelled();
     callback dialog-toggled(index: int);
     callback log-opened();
@@ -93,8 +93,8 @@ export component AppWindow inherits Window {
     }
 
     // Fill the dialog in, once for each opened.
-    public function open-dialog(initial: string, choice: int) {
-        dialog-view.open(initial, choice);
+    public function open-dialog(initial: string, choice: int, destination: int) {
+        dialog-view.open(initial, choice, destination);
     }
 
     public function open-log() {
@@ -347,8 +347,8 @@ export component AppWindow inherits Window {
     dialog-view := DialogView {
         visible: root.dialog-open;
         dialog: root.dialog;
-        accepted(text, choice) => {
-            root.dialog-accepted(text, choice);
+        accepted(text, choice, destination) => {
+            root.dialog-accepted(text, choice, destination);
         }
         cancelled => {
             root.dialog-cancelled();
