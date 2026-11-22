@@ -47,18 +47,29 @@ component Fold inherits VerticalLayout {
     }
 }
 
+// What a name or a file is tinted with when it is selected, or under the
+// pointer.
+component Tint inherits Rectangle {
+    in property <bool> selected;
+    in property <bool> hovered;
+
+    border-radius: 5px;
+    background: root.selected ? Theme.selection : root.hovered ? Theme.hover : transparent;
+}
+
 // A piece of the board, drawn for what it is in the rectangle it was given:
 // a name starts at its left edge.
 component PieceVisual inherits Rectangle {
     in property <Piece> data;
+    in property <bool> hovered;
 
     callback toggle();
 
     // ── A commit: one line, its files under it once open ──
     if data.kind == PieceKind.card: Rectangle {
         border-radius: 6px;
-        border-width: 1px;
-        border-color: Theme.border;
+        border-width: data.selected ? 2px : 1px;
+        border-color: data.selected ? Theme.accent : root.hovered ? Theme.dim : Theme.border;
         background: Theme.card;
 
         HorizontalLayout {
@@ -97,6 +108,20 @@ component PieceVisual inherits Rectangle {
                 }
             }
         }
+    }
+
+    // Clear of the name, which starts at the left edge.
+    if data.kind == PieceKind.tag || data.kind == PieceKind.base: Tint {
+        x: -6px;
+        width: parent.width + 6px;
+        selected: data.selected;
+        hovered: root.hovered;
+    }
+    if data.kind == PieceKind.chip: Tint {
+        x: 4px;
+        width: parent.width - 8px;
+        selected: data.selected;
+        hovered: root.hovered;
     }
 
     // ── A branch name, heading its frame ──
@@ -206,6 +231,18 @@ export component BoardView inherits Rectangle {
     callback resized(room: length);
     // The piece standing for `row` is to open, or to close.
     callback toggled(row: int);
+    // The left button went down on the piece standing for `row`.
+    callback pressed(row: int, control: bool, shift: bool);
+
+    // Scroll no further than it takes to show what lies from `y` down to
+    // `y + h` of the board; what is taller than the pane, from its top.
+    public function reveal(y: length, h: length) {
+        if y < -scroll.content-y || h + 32px > scroll.visible-height {
+            scroll.content-y = Math.max(scroll.visible-height - scroll.content-height, -Math.max(0px, y - 16px));
+        } else if y + h > scroll.visible-height - scroll.content-y {
+            scroll.content-y = Math.max(scroll.visible-height - scroll.content-height, scroll.visible-height - y - h - 16px);
+        }
+    }
 
     changed room => {
         root.resized(root.room);
@@ -252,12 +289,18 @@ export component BoardView inherits Rectangle {
             width: piece.w;
             height: piece.h;
 
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                    root.pressed(piece.row, event.modifiers.control, event.modifiers.shift);
+                }
+            }
             double-clicked => {
                 root.toggled(piece.row);
             }
 
             PieceVisual {
                 data: piece;
+                hovered: parent.has-hover;
                 toggle => {
                     root.toggled(piece.row);
                 }

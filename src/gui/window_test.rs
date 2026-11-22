@@ -1,0 +1,37 @@
+use super::*;
+use crate::gui::state::tests::{selected, state};
+
+fn press(state: &mut State, key: Key) -> bool {
+    key_pressed(state, &SharedString::from(key))
+}
+
+#[test]
+fn the_arrow_keys_and_escape_act_on_the_selection() {
+    let mut state = state();
+
+    assert!(press(&mut state, Key::DownArrow));
+    assert!(press(&mut state, Key::DownArrow));
+    assert_eq!(selected(&state), ["feature-b"]);
+
+    assert!(press(&mut state, Key::LeftArrow));
+    assert!(press(&mut state, Key::DownArrow));
+    assert_eq!(selected(&state), ["feature-a"], "feature-b is closed");
+
+    assert!(press(&mut state, Key::UpArrow));
+    assert!(press(&mut state, Key::RightArrow));
+    assert!(press(&mut state, Key::DownArrow));
+    assert_eq!(selected(&state), ["Second on b"], "and open again");
+
+    assert!(press(&mut state, Key::Escape));
+    assert!(selected(&state).is_empty());
+}
+
+#[test]
+fn a_key_that_is_not_the_selections_is_left_to_the_window() {
+    let mut state = state();
+
+    assert!(!press(&mut state, Key::Return));
+    assert!(!key_pressed(&mut state, "a"));
+
+    assert!(selected(&state).is_empty());
+}

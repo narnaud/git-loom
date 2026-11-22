@@ -1,7 +1,7 @@
 use super::*;
 use crate::core::repo::RepoInfo;
 use crate::core::test_helpers::{base_info, branch};
-use crate::gui::state::tests::{info, row, state, state_in, state_of};
+use crate::gui::state::tests::{info, row, select, state, state_in, state_of};
 
 fn find<'a>(pieces: &'a [Piece], reading: &str) -> &'a Piece {
     let found = pieces
@@ -228,4 +228,19 @@ fn a_model_of_another_length_is_replaced() {
         [1, 2, 3],
         "left as it was"
     );
+}
+
+#[test]
+fn a_piece_says_whether_its_row_is_selected() {
+    let mut state = state();
+    select(&mut state, "feature-a", &["feature-b"]);
+
+    let pieces = pieces(&state);
+
+    let selected: Vec<&str> = pieces
+        .iter()
+        .filter(|piece| piece.selected)
+        .map(|piece| piece.title.as_str())
+        .collect();
+    assert_eq!(selected, ["feature-b", "feature-a"]);
 }

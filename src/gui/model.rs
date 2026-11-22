@@ -42,6 +42,7 @@ fn piece(placed: &board::Piece, state: &State) -> Piece {
     };
     out.expandable = row.expandable;
     out.expanded = row.expanded;
+    out.selected = state.is_selected(row);
     match &row.kind {
         RowKind::BranchName { name, remote, .. } => {
             out.title = name.as_str().into();
