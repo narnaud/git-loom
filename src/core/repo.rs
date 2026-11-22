@@ -165,13 +165,13 @@ pub fn prune_gone_branches(repo: &Repository) -> bool {
         .unwrap_or(false)
 }
 
-/// Read git config `loom.tuiAutoReload`: when true, `loom tui` starts with
-/// auto-reload on (spec 020). False if unset.
+/// Read git config `loom.tuiAutoReload`: when false, `loom tui` starts with
+/// auto-reload off (spec 020). True if unset or unparsable.
 pub fn tui_auto_reload(repo: &Repository) -> bool {
     repo.config()
         .ok()
         .and_then(|config| config.get_bool("loom.tuiAutoReload").ok())
-        .unwrap_or(false)
+        .unwrap_or(true)
 }
 
 /// Read git config `loom.tuiTabWidth`: the spaces each tab in a TUI diff
