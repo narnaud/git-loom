@@ -143,6 +143,10 @@ impl Worker {
         work: impl FnOnce() -> Result<()> + Send + 'static,
     ) {
         debug_assert!(self.running.is_none(), "one action at a time");
+        // Never in place of the one running, whose thread would go on unwatched.
+        if self.running.is_some() {
+            return;
+        }
         self.open(&command);
         let job = self.spawn(work);
         self.running = Some(Running {
