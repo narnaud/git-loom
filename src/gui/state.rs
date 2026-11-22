@@ -5,13 +5,18 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 
+use crate::core::graph;
 use crate::core::repo;
+use crate::core::ui::{Hint, Level};
 use crate::gui::board::{Board, Rect};
+use crate::gui::forms::Form;
 use crate::session;
+use crate::session::action::{self, Action, LogEntry, Summary};
 use crate::session::diff_text::{self, diff_text};
 use crate::session::paused::PausedOp;
-use crate::session::snapshot::Snapshot;
+use crate::session::snapshot::{Snapshot, load_snapshot};
 use crate::session::tree::{self, Row, RowKind, SelectionClass};
+use crate::session::worker::{Ended, Event, Worker};
 
 /// What the inspector shows of one row.
 pub(crate) struct Inspected<'a> {
@@ -22,14 +27,22 @@ pub(crate) struct Inspected<'a> {
     pub diff: &'a str,
 }
 
+/// A line of the status bar.
+struct Notice {
+    level: Level,
+    text: String,
+}
+
 pub(crate) struct State {
-    snapshot: Snapshot,
+    pub(super) snapshot: Snapshot,
     /// Set while an operation is paused.
-    paused: Option<PausedOp>,
+    pub(super) paused: Option<PausedOp>,
+    /// Context depth the tree is read with, as `loom status -n <N>` takes it.
+    context: usize,
     /// The tree of the session: the local changes pane lists its local
     /// changes, the board places its branches and commits. The commits of a
     /// closed branch are not in it.
-    rows: Vec<Row>,
+    pub(super) rows: Vec<Row>,
     /// Keys of the commit rows open onto their files, and the local changes',
     /// which the pane lists whole.
     expanded: HashSet<String>,
@@ -43,15 +56,27 @@ pub(crate) struct State {
     /// Key of the row the selection was last put on, by a click, a `Ctrl`
     /// click that adds or an arrow key: `Shift` selects from it, and the
     /// arrow keys move from it.
-    cursor: Option<String>,
+    pub(super) cursor: Option<String>,
     /// Where the rows are, in a pane `room` wide.
     board: Board,
     room: f32,
     /// The diff of each row the inspector has shown, by row key: git is
     /// asked once.
     diffs: HashMap<String, String>,
+    /// How many times the repository was read: the diff of a row the
+    /// inspector still shows may have changed with it.
+    reads: u64,
     /// Spaces each tab of a diff shows as.
     tab_width: usize,
+    /// The command running, and the log of those that ran.
+    pub(super) worker: Worker,
+    /// How the last command went, or what was refused since one started.
+    notice: Option<Notice>,
+    /// The question asked over everything else.
+    pub(super) form: Option<Form>,
+    pub(super) forms_opened: u64,
+    /// Whether the log is shown over everything else.
+    log_open: bool,
 }
 
 impl State {
@@ -59,13 +84,24 @@ impl State {
     pub(crate) fn load() -> Result<State> {
         let opened = session::open()?;
         let tab_width = diff_text::tab_width(&opened.repo);
-        Ok(State::new(opened.snapshot, opened.paused, tab_width))
+        Ok(State::new(
+            opened.snapshot,
+            opened.paused,
+            opened.context,
+            tab_width,
+        ))
     }
 
-    fn new(snapshot: Snapshot, paused: Option<PausedOp>, tab_width: usize) -> State {
+    fn new(
+        snapshot: Snapshot,
+        paused: Option<PausedOp>,
+        context: usize,
+        tab_width: usize,
+    ) -> State {
         let mut state = State {
             snapshot,
             paused,
+            context,
             rows: Vec::new(),
             expanded: HashSet::from([tree::LOCAL_CHANGES_KEY.to_string()]),
             collapsed: HashSet::new(),
@@ -75,7 +111,13 @@ impl State {
             board: Board::default(),
             room: 0.0,
             diffs: HashMap::new(),
+            reads: 0,
             tab_width,
+            worker: Worker::new("gui", hint_words),
+            notice: None,
+            form: None,
+            forms_opened: 0,
+            log_open: false,
         };
         state.rebuild_rows();
         state
@@ -132,6 +174,14 @@ impl State {
 
     pub(crate) fn is_selected(&self, row: &Row) -> bool {
         self.selected.contains(&row.key)
+    }
+
+    /// The selected rows, in tree order.
+    pub(super) fn selection(&self) -> Vec<&Row> {
+        self.rows
+            .iter()
+            .filter(|row| self.is_selected(row))
+            .collect()
     }
 
     /// What the selected rows are: `None` with none selected, `Some(None)`
@@ -202,11 +252,11 @@ impl State {
 
     /// The rows a click or a key can select: those the local changes pane
     /// lists, and those the board has a piece for.
-    fn selectable(&self) -> impl Iterator<Item = usize> + '_ {
+    pub(super) fn selectable(&self) -> impl Iterator<Item = usize> + '_ {
         self.listed().chain(self.on_board())
     }
 
-    fn select_only(&mut self, index: usize) {
+    pub(super) fn select_only(&mut self, index: usize) {
         let key = self.rows[index].key.clone();
         self.selected = HashSet::from([key.clone()]);
         self.cursor = Some(key);
@@ -409,6 +459,197 @@ impl State {
             Some(_) => Board::default(),
             None => Board::layout(&self.rows, self.room),
         };
+    }
+
+    // ── Commands ──
+
+    /// Whether a command runs: no other starts until it ends.
+    pub(crate) fn busy(&self) -> bool {
+        self.worker.running().is_some()
+    }
+
+    /// What the status bar says: what was refused since the last command
+    /// started, else the command running, else how the last one went.
+    pub(crate) fn status(&self) -> (Level, String) {
+        if let Some(notice) = &self.notice {
+            return (notice.level, notice.text.clone());
+        }
+        let Some(running) = self.worker.running() else {
+            return (Level::Plain, String::new());
+        };
+        let text = match &running.spinner {
+            Some(step) => format!("{} — {}", running.command, step),
+            None => running.command.clone(),
+        };
+        (Level::Plain, text)
+    }
+
+    pub(super) fn say(&mut self, level: Level, text: impl Into<String>) {
+        let text = text.into();
+        self.notice = Some(Notice { level, text });
+    }
+
+    /// Run `action` on the worker: the window goes on, and asks what the
+    /// command asks.
+    pub(super) fn start(&mut self, action: Action) {
+        if self.busy() {
+            return;
+        }
+        let command = action::command_line(&action, |target| tree::short_id(&self.rows, target));
+        self.notice = None;
+        // What the theme is for, a picker drawn in a terminal, no command
+        // the window runs draws.
+        let theme = graph::Theme::dark();
+        let git_dir = &self.snapshot.git_dir;
+        self.worker.start(action, command, git_dir, &theme);
+    }
+
+    /// Take in what the running command sent, and how it ended; whether
+    /// anything shown changed.
+    pub(crate) fn tick(&mut self) -> bool {
+        let mut changed = false;
+        while let Some(event) = self.worker.poll() {
+            match event {
+                Event::Ask(ask) => self.open_form(Form::prompt(ask)),
+                // Every message is typed in the window: no command it runs
+                // opens an editor, which would find no terminal to take.
+                Event::Suspend(ack) => {
+                    let _ = ack.send(());
+                }
+                Event::Filed => {}
+            }
+            changed = true;
+        }
+        if let Some(ended) = self.worker.reap() {
+            // What a command that failed did on the way is shown too. A
+            // repository that cannot be read is said in place of how the
+            // command went, which the log has.
+            if ended == Ended::Cancelled || self.reload() {
+                self.report(ended);
+            }
+            changed = true;
+        }
+        changed
+    }
+
+    /// Say how the command ended: in the status bar, and over everything
+    /// when it failed.
+    pub(super) fn report(&mut self, ended: Ended) {
+        match ended {
+            Ended::Done => {
+                let (level, text) = match self.worker.summary() {
+                    Summary::Done => (Level::Success, "Done".to_string()),
+                    Summary::Warned(warning) => (Level::Warn, warning.to_string()),
+                    Summary::Succeeded { last, more: 0 } => (Level::Success, last.to_string()),
+                    Summary::Succeeded { last, more } => (
+                        Level::Success,
+                        format!("{last} (and {more} more in the log)"),
+                    ),
+                };
+                self.say(level, text);
+            }
+            Ended::Cancelled => self.say(Level::Plain, "Cancelled"),
+            Ended::Failed(text) => {
+                self.say(Level::Error, text.lines().next().unwrap_or_default());
+                // An open log already shows it, under what is being read.
+                if !self.log_open {
+                    let entry = self.worker.log.last();
+                    let command = entry.map_or("", |entry| entry.command.as_str());
+                    self.open_form(Form::notice(command, &text));
+                }
+            }
+        }
+    }
+
+    /// Read the repository again, as a command left it. What is open stays
+    /// open; a selection goes to the row of the cursor, else to the one now
+    /// in its place or the nearest above it. False when it could not be
+    /// read, and the window shows it as it was.
+    fn reload(&mut self) -> bool {
+        let workdir = self.snapshot.workdir.clone();
+        let git_dir = self.snapshot.git_dir.clone();
+        if let Some(paused) = PausedOp::load(&workdir, &git_dir) {
+            self.paused = Some(paused);
+            self.apply(Snapshot::placeholder(workdir, git_dir));
+            return true;
+        }
+        match load_snapshot(self.context) {
+            Ok(snapshot) => {
+                self.paused = None;
+                self.apply(snapshot);
+                true
+            }
+            Err(e) => {
+                self.cannot_read(&e.to_string());
+                false
+            }
+        }
+    }
+
+    /// Say over everything that the repository could not be read: `text`.
+    fn cannot_read(&mut self, text: &str) {
+        self.say(Level::Error, text.lines().next().unwrap_or_default());
+        self.open_form(Form::notice("", text));
+    }
+
+    /// Show `snapshot` in place of the one shown.
+    fn apply(&mut self, snapshot: Snapshot) {
+        let key = self.cursor.clone();
+        let place = self.cursor_index();
+        let selecting = !self.selected.is_empty();
+        self.snapshot = snapshot;
+        self.diffs.clear();
+        self.selected.clear();
+        self.reads += 1;
+        self.rebuild_rows();
+        if !selecting {
+            return;
+        }
+        let shown: Vec<usize> = self.selectable().collect();
+        let same = key.and_then(|key| shown.iter().copied().find(|i| self.rows[*i].key == key));
+        let above = place.and_then(|place| shown.iter().copied().filter(|i| *i <= place).max());
+        let first = shown.iter().copied().min();
+        if let Some(index) = same.or(above).or(first) {
+            self.select_only(index);
+        }
+    }
+
+    /// How many times the repository was read since the window opened.
+    pub(crate) fn reads(&self) -> u64 {
+        self.reads
+    }
+
+    pub(crate) fn log(&self) -> &[LogEntry] {
+        &self.worker.log
+    }
+
+    pub(crate) fn log_open(&self) -> bool {
+        self.log_open
+    }
+
+    pub(crate) fn open_log(&mut self) {
+        self.log_open = true;
+    }
+
+    pub(crate) fn close_log(&mut self) {
+        self.log_open = false;
+    }
+
+    /// The window is asked to close: not while a command runs, whose git
+    /// would be killed mid-way.
+    pub(crate) fn may_close(&mut self) -> bool {
+        if self.busy() {
+            self.say(Level::Warn, "A command is running: wait for it to end");
+        }
+        !self.busy()
+    }
+}
+
+/// How the window words what a command hints at.
+fn hint_words(hint: Hint) -> &'static str {
+    match hint {
+        Hint::ForcePush => "pick Force push in its menu",
+        Hint::Reload => "The window shows it as it is now",
     }
 }
 

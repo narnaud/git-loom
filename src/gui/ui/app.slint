@@ -1,19 +1,23 @@
 // The windows of git-loom-gui.
 
-import { Button, Palette } from "std-widgets.slint";
+import { Button, Palette, Spinner } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { LocalChanges, ChangeKind, ChangeRow, Piece, PieceKind, BoardLine, Strand, Remote, TextRow, TextKind } from "types.slint";
+import { LocalChanges, ChangeKind, ChangeRow, Piece, PieceKind, BoardLine, Strand, Remote, TextRow, TextKind, MenuEntry, Tone, Choice, Dialog } from "types.slint";
 import { ChangesView } from "changes.slint";
 import { BoardView } from "board.slint";
 import { InspectorView } from "inspector.slint";
+import { ToolButton } from "controls.slint";
+import { DialogView, LogView } from "dialogs.slint";
 
-export { Theme, LocalChanges, ChangeKind, ChangeRow, Piece, PieceKind, BoardLine, Strand, Remote, TextRow, TextKind }
+export { Theme, LocalChanges, ChangeKind, ChangeRow, Piece, PieceKind, BoardLine, Strand, Remote, TextRow, TextKind, MenuEntry, Tone, Choice, Dialog }
 
 export component AppWindow inherits Window {
     // The directory of the working tree.
     in property <string> repository;
     // The integration branch, or the operation paused on it.
     in property <string> heading;
+    // The commands of the bar.
+    in property <[MenuEntry]> bar;
 
     // The local changes pane, which lists nothing while an operation is
     // paused.
@@ -26,18 +30,48 @@ export component AppWindow inherits Window {
     in property <length> board-width;
     in property <length> board-height;
 
-    // The inspector: what it names, empty for nothing, and its diff.
+    // The inspector: what it names, empty for nothing, the commands the
+    // selection takes, and its diff.
     in property <string> inspector-title;
+    in property <[MenuEntry]> actions;
     in property <[TextRow]> diff;
     in property <int> diff-columns;
+
+    // A command runs: no other starts. The status bar says which, else how
+    // the last one went.
+    in property <bool> busy;
+    in property <string> status;
+    in property <Tone> status-tone;
+
+    // The context menu, filled in before it opens.
+    in property <[MenuEntry]> menu;
+
+    // The question asked over everything else.
+    in property <bool> dialog-open;
+    in property <Dialog> dialog;
+
+    in property <bool> log-open;
+    in property <[TextRow]> log;
+    in property <int> log-columns;
 
     callback board-resized(room: length);
     callback board-toggled(row: int);
     // The left button went down on a line of the local changes or a piece
     // of the board.
     callback row-pressed(row: int, control: bool, shift: bool);
+    // The right button did, at `x`, `y` of the window.
+    callback row-menu(row: int, x: length, y: length);
     // Whether the key was one of the window's.
     callback key-pressed(text: string) -> bool;
+    // The command `id` was picked in a menu, or its button clicked.
+    callback command(id: int);
+    // The entry of the menu the keys go to from `from`, down or up.
+    callback menu-step(from: int, down: bool) -> int;
+    callback dialog-accepted(text: string, choice: int);
+    callback dialog-cancelled();
+    callback dialog-toggled(index: int);
+    callback log-opened();
+    callback log-closed();
 
     public function reveal-in-changes(index: int) {
         changes-pane.reveal(index);
@@ -51,8 +85,33 @@ export component AppWindow inherits Window {
         inspector.to-top();
     }
 
+    public function show-menu(x: length, y: length) {
+        root.menu-x = x;
+        root.menu-y = y;
+        root.menu-current = -1;
+        menu-popup.show();
+    }
+
+    // Fill the dialog in, once for each opened.
+    public function open-dialog(initial: string, choice: int) {
+        dialog-view.open(initial, choice);
+    }
+
+    public function open-log() {
+        log-view.open();
+    }
+
+    // The keyboard back to the panes, once what was over them closed.
+    public function focus-panes() {
+        keys.focus();
+    }
+
     // The share of the room right of the local changes the board takes.
     property <float> split: 0.46;
+    // The entry of the menu the keys or the pointer are on, -1 for none.
+    property <int> menu-current: -1;
+    property <length> menu-x;
+    property <length> menu-y;
 
     title: root.repository + " — git-loom";
     preferred-width: 1280px;
@@ -69,14 +128,33 @@ export component AppWindow inherits Window {
             height: 44px;
             background: Theme.panel;
 
-            Text {
-                x: 16px;
-                height: parent.height;
-                text: root.heading;
-                color: Theme.text;
-                font-size: 15px;
-                font-weight: 700;
-                vertical-alignment: center;
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 10px;
+                spacing: 6px;
+
+                Text {
+                    text: root.heading;
+                    color: Theme.text;
+                    font-size: 15px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+
+                for entry in root.bar: VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 0;
+
+                    ToolButton {
+                        text: entry.title;
+                        enabled: entry.enabled && !root.busy;
+                        clicked => {
+                            root.command(entry.id);
+                        }
+                    }
+                }
             }
         }
 
@@ -86,6 +164,9 @@ export component AppWindow inherits Window {
         }
 
         keys := FocusScope {
+            // What is over the panes keeps the keyboard.
+            focus-on-tab-navigation: !root.dialog-open && !root.log-open;
+
             key-pressed(event) => {
                 root.key-pressed(event.text) ? accept : reject
             }
@@ -112,6 +193,10 @@ export component AppWindow inherits Window {
                     keys.focus();
                     root.row-pressed(row, control, shift);
                 }
+                menu-asked(row, x, y) => {
+                    keys.focus();
+                    root.row-menu(row, x, y);
+                }
             }
 
             Rectangle {
@@ -137,6 +222,10 @@ export component AppWindow inherits Window {
                     keys.focus();
                     root.row-pressed(row, control, shift);
                 }
+                menu-asked(row, x, y) => {
+                    keys.focus();
+                    root.row-menu(row, x, y);
+                }
             }
 
             Rectangle {
@@ -149,10 +238,15 @@ export component AppWindow inherits Window {
                 x: keys.left + 1px;
                 width: parent.width - self.x;
                 title: root.inspector-title;
+                actions: root.actions;
+                busy: root.busy;
                 diff: root.diff;
                 columns: root.diff-columns;
                 // Nothing to invite while the board is bare.
                 placeholder: root.pieces.length > 0 ? "Select a branch, a commit or a file to see its diff." : "";
+                command(id) => {
+                    root.command(id);
+                }
             }
 
             // Each wider than the divider it moves, and over the panes either side.
@@ -187,6 +281,158 @@ export component AppWindow inherits Window {
                     x: 2px;
                     width: 3px;
                     background: Theme.accent;
+                }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: Theme.border;
+        }
+
+        Rectangle {
+            height: 30px;
+            background: Theme.panel;
+
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 8px;
+                spacing: 8px;
+
+                if root.busy: VerticalLayout {
+                    alignment: center;
+
+                    Spinner {
+                        width: 16px;
+                        height: 16px;
+                        indeterminate: true;
+                    }
+                }
+
+                Text {
+                    text: root.status;
+                    color: root.status-tone == Tone.success ? Theme.added
+                        : root.status-tone == Tone.warn ? Theme.warn
+                        : root.status-tone == Tone.error ? Theme.removed
+                        : Theme.dim;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 0;
+
+                    ToolButton {
+                        text: "Log";
+                        clicked => {
+                            root.log-opened();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    log-view := LogView {
+        visible: root.log-open;
+        lines: root.log;
+        columns: root.log-columns;
+        closed => {
+            root.log-closed();
+        }
+    }
+
+    dialog-view := DialogView {
+        visible: root.dialog-open;
+        dialog: root.dialog;
+        accepted(text, choice) => {
+            root.dialog-accepted(text, choice);
+        }
+        cancelled => {
+            root.dialog-cancelled();
+        }
+        toggled(index) => {
+            root.dialog-toggled(index);
+        }
+    }
+
+    menu-popup := PopupWindow {
+        x: Math.min(root.menu-x, root.width - self.width - 4px);
+        y: Math.min(root.menu-y, root.height - self.height - 4px);
+
+        // The keys stay on the menu while it is open, off the selection it
+        // was opened on. Esc closes it.
+        FocusScope {
+            init => {
+                self.focus();
+            }
+            key-pressed(event) => {
+                if event.text == Key.DownArrow || event.text == Key.UpArrow {
+                    root.menu-current = root.menu-step(root.menu-current, event.text == Key.DownArrow);
+                    return accept;
+                }
+                if event.text == Key.Return || event.text == Key.Space {
+                    if root.menu-current >= 0 && !root.busy {
+                        root.command(root.menu[root.menu-current].id);
+                        menu-popup.close();
+                    }
+                    return accept;
+                }
+                event.text == Key.Tab || event.text == Key.Backtab ? accept : reject
+            }
+        }
+
+        Rectangle {
+            background: Theme.panel;
+            border-width: 1px;
+            border-color: Theme.border;
+            border-radius: 6px;
+            drop-shadow-blur: 12px;
+            drop-shadow-color: #00000060;
+
+            VerticalLayout {
+                padding: 4px;
+
+                for entry[i] in root.menu: Rectangle {
+                    property <bool> line: entry.id < 0;
+                    property <bool> enabled: !self.line && entry.enabled && !root.busy;
+                    property <bool> hovered: item.has-hover;
+
+                    changed hovered => {
+                        if self.hovered && self.enabled {
+                            root.menu-current = i;
+                        } else if !self.hovered && root.menu-current == i {
+                            root.menu-current = -1;
+                        }
+                    }
+
+                    height: self.line ? 9px : 28px;
+                    min-width: 200px;
+                    border-radius: 4px;
+                    background: self.enabled && i == root.menu-current ? Theme.selection : transparent;
+
+                    if entry.id < 0: Rectangle {
+                        y: 4px;
+                        height: 1px;
+                        background: Theme.border;
+                    }
+
+                    if entry.id >= 0: Text {
+                        x: 12px;
+                        width: parent.width - 24px;
+                        text: entry.title;
+                        color: entry.enabled && !root.busy ? Theme.text : Theme.dim;
+                        vertical-alignment: center;
+                    }
+
+                    item := TouchArea {
+                        enabled: entry.id >= 0 && entry.enabled && !root.busy;
+                        clicked => {
+                            root.command(entry.id);
+                        }
+                    }
                 }
             }
         }

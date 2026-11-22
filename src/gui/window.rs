@@ -1,16 +1,21 @@
 //! The window: its callbacks change the [`State`], and what the state then
 //! shows is copied onto its properties.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::Duration;
 
 use anyhow::Result;
 use slint::platform::Key;
-use slint::{ComponentHandle, SharedString};
+use slint::{CloseRequestResponse, ComponentHandle, SharedString, Timer, TimerMode};
 
+use crate::gui::commands::Cmd;
 use crate::gui::model::{self, model_of, update_model};
 use crate::gui::state::State;
 use crate::gui::ui::{AppWindow, Theme};
+
+/// How often what the running command sent is taken in.
+const TICK: Duration = Duration::from_millis(100);
 
 /// The monospace family of short IDs.
 fn mono_family() -> &'static str {
@@ -33,9 +38,20 @@ pub(super) fn run(state: State) -> Result<()> {
         window: window.as_weak(),
         state: RefCell::new(state),
         shown_diff: RefCell::new(None),
+        shown_form: Cell::new(0),
+        dialog_shown: Cell::new(false),
+        log_shown: Cell::new(false),
     });
     gui.connect(&window);
     gui.sync();
+    let timer = Timer::default();
+    let ticking = gui.clone();
+    timer.start(TimerMode::Repeated, TICK, move || {
+        let changed = ticking.state.borrow_mut().tick();
+        if changed {
+            ticking.sync();
+        }
+    });
     window.run()?;
     Ok(())
 }
@@ -43,9 +59,17 @@ pub(super) fn run(state: State) -> Result<()> {
 struct Gui {
     window: slint::Weak<AppWindow>,
     state: RefCell<State>,
-    /// Key of the row whose diff the window holds: its lines are built when
-    /// the inspector turns to another row, not at each sync.
-    shown_diff: RefCell<Option<String>>,
+    /// Key of the row whose diff the window holds, and how many times the
+    /// repository had been read then: its lines are built when the
+    /// inspector turns to another row or the repository is read again, not
+    /// at each sync.
+    shown_diff: RefCell<Option<(u64, String)>>,
+    /// How many forms the window was given: each is filled in once.
+    shown_form: Cell<u64>,
+    /// What was over the panes at the last sync, which the keyboard goes
+    /// back from as it closes.
+    dialog_shown: Cell<bool>,
+    log_shown: Cell<bool>,
 }
 
 impl Gui {
@@ -65,13 +89,74 @@ impl Gui {
                 gui.update(|state| state.row_pressed(row, control, shift));
             }
         });
+        let shown = window.as_weak();
+        window.on_menu_step(move |from, down| {
+            let menu = shown.upgrade().map(|window| window.get_menu());
+            let entries: Vec<_> = menu.iter().flat_map(slint::Model::iter).collect();
+            model::menu_step(&entries, from, down)
+        });
+        let gui = self.clone();
+        window.on_row_menu(move |row, x, y| {
+            if let Ok(row) = usize::try_from(row) {
+                gui.menu(row, x, y);
+            }
+        });
         let gui = self.clone();
         window.on_key_pressed(move |text| gui.key(&text));
+        let gui = self.clone();
+        window.on_command(move |id| {
+            if let Some(cmd) = Cmd::from_id(id) {
+                gui.update(|state| state.command(cmd));
+            }
+        });
+        let gui = self.clone();
+        window.on_dialog_accepted(move |text, choice| {
+            let choice = usize::try_from(choice).ok();
+            gui.update(|state| state.form_accepted(&text, choice));
+        });
+        let gui = self.clone();
+        window.on_dialog_cancelled(move || gui.update(State::form_cancelled));
+        let gui = self.clone();
+        window.on_dialog_toggled(move |index| {
+            if let Ok(index) = usize::try_from(index) {
+                gui.update(|state| state.form_toggled(index));
+            }
+        });
+        let gui = self.clone();
+        window.on_log_opened(move || gui.update(State::open_log));
+        let gui = self.clone();
+        window.on_log_closed(move || gui.update(State::close_log));
+        let gui = self.clone();
+        window.window().on_close_requested(move || {
+            let closes = gui.state.borrow_mut().may_close();
+            gui.sync();
+            match closes {
+                true => CloseRequestResponse::HideWindow,
+                false => CloseRequestResponse::KeepWindowShown,
+            }
+        });
     }
 
-    /// A key pressed over the panes; false when it is not one of theirs.
+    /// The right button on what stands for the row at `index`, at `x`, `y`
+    /// of the window: its menu opens there.
+    fn menu(&self, index: usize, x: f32, y: f32) {
+        let opens = self.state.borrow_mut().row_menu(index);
+        self.sync();
+        if let (true, Some(window)) = (opens, self.window.upgrade()) {
+            let menu = model::menu(&self.state.borrow().menu());
+            window.set_menu(model_of(menu));
+            window.invoke_show_menu(x, y);
+        }
+    }
+
+    /// A key pressed over the panes; false when it is not one of theirs, or
+    /// something is over them.
     fn key(&self, text: &str) -> bool {
-        let handled = key_pressed(&mut self.state.borrow_mut(), text);
+        let over = {
+            let state = self.state.borrow();
+            state.form().is_some() || state.log_open()
+        };
+        let handled = !over && key_pressed(&mut self.state.borrow_mut(), text);
         if handled && let Some(window) = self.window.upgrade() {
             self.sync();
             // Where a key put the selection may be out of view.
@@ -99,6 +184,9 @@ impl Gui {
         let mut state = self.state.borrow_mut();
         window.set_repository(state.repository().into());
         window.set_heading(state.heading().into());
+        update_model(&window.get_bar(), model::buttons(&state.bar()), |bar| {
+            window.set_bar(bar)
+        });
         window.set_local_changes(model::local_changes(&state));
         update_model(&window.get_changes(), model::changes(&state), |changes| {
             window.set_changes(changes)
@@ -113,19 +201,69 @@ impl Gui {
         window.set_board_width(board.width);
         window.set_board_height(board.height);
 
+        window.set_busy(state.busy());
+        let (level, status) = state.status();
+        window.set_status(model::plain(&status).into());
+        window.set_status_tone(model::tone(level));
+        update_model(
+            &window.get_actions(),
+            model::buttons(&state.actions()),
+            |actions| window.set_actions(actions),
+        );
+        self.sync_over(&window, &state);
+
         let tab_width = state.tab_width();
+        let reads = state.reads();
         let inspected = state.inspected();
         let title = inspected.as_ref().map_or("", |shown| shown.title.as_str());
         window.set_inspector_title(title.into());
-        let key = inspected.as_ref().map(|shown| shown.key);
-        if self.shown_diff.borrow().as_deref() != key {
+        let key = inspected
+            .as_ref()
+            .map(|shown| (reads, shown.key.to_string()));
+        if *self.shown_diff.borrow() != key {
             let diff = inspected.as_ref().map_or("", |shown| shown.diff);
             let rows = model::diff_rows(diff, tab_width);
             window.set_diff_columns(model::columns(&rows));
             window.set_diff(model_of(rows));
             // A list keeps where it was scrolled to across its models.
             window.invoke_diff_to_top();
-            self.shown_diff.replace(key.map(str::to_string));
+            self.shown_diff.replace(key);
+        }
+    }
+
+    /// What is over the panes: the log, then the dialog over it. Whichever
+    /// opens takes the keyboard, and gives it back as it closes.
+    fn sync_over(&self, window: &AppWindow, state: &State) {
+        let log_open = state.log_open();
+        window.set_log_open(log_open);
+        if log_open {
+            let rows = model::log_rows(state.log());
+            window.set_log_columns(model::columns(&rows));
+            update_model(&window.get_log(), rows, |log| window.set_log(log));
+        }
+        let form = state.form();
+        window.set_dialog_open(form.is_some());
+        if let Some(form) = form {
+            let opened = state.forms_opened();
+            if self.shown_form.replace(opened) != opened {
+                window.set_dialog(model::dialog(form));
+                let choice = form.choice.map_or(-1, |choice| choice as i32);
+                window.invoke_open_dialog(form.initial.as_str().into(), choice);
+            } else {
+                // Only its ticks change while it is open.
+                let choices = window.get_dialog().choices;
+                update_model(&choices, model::choices(form), |_| {});
+            }
+        }
+        let was_open = self.dialog_shown.replace(form.is_some());
+        let was_shown = self.log_shown.replace(log_open);
+        if form.is_some() {
+            return;
+        }
+        if log_open && (was_open || !was_shown) {
+            window.invoke_open_log();
+        } else if !log_open && (was_open || was_shown) {
+            window.invoke_focus_panes();
         }
     }
 }

@@ -75,8 +75,46 @@ export struct BoardLine {
     last: bool,
 }
 
-// What a line of a diff is; mirrors `session::diff_text::DiffLine`.
-export enum TextKind { file-header, index, added, removed, hunk-header, context, commit-line, commit-header }
+// What a line is: of a diff, as `session::diff_text::DiffLine` says, or of
+// the log.
+export enum TextKind { file-header, index, added, removed, hunk-header, context, commit-line, commit-header, command, success, warning, failure }
+
+// A command as a menu, the inspector or the bar offers it; `id` names it,
+// -1 for the line between two groups of a menu.
+export struct MenuEntry {
+    id: int,
+    title: string,
+    // Whether the selection is something it takes.
+    enabled: bool,
+}
+
+// How the status bar says something; mirrors `core::ui::Level`.
+export enum Tone { plain, success, warn, error }
+
+// An item of a dialog's list to pick from or tick, or a heading over some.
+export struct Choice {
+    text: string,
+    heading: bool,
+    checked: bool,
+}
+
+// A question over the window, or what went wrong.
+export struct Dialog {
+    // The command asking.
+    title: string,
+    body: string,
+    detail: string,
+    // Why the last answer was refused.
+    error: string,
+    // Whether a line is typed.
+    line: bool,
+    placeholder: string,
+    choices: [Choice],
+    // Whether any number of the choices are ticked, rather than one picked.
+    multi: bool,
+    confirm: string,
+    cancellable: bool,
+}
 
 export struct TextRow {
     text: string,

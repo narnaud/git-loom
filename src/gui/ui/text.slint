@@ -2,7 +2,8 @@ import { ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { TextRow, TextKind } from "types.slint";
 
-// Read-only monospace lines, each colored for what it is in a diff.
+// Read-only monospace lines, each colored for what it is in a diff or the
+// log.
 export component TextView inherits Rectangle {
     in property <[TextRow]> lines;
     // How many characters the longest line has.
@@ -12,6 +13,11 @@ export component TextView inherits Rectangle {
     public function to-start() {
         list.content-x = 0;
         list.content-y = 0;
+    }
+
+    // Down to the last line.
+    public function to-end() {
+        list.content-y = Math.min(0, list.visible-height - list.content-height);
     }
 
     // Ten characters of the font, to measure one by.
@@ -39,10 +45,11 @@ export component TextView inherits Rectangle {
                     text: line.text;
                     font-family: Theme.mono-family;
                     font-size: 13px;
-                    font-weight: line.kind == TextKind.file-header ? 700 : 400;
+                    font-weight: line.kind == TextKind.file-header || line.kind == TextKind.command ? 700 : 400;
                     vertical-alignment: center;
-                    color: line.kind == TextKind.added ? Theme.added
-                        : line.kind == TextKind.removed ? Theme.removed
+                    color: line.kind == TextKind.added || line.kind == TextKind.success ? Theme.added
+                        : line.kind == TextKind.removed || line.kind == TextKind.failure ? Theme.removed
+                        : line.kind == TextKind.warning ? Theme.warn
                         : line.kind == TextKind.hunk-header ? Theme.hunk
                         : line.kind == TextKind.index || line.kind == TextKind.commit-line ? Theme.dim
                         : Theme.text;

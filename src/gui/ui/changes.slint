@@ -11,6 +11,8 @@ export component ChangesView inherits Rectangle {
 
     // The left button went down on the line standing for `row`.
     callback pressed(row: int, control: bool, shift: bool);
+    // The right button did, at `x`, `y` of the window.
+    callback menu-asked(row: int, x: length, y: length);
 
     property <length> line-height: 26px;
 
@@ -36,6 +38,8 @@ export component ChangesView inherits Rectangle {
                 pointer-event(event) => {
                     if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
                         root.pressed(root.local.row, event.modifiers.control, event.modifiers.shift);
+                    } else if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                        root.menu-asked(root.local.row, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
                     }
                 }
             }
@@ -75,6 +79,8 @@ export component ChangesView inherits Rectangle {
                 pointer-event(event) => {
                     if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
                         root.pressed(change.row, event.modifiers.control, event.modifiers.shift);
+                    } else if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                        root.menu-asked(change.row, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
                     }
                 }
 

@@ -1,6 +1,7 @@
 use super::*;
 use crate::core::repo::{FileChange, RepoInfo};
 use crate::core::test_helpers::{base_info, branch};
+use crate::core::ui::Level;
 use crate::gui::state::tests::{info, row, select, state, state_in, state_of};
 use crate::session::paused::test_support::repo_with_a_paused_drop;
 
@@ -365,4 +366,116 @@ fn the_longest_line_counts_its_characters_not_its_bytes() {
 
     assert_eq!(columns(&rows), 14);
     assert_eq!(columns(&[]), 0);
+}
+
+#[test]
+fn a_message_drops_the_backticks_the_cli_highlights_with() {
+    assert_eq!(
+        plain("Dropped `a.rs` from `feature`"),
+        "Dropped a.rs from feature"
+    );
+    assert_eq!(plain("an `odd one"), "an `odd one", "one alone is kept");
+    assert_eq!(plain(""), "");
+}
+
+#[test]
+fn the_log_reads_each_command_then_what_it_said() {
+    let log = [
+        LogEntry {
+            command: "loom drop a".to_string(),
+            lines: vec![
+                (Level::Plain, "git said".to_string()),
+                (
+                    Level::Success,
+                    "Dropped `a`\nIts commits went too".to_string(),
+                ),
+            ],
+        },
+        LogEntry {
+            command: "loom push b".to_string(),
+            lines: vec![
+                (Level::Warn, "Nothing new".to_string()),
+                (Level::Error, "Push refused".to_string()),
+            ],
+        },
+    ];
+
+    let rows = log_rows(&log);
+
+    let read: Vec<(&str, TextKind)> = rows
+        .iter()
+        .map(|row| (row.text.as_str(), row.kind))
+        .collect();
+    assert_eq!(
+        read,
+        [
+            ("$ loom drop a", TextKind::Command),
+            ("git said", TextKind::Context),
+            ("• Dropped a", TextKind::Success),
+            ("  › Its commits went too", TextKind::Index),
+            ("", TextKind::Context),
+            ("$ loom push b", TextKind::Command),
+            ("! Nothing new", TextKind::Warning),
+            ("! Push refused", TextKind::Failure),
+        ]
+    );
+    assert_eq!(log_rows(&[])[0].text, "No command has run yet.");
+}
+
+#[test]
+fn the_keys_step_over_the_lines_and_greyed_entries_of_a_menu() {
+    let entry = |id: i32, enabled: bool| MenuEntry {
+        id,
+        enabled,
+        ..Default::default()
+    };
+    let menu = [
+        entry(0, true),
+        entry(-1, false),
+        entry(1, false),
+        entry(2, true),
+    ];
+
+    assert_eq!(menu_step(&menu, -1, true), 0);
+    assert_eq!(menu_step(&menu, 0, true), 3);
+    assert_eq!(menu_step(&menu, 3, true), 3);
+    assert_eq!(menu_step(&menu, 3, false), 0);
+    assert_eq!(menu_step(&menu, -1, false), 3);
+    assert_eq!(menu_step(&[entry(0, false)], -1, true), -1);
+}
+
+#[test]
+fn a_menu_draws_a_line_between_its_groups() {
+    let mut state = state();
+    select(&mut state, "local changes", &[]);
+
+    let menu = menu(&state.menu());
+
+    let read: Vec<(&str, bool)> = menu
+        .iter()
+        .map(|entry| (entry.title.as_str(), entry.id < 0))
+        .collect();
+    assert_eq!(
+        read,
+        [
+            ("Absorb", false),
+            ("", true),
+            ("Drop all local changes", false)
+        ]
+    );
+}
+
+#[test]
+fn a_dialog_reads_its_form_without_backticks_but_for_the_command() {
+    let form = Form::notice("loom drop `a`", "Could not drop `a`\nRun `loom trace`");
+
+    let dialog = dialog(&form);
+
+    assert_eq!(dialog.title, "loom drop `a`");
+    assert_eq!(dialog.body, "Could not drop a");
+    assert_eq!(dialog.detail, "Run loom trace");
+    assert_eq!(
+        (dialog.confirm.as_str(), dialog.cancellable),
+        ("Close", false)
+    );
 }
