@@ -34,11 +34,13 @@ pub(crate) enum Cmd {
     Split,
     /// A commit, at the hunks picked.
     SplitHunks,
+    /// The hunks picked of the local changes.
+    CommitHunks,
 }
 
 impl Cmd {
     /// Every command, each at the index the window names it by.
-    const ALL: [Cmd; 14] = [
+    const ALL: [Cmd; 15] = [
         Cmd::Absorb,
         Cmd::Drop,
         Cmd::Uncommit,
@@ -53,6 +55,7 @@ impl Cmd {
         Cmd::Branch,
         Cmd::Split,
         Cmd::SplitHunks,
+        Cmd::CommitHunks,
     ];
 
     pub(crate) fn id(self) -> i32 {
@@ -74,7 +77,7 @@ impl Cmd {
             Cmd::TakeRemote | Cmd::Update => "update",
             Cmd::Unmerge => "unmerge",
             Cmd::Merge => "merge",
-            Cmd::Commit => "commit",
+            Cmd::Commit | Cmd::CommitHunks => "commit",
             Cmd::Reword => "reword",
             Cmd::Branch => "branch",
             Cmd::Split | Cmd::SplitHunks => "split",
@@ -103,12 +106,18 @@ pub(crate) struct Entry {
 fn groups(row: &Row) -> &'static [&'static [(Cmd, &'static str)]] {
     match row.kind {
         RowKind::LocalChanges { .. } => &[
-            &[(Cmd::Commit, "Commit…")],
+            &[
+                (Cmd::Commit, "Commit…"),
+                (Cmd::CommitHunks, "Commit hunks…"),
+            ],
             &[(Cmd::Absorb, "Absorb")],
             &[(Cmd::Drop, "Drop all local changes")],
         ],
         RowKind::WorkingFile { .. } => &[
-            &[(Cmd::Commit, "Commit…")],
+            &[
+                (Cmd::Commit, "Commit…"),
+                (Cmd::CommitHunks, "Commit hunks…"),
+            ],
             &[(Cmd::Absorb, "Absorb")],
             &[(Cmd::Drop, "Drop")],
         ],
@@ -141,7 +150,11 @@ fn groups(row: &Row) -> &'static [&'static [(Cmd, &'static str)]] {
 }
 
 /// The buttons under the local changes, left to right.
-const COMMIT_BUTTONS: [(Cmd, &str); 2] = [(Cmd::Absorb, "Absorb"), (Cmd::Commit, "Commit…")];
+const COMMIT_BUTTONS: [(Cmd, &str); 3] = [
+    (Cmd::Absorb, "Absorb"),
+    (Cmd::CommitHunks, "Hunks…"),
+    (Cmd::Commit, "Commit…"),
+];
 
 /// What the bar offers, whatever is selected.
 const BAR: [(Cmd, &str); 2] = [
@@ -257,6 +270,11 @@ impl State {
         }
         let rows = self.selection();
         let action = match cmd {
+            Cmd::CommitHunks => {
+                // Of every local change, the ones selected kept at first.
+                commands::commit_files(&rows)?;
+                return PickFor::commit_hunks(&self.snapshot.info).map(Made::Pick);
+            }
             Cmd::SplitHunks => {
                 return match commands::split(&self.snapshot, &rows)? {
                     Split::Hunks(commit) => Ok(Made::Pick(PickFor::Split { commit })),
@@ -324,6 +342,13 @@ impl State {
                     }
                     [_] => "1 file".to_string(),
                     files => format!("{} files", files.len()),
+                };
+                self.commit_form(what)
+            }
+            Action::CommitHunks { hunks, .. } => {
+                let what = match hunks.ids.len() {
+                    1 => "1 hunk".to_string(),
+                    n => format!("{n} hunks"),
                 };
                 self.commit_form(what)
             }

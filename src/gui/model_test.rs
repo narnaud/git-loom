@@ -460,6 +460,7 @@ fn a_menu_draws_a_line_between_its_groups() {
         read,
         [
             ("Commit…", false),
+            ("Commit hunks…", false),
             ("", true),
             ("Absorb", false),
             ("", true),

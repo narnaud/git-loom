@@ -197,7 +197,7 @@ impl Form {
     /// the input left as it started. A commit's message is new, whatever it
     /// starts from.
     pub(crate) fn complete_with(&mut self, action: Action) {
-        if !matches!(action, Action::Commit { .. }) {
+        if !matches!(action, Action::Commit { .. } | Action::CommitHunks { .. }) {
             self.was = self.initial.clone();
         }
         self.purpose = Purpose::Complete(action);
@@ -233,8 +233,8 @@ impl State {
     }
 
     /// The form was dismissed. A prompt's command is told so: it waits for
-    /// an answer. A split of hunks picked ends as its picker cancelled does:
-    /// the log holds their read.
+    /// an answer. A split or a commit of hunks picked ends as its picker
+    /// cancelled does: the log holds their read.
     pub(crate) fn form_cancelled(&mut self) {
         match self.form.take().map(|form| form.purpose) {
             Some(Purpose::Prompt { reply, .. }) => {
@@ -243,6 +243,10 @@ impl State {
             Some(Purpose::Complete(Action::Split { hunks: Some(_), .. })) => {
                 self.worker.log_line(Level::Warn, "Cancelled");
                 self.say(Level::Plain, "split cancelled");
+            }
+            Some(Purpose::Complete(Action::CommitHunks { .. })) => {
+                self.worker.log_line(Level::Warn, "Cancelled");
+                self.say(Level::Plain, "commit cancelled");
             }
             _ => {}
         }
@@ -326,6 +330,12 @@ impl State {
                         *to = self.drafted(&form.dests, dest, &typed);
                         *message = Some(typed);
                     }
+                    Action::CommitHunks {
+                        dest: to, message, ..
+                    } => {
+                        *to = self.drafted(&form.dests, dest, &typed);
+                        *message = typed;
+                    }
                     Action::Split { message, .. } => *message = Some(typed),
                     Action::Reword { message, .. } => {
                         // A branch renamed is followed to its row.
@@ -365,7 +375,9 @@ fn refusal(form: &Form, text: &str, dest: usize) -> Option<&'static str> {
         Purpose::Prompt { .. } if form.multi && !form.choices.iter().any(|c| c.checked) => {
             Some("Tick at least one")
         }
-        Purpose::Complete(Action::Commit { .. }) if form.dests.get(dest).is_none() => {
+        Purpose::Complete(Action::Commit { .. } | Action::CommitHunks { .. })
+            if form.dests.get(dest).is_none() =>
+        {
             Some("Pick where the commit goes")
         }
         Purpose::Complete(_) if empty && form.input == Input::Text => Some("The message is empty"),

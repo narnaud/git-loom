@@ -1384,7 +1384,7 @@ impl<'a> App<'a> {
     fn start_pick(&mut self, origin: String, purpose: PickFor) {
         let all = self.snapshot.ids.get_unstaged();
         let command = purpose.command_line(all, |target| self.sid_of(target));
-        let read = purpose.read(all);
+        let read = purpose.read();
         let workdir = self.snapshot.workdir.clone();
         let job = self
             .worker
@@ -2626,6 +2626,8 @@ impl ShellApp for App<'_> {
                 let staged = self.select_and_stage(entries, terminal);
                 self.finish_pick(staged, origin);
             }
+            // The window's: the TUI's `C` stages its pick.
+            PickFor::CommitHunks => {}
             PickFor::Split { commit } => {
                 let picked =
                     run_hunk_selector_nested(entries, self.theme.clone(), "SPLIT", terminal);

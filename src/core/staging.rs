@@ -108,7 +108,13 @@ pub(crate) fn binary_stamp(workdir: &Path, entries: &[FileEntry]) -> Vec<Option<
 /// the `binary_stamp` of its entries, which it lists only as a label, so a
 /// replay after one changed on disk is refused rather than stage it (Spec 019).
 fn binary_source(workdir: &Path, entries: &[FileEntry]) -> String {
-    binary_stamp(workdir, entries)
+    stamp_source(&binary_stamp(workdir, entries))
+}
+
+/// [`binary_source`] of a listing whose `binary_stamp` was `stamp`: what a
+/// pick read earlier is fingerprinted against to match a replay.
+pub(crate) fn stamp_source(stamp: &[Option<git2::Oid>]) -> String {
+    stamp
         .iter()
         .map(|oid| oid.map_or_else(|| "-".to_string(), |oid| oid.to_string()))
         .collect::<Vec<_>>()
