@@ -161,15 +161,20 @@ pub(crate) fn absorb(info: &RepoInfo, rows: &[&Row], selecting: bool) -> Result<
         return Err("no local changes");
     }
     let is_file = |r: &&Row| matches!(r.kind, RowKind::WorkingFile { .. });
+    // An empty selection, or an unnamed file, would stand for every change.
     if selecting
-        && !rows
-            .iter()
-            .all(|r| is_file(r) || matches!(r.kind, RowKind::LocalChanges { .. }))
+        && (rows.is_empty()
+            || !rows
+                .iter()
+                .all(|r| is_file(r) || matches!(r.kind, RowKind::LocalChanges { .. })))
     {
         return Err("select files or local changes");
     }
-    let files = if rows.iter().all(is_file) {
-        rows.iter().filter_map(|r| r.target.clone()).collect()
+    let files = if !rows.is_empty() && rows.iter().all(is_file) {
+        rows.iter()
+            .map(|r| r.target.clone().filter(|t| !t.is_empty()))
+            .collect::<Option<Vec<String>>>()
+            .ok_or("this row has nothing to absorb")?
     } else {
         Vec::new()
     };
