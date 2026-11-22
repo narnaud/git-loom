@@ -2,17 +2,23 @@
 
 import { Button, Palette } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { Piece, PieceKind, BoardLine, Strand, Remote, TextRow, TextKind } from "types.slint";
+import { LocalChanges, ChangeKind, ChangeRow, Piece, PieceKind, BoardLine, Strand, Remote, TextRow, TextKind } from "types.slint";
+import { ChangesView } from "changes.slint";
 import { BoardView } from "board.slint";
 import { InspectorView } from "inspector.slint";
 
-export { Theme, Piece, PieceKind, BoardLine, Strand, Remote, TextRow, TextKind }
+export { Theme, LocalChanges, ChangeKind, ChangeRow, Piece, PieceKind, BoardLine, Strand, Remote, TextRow, TextKind }
 
 export component AppWindow inherits Window {
     // The directory of the working tree.
     in property <string> repository;
     // The integration branch, or the operation paused on it.
     in property <string> heading;
+
+    // The local changes pane, which lists nothing while an operation is
+    // paused.
+    in property <LocalChanges> local-changes;
+    in property <[ChangeRow]> changes;
 
     // The board, which has nothing on it while an operation is paused.
     in property <[Piece]> pieces;
@@ -27,9 +33,15 @@ export component AppWindow inherits Window {
 
     callback board-resized(room: length);
     callback board-toggled(row: int);
-    callback board-pressed(row: int, control: bool, shift: bool);
+    // The left button went down on a line of the local changes or a piece
+    // of the board.
+    callback row-pressed(row: int, control: bool, shift: bool);
     // Whether the key was one of the window's.
     callback key-pressed(text: string) -> bool;
+
+    public function reveal-in-changes(index: int) {
+        changes-pane.reveal(index);
+    }
 
     public function reveal-on-board(y: length, h: length) {
         board.reveal(y, h);
@@ -39,13 +51,15 @@ export component AppWindow inherits Window {
         inspector.to-top();
     }
 
-    // The share of the width the board takes.
+    // The share of the room right of the local changes the board takes.
     property <float> split: 0.46;
 
     title: root.repository + " — git-loom";
-    preferred-width: 1200px;
+    preferred-width: 1280px;
     preferred-height: 760px;
-    min-width: 640px;
+    // The local changes, the board and the inspector at their narrowest,
+    // and the dividers.
+    min-width: 882px;
     min-height: 360px;
     background: Theme.board;
     forward-focus: keys;
@@ -76,14 +90,39 @@ export component AppWindow inherits Window {
                 root.key-pressed(event.text) ? accept : reject
             }
 
+            // Where the divider right of the local changes was dragged to, and
+            // where it is: no nearer than their buttons need, nor further
+            // than leaves the board and the inspector their narrowest and the
+            // dividers.
+            property <length> changes-dragged: 260px;
+            property <length> changes-width: Math.max(260px, Math.min(self.changes-dragged, self.width - 622px));
+            // What the board and the inspector share.
+            property <length> room: self.width - self.changes-width - 1px;
             // Where the inspector starts. The board keeps room for its narrowest
             // frame and margins (`board.rs`), the inspector 280 px and the
             // divider.
-            property <length> left: Math.max(340px, Math.min(self.width - 281px, self.width * root.split));
+            property <length> left: self.changes-width + 1px + Math.max(340px, Math.min(self.room - 281px, self.room * root.split));
+
+            changes-pane := ChangesView {
+                x: 0;
+                width: keys.changes-width;
+                local: root.local-changes;
+                changes: root.changes;
+                pressed(row, control, shift) => {
+                    keys.focus();
+                    root.row-pressed(row, control, shift);
+                }
+            }
+
+            Rectangle {
+                x: keys.changes-width;
+                width: 1px;
+                background: Theme.border;
+            }
 
             board := BoardView {
-                x: 0;
-                width: keys.left;
+                x: keys.changes-width + 1px;
+                width: keys.left - self.x;
                 pieces: root.pieces;
                 lines: root.lines;
                 board-width: root.board-width;
@@ -96,7 +135,7 @@ export component AppWindow inherits Window {
                 }
                 pressed(row, control, shift) => {
                     keys.focus();
-                    root.board-pressed(row, control, shift);
+                    root.row-pressed(row, control, shift);
                 }
             }
 
@@ -116,14 +155,31 @@ export component AppWindow inherits Window {
                 placeholder: root.pieces.length > 0 ? "Select a branch, a commit or a file to see its diff." : "";
             }
 
-            // Wider than the divider it moves, and over both panes.
+            // Each wider than the divider it moves, and over the panes either side.
+            changes-grab := TouchArea {
+                x: keys.changes-width - 3px;
+                width: 7px;
+                mouse-cursor: MouseCursor.col-resize;
+                moved => {
+                    if self.pressed {
+                        keys.changes-dragged = Math.max(260px, Math.min(keys.width - 622px, self.x + self.mouse-x));
+                    }
+                }
+
+                if changes-grab.pressed: Rectangle {
+                    x: 2px;
+                    width: 3px;
+                    background: Theme.accent;
+                }
+            }
+
             grab := TouchArea {
                 x: keys.left - 3px;
                 width: 7px;
                 mouse-cursor: MouseCursor.col-resize;
                 moved => {
                     if self.pressed {
-                        root.split = Math.max(0.1, Math.min(0.9, (self.x + self.mouse-x) / keys.width));
+                        root.split = Math.max(0.1, Math.min(0.9, (self.x + self.mouse-x - keys.changes-width - 1px) / keys.room));
                     }
                 }
 

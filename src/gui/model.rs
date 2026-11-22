@@ -1,15 +1,76 @@
-//! The board and diff text as the window's models hold them.
+//! The local changes, the board and diff text as the window's models hold
+//! them.
 
 use std::rc::Rc;
 
 use slint::{Model, ModelRc, VecModel};
 
+use crate::core::graph::{self, FileGroup};
 use crate::core::repo::{self, RemoteStatus};
 use crate::gui::board::{self, Board, LineKind, PieceKind};
 use crate::gui::state::State;
-use crate::gui::ui::{BoardLine, Piece, PieceKind as Kind, Remote, Strand, TextKind, TextRow};
+use crate::gui::ui::{
+    BoardLine, ChangeKind, ChangeRow, LocalChanges, Piece, PieceKind as Kind, Remote, Strand,
+    TextKind, TextRow,
+};
 use crate::session::diff_text::{self, DiffLine, expand_tabs};
 use crate::session::tree::RowKind;
+
+/// The header of the local changes pane, standing for them all.
+pub(crate) fn local_changes(state: &State) -> LocalChanges {
+    let header = state
+        .local_changes()
+        .and_then(|index| match state.rows()[index].kind {
+            RowKind::LocalChanges { count } => Some((index, count)),
+            _ => None,
+        });
+    let Some((index, count)) = header else {
+        return LocalChanges {
+            row: -1,
+            ..Default::default()
+        };
+    };
+    LocalChanges {
+        row: index as i32,
+        hint: match count {
+            0 => "no changes".into(),
+            count => counted(count, "file").into(),
+        },
+        selected: state.is_selected(&state.rows()[index]),
+    }
+}
+
+/// The files of the local changes pane, each with what its line reads.
+pub(crate) fn changes(state: &State) -> Vec<ChangeRow> {
+    let rows = state
+        .local_files()
+        .map(|index| (index, &state.rows()[index]));
+    let files = rows.filter_map(|(index, row)| match &row.kind {
+        RowKind::WorkingFile {
+            path,
+            index: staged,
+            worktree,
+        } => {
+            let mut out = ChangeRow {
+                row: index as i32,
+                path: repo::cwd_relative_path(path, state.cwd_prefix()).into(),
+                selected: state.is_selected(row),
+                ..Default::default()
+            };
+            match graph::file_group(*staged, *worktree) {
+                FileGroup::Conflicted => out.kind = ChangeKind::Conflicted,
+                FileGroup::Untracked => out.kind = ChangeKind::Untracked,
+                FileGroup::Tracked => {
+                    out.staged = staged.to_string().into();
+                    out.unstaged = worktree.to_string().into();
+                }
+            }
+            Some(out)
+        }
+        _ => None,
+    });
+    files.collect()
+}
 
 /// The pieces of the board, each with what it reads.
 pub(crate) fn pieces(state: &State) -> Vec<Piece> {

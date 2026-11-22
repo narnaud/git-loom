@@ -81,7 +81,7 @@ pub(crate) fn state() -> State {
 /// Index of the row that reads `text`: a path, a branch name, a message.
 pub(crate) fn row(state: &State, text: &str) -> usize {
     let found = state.rows.iter().position(|r| match &r.kind {
-        RowKind::CommitFile { path, .. } => path == text,
+        RowKind::CommitFile { path, .. } | RowKind::WorkingFile { path, .. } => path == text,
         RowKind::BranchName { name, .. } => name == text,
         RowKind::Commit { message, .. } => message == text,
         RowKind::Upstream { .. } => text == "upstream",
@@ -99,17 +99,27 @@ pub(crate) fn select(state: &mut State, first: &str, more: &[&str]) {
     }
 }
 
-/// What the selected rows read, in tree order.
-pub(crate) fn selected(state: &State) -> Vec<String> {
-    let rows = state.rows.iter().filter(|row| state.is_selected(row));
-    let reading = rows.map(|row| match &row.kind {
-        RowKind::CommitFile { path, .. } => path.clone(),
+/// What `row` reads, as [`row`] finds it.
+fn reads(row: &Row) -> String {
+    match &row.kind {
+        RowKind::CommitFile { path, .. } | RowKind::WorkingFile { path, .. } => path.clone(),
         RowKind::BranchName { name, .. } => name.clone(),
         RowKind::Commit { message, .. } => message.clone(),
         RowKind::Upstream { .. } => "upstream".to_string(),
-        _ => "not on the board".to_string(),
-    });
-    reading.collect()
+        RowKind::LocalChanges { .. } => "local changes".to_string(),
+        _ => "not shown".to_string(),
+    }
+}
+
+/// What the selected rows read, in tree order.
+pub(crate) fn selected(state: &State) -> Vec<String> {
+    let rows = state.rows.iter().filter(|row| state.is_selected(row));
+    rows.map(reads).collect()
+}
+
+/// What the rows the local changes pane lists read.
+fn listed(state: &State) -> Vec<String> {
+    state.listed().map(|i| reads(&state.rows[i])).collect()
 }
 
 /// Whether a row of the tree reads `text`.
@@ -374,7 +384,28 @@ fn what_does_not_open_ignores_being_toggled() {
     state.row_toggled(rows);
 
     assert_eq!(state.rows.len(), rows);
-    assert!(state.expanded.is_empty() && state.collapsed.is_empty());
+    let local = HashSet::from([tree::LOCAL_CHANGES_KEY.to_string()]);
+    assert_eq!(state.expanded, local, "the local changes are always open");
+    assert!(state.collapsed.is_empty());
+}
+
+#[test]
+fn the_local_changes_pane_lists_what_stands_for_them_all_then_each_file() {
+    let state = state();
+
+    assert_eq!(listed(&state), ["local changes", "a.rs", "b.rs", "new.rs"]);
+}
+
+#[test]
+fn the_local_changes_are_not_listed_while_an_operation_is_paused() {
+    let (repo, _) = repo_with_a_paused_drop();
+    let mut state = repo.in_dir(State::load).unwrap();
+
+    assert!(listed(&state).is_empty());
+
+    state.row_pressed(row(&state, "local changes"), false, false);
+    state.move_cursor(true);
+    assert!(selected(&state).is_empty());
 }
 
 #[test]
@@ -494,22 +525,51 @@ fn the_upstream_is_selected_alone() {
 }
 
 #[test]
-fn a_press_on_a_row_the_board_has_no_piece_for_selects_nothing() {
+fn a_local_change_is_selected_as_a_piece_is_and_keeps_to_its_class() {
+    let mut state = state();
+
+    select(&mut state, "a.rs", &["new.rs", "local changes", "Loose"]);
+    assert_eq!(selected(&state), ["a.rs", "new.rs"]);
+
+    select(&mut state, "local changes", &["b.rs"]);
+    assert_eq!(
+        selected(&state),
+        ["local changes"],
+        "which stands for them all"
+    );
+}
+
+#[test]
+fn shift_click_from_a_local_file_onto_the_board_keeps_to_the_local_files() {
+    let mut state = state();
+    select(&mut state, "a.rs", &[]);
+
+    state.row_pressed(row(&state, "Loose"), false, true);
+
+    assert_eq!(selected(&state), ["a.rs", "b.rs", "new.rs"]);
+}
+
+#[test]
+fn a_press_on_a_row_neither_pane_shows_selects_nothing() {
     let mut state = state();
     select(&mut state, "On a", &[]);
+    let spacer = state
+        .rows
+        .iter()
+        .position(|r| matches!(r.kind, RowKind::Spacer(_)));
 
-    state.row_pressed(row(&state, "local changes"), false, false);
+    state.row_pressed(spacer.unwrap(), false, false);
     state.row_pressed(state.rows.len(), false, false);
 
     assert_eq!(selected(&state), ["On a"]);
 }
 
 #[test]
-fn the_arrow_keys_step_through_the_pieces_of_the_board_and_stop_at_its_ends() {
+fn the_arrow_keys_step_through_the_local_changes_then_the_board_and_stop_at_its_ends() {
     let mut state = state();
     let mut walk = Vec::new();
 
-    for _ in 0..8 {
+    for _ in 0..12 {
         state.move_cursor(true);
         walk.extend(selected(&state));
     }
@@ -517,6 +577,10 @@ fn the_arrow_keys_step_through_the_pieces_of_the_board_and_stop_at_its_ends() {
     assert_eq!(
         walk,
         [
+            "local changes",
+            "a.rs",
+            "b.rs",
+            "new.rs",
             "Loose",
             "feature-b",
             "Second on b",
@@ -527,10 +591,10 @@ fn the_arrow_keys_step_through_the_pieces_of_the_board_and_stop_at_its_ends() {
             "upstream",
         ]
     );
-    for _ in 0..8 {
+    for _ in 0..12 {
         state.move_cursor(false);
     }
-    assert_eq!(selected(&state), ["Loose"]);
+    assert_eq!(selected(&state), ["local changes"]);
 }
 
 #[test]
@@ -586,6 +650,20 @@ fn left_on_a_file_goes_up_to_its_commit() {
 }
 
 #[test]
+fn left_on_a_local_file_goes_up_to_the_local_changes_which_stay_listed() {
+    let mut state = state();
+    select(&mut state, "new.rs", &[]);
+
+    state.collapse_cursor();
+    assert_eq!(selected(&state), ["local changes"]);
+
+    state.collapse_cursor();
+    state.expand_cursor();
+    assert_eq!(selected(&state), ["local changes"]);
+    assert_eq!(listed(&state).len(), 4);
+}
+
+#[test]
 fn what_is_closed_over_selected_rows_takes_them_out_of_the_selection() {
     let mut state = state();
     select(&mut state, "First on b", &["On a"]);
@@ -622,6 +700,25 @@ fn the_window_is_told_where_the_selection_was_last_put() {
     assert_eq!(rect, piece.unwrap().rect);
 }
 
+#[test]
+fn the_window_is_told_which_local_file_the_selection_was_last_put_on() {
+    let mut state = state();
+
+    select(&mut state, "a.rs", &["new.rs"]);
+    assert_eq!(state.cursor_change(), Some(2));
+    assert_eq!(state.cursor_rect(), None, "which is not on the board");
+
+    state.clear_selection();
+    assert_eq!(state.cursor_change(), None, "nothing to keep in view");
+
+    select(&mut state, "local changes", &[]);
+    assert_eq!(state.cursor_change(), None, "which is always in view");
+
+    select(&mut state, "On a", &[]);
+    assert_eq!(state.cursor_change(), None);
+    assert!(state.cursor_rect().is_some());
+}
+
 /// As in the TUI: the arrow keys go on from where they were.
 #[test]
 fn the_arrow_keys_go_on_from_the_piece_that_hid_the_one_they_were_on() {
@@ -649,10 +746,11 @@ fn closing_a_card_puts_the_arrow_keys_on_it_from_its_file() {
 #[test]
 fn an_arrow_key_at_either_end_selects_the_piece_it_is_on_alone() {
     let mut state = state();
-    select(&mut state, "On a", &["Loose"]);
+    select(&mut state, "local changes", &[]);
+    state.clear_selection();
 
     state.move_cursor(false);
-    assert_eq!(selected(&state), ["Loose"]);
+    assert_eq!(selected(&state), ["local changes"]);
 
     select(&mut state, "upstream", &[]);
     state.clear_selection();
@@ -686,13 +784,15 @@ fn the_inspector_names_each_kind_of_piece() {
         inspected_title(&mut state).unwrap()
     };
 
+    assert_eq!(title("local changes"), "Local changes");
+    assert_eq!(title("b.rs"), "b.rs");
     assert_eq!(title("feature-a"), "Branch feature-a");
     assert_eq!(title("Second on b"), format!("{commit}  Second on b"));
     assert_eq!(title("y.rs"), format!("y.rs  in {commit}"));
     assert_eq!(title("upstream"), "Upstream origin/main");
 }
 
-/// As the board writes the path of that file (Spec 001).
+/// As the board and the local changes write the path of that file (Spec 001).
 #[test]
 fn the_inspector_names_a_file_from_the_directory_the_window_started_in() {
     let mut state = state_in(info(), "docs");
@@ -702,6 +802,24 @@ fn the_inspector_names_a_file_from_the_directory_the_window_started_in() {
     let title = inspected_title(&mut state).unwrap();
 
     assert!(title.starts_with("../z.rs  in "), "{title}");
+    select(&mut state, "a.rs", &[]);
+    assert_eq!(inspected_title(&mut state).unwrap(), "../a.rs");
+}
+
+#[test]
+fn the_inspector_shows_the_diff_of_a_local_file_and_of_all_of_them() {
+    let repo = TestRepo::new_with_remote();
+    repo.commit("Loose on the line", "loose.txt");
+    repo.write_file("loose.txt", "new line\n");
+    let mut state = repo.in_dir(State::load).unwrap();
+
+    select(&mut state, "loose.txt", &[]);
+    let file = state.inspected().unwrap().diff.to_string();
+    select(&mut state, "local changes", &[]);
+    let all = state.inspected().unwrap().diff.to_string();
+
+    assert!(file.contains("+new line"), "{file}");
+    assert!(all.contains("+new line"), "{all}");
 }
 
 #[test]

@@ -1,7 +1,71 @@
 use super::*;
-use crate::core::repo::RepoInfo;
+use crate::core::repo::{FileChange, RepoInfo};
 use crate::core::test_helpers::{base_info, branch};
 use crate::gui::state::tests::{info, row, select, state, state_in, state_of};
+use crate::session::paused::test_support::repo_with_a_paused_drop;
+
+#[test]
+fn the_local_changes_are_headed_by_how_many_files_there_are() {
+    let mut state = state();
+
+    let header = local_changes(&state);
+
+    assert_eq!(header.row, row(&state, "local changes") as i32);
+    assert_eq!((header.hint.as_str(), header.selected), ("3 files", false));
+    select(&mut state, "local changes", &[]);
+    assert!(local_changes(&state).selected);
+    let mut one = info();
+    one.working_changes.truncate(1);
+    assert_eq!(local_changes(&state_of(one)).hint, "1 file");
+    let mut none = info();
+    none.working_changes.clear();
+    assert_eq!(local_changes(&state_of(none)).hint, "no changes");
+}
+
+#[test]
+fn a_local_change_reads_its_status_letters_or_its_mark_then_its_path() {
+    let mut info = info();
+    info.working_changes.push(FileChange {
+        path: "docs/clash.md".to_string(),
+        index: '!',
+        worktree: '!',
+    });
+    let mut state = state_in(info, "docs");
+    select(&mut state, "b.rs", &[]);
+
+    let changes = changes(&state);
+
+    let reading = changes.iter().map(|change| {
+        let letters = format!("{}{}", change.staged, change.unstaged);
+        (change.kind, letters, change.path.as_str(), change.selected)
+    });
+    assert_eq!(
+        reading.collect::<Vec<_>>(),
+        [
+            (ChangeKind::Conflicted, String::new(), "clash.md", false),
+            (ChangeKind::Tracked, "M ".to_string(), "../a.rs", false),
+            (ChangeKind::Tracked, " M".to_string(), "../b.rs", true),
+            (ChangeKind::Untracked, String::new(), "../new.rs", false),
+        ]
+    );
+    assert_eq!(changes[2].row, row(&state, "b.rs") as i32);
+    // The window scrolls the pane by that position.
+    assert_eq!(state.cursor_change(), Some(2));
+}
+
+#[test]
+fn nothing_stands_for_the_local_changes_while_an_operation_is_paused() {
+    let (repo, _) = repo_with_a_paused_drop();
+
+    let state = repo.in_dir(State::load).unwrap();
+
+    let nothing = LocalChanges {
+        row: -1,
+        ..Default::default()
+    };
+    assert_eq!(local_changes(&state), nothing);
+    assert!(changes(&state).is_empty());
+}
 
 fn find<'a>(pieces: &'a [Piece], reading: &str) -> &'a Piece {
     let found = pieces

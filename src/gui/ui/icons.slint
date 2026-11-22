@@ -1,6 +1,6 @@
 // Small stroked icons, drawn rather than typed: the UI font has no glyph for
 // most of them.
-export enum IconKind { chevron-right, chevron-down, check, up, cross }
+export enum IconKind { chevron-right, chevron-down, check, up, cross, asterisk }
 
 export component Icon inherits Rectangle {
     in property <IconKind> kind;
@@ -22,6 +22,7 @@ export component Icon inherits Rectangle {
             : root.kind == IconKind.chevron-down ? "M 1.5 3.5 L 5 7 L 8.5 3.5"
             : root.kind == IconKind.check ? "M 1.5 5.5 L 4 8 L 8.5 2"
             : root.kind == IconKind.up ? "M 5 9 L 5 1.5 M 1.5 5 L 5 1.5 L 8.5 5"
+            : root.kind == IconKind.asterisk ? "M 5 1 L 5 9 M 1.5 3 L 8.5 7 M 1.5 7 L 8.5 3"
             : "M 2 2 L 8 8 M 8 2 L 2 8";
     }
 }

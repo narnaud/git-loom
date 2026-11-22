@@ -26,10 +26,12 @@ pub(crate) struct State {
     snapshot: Snapshot,
     /// Set while an operation is paused.
     paused: Option<PausedOp>,
-    /// The tree of the session, whose branches and commits the board places:
-    /// the commits of a closed branch are not in it.
+    /// The tree of the session: the local changes pane lists its local
+    /// changes, the board places its branches and commits. The commits of a
+    /// closed branch are not in it.
     rows: Vec<Row>,
-    /// Keys of the commit rows open onto their files.
+    /// Keys of the commit rows open onto their files, and the local changes',
+    /// which the pane lists whole.
     expanded: HashSet<String>,
     /// Keys of the branch rows closed onto their name.
     collapsed: HashSet<String>,
@@ -65,7 +67,7 @@ impl State {
             snapshot,
             paused,
             rows: Vec::new(),
-            expanded: HashSet::new(),
+            expanded: HashSet::from([tree::LOCAL_CHANGES_KEY.to_string()]),
             collapsed: HashSet::new(),
             owned: HashMap::new(),
             selected: HashSet::new(),
@@ -157,10 +159,51 @@ impl State {
             .map(|piece| piece.rect)
     }
 
-    /// The rows the board has a piece for, which are those a click or a key
-    /// can select.
+    /// Where the row the selection was last put on is among the files of the
+    /// local changes pane while it is selected, for the window to keep it in
+    /// view.
+    pub(crate) fn cursor_change(&self) -> Option<usize> {
+        let cursor = self.cursor_index()?;
+        if !self.is_selected(&self.rows[cursor]) {
+            return None;
+        }
+        self.local_files().position(|row| row == cursor)
+    }
+
+    /// The row heading the local changes pane, which stands for them all.
+    /// None while an operation is paused, whose snapshot is a placeholder.
+    pub(crate) fn local_changes(&self) -> Option<usize> {
+        let header = self
+            .rows
+            .iter()
+            .position(|row| matches!(row.kind, RowKind::LocalChanges { .. }));
+        header.filter(|_| self.paused.is_none())
+    }
+
+    /// The rows of the files the local changes pane lists; none while an
+    /// operation is paused.
+    pub(crate) fn local_files(&self) -> impl Iterator<Item = usize> + '_ {
+        let paused = self.paused.is_some();
+        let rows = self.rows.iter().enumerate();
+        let files =
+            rows.filter(move |(_, row)| !paused && matches!(row.kind, RowKind::WorkingFile { .. }));
+        files.map(|(index, _)| index)
+    }
+
+    /// The rows the local changes pane lists: its header, then each file.
+    fn listed(&self) -> impl Iterator<Item = usize> + '_ {
+        self.local_changes().into_iter().chain(self.local_files())
+    }
+
+    /// The rows the board has a piece for.
     fn on_board(&self) -> impl Iterator<Item = usize> + '_ {
         self.board.pieces.iter().filter_map(|piece| piece.row)
+    }
+
+    /// The rows a click or a key can select: those the local changes pane
+    /// lists, and those the board has a piece for.
+    fn selectable(&self) -> impl Iterator<Item = usize> + '_ {
+        self.listed().chain(self.on_board())
     }
 
     fn select_only(&mut self, index: usize) {
@@ -200,9 +243,10 @@ impl State {
         self.selected = of_its_class.map(|row| row.key.clone()).collect();
     }
 
-    /// A press on the piece of the row at `index`.
+    /// A press on what stands for the row at `index`: a line of the local
+    /// changes pane or a piece of the board.
     pub(crate) fn row_pressed(&mut self, index: usize, control: bool, shift: bool) {
-        if !self.on_board().any(|row| row == index) {
+        if !self.selectable().any(|row| row == index) {
             return;
         }
         if control {
@@ -214,14 +258,14 @@ impl State {
         }
     }
 
-    /// `↓` and `↑`: select the next piece down the board, or up it, alone;
-    /// at either end, the one the selection was last put on.
+    /// `↓` and `↑`: select the next row the panes show, or the previous one,
+    /// alone; at either end, the one the selection was last put on.
     pub(crate) fn move_cursor(&mut self, down: bool) {
         let next = match (self.cursor_index(), down) {
-            (Some(from), true) => self.on_board().filter(|row| *row > from).min(),
-            (Some(from), false) => self.on_board().filter(|row| *row < from).max(),
-            (None, true) => self.on_board().min(),
-            (None, false) => self.on_board().max(),
+            (Some(from), true) => self.selectable().filter(|row| *row > from).min(),
+            (Some(from), false) => self.selectable().filter(|row| *row < from).max(),
+            (None, true) => self.selectable().min(),
+            (None, false) => self.selectable().max(),
         };
         if let Some(next) = next.or(self.cursor_index()) {
             self.select_only(next);
@@ -236,7 +280,7 @@ impl State {
     }
 
     /// `←`: close the row the selection was last put on, or go from a file
-    /// up to its commit.
+    /// up to its commit or to the local changes.
     pub(crate) fn collapse_cursor(&mut self) {
         let Some(cursor) = self.cursor_index() else {
             return;
@@ -245,10 +289,12 @@ impl State {
         if row.expandable && row.expanded {
             return self.row_toggled(cursor);
         }
-        if matches!(row.kind, RowKind::CommitFile { .. })
-            && let Some(commit) = self.rows[..cursor].iter().rposition(|r| r.expandable)
+        if matches!(
+            row.kind,
+            RowKind::CommitFile { .. } | RowKind::WorkingFile { .. }
+        ) && let Some(holder) = self.rows[..cursor].iter().rposition(|r| r.expandable)
         {
-            self.select_only(commit);
+            self.select_only(holder);
         }
     }
 
@@ -283,6 +329,10 @@ impl State {
     /// How the inspector names `row`.
     fn title(&self, row: &Row) -> String {
         match &row.kind {
+            RowKind::LocalChanges { .. } => "Local changes".to_string(),
+            RowKind::WorkingFile { path, .. } => {
+                repo::cwd_relative_path(path, &self.snapshot.cwd_prefix)
+            }
             RowKind::BranchName { name, .. } => format!("Branch {name}"),
             RowKind::Commit { message, .. } => format!("{}  {}", row.sid, message),
             RowKind::CommitFile { path, oid, .. } => {
@@ -290,7 +340,7 @@ impl State {
                 format!("{}  in {}", path, self.snapshot.ids.get_commit(*oid))
             }
             RowKind::Upstream { label, .. } => format!("Upstream {label}"),
-            // No other row has a piece to select.
+            // No other row is shown to select.
             _ => String::new(),
         }
     }
@@ -343,13 +393,11 @@ impl State {
         let present: HashSet<&str> = self.rows.iter().map(|row| row.key.as_str()).collect();
         self.selected.retain(|key| present.contains(key.as_str()));
         self.lay_out();
-        let on_board: HashSet<&str> = self
-            .on_board()
+        let shown: HashSet<&str> = self
+            .selectable()
             .map(|row| self.rows[row].key.as_str())
             .collect();
-        let cursor = above
-            .into_iter()
-            .find(|key| on_board.contains(key.as_str()));
+        let cursor = above.into_iter().find(|key| shown.contains(key.as_str()));
         self.cursor = cursor;
     }
 
