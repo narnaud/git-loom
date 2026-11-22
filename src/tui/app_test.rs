@@ -4836,6 +4836,39 @@ fn abort_refuses_once_the_paused_operation_changed() {
     );
 }
 
+/// The loom state names the command alone, so the same command restarted
+/// from the same commit read as the operation the question named.
+#[test]
+fn abort_refuses_a_pause_restarted_from_the_same_commit() {
+    let (repo, head) = repo_with_a_paused_drop();
+    let one = repo.repo.find_commit(head).unwrap().parent_id(0).unwrap();
+    let theme = make_theme();
+
+    repo.in_dir(|| {
+        let mut app = paused_app(&repo, &theme);
+        press(&mut app, KeyCode::Char('a'));
+        let deadline = deadline();
+        while !matches!(app.popup, Some(Popup::Prompt { .. })) {
+            assert!(std::time::Instant::now() < deadline, "never asked");
+            app.poll_background();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        crate::core::transaction::abort_run().unwrap();
+        crate::drop::run(vec![one.to_string()], true).unwrap();
+        press(&mut app, KeyCode::Enter);
+        poll_until_idle(&mut app);
+        let lines = &app.worker.log.last().unwrap().lines;
+        assert!(
+            lines
+                .iter()
+                .any(|(_, l)| l.contains("The paused operation changed")),
+            "{lines:?}"
+        );
+    });
+
+    assert!(crate::git::rebase_is_in_progress(repo.repo.path()));
+}
+
 /// The view is only re-read on `R` or after an action: an operation finished
 /// or replaced from elsewhere since must not be continued in its place.
 #[test]

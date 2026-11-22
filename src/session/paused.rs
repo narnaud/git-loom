@@ -2,6 +2,7 @@
 //! mid-rebase, so no tree can be gathered until the operation ends.
 
 use std::path::Path;
+use std::time::SystemTime;
 
 use crate::core::graph;
 use crate::core::repo::{self, FileChange};
@@ -16,6 +17,9 @@ pub(crate) struct PausedId {
     pub(crate) git_op: Option<&'static str>,
     /// `orig-head` of a rebase, `MERGE_HEAD` of a merge.
     pub(crate) origin: Option<String>,
+    /// When the loom state and the origin were written: a restart of the same
+    /// command from the same commit writes them anew.
+    written: [Option<SystemTime>; 2],
 }
 
 impl PausedId {
@@ -25,21 +29,29 @@ impl PausedId {
         let (git_op, origin) = if git::rebase_is_in_progress(git_dir) {
             let origin = ["rebase-merge", "rebase-apply"]
                 .iter()
-                .find_map(|d| std::fs::read_to_string(git_dir.join(d).join("orig-head")).ok());
+                .map(|d| git_dir.join(d).join("orig-head"))
+                .find(|f| f.exists());
             (Some("rebase"), origin)
         } else if git::merge_is_in_progress(git_dir) {
-            let origin = std::fs::read_to_string(git_dir.join("MERGE_HEAD")).ok();
-            (Some("merge"), origin)
+            (Some("merge"), Some(git_dir.join("MERGE_HEAD")))
         } else {
             (None, None)
         };
         if command.is_none() && git_op.is_none() {
             return None;
         }
+        let written = |file: &Path| std::fs::metadata(file).and_then(|m| m.modified()).ok();
+        let origin = origin.as_deref();
         Some(PausedId {
             command,
             git_op,
-            origin: origin.map(|o| o.trim().to_string()),
+            origin: origin
+                .and_then(|f| std::fs::read_to_string(f).ok())
+                .map(|o| o.trim().to_string()),
+            written: [
+                written(&transaction::state_path(git_dir)),
+                origin.and_then(written),
+            ],
         })
     }
 }
