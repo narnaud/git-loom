@@ -4,7 +4,7 @@ use super::*;
 use crate::core::graph;
 use crate::core::repo::RepoInfo;
 use crate::core::shortid::IdAllocator;
-use crate::core::test_helpers::{base_info, branch, commit};
+use crate::core::test_helpers::{base_info, branch, commit, oid};
 use crate::gui::state::tests::info;
 use crate::session::tree::build_rows;
 use crate::session::tree::test_support::{branch_row, commit_row, upstream_row};
@@ -13,18 +13,25 @@ use crate::session::tree::test_support::{branch_row, commit_row, upstream_row};
 const ROOM: f32 = 420.0;
 
 fn rows_of(info: RepoInfo) -> Vec<Row> {
-    let ids = IdAllocator::new(info.collect_entities());
-    build_rows(&graph::build_sections(info), &ids, &HashSet::new())
+    rows_with_open(info, &[])
 }
 
-/// What a piece reads: a commit's message, a branch's name; the tip and the
-/// base read as what they are.
+/// The rows of `info`, the commits `open` listing their files.
+fn rows_with_open(info: RepoInfo, open: &[u8]) -> Vec<Row> {
+    let ids = IdAllocator::new(info.collect_entities());
+    let expanded: HashSet<String> = open.iter().map(|byte| oid(*byte).to_string()).collect();
+    build_rows(&graph::build_sections(info), &ids, &expanded)
+}
+
+/// What a piece reads: a commit's message, a branch's name, a file's path;
+/// the tip and the base read as what they are.
 fn text(rows: &[Row], piece: &Piece) -> String {
     match (piece.kind, piece.row.map(|row| &rows[row].kind)) {
         (PieceKind::Tip, None) => "tip".to_string(),
         (PieceKind::Base, Some(RowKind::Upstream { .. })) => "base".to_string(),
         (PieceKind::Card, Some(RowKind::Commit { message, .. })) => message.clone(),
         (PieceKind::Tag, Some(RowKind::BranchName { name, .. })) => name.clone(),
+        (PieceKind::Chip, Some(RowKind::CommitFile { path, .. })) => path.clone(),
         other => panic!("a piece standing for the wrong row: {:?}", other.0),
     }
 }
@@ -69,9 +76,10 @@ fn trunk_x(board: &Board) -> f32 {
     center(board.lines[0].rect).0
 }
 
-/// Where the line a piece is on meets it: the middle of the piece.
+/// Where the line a piece is on meets it: the middle of its own line.
 fn level(rows: &[Row], board: &Board, wanted: &str) -> f32 {
-    center(rect_of(rows, board, wanted)).1
+    let rect = rect_of(rows, board, wanted);
+    rect.y + rect.h.min(CARD_H) / 2.0
 }
 
 fn holds(frame: Rect, piece: Rect) -> bool {
@@ -354,6 +362,27 @@ fn the_names_of_a_frame_start_and_end_where_its_cards_do() {
     assert_eq!((tag.x, tag.w), (card.x, card.w));
 }
 
+/// What `State` leaves of a branch closed onto its name: none of its commit
+/// rows.
+#[test]
+fn a_closed_branch_is_a_frame_around_its_name_and_keeps_its_merge_dot() {
+    let mut rows = rows_of(info());
+    rows.retain(
+        |r| !matches!(&r.kind, RowKind::Commit { message, .. } if message.ends_with("on b")),
+    );
+
+    let board = Board::layout(&rows, ROOM);
+
+    let frame = frames(&board)[0].rect;
+    assert_eq!(frame.h, HEAD_H + 2.0 * HEAD_PAD);
+    assert!(holds(frame, rect_of(&rows, &board, "feature-b")));
+    let merge = (LineKind::Bead, level(&rows, &board, "feature-b"));
+    assert!(
+        nodes_on(&board, trunk_x(&board)).contains(&merge),
+        "still woven in"
+    );
+}
+
 /// Nothing is merged for a branch still at the base.
 #[test]
 fn a_branch_owning_no_commit_has_no_dot_on_the_trunk() {
@@ -373,6 +402,60 @@ fn a_branch_owning_no_commit_has_no_dot_on_the_trunk() {
         2,
         "the tip and the base"
     );
+}
+
+#[test]
+fn an_open_card_grows_to_list_its_files_and_pushes_down_what_is_under_it() {
+    let closed_rows = rows_of(info());
+    let closed = Board::layout(&closed_rows, ROOM);
+    let rows = rows_with_open(info(), &[0xB2]);
+    let open = Board::layout(&rows, ROOM);
+
+    let chips: Vec<&Piece> = open
+        .pieces
+        .iter()
+        .filter(|p| p.kind == PieceKind::Chip)
+        .collect();
+
+    let files: Vec<String> = chips.iter().map(|chip| text(&rows, chip)).collect();
+    assert_eq!(files, ["x.rs", "y.rs"]);
+    let grown = rect_of(&rows, &open, "Second on b");
+    let by = 2.0 * CHIP_H + CARD_FOOT;
+    assert_eq!(grown.h, CARD_H + by);
+    for chip in &chips {
+        assert!(chip.rect.y >= grown.y + CARD_H, "under the card's own line");
+        assert!(holds(grown, chip.rect));
+        assert_eq!((chip.rect.x, chip.rect.w), (grown.x, grown.w), "across it");
+    }
+    assert!(
+        chips[0].rect.y < chips[1].rect.y,
+        "in the order of the tree"
+    );
+    let moved = |text: &str| rect_of(&rows, &open, text).y - rect_of(&closed_rows, &closed, text).y;
+    assert_eq!(moved("Loose"), 0.0, "over it");
+    assert_eq!(moved("First on b"), by);
+    assert_eq!(moved("feature-a"), by);
+    assert_eq!(moved("base"), by);
+    assert_eq!(frames(&open)[0].rect.h - frames(&closed)[0].rect.h, by);
+    assert_eq!(
+        level(&rows, &open, "Second on b"),
+        level(&closed_rows, &closed, "Second on b"),
+        "its dot stays on its own line"
+    );
+}
+
+/// A file is placed after the card it is in: the window draws it over the
+/// card, where it takes the pointer.
+#[test]
+fn the_files_of_a_card_follow_it_among_the_pieces() {
+    let rows = rows_with_open(info(), &[0x01, 0xA1]);
+
+    let board = Board::layout(&rows, ROOM);
+
+    let order: Vec<String> = board.pieces.iter().map(|p| text(&rows, p)).collect();
+    let at = |wanted: &str| order.iter().position(|text| text == wanted).unwrap();
+    assert_eq!(at("w.rs"), at("Loose") + 1, "on the trunk");
+    assert_eq!(at("z.rs"), at("On a") + 1, "in a frame");
 }
 
 #[test]

@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use slint::{Model, ModelRc, VecModel};
 
-use crate::core::repo::RemoteStatus;
+use crate::core::repo::{self, RemoteStatus};
 use crate::gui::board::{self, Board, LineKind, PieceKind};
 use crate::gui::state::State;
 use crate::gui::ui::{BoardLine, Piece, PieceKind as Kind, Remote, Strand};
@@ -22,21 +22,33 @@ fn piece(placed: &board::Piece, state: &State) -> Piece {
             PieceKind::Tip => Kind::Tip,
             PieceKind::Tag => Kind::Tag,
             PieceKind::Card => Kind::Card,
+            PieceKind::Chip => Kind::Chip,
             PieceKind::Base => Kind::Base,
         },
+        row: placed.row.map_or(-1, |index| index as i32),
         x: placed.rect.x,
         y: placed.rect.y,
         w: placed.rect.w,
         h: placed.rect.h,
+        line: match placed.kind {
+            PieceKind::Card => board::CARD_H,
+            _ => placed.rect.h,
+        },
         ..Default::default()
     };
     let Some(row) = placed.row.map(|index| &state.rows()[index]) else {
         out.title = state.integration_branch().into();
         return out;
     };
+    out.expandable = row.expandable;
+    out.expanded = row.expanded;
     match &row.kind {
         RowKind::BranchName { name, remote, .. } => {
             out.title = name.as_str().into();
+            out.hint = match state.owned(row) {
+                0 => "no commits".into(),
+                owned => counted(owned, "commit").into(),
+            };
             out.remote = match remote {
                 Some(RemoteStatus::Synced) => Remote::Synced,
                 Some(RemoteStatus::Different) => Remote::Different,
@@ -52,6 +64,10 @@ fn piece(placed: &board::Piece, state: &State) -> Piece {
             out.sid = row.sid.as_str().into();
             out.text = message.as_str().into();
             out.hint = counted(*file_count, "file").into();
+        }
+        RowKind::CommitFile { path, index, .. } => {
+            out.status = index.to_string().into();
+            out.text = repo::cwd_relative_path(path, state.cwd_prefix()).into();
         }
         RowKind::Upstream {
             label,

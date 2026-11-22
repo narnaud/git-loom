@@ -18,12 +18,43 @@ component Hint inherits Text {
     vertical-alignment: center;
 }
 
+// Opens or closes what it is on: a card onto its files, a branch onto its
+// commits.
+component Fold inherits VerticalLayout {
+    in property <bool> open;
+    callback toggle();
+
+    alignment: center;
+
+    Rectangle {
+        width: 20px;
+        height: 20px;
+        border-radius: 4px;
+        background: area.has-hover ? Theme.hover : transparent;
+
+        Icon {
+            x: 4px;
+            height: parent.height;
+            kind: root.open ? IconKind.chevron-down : IconKind.chevron-right;
+            ink: Theme.dim;
+        }
+
+        area := TouchArea {
+            clicked => {
+                root.toggle();
+            }
+        }
+    }
+}
+
 // A piece of the board, drawn for what it is in the rectangle it was given:
 // a name starts at its left edge.
 component PieceVisual inherits Rectangle {
     in property <Piece> data;
 
-    // ── A commit: one line ──
+    callback toggle();
+
+    // ── A commit: one line, its files under it once open ──
     if data.kind == PieceKind.card: Rectangle {
         border-radius: 6px;
         border-width: 1px;
@@ -31,8 +62,11 @@ component PieceVisual inherits Rectangle {
         background: Theme.card;
 
         HorizontalLayout {
+            x: 0;
+            y: 0;
+            height: data.line;
             padding-left: 10px;
-            padding-right: 10px;
+            padding-right: 5px;
             spacing: 10px;
 
             Text {
@@ -55,11 +89,19 @@ component PieceVisual inherits Rectangle {
             Hint {
                 text: data.hint;
             }
+
+            if data.expandable: Fold {
+                open: data.expanded;
+                toggle => {
+                    root.toggle();
+                }
+            }
         }
     }
 
     // ── A branch name, heading its frame ──
     if data.kind == PieceKind.tag: HorizontalLayout {
+        padding-right: 5px;
         spacing: 8px;
 
         Name {
@@ -72,6 +114,42 @@ component PieceVisual inherits Rectangle {
             ink: data.remote == Remote.synced ? Theme.added : data.remote == Remote.different ? Theme.warn : Theme.removed;
         }
         Rectangle {
+            horizontal-stretch: 1;
+        }
+
+        Hint {
+            text: data.hint;
+        }
+
+        if data.expandable: Fold {
+            open: data.expanded;
+            toggle => {
+                root.toggle();
+            }
+        }
+    }
+
+    // ── A file of an open commit ──
+    if data.kind == PieceKind.chip: HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 6px;
+
+        Text {
+            width: 12px;
+            text: data.status;
+            color: Theme.added;
+            font-family: Theme.mono-family;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: data.text;
+            color: Theme.text;
+            font-size: 12px;
+            vertical-alignment: center;
+            overflow: elide;
             horizontal-stretch: 1;
         }
     }
@@ -126,6 +204,8 @@ export component BoardView inherits Rectangle {
     out property <length> room: scroll.visible-width;
 
     callback resized(room: length);
+    // The piece standing for `row` is to open, or to close.
+    callback toggled(row: int);
 
     changed room => {
         root.resized(root.room);
@@ -164,12 +244,24 @@ export component BoardView inherits Rectangle {
             background: self.frame ? Theme.frame : self.ring ? self.ground : self.ink;
         }
 
-        for piece in root.pieces: PieceVisual {
+        // A file is placed after its card, so over it: it takes the pointer
+        // there.
+        for piece in root.pieces: TouchArea {
             x: piece.x;
             y: piece.y;
             width: piece.w;
             height: piece.h;
-            data: piece;
+
+            double-clicked => {
+                root.toggled(piece.row);
+            }
+
+            PieceVisual {
+                data: piece;
+                toggle => {
+                    root.toggled(piece.row);
+                }
+            }
         }
     }
 }

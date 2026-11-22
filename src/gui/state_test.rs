@@ -4,8 +4,8 @@ use super::*;
 use crate::core::repo::{CommitInfo, FileChange, RemoteStatus, RepoInfo};
 use crate::core::shortid::IdAllocator;
 use crate::core::test_helpers::{TestRepo, base_info, branch, commit};
+use crate::gui::board::{LineKind, PieceKind};
 use crate::session::paused::test_support::repo_with_a_paused_drop;
-use crate::session::tree::RowKind;
 
 fn file(path: &str, index: char, worktree: char) -> FileChange {
     FileChange {
@@ -56,12 +56,18 @@ pub(crate) fn info() -> RepoInfo {
 
 /// A state over `info`, in a working tree that does not exist.
 pub(crate) fn state_of(info: RepoInfo) -> State {
+    state_in(info, "")
+}
+
+/// [`state_of`], the window started in the directory `cwd_prefix` of the
+/// repository.
+pub(crate) fn state_in(info: RepoInfo, cwd_prefix: &str) -> State {
     let ids = IdAllocator::new(info.collect_entities());
     let nowhere = PathBuf::from("gui-test-fixture-has-no-workdir");
     let snapshot = Snapshot {
         workdir: nowhere.clone(),
         git_dir: nowhere,
-        cwd_prefix: String::new(),
+        cwd_prefix: cwd_prefix.to_string(),
         info,
         ids,
     };
@@ -70,6 +76,28 @@ pub(crate) fn state_of(info: RepoInfo) -> State {
 
 pub(crate) fn state() -> State {
     state_of(info())
+}
+
+/// Index of the row that reads `text`: a path, a branch name, a message.
+pub(crate) fn row(state: &State, text: &str) -> usize {
+    let found = state.rows.iter().position(|r| match &r.kind {
+        RowKind::CommitFile { path, .. } => path == text,
+        RowKind::BranchName { name, .. } => name == text,
+        RowKind::Commit { message, .. } => message == text,
+        RowKind::Upstream { .. } => text == "upstream",
+        RowKind::LocalChanges { .. } => text == "local changes",
+        _ => false,
+    });
+    found.unwrap_or_else(|| panic!("no row reads {text}"))
+}
+
+/// Whether a row of the tree reads `text`.
+fn shows(state: &State, text: &str) -> bool {
+    state.rows.iter().any(|r| match &r.kind {
+        RowKind::CommitFile { path, .. } => path == text,
+        RowKind::Commit { message, .. } => message == text,
+        _ => false,
+    })
 }
 
 #[test]
@@ -137,4 +165,193 @@ fn the_board_is_laid_out_again_for_the_room_its_pane_has() {
 
     assert_eq!(state.board().width, 600.0);
     assert!(narrow < 600.0, "{narrow}");
+}
+
+#[test]
+fn a_commit_opens_onto_its_files_and_closes_again() {
+    let mut state = state();
+    let commit = row(&state, "Second on b");
+    assert!(state.rows[commit].expandable && !state.rows[commit].expanded);
+
+    state.row_toggled(commit);
+
+    assert!(state.rows[commit].expanded);
+    assert!(shows(&state, "x.rs") && shows(&state, "y.rs"));
+    assert!(!shows(&state, "z.rs"), "another commit's");
+    let chips = state.board().pieces.iter();
+    assert_eq!(chips.filter(|p| p.kind == PieceKind::Chip).count(), 2);
+
+    state.row_toggled(commit);
+
+    assert!(!shows(&state, "y.rs"));
+    assert_eq!(state.board(), state_of(info()).board(), "as it opened");
+}
+
+#[test]
+fn several_commits_can_be_open_at_once() {
+    let mut state = state();
+
+    state.row_toggled(row(&state, "Second on b"));
+    state.row_toggled(row(&state, "On a"));
+
+    assert!(shows(&state, "y.rs") && shows(&state, "z.rs"));
+}
+
+#[test]
+fn closing_a_branch_hides_its_commits_and_keeps_their_count() {
+    let mut state = state();
+    let tag = row(&state, "feature-b");
+    assert!(state.rows[tag].expandable && state.rows[tag].expanded);
+
+    state.row_toggled(tag);
+
+    let tag = &state.rows[row(&state, "feature-b")];
+    assert!(tag.expandable && !tag.expanded);
+    assert!(!shows(&state, "Second on b") && !shows(&state, "First on b"));
+    assert!(shows(&state, "On a"), "the other branch keeps its own");
+    assert_eq!(state.owned(tag), 2);
+
+    state.row_toggled(row(&state, "feature-b"));
+
+    assert!(shows(&state, "Second on b") && shows(&state, "First on b"));
+}
+
+/// What is open is kept by row key, not by where the row is.
+#[test]
+fn a_commit_is_still_open_once_the_branch_closed_over_it_opens_again() {
+    let mut state = state();
+    state.row_toggled(row(&state, "First on b"));
+
+    state.row_toggled(row(&state, "feature-b"));
+    assert!(!shows(&state, "x.rs"), "hidden with its commit");
+    state.row_toggled(row(&state, "feature-b"));
+
+    assert!(shows(&state, "x.rs"));
+}
+
+#[test]
+fn names_at_the_same_commit_close_and_open_together() {
+    let together = RepoInfo {
+        commits: vec![commit(0x01, "Shared", Some(0xAA))],
+        branches: vec![branch("one", 0x01, None), branch("two", 0x01, None)],
+        ..base_info()
+    };
+    let mut state = state_of(together);
+
+    state.row_toggled(row(&state, "one"));
+
+    assert!(!shows(&state, "Shared"));
+    let closed = |name: &str| !state.rows[row(&state, name)].expanded;
+    assert!(closed("one") && closed("two"));
+    let owned = |name: &str| state.owned(&state.rows[row(&state, name)]);
+    assert_eq!((owned("one"), owned("two")), (1, 1));
+
+    state.row_toggled(row(&state, "two"));
+
+    assert!(shows(&state, "Shared"));
+}
+
+/// ```text
+/// │╭─ [top]      ● T
+/// ││
+/// │├─ [bottom]   ● B
+/// ├╯
+/// ```
+#[test]
+fn each_branch_of_a_stack_closes_on_its_own() {
+    let stacked = RepoInfo {
+        commits: vec![commit(0x02, "T", Some(0x01)), commit(0x01, "B", Some(0xAA))],
+        branches: vec![branch("top", 0x02, None), branch("bottom", 0x01, None)],
+        ..base_info()
+    };
+    let mut state = state_of(stacked);
+
+    state.row_toggled(row(&state, "top"));
+
+    assert!(!shows(&state, "T") && shows(&state, "B"));
+    assert!(state.rows[row(&state, "bottom")].expanded);
+}
+
+/// The frames of a stack are told apart by the spacer between its branches,
+/// which a closed branch keeps: without it the two names would read as
+/// branches at the same commit, in one frame.
+#[test]
+fn a_stack_keeps_a_frame_and_a_color_for_each_branch_closed_or_not() {
+    let stacked = RepoInfo {
+        commits: vec![commit(0x02, "T", Some(0x01)), commit(0x01, "B", Some(0xAA))],
+        branches: vec![branch("top", 0x02, None), branch("bottom", 0x01, None)],
+        ..base_info()
+    };
+    let mut state = state_of(stacked);
+    let frames = |state: &State| -> Vec<(LineKind, Option<usize>)> {
+        let lines = state.board().lines.iter();
+        let frames = lines.filter(|line| matches!(line.kind, LineKind::Frame { .. }));
+        frames.map(|frame| (frame.kind, frame.color)).collect()
+    };
+    let open = frames(&state);
+    assert_eq!(
+        open,
+        [
+            (
+                LineKind::Frame {
+                    first: true,
+                    last: false
+                },
+                Some(0)
+            ),
+            (
+                LineKind::Frame {
+                    first: false,
+                    last: true
+                },
+                Some(1)
+            ),
+        ]
+    );
+    let merges = |state: &State| {
+        let lines = state.board().lines.iter();
+        let beads = lines.filter(|line| line.kind == LineKind::Bead && line.color.is_none());
+        // The base is a bead of the trunk too.
+        beads.count() - 1
+    };
+    assert_eq!(merges(&state), 1);
+
+    state.row_toggled(row(&state, "top"));
+    assert_eq!(frames(&state), open, "the upper one closed");
+    assert_eq!(merges(&state), 1);
+
+    state.row_toggled(row(&state, "bottom"));
+    assert_eq!(frames(&state), open, "both closed");
+    assert_eq!(merges(&state), 1, "still woven in");
+    let tags = state.board().pieces.iter();
+    assert_eq!(tags.filter(|p| p.kind == PieceKind::Tag).count(), 2);
+}
+
+#[test]
+fn a_branch_owning_no_commit_has_nothing_to_close_onto() {
+    let stale = RepoInfo {
+        branches: vec![branch("stale", 0xAA, None)],
+        ..base_info()
+    };
+    let mut state = state_of(stale);
+    let tag = row(&state, "stale");
+
+    state.row_toggled(tag);
+
+    assert!(!state.rows[tag].expandable);
+    assert_eq!(state.owned(&state.rows[tag]), 0);
+    assert!(state.collapsed.is_empty());
+}
+
+#[test]
+fn what_does_not_open_ignores_being_toggled() {
+    let mut state = state();
+    let rows = state.rows.len();
+
+    state.row_toggled(row(&state, "upstream"));
+    state.row_toggled(row(&state, "local changes"));
+    state.row_toggled(rows);
+
+    assert_eq!(state.rows.len(), rows);
+    assert!(state.expanded.is_empty() && state.collapsed.is_empty());
 }
