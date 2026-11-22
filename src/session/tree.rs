@@ -364,6 +364,15 @@ fn push_commit_rows(
     }
 }
 
+/// The short ID `rows` show for the command argument `target`, or `target`
+/// itself when no row carries one: how a command line names its arguments.
+pub(crate) fn short_id(rows: &[Row], target: &str) -> String {
+    let named = rows
+        .iter()
+        .find(|r| r.target.as_deref() == Some(target) && !r.sid.is_empty());
+    named.map_or_else(|| target.to_string(), |r| r.sid.clone())
+}
+
 /// The focusable row at or above `index`, else the first focusable one.
 pub(crate) fn nearest_focusable(rows: &[Row], index: usize) -> Option<usize> {
     if rows.is_empty() {
