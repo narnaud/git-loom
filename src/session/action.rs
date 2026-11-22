@@ -78,6 +78,18 @@ pub(crate) enum Action {
         dest: CommitDest,
         message: Option<String>,
     },
+    /// `loom commit -l|-b <branch> -m <message> -p --hunks <id>...
+    /// --hunks-from <fingerprint>`: the working-tree hunks picked out of
+    /// every local change. What the pick leaves out stays as it was, staged
+    /// or not (Spec 006).
+    // The window's alone: the TUI's `C` stages its pick, then commits the
+    // index.
+    #[cfg_attr(not(feature = "gui"), allow(dead_code))]
+    CommitHunks {
+        dest: CommitDest,
+        message: String,
+        hunks: HunkArgs,
+    },
     /// `loom fold [-p] <sources...> <target> [--hunks <id>... --hunks-from
     /// <fingerprint>]`: the hunks, when some, are picked out of the one
     /// source commit.
@@ -178,15 +190,21 @@ pub(crate) fn execute_action(
             dest,
             message,
         } => {
-            let (branch, integration) = match dest {
-                CommitDest::Integration => (None, true),
-                CommitDest::Branch(name) => (Some(name), false),
-            };
+            let (branch, integration) = commit_to(dest);
             let files = match source {
                 CommitSource::Files(files) => files,
                 CommitSource::Index => vec![],
             };
             commit::run(branch, integration, message, None, files, vec![], theme)
+        }
+        Action::CommitHunks {
+            dest,
+            message,
+            hunks,
+        } => {
+            let (branch, integration) = commit_to(dest);
+            let (message, hunks) = (Some(message), Some(hunks));
+            commit::run(branch, integration, message, hunks, vec![], vec![], theme)
         }
         Action::Fold {
             sources,
@@ -266,10 +284,38 @@ pub(crate) fn execute_action(
     result
 }
 
+/// `commit::run`'s branch and loose flag for `dest`.
+fn commit_to(dest: CommitDest) -> (Option<String>, bool) {
+    match dest {
+        CommitDest::Integration => (None, true),
+        CommitDest::Branch(name) => (Some(name), false),
+    }
+}
+
 /// `-m <message>` as the log shows it: the subject stands for the rest.
 fn message_words(message: &str) -> [String; 2] {
     let subject = message.lines().next().unwrap_or_default();
     ["-m".into(), git::shell_quote(subject)]
+}
+
+/// `--hunks <id>...` then `--hunks-from <fingerprint>`.
+fn hunk_words(hunks: &HunkArgs) -> Vec<String> {
+    let mut words = Vec::new();
+    for id in &hunks.ids {
+        words.extend(["--hunks".into(), git::shell_quote(id)]);
+    }
+    if let Some(from) = &hunks.from {
+        words.extend(["--hunks-from".into(), from.clone()]);
+    }
+    words
+}
+
+/// `-l`, or `-b <branch>` as `sid` names it.
+fn dest_words(dest: &CommitDest, sid: impl Fn(&str) -> String) -> Vec<String> {
+    match dest {
+        CommitDest::Integration => vec!["-l".into()],
+        CommitDest::Branch(name) => vec!["-b".into(), sid(name)],
+    }
 }
 
 /// The CLI line equivalent to `action`, for the log; `sid` maps a command
@@ -283,15 +329,23 @@ pub(crate) fn command_line(action: &Action, sid: impl Fn(&str) -> String) -> Str
             message,
         } => {
             words.push("commit".into());
-            match dest {
-                CommitDest::Integration => words.push("-l".into()),
-                CommitDest::Branch(name) => words.extend(["-b".into(), sid(name)]),
-            }
+            words.extend(dest_words(dest, &sid));
             words.extend(message.iter().flat_map(|m| message_words(m)));
             // `C` staged what it picked, so this half names no files.
             if let CommitSource::Files(files) = source {
                 words.extend(files.iter().map(|f| sid(f)));
             }
+        }
+        Action::CommitHunks {
+            dest,
+            message,
+            hunks,
+        } => {
+            words.push("commit".into());
+            words.extend(dest_words(dest, &sid));
+            words.extend(message_words(message));
+            words.push("-p".into());
+            words.extend(hunk_words(hunks));
         }
         Action::Fold {
             sources,
@@ -304,14 +358,7 @@ pub(crate) fn command_line(action: &Action, sid: impl Fn(&str) -> String) -> Str
             }
             words.extend(sources.iter().map(|s| sid(s)));
             words.push(sid(target));
-            if let Some(hunks) = hunks {
-                for id in &hunks.ids {
-                    words.extend(["--hunks".into(), git::shell_quote(id)]);
-                }
-                if let Some(from) = &hunks.from {
-                    words.extend(["--hunks-from".into(), from.clone()]);
-                }
-            }
+            words.extend(hunks.iter().flat_map(hunk_words));
         }
         Action::FoldHunks {
             sources, target, ..
@@ -342,14 +389,7 @@ pub(crate) fn command_line(action: &Action, sid: impl Fn(&str) -> String) -> Str
             words.push(sid(commit));
             words.extend(message.iter().flat_map(|m| message_words(m)));
             words.extend(files.iter().map(|f| git::shell_quote(f)));
-            if let Some(hunks) = hunks {
-                for id in &hunks.ids {
-                    words.extend(["--hunks".into(), git::shell_quote(id)]);
-                }
-                if let Some(from) = &hunks.from {
-                    words.extend(["--hunks-from".into(), from.clone()]);
-                }
-            }
+            words.extend(hunks.iter().flat_map(hunk_words));
         }
         Action::Branch { name, target } => {
             words.extend(["branch".into(), name.clone()]);

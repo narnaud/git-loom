@@ -2,12 +2,14 @@ use super::*;
 use crate::core::diff::DiffHunk;
 use crate::core::hunk_select::{self, HunkArgs};
 use crate::core::hunks::{HunkEntry, HunkOrigin};
+use crate::core::staging;
 use crate::core::test_helpers::TestRepo;
 use crate::gui::commands::Cmd;
 use crate::gui::model;
 use crate::gui::state::tests::{row, select, state, tick_until};
 use crate::gui::ui::TextKind;
 use crate::session::action::LogEntry;
+use crate::session::snapshot::CommitDest;
 use crate::session::tree::RowKind;
 
 /// A file of a commit changed in a hunk per text, none kept.
@@ -36,14 +38,19 @@ fn picking(files: Vec<FileEntry>) -> (State, git2::Oid) {
         RowKind::Commit { oid, .. } => oid,
         _ => unreachable!(),
     };
+    open(&mut state, files, Vec::new(), PickFor::Split { commit });
+    (state, commit)
+}
+
+fn open(state: &mut State, files: Vec<FileEntry>, stamp: Stamp, purpose: PickFor) {
     state.pick = Some(Pick::Open(HunkPick {
         files,
         current: 0,
-        purpose: PickFor::Split { commit },
+        stamp,
+        purpose,
         title: String::new(),
         error: String::new(),
     }));
-    (state, commit)
 }
 
 fn kept(state: &State) -> Vec<Vec<bool>> {
@@ -166,6 +173,149 @@ fn nothing_starts_under_the_hunk_picker() {
 }
 
 #[test]
+fn a_pick_to_commit_asks_its_message_and_destination_next() {
+    let mut state = state();
+    let stamp = vec![None];
+    let files = vec![file("a.rs", &["one", "two"])];
+    open(&mut state, files, stamp.clone(), PickFor::CommitHunks);
+
+    assert_eq!(state.confirm_pick(), None);
+    let pick = state.hunk_pick().expect("still open");
+    assert_eq!(pick.error, "Nothing kept for the commit");
+    state.hunk_toggled(1);
+    assert_eq!(state.confirm_pick(), None);
+
+    assert!(state.hunk_pick().is_none());
+    assert_eq!(state.form().expect("its dialog").body, "Commit 1 hunk");
+    assert_eq!(state.accept("Add a", None, usize::MAX), None);
+    assert_eq!(state.form().unwrap().error, "Pick where the commit goes");
+    let read = [file("a.rs", &["one", "two"])];
+    let from = hunk_select::fingerprint(&staging::stamp_source(&stamp), None, &read);
+    assert_eq!(
+        state.accept(" Add a \n", None, 2),
+        Some(Action::CommitHunks {
+            dest: CommitDest::Branch("feature-a".to_string()),
+            message: "Add a".to_string(),
+            hunks: HunkArgs::new(vec!["a.rs:2".to_string()], Some(from)),
+        })
+    );
+}
+
+#[test]
+fn a_pick_to_commit_keeps_the_files_selected_and_only_those_at_first() {
+    let mut files = vec![
+        file("a.rs", &["one", "two"]),
+        file("b.rs", &["three"]),
+        file("lib/x.rs", &["four"]),
+        file("libx.rs", &["five"]),
+    ];
+    // Read kept, as a staged hunk is.
+    files[1].hunks[0].selected = true;
+
+    keep_only(&mut files, &["a.rs".to_string(), "lib/".to_string()]);
+
+    let kept: Vec<Vec<bool>> = (files.iter())
+        .map(|file| file.hunks.iter().map(|hunk| hunk.selected).collect())
+        .collect();
+    assert_eq!(
+        kept,
+        [vec![true, true], vec![false], vec![true], vec![false]],
+        "the files of a directory selected, and nothing of a file not"
+    );
+}
+
+#[test]
+fn hunks_to_commit_are_read_with_those_of_the_files_selected_kept() {
+    let repo = TestRepo::new_with_remote();
+    repo.write_file("a.txt", "a\n");
+    repo.write_file("b.txt", "b\n");
+    repo.stage_files(&["a.txt", "b.txt"]);
+    repo.commit_staged("Two files");
+    repo.write_file("a.txt", "a, changed\n");
+    repo.write_file("b.txt", "b, changed\n");
+    let mut state = repo.in_dir(State::load).unwrap();
+    select(&mut state, "a.txt", &[]);
+
+    assert_eq!(state.prepare(Cmd::CommitHunks), None);
+    select(&mut state, "b.txt", &[]);
+
+    assert_eq!(state.reading(), Some("loom commit -p"), "nothing is staged");
+    tick_until(&mut state, |state| state.hunk_pick().is_some());
+    let pick = state.hunk_pick().unwrap();
+    assert_eq!(pick.title, "Commit: keep the hunks to commit");
+    let kept: Vec<(&str, bool)> = (pick.files.iter())
+        .map(|file| (file.path.as_str(), file.hunks[0].selected))
+        .collect();
+    assert_eq!(
+        kept,
+        [("a.txt", true), ("b.txt", false)],
+        "as selected when it started"
+    );
+}
+
+#[test]
+fn a_pick_to_commit_keeps_everything_for_the_header() {
+    let mut state = state();
+
+    select(&mut state, "local changes", &[]);
+    assert_eq!(state.keep_selected(), Keep::All);
+    select(&mut state, "b.rs", &["new.rs"]);
+    let paths = vec!["b.rs".to_string(), "new.rs".to_string()];
+    assert_eq!(state.keep_selected(), Keep::Paths(paths));
+}
+
+/// The header kept the files the window had read, so one changed since
+/// was shown left out.
+#[test]
+fn a_pick_to_commit_from_the_header_keeps_a_file_changed_since_the_load() {
+    let repo = TestRepo::new_with_remote();
+    repo.write_file("a.txt", "a\n");
+    repo.write_file("b.txt", "b\n");
+    repo.stage_files(&["a.txt", "b.txt"]);
+    repo.commit_staged("Two files");
+    repo.write_file("a.txt", "a, changed\n");
+    let mut state = repo.in_dir(State::load).unwrap();
+    repo.write_file("b.txt", "b, changed\n");
+    assert_eq!(state.local_files().count(), 1);
+    select(&mut state, "local changes", &[]);
+
+    assert_eq!(state.prepare(Cmd::CommitHunks), None);
+    tick_until(&mut state, |state| state.hunk_pick().is_some());
+
+    let pick = state.hunk_pick().unwrap();
+    let kept: Vec<(&str, bool)> = (pick.files.iter())
+        .map(|file| (file.path.as_str(), file.hunks[0].selected))
+        .collect();
+    assert_eq!(kept, [("a.txt", true), ("b.txt", true)]);
+}
+
+#[test]
+fn the_dialog_of_a_commit_of_hunks_cancelled_ends_it_as_its_picker_would() {
+    let mut state = state();
+    state.worker.log.push(LogEntry {
+        command: "loom commit -p".to_string(),
+        lines: Vec::new(),
+    });
+    open(
+        &mut state,
+        vec![file("a.rs", &["one"])],
+        vec![None],
+        PickFor::CommitHunks,
+    );
+    state.hunk_toggled(0);
+    assert_eq!(state.confirm_pick(), None, "its message is asked");
+
+    state.form_cancelled();
+
+    assert_eq!(
+        state.status(),
+        (Level::Plain, "commit cancelled".to_string())
+    );
+    let lines = &state.log().last().unwrap().lines;
+    assert_eq!(lines, &[(Level::Warn, "Cancelled".to_string())]);
+}
+
+#[test]
 fn a_pick_cancelled_runs_nothing() {
     let (mut state, _) = picking(vec![file("a.rs", &["one", "two"])]);
 
@@ -274,6 +424,7 @@ fn what_a_read_sent_last_is_logged_before_how_it_ended() {
             commit: git2::Oid::ZERO_SHA1,
         },
         command,
+        keep: Keep::AsRead,
     });
 
     assert!(state.advance_pick());

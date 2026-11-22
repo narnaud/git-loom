@@ -60,6 +60,24 @@ fn without_a_success_the_last_warning_speaks() {
 }
 
 #[test]
+fn a_commit_of_hunks_is_logged_with_the_ids_it_hands_over() {
+    let action = Action::CommitHunks {
+        dest: CommitDest::Branch("feature".to_string()),
+        message: "Add it\n\nWith a body".to_string(),
+        hunks: HunkArgs::new(
+            vec!["a.rs:1".to_string(), "b.rs:2".to_string()],
+            Some("0123456789ab".to_string()),
+        ),
+    };
+
+    assert_eq!(
+        command_line(&action, |target| format!("<{target}>")),
+        "loom commit -b <feature> -m 'Add it' -p --hunks 'a.rs:1' --hunks 'b.rs:2' \
+         --hunks-from 0123456789ab"
+    );
+}
+
+#[test]
 fn a_success_is_shown_rather_than_a_warning() {
     let both = entry(&[
         (Level::Success, "Folded"),

@@ -38,11 +38,18 @@ fn each_class_of_piece_has_a_menu_of_its_own() {
 
     assert_eq!(
         menu(&mut state, "local changes"),
-        ["Commit…", "-", "Absorb", "-", "Drop all local changes"]
+        [
+            "Commit…",
+            "Commit hunks…",
+            "-",
+            "Absorb",
+            "-",
+            "Drop all local changes"
+        ]
     );
     assert_eq!(
         menu(&mut state, "b.rs"),
-        ["Commit…", "-", "Absorb", "-", "Drop"]
+        ["Commit…", "Commit hunks…", "-", "Absorb", "-", "Drop"]
     );
     assert_eq!(
         menu(&mut state, "On a"),
@@ -109,6 +116,7 @@ fn a_menu_greys_out_what_the_selection_does_not_take() {
         menu_of(&state),
         [
             "(Commit…)",
+            "(Commit hunks…)",
             "-",
             "(Absorb)",
             "-",
@@ -542,7 +550,13 @@ fn the_buttons_under_the_local_changes_take_the_ones_selected() {
             .map(|entry| (entry.title, entry.enabled))
             .collect::<Vec<_>>()
     };
-    let all = |enabled| [("Absorb", enabled), ("Commit…", enabled)];
+    let all = |enabled| {
+        [
+            ("Absorb", enabled),
+            ("Hunks…", enabled),
+            ("Commit…", enabled),
+        ]
+    };
 
     assert_eq!(buttons(&state), all(false), "nothing selected");
     select(&mut state, "b.rs", &[]);

@@ -12,13 +12,18 @@ use crate::core::staging;
 use crate::session::Refusal;
 use crate::session::action::{Action, Stamp};
 use crate::session::commands;
+use crate::session::snapshot::CommitDest;
 use crate::session::targets::{self, FoldEffect, FoldTarget};
 use crate::session::tree::{Row, RowKind};
 
 /// What a pick's selection goes to.
 pub(crate) enum PickFor {
-    /// Staged at once, then committed.
+    /// Staged at once, then committed: the TUI's `C`.
     Commit,
+    /// Handed to `commit -p` by id, staging nothing: what the pick leaves
+    /// out stays as it was, staged or not (Spec 006).
+    #[cfg_attr(not(feature = "gui"), allow(dead_code))]
+    CommitHunks,
     /// Folded into one of `targets`, read off the tree before the hunks so a
     /// pick with nowhere to go never opens. `commit` is the source commit when
     /// the hunks are its own rather than the working tree's.
@@ -35,10 +40,11 @@ pub(crate) enum PickFor {
 /// off the front-end's thread.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Read {
-    /// The local changes `loom add -p <files>` lists.
-    Staging(Vec<String>),
-    /// Every local change, stamped: a fold stages its pick only once the
-    /// target is chosen, and has to tell that the tree moved meanwhile.
+    /// Every local change, staged at once once picked: nothing to stamp.
+    Staging,
+    /// Every local change, stamped: what is made of the pick once it is
+    /// confirmed, a commit by id or a fold once its target is chosen, has to
+    /// tell that the tree moved meanwhile (Spec 019).
     Worktree,
     Commit(git2::Oid),
 }
@@ -48,16 +54,13 @@ impl Read {
     /// they must agree with is the one shown.
     pub(crate) fn run(self, workdir: &Path) -> Result<(Vec<FileEntry>, Stamp)> {
         match self {
-            Read::Staging(files) => {
-                let repo = git2::Repository::open(workdir)?;
-                let filter = staging::filter_paths(&repo, &files)?;
-                let entries = staging::collect_file_entries(&repo, workdir, filter.as_deref())?;
-                Ok((entries, Vec::new()))
-            }
-            Read::Worktree => {
+            Read::Staging | Read::Worktree => {
                 let repo = git2::Repository::open(workdir)?;
                 let entries = staging::collect_file_entries(&repo, workdir, None)?;
-                let stamp = staging::binary_stamp(workdir, &entries);
+                let stamp = match self {
+                    Read::Worktree => staging::binary_stamp(workdir, &entries),
+                    _ => Vec::new(),
+                };
                 Ok((entries, stamp))
             }
             Read::Commit(oid) => {
@@ -76,6 +79,16 @@ impl PickFor {
             return Err("no local changes");
         }
         Ok(PickFor::Commit)
+    }
+
+    /// A pick to hand to `commit -p` by id, out of every local change
+    /// whatever the rows: the ids number the listing it makes of them all.
+    #[cfg_attr(not(feature = "gui"), allow(dead_code))]
+    pub(crate) fn commit_hunks(info: &RepoInfo) -> Result<PickFor, Refusal> {
+        if info.working_changes.is_empty() {
+            return Err("no local changes");
+        }
+        Ok(PickFor::CommitHunks)
     }
 
     /// A pick to fold: out of the one commit `rows` are, or, on working
@@ -107,7 +120,7 @@ impl PickFor {
     /// The command the pick is for.
     pub(crate) fn label(&self) -> &'static str {
         match self {
-            PickFor::Commit => "commit",
+            PickFor::Commit | PickFor::CommitHunks => "commit",
             PickFor::Fold { .. } => "fold",
             PickFor::Split { .. } => "split",
         }
@@ -118,6 +131,7 @@ impl PickFor {
     pub(crate) fn command_line(&self, all: &str, sid: impl Fn(&str) -> String) -> String {
         match self {
             PickFor::Commit => format!("loom add -p {}", all),
+            PickFor::CommitHunks => "loom commit -p".to_string(),
             PickFor::Fold { sources, .. } => {
                 let shown: Vec<String> = sources.iter().map(|s| sid(s)).collect();
                 format!("loom fold -p {}", shown.join(" "))
@@ -126,11 +140,11 @@ impl PickFor {
         }
     }
 
-    /// What reads the hunks to pick from; `all` names every local change.
-    pub(crate) fn read(&self, all: &str) -> Read {
+    /// What reads the hunks to pick from.
+    pub(crate) fn read(&self) -> Read {
         match self {
-            PickFor::Commit => Read::Staging(vec![all.to_string()]),
-            PickFor::Fold { commit: None, .. } => Read::Worktree,
+            PickFor::Commit => Read::Staging,
+            PickFor::CommitHunks | PickFor::Fold { commit: None, .. } => Read::Worktree,
             PickFor::Fold {
                 commit: Some(commit),
                 ..
@@ -140,12 +154,14 @@ impl PickFor {
     }
 
     /// Why `entries`, as read, leave nothing to pick: the line for the log,
-    /// then the refusal. A split needs two hunks to keep one on each side.
+    /// then the refusal. A split needs two hunks to keep one on each side. A
+    /// read of the local changes leaves conflicted files out, so it can find
+    /// nothing.
     pub(crate) fn nothing_to_pick(&self, entries: &[FileEntry]) -> Option<(&'static str, Refusal)> {
         let none = ("No changes to pick", "no hunks to pick");
         match self {
             PickFor::Commit => None,
-            PickFor::Fold { .. } => entries.is_empty().then_some(none),
+            PickFor::CommitHunks | PickFor::Fold { .. } => entries.is_empty().then_some(none),
             PickFor::Split { .. } => match entries.iter().map(|f| f.hunks.len()).sum::<usize>() {
                 0 => Some(none),
                 1 => Some(("Only one hunk", "one hunk only, nothing to split")),
@@ -201,6 +217,29 @@ pub(crate) fn fold(sources: Vec<String>, target: FoldTarget, hunks: Option<FoldH
             }
         }
     }
+}
+
+/// `loom commit -p` to `dest` of the working-tree hunks `picked` keeps,
+/// read every local change at once and stamped `stamp`, handed over by id
+/// (Spec 019): the commit refuses them if the tree moved since. The error
+/// is the line for the log, then the refusal.
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub(crate) fn commit(
+    dest: CommitDest,
+    message: String,
+    picked: &[FileEntry],
+    stamp: &[Option<git2::Oid>],
+) -> Result<Action, (&'static str, Refusal)> {
+    if !any_picked(picked) {
+        return Err(("Nothing kept for the commit", "keep at least one hunk"));
+    }
+    let from = hunk_select::fingerprint(&staging::stamp_source(stamp), None, picked);
+    let ids = hunk_select::picked_ids(picked);
+    Ok(Action::CommitHunks {
+        dest,
+        message,
+        hunks: HunkArgs::new(ids, Some(from)),
+    })
 }
 
 /// `loom split -p` of `commit` at the hunks `picked` keeps, handed over by id

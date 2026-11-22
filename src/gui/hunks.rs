@@ -6,7 +6,7 @@ use crate::core::ui::Level;
 use crate::gui::state::State;
 use crate::session::action::{Action, Stamp};
 use crate::session::pick::{self, PickFor};
-use crate::session::tree;
+use crate::session::tree::{self, RowKind};
 use crate::session::worker::{Ended, Job};
 
 /// A pick of hunks: being read, then open.
@@ -16,26 +16,41 @@ pub(super) enum Pick {
         purpose: PickFor,
         /// The command the read is for, as the log names it.
         command: String,
+        keep: Keep,
     },
     Open(HunkPick),
 }
 
+/// Which hunks a pick keeps at first, as selected when it started.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Keep {
+    /// Those read kept.
+    AsRead,
+    /// Every one read, the header being selected: a file changed since the
+    /// window read the repository too.
+    All,
+    /// Those of the files at these paths only.
+    Paths(Vec<String>),
+}
+
 /// The picker over what was read.
 pub(crate) struct HunkPick {
-    pub files: Vec<FileEntry>,
+    pub(super) files: Vec<FileEntry>,
     /// Index into `files` of the one whose hunks show.
-    pub current: usize,
+    pub(super) current: usize,
+    /// What the files were stamped with as they were read.
+    stamp: Stamp,
     purpose: PickFor,
     /// What the pick is for, as the picker is headed.
-    pub title: String,
-    /// Why the last confirm was refused.
-    pub error: String,
+    pub(super) title: String,
+    /// Why the last confirm was refused, until the pick changes.
+    pub(super) error: String,
 }
 
 impl HunkPick {
     pub(crate) fn confirm(&self) -> &'static str {
         match self.purpose {
-            PickFor::Commit => "Commit",
+            PickFor::Commit | PickFor::CommitHunks => "Commit…",
             PickFor::Fold { .. } => "Fold",
             PickFor::Split { .. } => "Split…",
         }
@@ -59,7 +74,11 @@ impl State {
         }
         let all = self.snapshot.ids.get_unstaged();
         let command = purpose.command_line(all, |target| tree::short_id(&self.rows, target));
-        let read = purpose.read(all);
+        let keep = match purpose {
+            PickFor::CommitHunks => self.keep_selected(),
+            _ => Keep::AsRead,
+        };
+        let read = purpose.read();
         let workdir = self.snapshot.workdir.clone();
         self.clear_notice();
         let git_dir = &self.snapshot.git_dir;
@@ -68,7 +87,21 @@ impl State {
             job,
             purpose,
             command,
+            keep,
         });
+    }
+
+    /// What a pick to commit keeps of the local changes selected.
+    fn keep_selected(&self) -> Keep {
+        let rows = self.selection();
+        if (rows.iter()).any(|row| matches!(row.kind, RowKind::LocalChanges { .. })) {
+            return Keep::All;
+        }
+        let paths = rows.into_iter().filter_map(|row| match &row.kind {
+            RowKind::WorkingFile { path, .. } => Some(path.clone()),
+            _ => None,
+        });
+        Keep::Paths(paths.collect())
     }
 
     /// The command whose hunks are being read, if any.
@@ -105,13 +138,16 @@ impl State {
             Some(Pick::Reading { job, .. }) if job.is_finished() => {}
             _ => return false,
         }
-        let Some(Pick::Reading { job, purpose, .. }) = self.pick.take() else {
+        let Some(Pick::Reading {
+            job, purpose, keep, ..
+        }) = self.pick.take()
+        else {
             return false;
         };
         let read = job.join("reading the hunks");
         // What it sent last can still be queued: filed before its outcome.
         self.take_requests();
-        let (files, _) = match read {
+        let (mut files, stamp) = match read {
             Ok(read) => read,
             Err(e) => {
                 let text = e.to_string();
@@ -125,12 +161,22 @@ impl State {
             self.say(Level::Warn, format!("{}: {refusal}", purpose.label()));
             return true;
         }
+        match keep {
+            Keep::AsRead => {}
+            Keep::All => {
+                for hunk in files.iter_mut().flat_map(|file| &mut file.hunks) {
+                    hunk.selected = true;
+                }
+            }
+            Keep::Paths(paths) => keep_only(&mut files, &paths),
+        }
         let title = self.pick_title(&purpose);
         // A close refused while the hunks were read no longer holds.
         self.clear_notice();
         self.pick = Some(Pick::Open(HunkPick {
             files,
             current: 0,
+            stamp,
             purpose,
             title,
             error: String::new(),
@@ -141,12 +187,14 @@ impl State {
 
     fn pick_title(&self, purpose: &PickFor) -> String {
         match purpose {
+            PickFor::Commit | PickFor::CommitHunks => {
+                "Commit: keep the hunks to commit".to_string()
+            }
             PickFor::Split { commit } => {
                 let sid = tree::short_id(&self.rows, &commit.to_string());
                 format!("Split {sid}: keep the hunks of the first commit")
             }
-            PickFor::Commit => "Commit: keep the hunks to commit".to_string(),
-            PickFor::Fold { .. } => "Fold: keep the hunks to fold".to_string(),
+            _ => "Fold: keep the hunks to fold".to_string(),
         }
     }
 
@@ -215,11 +263,16 @@ impl State {
     /// start at once, if any. A pick refused stays open, saying why. Tests
     /// go through this.
     pub(super) fn confirm_pick(&mut self) -> Option<Action> {
+        // The dialog asks where it goes.
+        let dest = self.draft.dest.clone();
         let pick = self.hunk_pick_mut()?;
-        let made = match pick.purpose {
-            PickFor::Split { commit } => pick::split(commit, &pick.files),
+        let made = match &pick.purpose {
+            // The TUI's: the window hands a commit over by id.
+            PickFor::Commit => return None,
+            PickFor::CommitHunks => pick::commit(dest, String::new(), &pick.files, &pick.stamp),
+            PickFor::Split { commit } => pick::split(*commit, &pick.files),
             // The window opens no pick of these.
-            PickFor::Commit | PickFor::Fold { .. } => return None,
+            PickFor::Fold { .. } => return None,
         };
         let action = match made {
             Ok(action) => action,
@@ -235,6 +288,19 @@ impl State {
                 None
             }
             Err(action) => Some(action),
+        }
+    }
+}
+
+/// Keep the hunks of the files at `paths`, and only those: an untracked
+/// directory is one line of the local changes, and each of its files an
+/// entry of the pick.
+fn keep_only(files: &mut [FileEntry], paths: &[String]) {
+    for file in files {
+        let under = |path: &&String| path.ends_with('/') && file.path.starts_with(path.as_str());
+        let keep = paths.iter().any(|path| file.path == *path || under(&path));
+        for hunk in &mut file.hunks {
+            hunk.selected = keep;
         }
     }
 }
