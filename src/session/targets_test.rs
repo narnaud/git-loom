@@ -47,6 +47,14 @@ fn a_new_commit_goes_on_the_integration_line_or_a_branch_of_the_tree() {
 }
 
 #[test]
+fn a_fold_of_no_rows_lands_nowhere() {
+    assert_eq!(
+        fold_targets(&[], Path::new(""), &[], false),
+        Err("select source rows first")
+    );
+}
+
+#[test]
 fn a_commit_does_not_move_to_the_place_it_has() {
     let info = info();
 

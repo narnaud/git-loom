@@ -62,7 +62,10 @@ pub(crate) fn fold_targets(
             effect,
         })
     };
-    let targets: Vec<FoldTarget> = match rows[0].kind {
+    let Some(first) = rows.first() else {
+        return Err("select source rows first");
+    };
+    let targets: Vec<FoldTarget> = match first.kind {
         RowKind::LocalChanges { count: 0 } => return Err("no local changes"),
         RowKind::LocalChanges { .. } | RowKind::WorkingFile { .. } => tree
             .iter()
