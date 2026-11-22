@@ -229,6 +229,7 @@ pub(crate) fn split(
         commit,
         files: Vec::new(),
         hunks: Some(HunkArgs::new(ids, Some(from))),
+        message: None,
     })
 }
 

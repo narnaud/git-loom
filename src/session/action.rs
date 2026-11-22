@@ -69,12 +69,14 @@ pub(crate) enum CommitSource {
 /// A loom command to run on the worker thread.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Action {
-    /// `loom commit -l|-b <branch> [files...]`. `c` always names files, so
-    /// the index decides nothing; only `C`, which just staged what it picked,
-    /// commits the index (no file arguments).
+    /// `loom commit -l|-b <branch> [-m <message>] [files...]`. `c` always
+    /// names files, so the index decides nothing; only `C`, which just staged
+    /// what it picked, commits the index (no file arguments). Without a
+    /// message the editor asks for it.
     Commit {
         source: CommitSource,
         dest: CommitDest,
+        message: Option<String>,
     },
     /// `loom fold [-p] <sources...> <target> [--hunks <id>... --hunks-from
     /// <fingerprint>]`: the hunks, when some, are picked out of the one
@@ -98,11 +100,13 @@ pub(crate) enum Action {
     Move { commit: git2::Oid, slot: MoveSlot },
     /// `loom split <commit> [files...]`, or `loom split -p <commit> --hunks
     /// <id>... --hunks-from <fingerprint>` with the hunks `S` picked. `files`
-    /// are cwd-relative, as the CLI takes them.
+    /// are cwd-relative, as the CLI takes them. Without a message the editor
+    /// asks for the first commit's.
     Split {
         commit: String,
         files: Vec<String>,
         hunks: Option<HunkArgs>,
+        message: Option<String>,
     },
     /// `loom branch <name> [--on target]`.
     Branch {
@@ -113,11 +117,11 @@ pub(crate) enum Action {
     Drop { targets: Vec<String> },
     /// `loom absorb [files...]`; no files is every local change.
     Absorb { files: Vec<String> },
-    /// `loom reword <target>`; `name` is the new branch name typed in the
-    /// tree, `None` for a commit (the editor asks for the message).
+    /// `loom reword <target> [-m <message>]`: a branch's new name, or a
+    /// commit's new message, which the editor asks for without one.
     Reword {
         target: String,
-        name: Option<String>,
+        message: Option<String>,
     },
     /// `loom merge --all`: merge's own picker asks which branch, local ones
     /// first.
@@ -168,7 +172,11 @@ pub(crate) fn execute_action(
         return Err(e);
     }
     let result = match action {
-        Action::Commit { source, dest } => {
+        Action::Commit {
+            source,
+            dest,
+            message,
+        } => {
             let (branch, integration) = match dest {
                 CommitDest::Integration => (None, true),
                 CommitDest::Branch(name) => (Some(name), false),
@@ -177,7 +185,7 @@ pub(crate) fn execute_action(
                 CommitSource::Files(files) => files,
                 CommitSource::Index => vec![],
             };
-            commit::run(branch, integration, None, None, files, vec![], theme)
+            commit::run(branch, integration, message, None, files, vec![], theme)
         }
         Action::Fold {
             sources,
@@ -218,15 +226,16 @@ pub(crate) fn execute_action(
             commit,
             files,
             hunks,
+            message,
         } => {
             let patch = hunks.is_some();
             let hunks = hunks.unwrap_or_default();
-            split::run(commit, None, patch, hunks, files, vec![], theme)
+            split::run(commit, message, patch, hunks, files, vec![], theme)
         }
         Action::Branch { name, target } => branch::run(Some(name), target),
         Action::Drop { targets } => drop::run(targets, false),
         Action::Absorb { files } => absorb::run(false, files, vec![]),
-        Action::Reword { target, name } => reword::run(target, name, vec![]),
+        Action::Reword { target, message } => reword::run(target, message, vec![]),
         Action::Merge => merge::run(None, true),
         Action::Unmerge { branch } => unmerge::run(branch),
         Action::Update => update::run(None, false),
@@ -256,17 +265,28 @@ pub(crate) fn execute_action(
     result
 }
 
+/// `-m <message>` as the log shows it: the subject stands for the rest.
+fn message_words(message: &str) -> [String; 2] {
+    let subject = message.lines().next().unwrap_or_default();
+    ["-m".into(), git::shell_quote(subject)]
+}
+
 /// The CLI line equivalent to `action`, for the log; `sid` maps a command
 /// argument to the short ID the tree shows for it.
 pub(crate) fn command_line(action: &Action, sid: impl Fn(&str) -> String) -> String {
     let mut words = vec!["loom".to_string()];
     match action {
-        Action::Commit { source, dest } => {
+        Action::Commit {
+            source,
+            dest,
+            message,
+        } => {
             words.push("commit".into());
             match dest {
                 CommitDest::Integration => words.push("-l".into()),
                 CommitDest::Branch(name) => words.extend(["-b".into(), sid(name)]),
             }
+            words.extend(message.iter().flat_map(|m| message_words(m)));
             // `C` staged what it picked, so this half names no files.
             if let CommitSource::Files(files) = source {
                 words.extend(files.iter().map(|f| sid(f)));
@@ -312,12 +332,14 @@ pub(crate) fn command_line(action: &Action, sid: impl Fn(&str) -> String) -> Str
             commit,
             files,
             hunks,
+            message,
         } => {
             words.push("split".into());
             if hunks.is_some() {
                 words.push("-p".into());
             }
             words.push(sid(commit));
+            words.extend(message.iter().flat_map(|m| message_words(m)));
             words.extend(files.iter().map(|f| git::shell_quote(f)));
             if let Some(hunks) = hunks {
                 for id in &hunks.ids {
@@ -342,11 +364,9 @@ pub(crate) fn command_line(action: &Action, sid: impl Fn(&str) -> String) -> Str
             words.push("absorb".into());
             words.extend(files.iter().map(|f| sid(f)));
         }
-        Action::Reword { target, name } => {
+        Action::Reword { target, message } => {
             words.extend(["reword".into(), sid(target)]);
-            if let Some(name) = name {
-                words.extend(["-m".into(), name.clone()]);
-            }
+            words.extend(message.iter().flat_map(|m| message_words(m)));
         }
         Action::Merge => words.extend(["merge".into(), "--all".into()]),
         Action::Unmerge { branch } => {

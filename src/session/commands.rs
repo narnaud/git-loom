@@ -124,6 +124,7 @@ pub(crate) fn split(snapshot: &Snapshot, rows: &[&Row]) -> Result<Split, Refusal
         commit: commit.to_string(),
         files,
         hunks: None,
+        message: None,
     }))
 }
 
@@ -232,9 +233,10 @@ pub(crate) enum Reword {
 
 pub(crate) fn reword(row: &Row) -> Result<Reword, Refusal> {
     match (&row.kind, row.target.clone()) {
-        (RowKind::Commit { .. }, Some(target)) => {
-            Ok(Reword::Commit(Action::Reword { target, name: None }))
-        }
+        (RowKind::Commit { .. }, Some(target)) => Ok(Reword::Commit(Action::Reword {
+            target,
+            message: None,
+        })),
         (RowKind::BranchName { name, .. }, Some(branch)) => Ok(Reword::Branch {
             branch,
             name: name.clone(),
