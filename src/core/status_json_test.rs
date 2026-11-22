@@ -251,6 +251,27 @@ fn commits_owned_by_no_branch_are_loose() {
 }
 
 #[test]
+fn local_changes_are_listed_in_the_order_loom_status_prints_them() {
+    let file = |path: &str, index, worktree| FileChange {
+        path: path.to_string(),
+        index,
+        worktree,
+    };
+    let mut info = base_info();
+    info.working_changes = vec![
+        file("a.rs", '?', '?'),
+        file("d.rs", 'A', ' '),
+        file("c.rs", '!', '!'),
+        file("b.rs", ' ', 'M'),
+    ];
+
+    let j = json(info);
+    let files = j["local_changes"]["files"].as_array().unwrap();
+    let paths: Vec<_> = files.iter().map(|f| f["path"].as_str().unwrap()).collect();
+    assert_eq!(paths, ["c.rs", "d.rs", "b.rs", "a.rs"]);
+}
+
+#[test]
 fn working_files_carry_their_state_and_raw_status() {
     let mut info = base_info();
     info.working_changes = vec![

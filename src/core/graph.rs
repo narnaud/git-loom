@@ -130,7 +130,8 @@ pub struct RenderOpts {
 /// RepoInfo and rendered top-to-bottom with UTF-8 box-drawing characters.
 /// Also consumed by `loom tui` to build its interactive tree.
 pub(crate) enum Section {
-    /// Working tree status (always present, may contain zero changes).
+    /// Working tree status (always present, may contain zero changes), in the
+    /// order `loom status` lists it.
     WorkingChanges(Vec<FileChange>),
     /// A feature branch: its name(s) and the commits it owns.
     /// Multiple names occur when several branches point to the same tip commit.
@@ -165,9 +166,10 @@ fn display_path(repo_path: &str, cwd_prefix: &str) -> String {
 }
 
 /// The three groups the local-changes section renders, in that order
-/// (Spec 001). The renderer partitions by it and the agent JSON reports it, so
-/// the two classifications cannot drift.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+/// (Spec 001). The sections sort the local changes by it, the renderer
+/// partitions them by it and the agent JSON reports it, so the classifications
+/// cannot drift.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub(crate) enum FileGroup {
     Conflicted,
     Tracked,
@@ -416,7 +418,10 @@ pub(crate) fn build_sections(info: RepoInfo) -> Vec<Section> {
 
     let mut sections: Vec<Section> = Vec::new();
 
-    sections.push(Section::WorkingChanges(info.working_changes));
+    // Within a group, git's order stays.
+    let mut working_changes = info.working_changes;
+    working_changes.sort_by_key(|change| file_group(change.index, change.worktree));
+    sections.push(Section::WorkingChanges(working_changes));
 
     // Separate commits into loose and branch groups, preserving topo order within each.
     let mut loose_commits: Vec<CommitInfo> = Vec::new();

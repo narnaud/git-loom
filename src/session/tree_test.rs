@@ -1,9 +1,10 @@
 use std::collections::HashSet;
 
 use super::*;
-use crate::core::graph::Section;
+use crate::core::graph::{Section, build_sections};
 use crate::core::repo::{CommitInfo, FileChange, UpstreamInfo};
 use crate::core::shortid::Entity;
+use crate::core::test_helpers::base_info;
 
 fn oid(hex_char: char) -> git2::Oid {
     git2::Oid::from_str(&hex_char.to_string().repeat(40)).unwrap()
@@ -120,6 +121,27 @@ fn expanding_a_commit_adds_its_file_rows() {
         file_row.target.as_deref(),
         Some(format!("{commit_sid}:0").as_str())
     );
+}
+
+#[test]
+fn working_files_are_listed_in_the_order_loom_status_prints_them() {
+    let mut info = base_info();
+    info.working_changes = vec![
+        file("a.rs", '?', '?'),
+        file("d.rs", 'A', ' '),
+        file("c.rs", '!', '!'),
+        file("b.rs", ' ', 'M'),
+    ];
+    let sections = build_sections(info);
+    let expanded = HashSet::from([LOCAL_CHANGES_KEY.to_string()]);
+
+    let rows = build_rows(&sections, &sample_ids(), &expanded);
+
+    let paths = rows.iter().filter_map(|row| match &row.kind {
+        RowKind::WorkingFile { path, .. } => Some(path.as_str()),
+        _ => None,
+    });
+    assert_eq!(paths.collect::<Vec<_>>(), ["c.rs", "d.rs", "b.rs", "a.rs"]);
 }
 
 #[test]
