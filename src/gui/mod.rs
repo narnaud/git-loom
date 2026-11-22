@@ -1,6 +1,9 @@
 //! The window of git-loom, which `git-loom-gui` runs (Spec 024).
 
+mod board;
+mod model;
 mod state;
+mod window;
 
 use std::io::Write;
 
@@ -42,12 +45,7 @@ pub fn run() -> ! {
 /// closed.
 fn open() -> Result<()> {
     crate::git::check_git_version()?;
-    let state = State::load()?;
-    let window = ui::AppWindow::new()?;
-    window.set_repository(state.repository().into());
-    window.set_heading(state.heading().into());
-    window.run()?;
-    Ok(())
+    window::run(State::load()?)
 }
 
 /// Say why no window opened: in a dialog, since a GUI program has no terminal
