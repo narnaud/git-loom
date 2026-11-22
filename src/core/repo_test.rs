@@ -570,6 +570,37 @@ fn resolve_arg_file_on_disk() {
     });
 }
 
+/// `AD`: the file is in neither HEAD nor the working tree, so only its
+/// status names it.
+#[test]
+fn resolve_arg_file_staged_new_then_deleted() {
+    let test_repo = TestRepo::new_with_remote();
+    test_repo.write_file("new.rs", "content");
+    let mut index = test_repo.repo.index().unwrap();
+    index.add_path(std::path::Path::new("new.rs")).unwrap();
+    index.write().unwrap();
+    std::fs::remove_file(test_repo.workdir().join("new.rs")).unwrap();
+
+    test_repo.in_dir(|| {
+        for arg in ["new.rs", "./new.rs"] {
+            let result = repo::resolve_arg(&test_repo.repo, arg, &[TargetKind::File]).unwrap();
+            assert_eq!(result, Target::File("new.rs".to_string()), "{arg}");
+        }
+    });
+}
+
+#[cfg(unix)]
+#[test]
+fn resolve_arg_file_dangling_symlink() {
+    let test_repo = TestRepo::new_with_remote();
+    std::os::unix::fs::symlink("nowhere", test_repo.workdir().join("link")).unwrap();
+
+    test_repo.in_dir(|| {
+        let result = repo::resolve_arg(&test_repo.repo, "./link", &[TargetKind::File]).unwrap();
+        assert_eq!(result, Target::File("link".to_string()));
+    });
+}
+
 #[test]
 fn resolve_arg_file_normalizes_the_spelling() {
     let test_repo = TestRepo::new_with_remote();

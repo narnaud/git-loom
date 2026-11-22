@@ -1344,7 +1344,7 @@ fn fold_flow_uses_selection_as_sources_and_cursor_as_target() {
     else {
         panic!("expected a fold action");
     };
-    assert_eq!(sources, vec![app.snapshot.ids.get_file("a.rs").to_string()]);
+    assert_eq!(sources, ["./a.rs"]);
     assert_eq!(target, oid('a').to_string());
     assert!(matches!(app.mode, Mode::Normal));
 }
@@ -1953,11 +1953,7 @@ fn drop_takes_every_selected_working_file_but_only_files_together() {
     press(&mut app, KeyCode::Char(' '));
     press(&mut app, KeyCode::Char(' '));
     // The cursor moved on past the selection; the selection still wins.
-    let ids = &app.snapshot.ids;
-    let expected = vec![
-        ids.get_file("a.rs").to_string(),
-        ids.get_file("b.rs").to_string(),
-    ];
+    let expected = vec!["./a.rs".to_string(), "./b.rs".to_string()];
     assert_eq!(app.action_drop(), Some(Action::Drop { targets: expected }));
 
     app.selected.insert(oid('a').to_string());
@@ -3214,10 +3210,7 @@ fn pending_commit_diff_keeps_a_failed_diff_off_the_untracked_header() {
 
     // Not a repository, so the tracked diff fails and returns its message,
     // which is what ends mid-line: without the guard the header is glued on.
-    let only_tracked = pending_commit_diff(
-        &snapshot,
-        &[snapshot.ids.get_file("tracked.rs").to_string()],
-    );
+    let only_tracked = pending_commit_diff(&snapshot, &["./tracked.rs".to_string()]);
     assert!(only_tracked.starts_with("error:"), "got: {only_tracked}");
     assert!(!only_tracked.ends_with('\n'), "got: {only_tracked}");
 
@@ -3254,7 +3247,7 @@ fn pending_commit_diff_shows_the_files_it_will_hold() {
     };
     let ids = &snapshot.ids;
 
-    let one = pending_commit_diff(&snapshot, &[ids.get_file("file.txt").to_string()]);
+    let one = pending_commit_diff(&snapshot, &["./file.txt".to_string()]);
     assert!(one.contains("+changed"));
     assert!(!one.contains("fresh"), "only the file it holds");
     assert!(!one.contains("second changed"), "only the file it holds");
@@ -3262,10 +3255,7 @@ fn pending_commit_diff_shows_the_files_it_will_hold() {
     // Several tracked files go out as one `git diff`, and both must be in it.
     let two = pending_commit_diff(
         &snapshot,
-        &[
-            ids.get_file("file.txt").to_string(),
-            ids.get_file("other.txt").to_string(),
-        ],
+        &["./file.txt".to_string(), "./other.txt".to_string()],
     );
     assert!(two.contains("+changed"), "got: {two}");
     assert!(two.contains("+second changed"), "got: {two}");
@@ -3276,7 +3266,7 @@ fn pending_commit_diff_shows_the_files_it_will_hold() {
     assert!(all.contains("+changed"));
     assert!(all.contains("+fresh"), "untracked file missing from zz");
 
-    let untracked = pending_commit_diff(&snapshot, &[ids.get_file("new.txt").to_string()]);
+    let untracked = pending_commit_diff(&snapshot, &["./new.txt".to_string()]);
     assert!(untracked.contains("+fresh"), "untracked shown as added");
 
     // Nothing tracked to diff: the whole-tree diff is empty and only the
@@ -4329,7 +4319,7 @@ fn a_split_pick_with_fewer_than_two_hunks_never_opens() {
 fn absorb_takes_the_picked_files_else_every_change() {
     let theme = make_theme();
     let mut app = make_app(make_snapshot(), &theme);
-    let a_rs = app.snapshot.ids.get_file("a.rs").to_string();
+    let a_rs = "./a.rs".to_string();
 
     move_cursor_to(&mut app, "wf:a.rs");
     assert_eq!(
@@ -4342,7 +4332,8 @@ fn absorb_takes_the_picked_files_else_every_change() {
         app.command_line(&Action::Absorb {
             files: vec![a_rs.clone()]
         }),
-        format!("loom absorb {a_rs}")
+        format!("loom absorb {}", app.snapshot.ids.get_file("a.rs")),
+        "the log names the file by its short ID"
     );
 
     for key in [LOCAL_CHANGES_KEY.to_string(), oid('a').to_string()] {

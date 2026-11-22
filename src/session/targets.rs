@@ -230,7 +230,7 @@ fn move_signature(
         oid: commit,
         slot: slot.clone(),
     }));
-    tree::build_rows(&sections, &snapshot.ids, expanded)
+    tree::build_rows(&sections, &snapshot.ids, &snapshot.cwd_prefix, expanded)
         .into_iter()
         .map(|r| match r.kind {
             RowKind::Spacer(text) => text.to_string(),

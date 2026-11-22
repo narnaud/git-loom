@@ -7,7 +7,7 @@ use crate::core::graph;
 use crate::core::repo::{self, FileChange};
 use crate::git;
 use crate::session::snapshot::{NEW_BRANCH_NAME, Snapshot};
-use crate::session::tree::{PENDING_COMMIT_OID, Row, RowKind, branch_key};
+use crate::session::tree::{self, PENDING_COMMIT_OID, Row, RowKind, branch_key};
 
 /// What a line of `git diff`/`git show` output is, for coloring.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -180,14 +180,14 @@ pub(crate) fn staged_commit_diff(snapshot: &Snapshot) -> String {
 }
 
 /// What the commit being placed will contain: the working-tree changes of
-/// `files` (short IDs, or `zz` for all of them), as their rows show them.
+/// `files` (their rows' arguments, or `zz` for all of them), as their rows
+/// show them.
 ///
 /// `zz` commits through `git add -A`, so the untracked files go in too and
 /// the preview must list them — `git diff HEAD` alone would hide exactly the
 /// files the row counts.
 pub(crate) fn pending_commit_diff(snapshot: &Snapshot, files: &[String]) -> String {
     let workdir = &snapshot.workdir;
-    let ids = &snapshot.ids;
     let all = snapshot.is_all_changes(files);
     let or_empty = |result: Result<String>| match result {
         Ok(text) if text.trim().is_empty() => String::new(),
@@ -198,7 +198,8 @@ pub(crate) fn pending_commit_diff(snapshot: &Snapshot, files: &[String]) -> Stri
     // and the JSON share, so this stays local rather than going through
     // `graph::file_group`.
     let untracked = |c: &repo::FileChange| c.index == '?' && c.worktree == '?';
-    let wanted = |c: &repo::FileChange| all || files.iter().any(|f| f == ids.get_file(&c.path));
+    let arg = |c: &repo::FileChange| tree::file_arg(&c.path, &snapshot.cwd_prefix);
+    let wanted = |c: &repo::FileChange| all || files.contains(&arg(c));
     let mut out = String::new();
 
     // One `git` for every tracked file at once: `c` runs this on the event

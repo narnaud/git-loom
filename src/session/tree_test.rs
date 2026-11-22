@@ -79,7 +79,7 @@ fn commits_are_collapsed_by_default() {
     let mut expanded = HashSet::new();
     expanded.insert(LOCAL_CHANGES_KEY.to_string());
 
-    let rows = build_rows(&sections, &ids, &expanded);
+    let rows = build_rows(&sections, &ids, "", &expanded);
 
     // No CommitFile rows when the commit is collapsed.
     assert!(
@@ -108,7 +108,7 @@ fn expanding_a_commit_adds_its_file_rows() {
     let mut expanded = HashSet::new();
     expanded.insert(oid('a').to_string());
 
-    let rows = build_rows(&sections, &ids, &expanded);
+    let rows = build_rows(&sections, &ids, "", &expanded);
 
     let file_row = rows
         .iter()
@@ -135,7 +135,7 @@ fn working_files_are_listed_in_the_order_loom_status_prints_them() {
     let sections = build_sections(info);
     let expanded = HashSet::from([LOCAL_CHANGES_KEY.to_string()]);
 
-    let rows = build_rows(&sections, &sample_ids(), &expanded);
+    let rows = build_rows(&sections, &sample_ids(), "", &expanded);
 
     let paths = rows.iter().filter_map(|row| match &row.kind {
         RowKind::WorkingFile { path, .. } => Some(path.as_str()),
@@ -150,7 +150,7 @@ fn collapsed_local_changes_hides_working_files() {
     let ids = sample_ids();
     let expanded = HashSet::new();
 
-    let rows = build_rows(&sections, &ids, &expanded);
+    let rows = build_rows(&sections, &ids, "", &expanded);
 
     assert!(
         !rows
@@ -167,7 +167,7 @@ fn row_keys_are_unique() {
     expanded.insert(LOCAL_CHANGES_KEY.to_string());
     expanded.insert(oid('a').to_string());
 
-    let rows = build_rows(&sections, &ids, &expanded);
+    let rows = build_rows(&sections, &ids, "", &expanded);
 
     let keys: Vec<&str> = rows
         .iter()
@@ -182,7 +182,7 @@ fn row_keys_are_unique() {
 fn commit_targets_are_full_hashes_and_branch_targets_are_names() {
     let sections = sample_sections();
     let ids = sample_ids();
-    let rows = build_rows(&sections, &ids, &HashSet::new());
+    let rows = build_rows(&sections, &ids, "", &HashSet::new());
 
     let commit_row = rows
         .iter()
@@ -214,7 +214,7 @@ fn branch_range_spans_owned_commits() {
         Section::Upstream(upstream()),
     ];
     let ids = sample_ids();
-    let rows = build_rows(&sections, &ids, &HashSet::new());
+    let rows = build_rows(&sections, &ids, "", &HashSet::new());
 
     let RowKind::BranchName { range, .. } = &rows
         .iter()
@@ -233,7 +233,7 @@ fn branch_range_spans_owned_commits() {
 fn spacers_are_not_focusable() {
     let sections = sample_sections();
     let ids = sample_ids();
-    let rows = build_rows(&sections, &ids, &HashSet::new());
+    let rows = build_rows(&sections, &ids, "", &HashSet::new());
 
     for row in &rows {
         if matches!(row.kind, RowKind::Spacer(_)) {
@@ -247,7 +247,7 @@ fn spacers_are_not_focusable() {
 fn upstream_row_is_focusable_but_not_selectable() {
     let sections = sample_sections();
     let ids = sample_ids();
-    let rows = build_rows(&sections, &ids, &HashSet::new());
+    let rows = build_rows(&sections, &ids, "", &HashSet::new());
 
     let row = rows
         .iter()
@@ -260,7 +260,7 @@ fn upstream_row_is_focusable_but_not_selectable() {
 
 #[test]
 fn a_command_argument_is_named_by_the_short_id_its_row_shows() {
-    let rows = build_rows(&sample_sections(), &sample_ids(), &HashSet::new());
+    let rows = build_rows(&sample_sections(), &sample_ids(), "", &HashSet::new());
     let commit = rows
         .iter()
         .find(|r| matches!(r.kind, RowKind::Commit { .. }))
@@ -272,4 +272,49 @@ fn a_command_argument_is_named_by_the_short_id_its_row_shows() {
         "deadbeef",
         "an argument no row shows is passed through"
     );
+}
+
+#[test]
+fn a_working_file_is_passed_by_its_path_and_shown_by_its_short_id() {
+    let expanded = HashSet::from([LOCAL_CHANGES_KEY.to_string()]);
+    let rows = build_rows(&sample_sections(), &sample_ids(), "", &expanded);
+    let wt = rows
+        .iter()
+        .find(|r| matches!(r.kind, RowKind::WorkingFile { .. }))
+        .unwrap();
+
+    assert_eq!(wt.target.as_deref(), Some("./wt.rs"));
+    assert_eq!(wt.sid, sample_ids().get_file("wt.rs"));
+    assert_eq!(short_id(&rows, "./wt.rs"), wt.sid, "the log's name for it");
+}
+
+#[test]
+fn a_file_argument_is_written_from_the_directory_the_session_started_in() {
+    assert_eq!(file_arg("a.rs", ""), "./a.rs");
+    assert_eq!(file_arg("docs/a.md", "docs"), "./a.md");
+    assert_eq!(file_arg("src/a.rs", "docs"), "../src/a.rs");
+}
+
+/// A path resolves before any short ID or `zz`; a bare name could also be a
+/// ref, which `fold` tries first.
+#[test]
+fn a_file_argument_names_its_file_whatever_the_file_is_called() {
+    use crate::core::repo::{Target, TargetKind, resolve_arg};
+    use crate::core::test_helpers::TestRepo;
+
+    let repo = TestRepo::new();
+    repo.write_file("zz", "a file called zz\n");
+    repo.write_file("main", "a file called like a branch\n");
+    repo.write_file("HEAD", "a file called like a ref\n");
+    let kinds = [
+        TargetKind::Commit,
+        TargetKind::CommitFile,
+        TargetKind::File,
+        TargetKind::Unstaged,
+    ];
+
+    for name in ["zz", "main", "HEAD"] {
+        let resolved = repo.in_dir(|| resolve_arg(&repo.repo, &file_arg(name, ""), &kinds));
+        assert_eq!(resolved.unwrap(), Target::File(name.to_string()), "{name}");
+    }
 }
