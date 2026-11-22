@@ -79,8 +79,8 @@ export struct BoardLine {
 // the log.
 export enum TextKind { file-header, index, added, removed, hunk-header, context, commit-line, commit-header, command, success, warning, failure }
 
-// A command as a menu, the inspector or the bar offers it; `id` names it,
-// -1 for the line between two groups of a menu.
+// A command as a menu, the inspector, the bar or the commit buttons offer
+// it; `id` names it, -1 for the line between two groups of a menu.
 export struct MenuEntry {
     id: int,
     title: string,

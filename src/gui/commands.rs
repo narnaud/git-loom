@@ -11,7 +11,6 @@ use crate::session::Refusal;
 use crate::session::action::{Action, CommitSource};
 use crate::session::commands::{self, Reword, Split};
 use crate::session::snapshot::CommitDest;
-use crate::session::targets;
 use crate::session::tree::{self, Row, RowKind};
 
 /// A command the window offers.
@@ -129,6 +128,9 @@ fn groups(row: &Row) -> &'static [&'static [(Cmd, &'static str)]] {
     }
 }
 
+/// The buttons under the local changes, left to right.
+const COMMIT_BUTTONS: [(Cmd, &str); 2] = [(Cmd::Absorb, "Absorb"), (Cmd::Commit, "Commit…")];
+
 /// What the bar offers, whatever is selected.
 const BAR: [(Cmd, &str); 2] = [
     (Cmd::Branch, "New branch…"),
@@ -161,6 +163,14 @@ impl State {
     pub(crate) fn actions(&self) -> Vec<Entry> {
         let entries = self.menu().into_iter().flatten();
         entries.filter(|entry| entry.enabled).collect()
+    }
+
+    /// The buttons under the local changes, which take the ones selected.
+    pub(crate) fn commit_buttons(&self) -> Vec<Entry> {
+        COMMIT_BUTTONS
+            .iter()
+            .map(|&(cmd, title)| self.entry(cmd, title))
+            .collect()
     }
 
     /// The buttons of the bar.
@@ -292,13 +302,7 @@ impl State {
                     [_] => "1 file".to_string(),
                     files => format!("{} files", files.len()),
                 };
-                let mut form = Form::complete(format!("Commit {what}"), Input::Text, "Commit");
-                form.placeholder = "Message".to_string();
-                form.dests = targets::commit_dests(&self.rows);
-                let last = self.last_dest.as_ref();
-                let dest = last.and_then(|last| form.dests.iter().position(|dest| dest == last));
-                form.dest = dest.unwrap_or(0);
-                form
+                self.commit_form(what)
             }
             Action::Reword { target, .. } => match self.selection().as_slice() {
                 [row] if matches!(row.kind, RowKind::BranchName { .. }) => {
@@ -352,6 +356,17 @@ impl State {
         };
         form.complete_with(action);
         Ok(form)
+    }
+
+    /// The dialog of a commit of `what`: its message, from the last that did
+    /// not go through, and where it goes, from where the last went.
+    fn commit_form(&self, what: String) -> Form {
+        let mut form = Form::complete(format!("Commit {what}"), Input::Text, "Commit");
+        form.placeholder = "Message".to_string();
+        form.initial = self.draft.message.clone();
+        form.dests = self.commit_dests();
+        form.dest = self.commit_dest().unwrap_or(0);
+        form
     }
 
     /// The message of the commit `target` names, to start a reword from;

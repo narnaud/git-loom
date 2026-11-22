@@ -24,6 +24,9 @@ export component AppWindow inherits Window {
     in property <LocalChanges> local-changes;
     in property <[ChangeRow]> changes;
 
+    // The buttons under them.
+    in property <[MenuEntry]> commit-buttons;
+
     // The board, which has nothing on it while an operation is paused.
     in property <[Piece]> pieces;
     in property <[BoardLine]> lines;
@@ -119,7 +122,8 @@ export component AppWindow inherits Window {
     // The local changes, the board and the inspector at their narrowest,
     // and the dividers.
     min-width: 882px;
-    min-height: 360px;
+    // Room for a few local files and the buttons under them.
+    min-height: 480px;
     background: Theme.board;
     forward-focus: keys;
 
@@ -189,6 +193,8 @@ export component AppWindow inherits Window {
                 width: keys.changes-width;
                 local: root.local-changes;
                 changes: root.changes;
+                buttons: root.commit-buttons;
+                busy: root.busy;
                 pressed(row, control, shift) => {
                     keys.focus();
                     root.row-pressed(row, control, shift);
@@ -196,6 +202,9 @@ export component AppWindow inherits Window {
                 menu-asked(row, x, y) => {
                     keys.focus();
                     root.row-menu(row, x, y);
+                }
+                command(id) => {
+                    root.command(id);
                 }
             }
 

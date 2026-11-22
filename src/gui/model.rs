@@ -18,6 +18,7 @@ use crate::gui::ui::{
 };
 use crate::session::action::LogEntry;
 use crate::session::diff_text::{self, DiffLine, expand_tabs};
+use crate::session::snapshot::CommitDest;
 use crate::session::tree::RowKind;
 
 /// The header of the local changes pane, standing for them all.
@@ -279,13 +280,19 @@ pub(crate) fn plain(text: &str) -> String {
     out
 }
 
+/// Where a commit can go, as it is picked; `integration` names a loose
+/// commit's destination.
+fn destinations(dests: &[CommitDest], integration: &str) -> Vec<SharedString> {
+    let labels = dests
+        .iter()
+        .map(|dest| forms::dest_label(dest, integration));
+    labels.map(SharedString::from).collect()
+}
+
 /// What `form` asks, but for what its fields start with; `integration`
 /// names a loose commit's destination.
 pub(crate) fn dialog(form: &Form, integration: &str) -> Dialog {
-    let dests = form.dests.iter();
-    let destinations: Vec<SharedString> = dests
-        .map(|dest| forms::dest_label(dest, integration).into())
-        .collect();
+    let destinations = destinations(&form.dests, integration);
     Dialog {
         title: form.title.as_str().into(),
         body: plain(&form.body).into(),

@@ -193,6 +193,10 @@ impl Gui {
         update_model(&window.get_changes(), model::changes(&state), |changes| {
             window.set_changes(changes)
         });
+        let buttons = model::buttons(&state.commit_buttons());
+        update_model(&window.get_commit_buttons(), buttons, |buttons| {
+            window.set_commit_buttons(buttons)
+        });
         let board = state.board();
         update_model(&window.get_pieces(), model::pieces(&state), |pieces| {
             window.set_pieces(pieces)
