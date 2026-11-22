@@ -251,7 +251,11 @@ impl Worker {
             return None;
         }
         let running = self.running.take()?;
-        Some(self.close(running.job.join("the action")))
+        let result = running.job.join("the action");
+        // What it sent last can still be queued: filed before the ending sums
+        // its entry up. A thread that is done is asking nothing.
+        while self.poll().is_some() {}
+        Some(self.close(result))
     }
 
     /// File how an action that returned `result` ended: the second half of
