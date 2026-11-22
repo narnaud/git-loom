@@ -289,7 +289,8 @@ fn reparent_children(info: &mut RepoInfo, from: git2::Oid, to: git2::Oid) {
 
 /// Move commit `oid` of `info` to `slot`, as `loom fold` would (Spec 007):
 /// taken out, its children and the branches ending at it fall back onto its
-/// parent; `--above` hands it the target's branches, `--below` leaves them.
+/// parent, else the base; `--above` hands it the target's branches, `--below`
+/// leaves them.
 pub(crate) fn place_moved_commit(info: &mut RepoInfo, oid: git2::Oid, slot: &MoveSlot) {
     let anchor_known = |x: &git2::Oid| *x != oid && info.commits.iter().any(|c| c.oid == *x);
     let known = match slot {
@@ -306,12 +307,12 @@ pub(crate) fn place_moved_commit(info: &mut RepoInfo, oid: git2::Oid, slot: &Mov
         return;
     };
     let mut moved = info.commits.remove(from);
-    if let Some(parent) = moved.parent_oid {
-        reparent_children(info, oid, parent);
-        for branch in &mut info.branches {
-            if branch.tip_oid == oid {
-                branch.tip_oid = parent;
-            }
+    // Left on a moved root, its children would draw a cycle through it.
+    let parent = moved.parent_oid.unwrap_or(info.upstream.merge_base_oid);
+    reparent_children(info, oid, parent);
+    for branch in &mut info.branches {
+        if branch.tip_oid == oid {
+            branch.tip_oid = parent;
         }
     }
     let position = |info: &RepoInfo, x: git2::Oid| {

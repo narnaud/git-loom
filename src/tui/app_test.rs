@@ -1783,6 +1783,32 @@ fn moving_a_commit_above_a_branch_tip_carries_its_names_along() {
     assert_eq!(info.commits[0].parent_oid, Some(oid('b')));
 }
 
+/// Root `a` ← `b` on `feature-a`: `b` kept `a` as its parent, a cycle the
+/// tree's ownership walk never left.
+#[test]
+fn moving_a_root_commit_drops_its_children_onto_the_base() {
+    let mut info = make_info();
+    info.commits = vec![
+        commit('b', 'a', "Add lexer"),
+        CommitInfo {
+            parent_oid: None,
+            ..commit('a', '9', "Add parser")
+        },
+    ];
+    info.branches[0].tip_oid = oid('b');
+    place_moved_commit(&mut info, oid('a'), &MoveSlot::Above(oid('b')));
+
+    let parent = |c: char| {
+        info.commits
+            .iter()
+            .find(|x| x.oid == oid(c))
+            .unwrap()
+            .parent_oid
+    };
+    assert_eq!(parent('b'), Some(oid('9')));
+    assert_eq!(parent('a'), Some(oid('b')));
+}
+
 #[test]
 fn move_refuses_what_is_not_one_commit() {
     let theme = make_theme();
