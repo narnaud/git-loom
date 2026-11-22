@@ -206,6 +206,38 @@ fn an_absorb_takes_files_else_every_local_change() {
     assert_eq!(absorb(&base_info(), &[&a], true), Err("no local changes"));
 }
 
+/// Both would stand for every change.
+#[test]
+fn an_absorb_refuses_an_empty_selection_or_an_unnamed_file() {
+    let info = RepoInfo {
+        working_changes: vec![change("a.rs"), change("b.rs")],
+        ..base_info()
+    };
+    let unnamed = Row {
+        target: None,
+        ..working_file("a.rs")
+    };
+    let empty = Row {
+        target: Some(String::new()),
+        ..working_file("a.rs")
+    };
+
+    assert_eq!(
+        absorb(&info, &[], true),
+        Err("select files or local changes")
+    );
+    for rows in [
+        vec![&unnamed],
+        vec![&empty],
+        vec![&working_file("b.rs"), &unnamed],
+    ] {
+        assert_eq!(
+            absorb(&info, &rows, rows.len() > 1),
+            Err("this row has nothing to absorb")
+        );
+    }
+}
+
 #[test]
 fn a_command_on_a_branch_takes_one_or_asks() {
     let top = branch_row("top", None);
