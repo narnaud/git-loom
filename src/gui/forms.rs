@@ -233,10 +233,18 @@ impl State {
     }
 
     /// The form was dismissed. A prompt's command is told so: it waits for
-    /// an answer.
+    /// an answer. A split of hunks picked ends as its picker cancelled does:
+    /// the log holds their read.
     pub(crate) fn form_cancelled(&mut self) {
-        if let Some(Purpose::Prompt { reply, .. }) = self.form.take().map(|form| form.purpose) {
-            let _ = reply.send(None);
+        match self.form.take().map(|form| form.purpose) {
+            Some(Purpose::Prompt { reply, .. }) => {
+                let _ = reply.send(None);
+            }
+            Some(Purpose::Complete(Action::Split { hunks: Some(_), .. })) => {
+                self.worker.log_line(Level::Warn, "Cancelled");
+                self.say(Level::Plain, "split cancelled");
+            }
+            _ => {}
         }
     }
 

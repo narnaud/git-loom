@@ -8,13 +8,16 @@ use slint::{Model, ModelRc, SharedString, VecModel};
 use crate::core::graph::{self, FileGroup};
 use crate::core::repo::{self, RemoteStatus};
 use crate::core::ui::Level;
+use crate::git::raw_text;
 use crate::gui::board::{self, Board, LineKind, PieceKind};
 use crate::gui::commands::Entry;
 use crate::gui::forms::{self, Form, Input};
+use crate::gui::hunks::HunkPick;
 use crate::gui::state::State;
 use crate::gui::ui::{
-    BoardLine, ChangeKind, ChangeRow, Choice, Dialog, DialogInput, LocalChanges, MenuEntry, Piece,
-    PieceKind as Kind, Remote, Strand, TextKind, TextRow, Tone,
+    BoardLine, ChangeKind, ChangeRow, Choice, Dialog, DialogInput, HunkFile, HunkLine,
+    LocalChanges, MenuEntry, Picking, Piece, PieceKind as Kind, Remote, Strand, TextKind, TextRow,
+    Tone,
 };
 use crate::session::action::LogEntry;
 use crate::session::diff_text::{self, DiffLine, expand_tabs};
@@ -211,7 +214,16 @@ pub(crate) fn diff_rows(text: &str, tab_width: usize) -> Vec<TextRow> {
 
 /// How many characters the longest of `rows` has.
 pub(crate) fn columns(rows: &[TextRow]) -> i32 {
-    let longest = rows.iter().map(|row| row.text.chars().count()).max();
+    longest(rows.iter().map(|row| row.text.as_str()))
+}
+
+/// How many characters the longest of `lines` has.
+pub(crate) fn hunk_columns(lines: &[HunkLine]) -> i32 {
+    longest(lines.iter().map(|line| line.text.as_str()))
+}
+
+fn longest<'a>(texts: impl Iterator<Item = &'a str>) -> i32 {
+    let longest = texts.map(|text| text.chars().count()).max();
     i32::try_from(longest.unwrap_or(0)).unwrap_or(i32::MAX)
 }
 
@@ -319,6 +331,69 @@ pub(crate) fn choices(form: &Form) -> Vec<Choice> {
         checked: choice.checked,
     });
     choices.collect()
+}
+
+/// What the hunk picker is for, and how many hunks it keeps.
+pub(crate) fn picking(pick: &HunkPick) -> Picking {
+    let (kept, all) = pick.kept();
+    Picking {
+        title: pick.title.as_str().into(),
+        summary: format!("{kept} of {} kept", counted(all, "hunk")).into(),
+        confirm: pick.confirm().into(),
+        error: pick.error.as_str().into(),
+    }
+}
+
+/// The files of the hunk picker, paths relative to `cwd_prefix`.
+pub(crate) fn hunk_files(pick: &HunkPick, cwd_prefix: &str) -> Vec<HunkFile> {
+    let files = pick.files.iter().map(|file| {
+        let kept = file.hunks.iter().filter(|hunk| hunk.selected).count();
+        let mut out = HunkFile {
+            path: repo::cwd_relative_path(&file.path, cwd_prefix).into(),
+            checked: kept == file.hunks.len(),
+            mixed: kept > 0 && kept < file.hunks.len(),
+            ..Default::default()
+        };
+        if file.is_untracked() {
+            out.kind = ChangeKind::Untracked;
+        } else {
+            out.staged = file.index_status.to_string().into();
+            out.unstaged = file.worktree_status.to_string().into();
+        }
+        out
+    });
+    files.collect()
+}
+
+/// The lines of the hunks of the file the picker shows, each tab as
+/// `tab_width` spaces.
+pub(crate) fn hunk_lines(pick: &HunkPick, tab_width: usize) -> Vec<HunkLine> {
+    let Some(file) = pick.files.get(pick.current) else {
+        return Vec::new();
+    };
+    let mut lines = Vec::new();
+    for (index, entry) in file.hunks.iter().enumerate() {
+        let text = raw_text::for_display(&entry.hunk.text);
+        for (n, line) in text.lines().enumerate() {
+            let kind = match line.chars().next() {
+                // A whole file's placeholder is a label, not a line of it.
+                _ if n == 0 && !entry.hunk.is_text() => TextKind::Index,
+                _ if n == 0 => TextKind::HunkHeader,
+                Some('+') => TextKind::Added,
+                Some('-') => TextKind::Removed,
+                Some('\\') => TextKind::Index,
+                _ => TextKind::Context,
+            };
+            lines.push(HunkLine {
+                text: expand_tabs(line, tab_width).into(),
+                kind,
+                hunk: index as i32,
+                first: n == 0,
+                kept: entry.selected,
+            });
+        }
+    }
+    lines
 }
 
 /// The log: each command's line, then what it said, a hint a line under

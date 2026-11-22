@@ -124,3 +124,37 @@ export struct TextRow {
     text: string,
     kind: TextKind,
 }
+
+// What the hunk picker is for, and how far the pick went.
+export struct Picking {
+    title: string,
+    // How many hunks are kept, of how many.
+    summary: string,
+    confirm: string,
+    // Why the last confirm was refused.
+    error: string,
+}
+
+// A file of the hunk picker.
+export struct HunkFile {
+    kind: ChangeKind,
+    // Of a tracked file: the letter of its index, and of its working tree;
+    // of a commit's, what the commit does to it, then nothing.
+    staged: string,
+    unstaged: string,
+    path: string,
+    // Whether the pick keeps all its hunks, or some.
+    checked: bool,
+    mixed: bool,
+}
+
+// A line of the hunks of the file the picker shows: the first line of a
+// hunk, which carries its box, or a line under it.
+export struct HunkLine {
+    text: string,
+    kind: TextKind,
+    // Index of its hunk in the file, which a click names.
+    hunk: int,
+    first: bool,
+    kept: bool,
+}

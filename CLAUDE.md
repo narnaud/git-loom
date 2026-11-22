@@ -22,8 +22,9 @@ integration branch and rewrites/manages them without leaving that branch.
 - `src/tui/`: status tree, shell, hunk selector, widgets, theme.
 - `src/gui/` (feature `gui`, Slint): the window. `state.rs` decides what it
   shows and `board.rs` where, with no window, `commands.rs` what its menus
-  and buttons offer and `forms.rs` what its dialogs ask; `window.rs` copies
-  that onto the window as `model.rs` words it;
+  and buttons offer, `forms.rs` what its dialogs ask and `hunks.rs` which
+  hunks its picker keeps; `window.rs` copies that onto the window as
+  `model.rs` words it;
   `ui/*.slint` draws it; `mod.rs` starts it.
 - `src/agent/`: `agent install`; embedded source is `skills/git-loom/SKILL.md`.
 - Tests are sibling `*_test.rs` files; shared fixtures are in

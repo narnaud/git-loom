@@ -10,6 +10,7 @@ use slint::platform::Key;
 use slint::{CloseRequestResponse, ComponentHandle, SharedString, Timer, TimerMode};
 
 use crate::gui::commands::Cmd;
+use crate::gui::hunks::HunkPick;
 use crate::gui::model::{self, model_of, update_model};
 use crate::gui::state::State;
 use crate::gui::ui::{AppWindow, Theme};
@@ -39,8 +40,10 @@ pub(super) fn run(state: State) -> Result<()> {
         state: RefCell::new(state),
         shown_diff: RefCell::new(None),
         shown_form: Cell::new(0),
+        shown_hunks: Cell::new((0, 0)),
         dialog_shown: Cell::new(false),
         log_shown: Cell::new(false),
+        picker_shown: Cell::new(false),
     });
     gui.connect(&window);
     gui.sync();
@@ -66,10 +69,14 @@ struct Gui {
     shown_diff: RefCell<Option<(u64, String)>>,
     /// How many forms the window was given: each is filled in once.
     shown_form: Cell<u64>,
+    /// Which picker, and which of its files, the window shows the hunks of:
+    /// another starts at its top.
+    shown_hunks: Cell<(u64, usize)>,
     /// What was over the panes at the last sync, which the keyboard goes
     /// back from as it closes.
     dialog_shown: Cell<bool>,
     log_shown: Cell<bool>,
+    picker_shown: Cell<bool>,
 }
 
 impl Gui {
@@ -129,6 +136,30 @@ impl Gui {
         let gui = self.clone();
         window.on_log_closed(move || gui.update(State::close_log));
         let gui = self.clone();
+        window.on_hunk_file_picked(move |index| {
+            if let Ok(index) = usize::try_from(index) {
+                gui.update(|state| state.hunk_file_picked(index));
+            }
+        });
+        let gui = self.clone();
+        window.on_hunk_file_toggled(move |index| {
+            if let Ok(index) = usize::try_from(index) {
+                gui.update(|state| state.hunk_file_toggled(index));
+            }
+        });
+        let gui = self.clone();
+        window.on_hunk_toggled(move |index| {
+            if let Ok(index) = usize::try_from(index) {
+                gui.update(|state| state.hunk_toggled(index));
+            }
+        });
+        let gui = self.clone();
+        window.on_hunks_kept(move |keep| gui.update(|state| state.hunks_kept(keep)));
+        let gui = self.clone();
+        window.on_hunks_confirmed(move || gui.update(State::hunks_confirmed));
+        let gui = self.clone();
+        window.on_hunks_cancelled(move || gui.update(State::hunks_cancelled));
+        let gui = self.clone();
         window.window().on_close_requested(move || {
             let closes = gui.state.borrow_mut().may_close();
             gui.sync();
@@ -156,7 +187,7 @@ impl Gui {
     fn key(&self, text: &str) -> bool {
         let over = {
             let state = self.state.borrow();
-            state.form().is_some() || state.log_open()
+            state.form().is_some() || state.log_open() || state.hunk_pick().is_some()
         };
         let handled = !over && key_pressed(&mut self.state.borrow_mut(), text);
         if handled && let Some(window) = self.window.upgrade() {
@@ -237,8 +268,9 @@ impl Gui {
         }
     }
 
-    /// What is over the panes: the log, then the dialog over it. Whichever
-    /// opens takes the keyboard, and gives it back as it closes.
+    /// What is over the panes: the log, the hunk picker, then the dialog
+    /// over them. Whichever opens takes the keyboard, and gives it back as it
+    /// closes.
     fn sync_over(&self, window: &AppWindow, state: &State) {
         let log_open = state.log_open();
         window.set_log_open(log_open);
@@ -246,6 +278,11 @@ impl Gui {
             let rows = model::log_rows(state.log());
             window.set_log_columns(model::columns(&rows));
             update_model(&window.get_log(), rows, |log| window.set_log(log));
+        }
+        let pick = state.hunk_pick();
+        window.set_picker_open(pick.is_some());
+        if let Some(pick) = pick {
+            self.sync_picker(window, state, pick);
         }
         let form = state.form();
         window.set_dialog_open(form.is_some());
@@ -272,13 +309,39 @@ impl Gui {
         }
         let was_open = self.dialog_shown.replace(form.is_some());
         let was_shown = self.log_shown.replace(log_open);
+        let was_picking = self.picker_shown.replace(pick.is_some());
         if form.is_some() {
             return;
         }
-        if log_open && (was_open || !was_shown) {
+        if pick.is_some() {
+            if was_open || !was_picking {
+                window.invoke_open_picker();
+            }
+        } else if log_open && (was_open || was_picking || !was_shown) {
             window.invoke_open_log();
-        } else if !log_open && (was_open || was_shown) {
+        } else if !log_open && (was_open || was_picking || was_shown) {
             window.invoke_focus_panes();
+        }
+    }
+
+    /// The hunk picker: another one, or another of its files, from its top.
+    fn sync_picker(&self, window: &AppWindow, state: &State, pick: &HunkPick) {
+        window.set_picking(model::picking(pick));
+        let files = model::hunk_files(pick, state.cwd_prefix());
+        update_model(&window.get_hunk_files(), files, |files| {
+            window.set_hunk_files(files)
+        });
+        window.set_hunk_file(pick.current as i32);
+        let lines = model::hunk_lines(pick, state.tab_width());
+        let shown = (state.picks_opened(), pick.current);
+        if self.shown_hunks.replace(shown) != shown {
+            window.set_hunk_columns(model::hunk_columns(&lines));
+            window.set_hunk_lines(model_of(lines));
+            window.invoke_hunks_to_top();
+        } else {
+            update_model(&window.get_hunk_lines(), lines, |lines| {
+                window.set_hunk_lines(lines)
+            });
         }
     }
 }
