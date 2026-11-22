@@ -5,11 +5,22 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 
+use crate::core::repo;
 use crate::gui::board::{Board, Rect};
 use crate::session;
+use crate::session::diff_text::{self, diff_text};
 use crate::session::paused::PausedOp;
 use crate::session::snapshot::Snapshot;
 use crate::session::tree::{self, Row, RowKind, SelectionClass};
+
+/// What the inspector shows of one row.
+pub(crate) struct Inspected<'a> {
+    /// The key of the row, which tells the window when to build the lines of
+    /// another diff.
+    pub key: &'a str,
+    pub title: String,
+    pub diff: &'a str,
+}
 
 pub(crate) struct State {
     snapshot: Snapshot,
@@ -34,16 +45,22 @@ pub(crate) struct State {
     /// Where the rows are, in a pane `room` wide.
     board: Board,
     room: f32,
+    /// The diff of each row the inspector has shown, by row key: git is
+    /// asked once.
+    diffs: HashMap<String, String>,
+    /// Spaces each tab of a diff shows as.
+    tab_width: usize,
 }
 
 impl State {
     /// The repository the process runs in, as it stands.
     pub(crate) fn load() -> Result<State> {
         let opened = session::open()?;
-        Ok(State::new(opened.snapshot, opened.paused))
+        let tab_width = diff_text::tab_width(&opened.repo);
+        Ok(State::new(opened.snapshot, opened.paused, tab_width))
     }
 
-    fn new(snapshot: Snapshot, paused: Option<PausedOp>) -> State {
+    fn new(snapshot: Snapshot, paused: Option<PausedOp>, tab_width: usize) -> State {
         let mut state = State {
             snapshot,
             paused,
@@ -55,6 +72,8 @@ impl State {
             cursor: None,
             board: Board::default(),
             room: 0.0,
+            diffs: HashMap::new(),
+            tab_width,
         };
         state.rebuild_rows();
         state
@@ -236,6 +255,44 @@ impl State {
     /// `Esc`: select nothing.
     pub(crate) fn clear_selection(&mut self) {
         self.selected.clear();
+    }
+
+    pub(crate) fn tab_width(&self) -> usize {
+        self.tab_width
+    }
+
+    /// The row the inspector shows, its diff read from git the first time:
+    /// the one the selection was last put on while it is selected, else the
+    /// first selected one.
+    pub(crate) fn inspected(&mut self) -> Option<Inspected<'_>> {
+        let selected = |index: &usize| self.is_selected(&self.rows[*index]);
+        let last_put_on = self.cursor_index().filter(selected);
+        let index = last_put_on.or_else(|| (0..self.rows.len()).find(selected))?;
+        let row = &self.rows[index];
+        if !self.diffs.contains_key(&row.key) {
+            let diff = diff_text(&self.snapshot, row);
+            self.diffs.insert(row.key.clone(), diff);
+        }
+        Some(Inspected {
+            key: &row.key,
+            title: self.title(row),
+            diff: &self.diffs[&row.key],
+        })
+    }
+
+    /// How the inspector names `row`.
+    fn title(&self, row: &Row) -> String {
+        match &row.kind {
+            RowKind::BranchName { name, .. } => format!("Branch {name}"),
+            RowKind::Commit { message, .. } => format!("{}  {}", row.sid, message),
+            RowKind::CommitFile { path, oid, .. } => {
+                let path = repo::cwd_relative_path(path, &self.snapshot.cwd_prefix);
+                format!("{}  in {}", path, self.snapshot.ids.get_commit(*oid))
+            }
+            RowKind::Upstream { label, .. } => format!("Upstream {label}"),
+            // No other row has a piece to select.
+            _ => String::new(),
+        }
     }
 
     /// Open or close the row at `index`: a commit onto its files, a branch

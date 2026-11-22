@@ -71,7 +71,7 @@ pub(crate) fn state_in(info: RepoInfo, cwd_prefix: &str) -> State {
         info,
         ids,
     };
-    State::new(snapshot, None)
+    State::new(snapshot, None, 4)
 }
 
 pub(crate) fn state() -> State {
@@ -658,4 +658,134 @@ fn an_arrow_key_at_either_end_selects_the_piece_it_is_on_alone() {
     state.clear_selection();
     state.move_cursor(true);
     assert_eq!(selected(&state), ["upstream"]);
+}
+
+/// What the inspector names, or nothing.
+fn inspected_title(state: &mut State) -> Option<String> {
+    state.inspected().map(|shown| shown.title)
+}
+
+#[test]
+fn the_inspector_shows_nothing_with_nothing_selected() {
+    let mut state = state();
+
+    assert!(state.inspected().is_none());
+
+    select(&mut state, "On a", &[]);
+    state.clear_selection();
+    assert!(state.inspected().is_none(), "nor what was selected before");
+}
+
+#[test]
+fn the_inspector_names_each_kind_of_piece() {
+    let mut state = state();
+    state.row_toggled(row(&state, "Second on b"));
+    let commit = state.rows[row(&state, "Second on b")].sid.clone();
+    let mut title = |text: &str| {
+        select(&mut state, text, &[]);
+        inspected_title(&mut state).unwrap()
+    };
+
+    assert_eq!(title("feature-a"), "Branch feature-a");
+    assert_eq!(title("Second on b"), format!("{commit}  Second on b"));
+    assert_eq!(title("y.rs"), format!("y.rs  in {commit}"));
+    assert_eq!(title("upstream"), "Upstream origin/main");
+}
+
+/// As the board writes the path of that file (Spec 001).
+#[test]
+fn the_inspector_names_a_file_from_the_directory_the_window_started_in() {
+    let mut state = state_in(info(), "docs");
+    state.row_toggled(row(&state, "On a"));
+    select(&mut state, "z.rs", &[]);
+
+    let title = inspected_title(&mut state).unwrap();
+
+    assert!(title.starts_with("../z.rs  in "), "{title}");
+}
+
+#[test]
+fn the_inspector_shows_the_piece_the_selection_was_last_put_on() {
+    let mut state = state();
+
+    select(&mut state, "First on b", &["On a"]);
+
+    assert!(inspected_title(&mut state).unwrap().ends_with("On a"));
+}
+
+/// The one it was last put on can be taken out of the selection again.
+#[test]
+fn the_inspector_falls_back_on_the_first_selected_piece() {
+    let mut state = state();
+
+    select(&mut state, "Second on b", &["First on b", "On a", "On a"]);
+
+    assert!(
+        inspected_title(&mut state)
+            .unwrap()
+            .ends_with("Second on b")
+    );
+}
+
+#[test]
+fn the_inspector_keeps_to_what_is_selected_when_a_branch_closes_over_the_rest() {
+    let mut state = state();
+    select(&mut state, "On a", &["First on b"]);
+
+    state.row_toggled(row(&state, "feature-b"));
+
+    assert!(inspected_title(&mut state).unwrap().ends_with("On a"));
+}
+
+#[test]
+fn the_inspector_says_what_the_upstream_holds() {
+    let mut state = state();
+    select(&mut state, "upstream", &[]);
+
+    let shown = state.inspected().unwrap();
+
+    assert_eq!(
+        shown.diff,
+        "upstream: origin/main\ncommon base: aaa0000 Initial commit\n0 new commit(s) on the remote"
+    );
+}
+
+/// The window asks at each sync: a resize must not start git again.
+#[test]
+fn the_diff_of_a_piece_is_read_from_git_once() {
+    let repo = TestRepo::new_with_remote();
+    repo.commit("Loose on the line", "loose.txt");
+    let mut state = repo.in_dir(State::load).unwrap();
+    select(&mut state, "Loose on the line", &[]);
+
+    let first = state.inspected().unwrap().diff.to_string();
+    assert!(first.starts_with("commit "), "{first}");
+    assert!(first.contains("+++ b/loose.txt"), "{first}");
+
+    state.snapshot.workdir = PathBuf::from("gui-test-fixture-has-no-workdir");
+    assert_eq!(state.inspected().unwrap().diff, first);
+}
+
+#[test]
+fn each_inspected_piece_is_told_from_the_others_by_its_key() {
+    let mut state = state();
+    select(&mut state, "On a", &[]);
+    let commit = state.inspected().unwrap().key.to_string();
+
+    select(&mut state, "feature-a", &[]);
+    let branch = state.inspected().unwrap().key.to_string();
+
+    assert_ne!(commit, branch);
+    select(&mut state, "On a", &[]);
+    assert_eq!(state.inspected().unwrap().key, commit);
+}
+
+#[test]
+fn the_width_of_a_tab_is_the_repositorys() {
+    let repo = TestRepo::new_with_remote();
+    repo.set_config("loom.tuiTabWidth", "2");
+
+    let state = repo.in_dir(State::load).unwrap();
+
+    assert_eq!(state.tab_width(), 2);
 }

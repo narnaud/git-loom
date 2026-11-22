@@ -50,3 +50,11 @@ export struct BoardLine {
     first: bool,
     last: bool,
 }
+
+// What a line of a diff is; mirrors `session::diff_text::DiffLine`.
+export enum TextKind { file-header, index, added, removed, hunk-header, context, commit-line, commit-header }
+
+export struct TextRow {
+    text: string,
+    kind: TextKind,
+}

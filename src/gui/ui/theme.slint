@@ -8,6 +8,7 @@ export global Theme {
     // The family of short IDs, which each platform names its own way.
     in property <string> mono-family;
 
+    out property <color> background: dark ? #0d1117 : #ffffff;
     out property <color> panel: dark ? #161b22 : #f6f8fa;
     out property <color> board: dark ? #0d1117 : #eef1f5;
     out property <color> card: dark ? #1c2128 : #ffffff;
@@ -25,6 +26,9 @@ export global Theme {
     out property <color> added: dark ? #3fb950 : #1a7f37;
     out property <color> removed: dark ? #f85149 : #cf222e;
     out property <color> warn: dark ? #d29922 : #9a6700;
+    out property <color> hunk: dark ? #58a6ff : #0969da;
+    out property <color> added-bg: dark ? #2ea04326 : #dafbe1;
+    out property <color> removed-bg: dark ? #f8514926 : #ffebe9;
 
     // Rotating colors of the threads of the branches.
     out property <[color]> dots: dark

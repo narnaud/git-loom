@@ -8,7 +8,7 @@ use anyhow::Result;
 use slint::platform::Key;
 use slint::{ComponentHandle, SharedString};
 
-use crate::gui::model::{self, update_model};
+use crate::gui::model::{self, model_of, update_model};
 use crate::gui::state::State;
 use crate::gui::ui::{AppWindow, Theme};
 
@@ -32,6 +32,7 @@ pub(super) fn run(state: State) -> Result<()> {
     let gui = Rc::new(Gui {
         window: window.as_weak(),
         state: RefCell::new(state),
+        shown_diff: RefCell::new(None),
     });
     gui.connect(&window);
     gui.sync();
@@ -42,6 +43,9 @@ pub(super) fn run(state: State) -> Result<()> {
 struct Gui {
     window: slint::Weak<AppWindow>,
     state: RefCell<State>,
+    /// Key of the row whose diff the window holds: its lines are built when
+    /// the inspector turns to another row, not at each sync.
+    shown_diff: RefCell<Option<String>>,
 }
 
 impl Gui {
@@ -89,7 +93,7 @@ impl Gui {
         let Some(window) = self.window.upgrade() else {
             return;
         };
-        let state = self.state.borrow();
+        let mut state = self.state.borrow_mut();
         window.set_repository(state.repository().into());
         window.set_heading(state.heading().into());
         let board = state.board();
@@ -101,6 +105,21 @@ impl Gui {
         });
         window.set_board_width(board.width);
         window.set_board_height(board.height);
+
+        let tab_width = state.tab_width();
+        let inspected = state.inspected();
+        let title = inspected.as_ref().map_or("", |shown| shown.title.as_str());
+        window.set_inspector_title(title.into());
+        let key = inspected.as_ref().map(|shown| shown.key);
+        if self.shown_diff.borrow().as_deref() != key {
+            let diff = inspected.as_ref().map_or("", |shown| shown.diff);
+            let rows = model::diff_rows(diff, tab_width);
+            window.set_diff_columns(model::columns(&rows));
+            window.set_diff(model_of(rows));
+            // A list keeps where it was scrolled to across its models.
+            window.invoke_diff_to_top();
+            self.shown_diff.replace(key.map(str::to_string));
+        }
     }
 }
 

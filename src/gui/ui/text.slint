@@ -1,0 +1,53 @@
+import { ListView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { TextRow, TextKind } from "types.slint";
+
+// Read-only monospace lines, each colored for what it is in a diff.
+export component TextView inherits Rectangle {
+    in property <[TextRow]> lines;
+    // How many characters the longest line has.
+    in property <int> columns;
+
+    // Back to the first line and column, for other text.
+    public function to-start() {
+        list.content-x = 0;
+        list.content-y = 0;
+    }
+
+    // Ten characters of the font, to measure one by.
+    probe := Text {
+        visible: false;
+        text: "0000000000";
+        font-family: Theme.mono-family;
+        font-size: 13px;
+    }
+
+    list := ListView {
+        // A row reports the width of its layout's content to the list, which
+        // scrolls sideways as far as the widest row it shows: each is as wide
+        // as the longest line, shown or not.
+        for line in root.lines: HorizontalLayout {
+            Rectangle {
+                min-width: Math.max(text.preferred-width, root.columns * probe.preferred-width / 10) + 24px;
+                height: 18px;
+                background: line.kind == TextKind.added ? Theme.added-bg
+                    : line.kind == TextKind.removed ? Theme.removed-bg
+                    : transparent;
+
+                text := Text {
+                    x: 10px;
+                    text: line.text;
+                    font-family: Theme.mono-family;
+                    font-size: 13px;
+                    font-weight: line.kind == TextKind.file-header ? 700 : 400;
+                    vertical-alignment: center;
+                    color: line.kind == TextKind.added ? Theme.added
+                        : line.kind == TextKind.removed ? Theme.removed
+                        : line.kind == TextKind.hunk-header ? Theme.hunk
+                        : line.kind == TextKind.index || line.kind == TextKind.commit-line ? Theme.dim
+                        : Theme.text;
+                }
+            }
+        }
+    }
+}

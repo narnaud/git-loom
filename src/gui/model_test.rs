@@ -244,3 +244,61 @@ fn a_piece_says_whether_its_row_is_selected() {
         .collect();
     assert_eq!(selected, ["feature-b", "feature-a"]);
 }
+
+#[test]
+fn diff_text_becomes_one_row_a_line_each_of_its_kind_with_tabs_as_spaces() {
+    let rows = diff_rows(
+        "diff --git a/x b/x\nindex 1..2\n@@ -1 +1 @@\n-\told\n+\tnew\n same",
+        2,
+    );
+
+    let kinds: Vec<TextKind> = rows.iter().map(|row| row.kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            TextKind::FileHeader,
+            TextKind::Index,
+            TextKind::HunkHeader,
+            TextKind::Removed,
+            TextKind::Added,
+            TextKind::Context,
+        ]
+    );
+    assert_eq!(rows[3].text, "-  old");
+}
+
+/// The message of a commit is indented as context lines are.
+#[test]
+fn what_git_show_says_before_the_first_file_is_not_read_as_a_diff() {
+    let rows = diff_rows(
+        "commit abc\nAuthor: A\n\n    + not an added line\n\ndiff --git a/x b/x\n+added",
+        4,
+    );
+
+    let kinds: Vec<TextKind> = rows.iter().map(|row| row.kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            TextKind::CommitLine,
+            TextKind::CommitHeader,
+            TextKind::CommitHeader,
+            TextKind::CommitHeader,
+            TextKind::CommitHeader,
+            TextKind::FileHeader,
+            TextKind::Added,
+        ]
+    );
+}
+
+#[test]
+fn no_diff_is_no_row() {
+    assert!(diff_rows("", 4).is_empty());
+}
+
+#[test]
+fn the_longest_line_counts_its_characters_not_its_bytes() {
+    let rows = diff_rows("+short\n+\tlonger, é\n same", 4);
+
+    assert_eq!(columns(&rows), 14);
+    assert_eq!(columns(&[]), 0);
+}
