@@ -138,6 +138,7 @@ fn work_runs_under_the_name_and_the_words_of_its_front_end() {
         match hint {
             ui::Hint::ForcePush => "from its menu",
             ui::Hint::Reload => "Reload",
+            ui::Hint::Repick => "Pick again",
         }
     }
     let git_dir = tempfile::tempdir().unwrap();

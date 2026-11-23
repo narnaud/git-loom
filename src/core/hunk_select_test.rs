@@ -88,7 +88,23 @@ fn apply_refuses_a_stale_fingerprint() {
     let mut entries = sample();
     let err = apply(OID, &mut entries, &hunks(&["src/a.rs:1"], "deadbeef")).unwrap_err();
     assert!(err.to_string().contains("fingerprinted deadbeef"), "{err}");
+    assert!(
+        err.to_string()
+            .ends_with("\nRe-run with -p alone to list them again"),
+        "{err}"
+    );
     assert!(!entries[0].hunks[0].selected);
+}
+
+#[test]
+fn a_stale_fingerprint_is_picked_again_in_the_front_ends_words() {
+    let mut entries = sample();
+    let (tx, _rx) = std::sync::mpsc::channel();
+    ui::install(tx, ui::test_words);
+    let err = apply(OID, &mut entries, &hunks(&["src/a.rs:1"], "deadbeef")).unwrap_err();
+    ui::uninstall();
+
+    assert!(err.to_string().ends_with("\n<repick>"), "{err}");
 }
 
 #[test]

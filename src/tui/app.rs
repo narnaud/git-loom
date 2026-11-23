@@ -2737,6 +2737,7 @@ fn hint_words(hint: Hint) -> &'static str {
     match hint {
         Hint::ForcePush => "force-push it with `P` on its row",
         Hint::Reload => "Press R to look at it again",
+        Hint::Repick => "Pick them again",
     }
 }
 

@@ -13,6 +13,7 @@ use git2::{ObjectType, Oid};
 use crate::core::agent_mode::{self, HunkItem};
 use crate::core::diff::{BINARY_ENTRY, DiffHunk};
 use crate::core::hunks::{FileEntry, HunkOrigin};
+use crate::core::ui::{self, Hint};
 use crate::git;
 
 /// The `--hunks` / `--hunks-from` pair. The CLI requires each flag with the
@@ -265,8 +266,8 @@ pub fn apply(oid: &str, entries: &mut [FileEntry], picker: &Picker) -> Result<()
     match args.from.as_deref() {
         Some(from) if from == current => {}
         Some(from) => bail!(
-            "The hunks changed since the listing fingerprinted {from} (now {current})\n\
-             Re-run with -p alone to list them again"
+            "The hunks changed since the listing fingerprinted {from} (now {current})\n{}",
+            ui::hint(Hint::Repick).unwrap_or("Re-run with -p alone to list them again")
         ),
         None => bail!("--hunks requires --hunks-from <fingerprint>"),
     }

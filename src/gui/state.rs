@@ -696,6 +696,7 @@ fn hint_words(hint: Hint) -> &'static str {
     match hint {
         Hint::ForcePush => "pick Force push in its menu",
         Hint::Reload => "The window shows it as it is now",
+        Hint::Repick => "Pick them again",
     }
 }
 
