@@ -2,7 +2,7 @@
 
 import { Button, Palette, Spinner } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { LocalChanges, ChangeKind, ChangeRow, Piece, PieceKind, BoardLine, Strand, Remote, TextRow, TextKind, MenuEntry, Tone, Choice, Dialog, DialogInput, Picking, HunkFile, HunkLine } from "types.slint";
+import { Beside, DragRole, LocalChanges, ChangeKind, ChangeRow, Piece, PieceKind, BoardLine, Strand, Remote, TextRow, TextKind, MenuEntry, Tone, Choice, Dialog, DialogInput, Picking, HunkFile, HunkLine } from "types.slint";
 import { ChangesView } from "changes.slint";
 import { BoardView } from "board.slint";
 import { InspectorView } from "inspector.slint";
@@ -10,7 +10,7 @@ import { ToolButton } from "controls.slint";
 import { DialogView, LogView } from "dialogs.slint";
 import { HunkPicker } from "hunks.slint";
 
-export { Theme, LocalChanges, ChangeKind, ChangeRow, Piece, PieceKind, BoardLine, Strand, Remote, TextRow, TextKind, MenuEntry, Tone, Choice, Dialog, DialogInput, Picking, HunkFile, HunkLine }
+export { Theme, Beside, DragRole, LocalChanges, ChangeKind, ChangeRow, Piece, PieceKind, BoardLine, Strand, Remote, TextRow, TextKind, MenuEntry, Tone, Choice, Dialog, DialogInput, Picking, HunkFile, HunkLine }
 
 export component AppWindow inherits Window {
     // The directory of the working tree.
@@ -33,6 +33,12 @@ export component AppWindow inherits Window {
     in property <[BoardLine]> lines;
     in property <length> board-width;
     in property <length> board-height;
+
+    // Pieces are being dragged: what they are, and what letting them go
+    // where the pointer is does.
+    in property <bool> dragging;
+    in property <string> carried;
+    in property <Beside> beside;
 
     // The inspector: what it names, empty for nothing, the commands the
     // selection takes, and its diff.
@@ -74,6 +80,15 @@ export component AppWindow inherits Window {
     callback row-pressed(row: int, control: bool, shift: bool);
     // The right button did, at `x`, `y` of the window.
     callback row-menu(row: int, x: length, y: length);
+    // The left button was let go on it, with no drag.
+    callback row-released(row: int);
+    // The pointer went off it with the button down, then dragged to `x`, `y`
+    // of the board when over it, or over the local changes; the drag was let
+    // go, or taken away.
+    callback drag-lifted(row: int);
+    callback drag-moved(x: length, y: length, on-board: bool, on-changes: bool);
+    callback drag-dropped();
+    callback drag-cancelled();
     // Whether the key was one of the window's.
     callback key-pressed(text: string) -> bool;
     // The command `id` was picked in a menu, or its button clicked.
@@ -140,6 +155,21 @@ export component AppWindow inherits Window {
     property <int> menu-current: -1;
     property <length> menu-x;
     property <length> menu-y;
+    // Where the pointer dragging is, in the window.
+    property <length> drag-x;
+    property <length> drag-y;
+
+    function drag-to(x: length, y: length) {
+        root.drag-x = x;
+        root.drag-y = y;
+        root.drag-moved(
+            x - board.absolute-position.x - board.content-x,
+            y - board.absolute-position.y - board.content-y,
+            x >= board.absolute-position.x && x < board.absolute-position.x + board.width
+                && y >= board.absolute-position.y && y < board.absolute-position.y + board.height,
+            x >= changes-pane.absolute-position.x && x < changes-pane.absolute-position.x + changes-pane.width
+                && y >= changes-pane.absolute-position.y && y < changes-pane.absolute-position.y + changes-pane.height);
+    }
 
     title: root.repository + " — git-loom";
     preferred-width: 1280px;
@@ -220,6 +250,7 @@ export component AppWindow inherits Window {
                 changes: root.changes;
                 buttons: root.commit-buttons;
                 busy: root.busy;
+                dragging: root.dragging;
                 pressed(row, control, shift) => {
                     keys.focus();
                     root.row-pressed(row, control, shift);
@@ -227,6 +258,24 @@ export component AppWindow inherits Window {
                 menu-asked(row, x, y) => {
                     keys.focus();
                     root.row-menu(row, x, y);
+                }
+                released(row) => {
+                    root.row-released(row);
+                }
+                lifted(row) => {
+                    root.drag-lifted(row);
+                }
+                dragged(x, y) => {
+                    root.drag-to(x, y);
+                }
+                dropped => {
+                    root.drag-dropped();
+                }
+                drag-cancelled => {
+                    root.drag-cancelled();
+                }
+                wheeled(dx, dy) => {
+                    board.scroll-by(dx, dy);
                 }
                 command(id) => {
                     root.command(id);
@@ -246,6 +295,8 @@ export component AppWindow inherits Window {
                 lines: root.lines;
                 board-width: root.board-width;
                 board-height: root.board-height;
+                dragging: root.dragging;
+                beside: root.beside;
                 resized(room) => {
                     root.board-resized(room);
                 }
@@ -259,6 +310,26 @@ export component AppWindow inherits Window {
                 menu-asked(row, x, y) => {
                     keys.focus();
                     root.row-menu(row, x, y);
+                }
+                released(row) => {
+                    root.row-released(row);
+                }
+                lifted(row) => {
+                    root.drag-lifted(row);
+                }
+                dragged(x, y) => {
+                    root.drag-to(x, y);
+                }
+                dropped => {
+                    root.drag-dropped();
+                }
+                drag-cancelled => {
+                    root.drag-cancelled();
+                }
+                scrolled => {
+                    if root.dragging {
+                        root.drag-to(root.drag-x, root.drag-y);
+                    }
                 }
             }
 
@@ -366,6 +437,27 @@ export component AppWindow inherits Window {
                     }
                 }
             }
+        }
+    }
+
+    // What is dragged, following the pointer.
+    if root.dragging: Rectangle {
+        x: Math.min(root.drag-x + 14px, root.width - self.width - 4px);
+        y: Math.min(root.drag-y + 12px, root.height - self.height - 4px);
+        width: badge.preferred-width + 20px;
+        height: 26px;
+        border-radius: 13px;
+        background: Theme.card;
+        border-width: 1px;
+        border-color: Theme.accent;
+        drop-shadow-blur: 10px;
+        drop-shadow-color: #00000060;
+
+        badge := Text {
+            text: root.carried;
+            color: Theme.text;
+            vertical-alignment: center;
+            horizontal-alignment: center;
         }
     }
 

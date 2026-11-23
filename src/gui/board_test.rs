@@ -459,6 +459,91 @@ fn the_files_of_a_card_follow_it_among_the_pieces() {
 }
 
 #[test]
+fn a_point_finds_the_piece_under_it_and_where_on_it() {
+    let rows = rows_with_open(info(), &[0x01]);
+    let board = Board::layout(&rows, ROOM);
+    let at = |x: f32, y: f32| {
+        let found = board.hit(x, y);
+        found.map(|hit| {
+            let piece = &board.pieces[piece_of(&board, hit.row)];
+            (text(&rows, piece), hit.zone, hit.inside)
+        })
+    };
+    let (card, file) = (
+        rect_of(&rows, &board, "Loose"),
+        rect_of(&rows, &board, "w.rs"),
+    );
+    let loose = |zone, inside| Some(("Loose".to_string(), zone, inside));
+
+    assert_eq!(at(card.x + 1.0, card.y - 2.0), loose(Zone::Over, false));
+    assert_eq!(at(card.x + 1.0, card.y + 1.0), loose(Zone::Over, true));
+    assert_eq!(
+        at(card.x + 1.0, card.y + CARD_H / 2.0),
+        loose(Zone::On, true)
+    );
+    assert_eq!(
+        at(card.x + 1.0, card.y + card.h - 1.0),
+        loose(Zone::Under, true),
+        "under its files"
+    );
+    assert_eq!(
+        at(file.x + 1.0, file.y + file.h / 2.0),
+        loose(Zone::On, true),
+        "a file is its card"
+    );
+    let tip = board.pieces[0].rect;
+    assert_eq!(
+        at(tip.x + 1.0, tip.y + 1.0),
+        None,
+        "the tip stands for no row"
+    );
+    assert_eq!(at(card.x - 1.0, card.y + 1.0), None, "bare board");
+}
+
+#[test]
+fn a_commit_goes_beside_a_card_in_the_gap_over_it_or_under_its_files() {
+    let rows = rows_with_open(info(), &[0xB2]);
+    let board = Board::layout(&rows, ROOM);
+    let row = |text: &str| board.pieces[piece_index(&rows, &board, text)].row.unwrap();
+    let (second, first) = (
+        rect_of(&rows, &board, "Second on b"),
+        rect_of(&rows, &board, "First on b"),
+    );
+
+    let under = board.beside(row("Second on b"), true).unwrap();
+    let over = board.beside(row("First on b"), false).unwrap();
+
+    assert!(under.y >= second.y + second.h, "under its files");
+    assert!(under.y + under.h <= first.y);
+    assert_eq!(over.y, under.y, "one gap, said either way");
+    let last = board
+        .pieces
+        .iter()
+        .find(|p| p.row == Some(row("First on b")))
+        .unwrap()
+        .rect;
+    let below = |dy: f32| board.hit(last.x + 1.0, last.y + last.h + dy);
+    let hit = below(REACH - 1.0).expect("the room under a branch");
+    assert_eq!((hit.row, hit.zone), (row("First on b"), Zone::Under));
+    assert_eq!(below(REACH + 1.0), None, "not all of it");
+    assert_eq!(
+        under.y + under.h / 2.0,
+        (second.y + second.h + first.y) / 2.0
+    );
+    assert_eq!((under.x, under.w), (second.x, second.w));
+}
+
+fn piece_index(rows: &[Row], board: &Board, wanted: &str) -> usize {
+    let found = board.pieces.iter().position(|p| text(rows, p) == wanted);
+    found.unwrap_or_else(|| panic!("no piece reads {wanted}"))
+}
+
+fn piece_of(board: &Board, row: usize) -> usize {
+    let found = board.pieces.iter().position(|p| p.row == Some(row));
+    found.expect("a piece for the row")
+}
+
+#[test]
 fn frames_take_the_room_there_is_between_what_they_need_and_what_they_read_well_at() {
     let rows = rows_of(info());
     let width = |room: f32| frames(&Board::layout(&rows, room))[0].rect.w;

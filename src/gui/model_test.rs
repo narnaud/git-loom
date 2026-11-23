@@ -2,6 +2,7 @@ use super::*;
 use crate::core::repo::{FileChange, RepoInfo};
 use crate::core::test_helpers::{base_info, branch};
 use crate::core::ui::Level;
+use crate::gui::drag::Spot;
 use crate::gui::state::tests::{info, row, select, state, state_in, state_of};
 use crate::session::paused::test_support::repo_with_a_paused_drop;
 use crate::session::snapshot::CommitDest;
@@ -53,6 +54,52 @@ fn a_local_change_reads_its_status_letters_or_its_mark_then_its_path() {
     assert_eq!(changes[2].row, row(&state, "b.rs") as i32);
     // The window scrolls the pane by that position.
     assert_eq!(state.cursor_change(), Some(2));
+}
+
+#[test]
+fn a_drag_marks_what_it_carries_where_it_can_land_and_where_it_would() {
+    let mut state = state();
+    let loose = row(&state, "Loose");
+    state.row_pressed(loose, false, false);
+    assert!(state.drag_started(loose));
+    state.dragged_over(Spot::LocalChanges);
+
+    let piece = |state: &State, text: &str| {
+        let index = row(state, text) as i32;
+        pieces(state)
+            .into_iter()
+            .find(|piece| piece.row == index)
+            .unwrap()
+    };
+    assert_eq!(piece(&state, "Loose").role, DragRole::Source);
+    let on_a = piece(&state, "On a");
+    assert_eq!((on_a.role, on_a.landing.as_str()), (DragRole::Target, ""));
+    let header = local_changes(&state);
+    assert_eq!(
+        (header.role, header.landing.as_str()),
+        (DragRole::Target, "UNCOMMIT")
+    );
+    assert_eq!(
+        carried(&state),
+        format!("{}  Loose  →  UNCOMMIT", state.rows()[loose].sid)
+    );
+
+    state.dragged_over(Spot::Board {
+        x: on_a.x + 1.0,
+        y: on_a.y + 1.0,
+    });
+    let line = beside(&state);
+    assert_eq!((line.shown, line.label.as_str()), (true, "MOVE HERE"));
+    assert!(line.y < on_a.y, "in the gap over the card");
+    assert_eq!(piece(&state, "On a").landing, "", "not onto it");
+    assert_eq!(local_changes(&state).landing, "");
+
+    state.dragged_over(Spot::Elsewhere);
+    assert!(!beside(&state).shown);
+    assert_eq!(
+        carried(&state),
+        format!("{}  Loose", state.rows()[loose].sid)
+    );
 }
 
 #[test]

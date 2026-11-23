@@ -39,9 +39,33 @@ const TOP: f32 = 50.0;
 /// Under the base.
 const FOOT: f32 = 16.0;
 const LINE_W: f32 = 2.0;
+/// How far into a card its edges reach: with half the room beside it, where
+/// a commit goes between it and the next.
+const EDGE: f32 = 6.0;
+/// The most of the room beside a card that the card takes.
+const REACH: f32 = 8.0;
 // Across a node, the ring of bare ground that sets it off included.
 const NODE: f32 = 12.0;
 const BASE_NODE: f32 = 14.0;
+
+/// Where on a piece a point is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Zone {
+    /// Between a card and the one over it: the gap, and the card's top edge.
+    Over,
+    On,
+    /// Between a card, its files included, and the one under it.
+    Under,
+}
+
+/// A piece under a point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Hit {
+    pub row: usize,
+    pub zone: Zone,
+    /// Whether the point is on the piece, not in the gap beside it.
+    pub inside: bool,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Rect {
@@ -338,6 +362,83 @@ impl Board {
             line += CHIP_H;
         }
         h
+    }
+
+    /// The piece at (`x`, `y`). A card also takes half the room over and
+    /// under it, which with its edges is where a commit goes between it and
+    /// the next; a file is the card it is in, as nothing lands on a file; the
+    /// tip, standing for no row, is nothing.
+    pub(crate) fn hit(&self, x: f32, y: f32) -> Option<Hit> {
+        let zone = |piece: &Piece| {
+            let r = piece.rect;
+            if x < r.x || x >= r.x + r.w || piece.kind == PieceKind::Chip {
+                return None;
+            }
+            let inside = y >= r.y && y < r.y + r.h;
+            // No piece reaches further: `reach` is worked out only close by.
+            if y < r.y - REACH || y >= r.y + r.h + REACH {
+                return None;
+            }
+            if piece.kind != PieceKind::Card {
+                return inside.then_some((Zone::On, true));
+            }
+            let zone =
+                if y < r.y - self.reach(piece, false) || y >= r.y + r.h + self.reach(piece, true) {
+                    return None;
+                } else if y < r.y + EDGE {
+                    Zone::Over
+                } else if y >= r.y + r.h - EDGE {
+                    Zone::Under
+                } else {
+                    Zone::On
+                };
+            Some((zone, inside))
+        };
+        let mut pieces = self.pieces.iter().rev();
+        let (row, (zone, inside)) = pieces.find_map(|p| zone(p).map(|z| (p.row, z)))?;
+        row.map(|row| Hit { row, zone, inside })
+    }
+
+    /// Half the room between `piece` and the next piece over it, or under it,
+    /// in its column; no more than `REACH`.
+    fn reach(&self, piece: &Piece, under: bool) -> f32 {
+        let r = piece.rect;
+        let column =
+            (self.pieces.iter()).filter(|p| p.rect.x < r.x + r.w && r.x < p.rect.x + p.rect.w);
+        let rooms = column.map(|p| match under {
+            true => p.rect.y - (r.y + r.h),
+            false => r.y - (p.rect.y + p.rect.h),
+        });
+        let room = rooms
+            .filter(|room| *room >= 0.0)
+            .fold(f32::INFINITY, f32::min);
+        (room / 2.0).min(REACH)
+    }
+
+    /// The line saying a commit dragged goes over the piece of `row`, or
+    /// under it and the files it lists: in the middle of the gap beside it.
+    pub(crate) fn beside(&self, row: usize, under: bool) -> Option<Rect> {
+        let r = self.pieces.iter().find(|p| p.row == Some(row))?.rect;
+        let edge = if under { r.y + r.h } else { r.y };
+        // To the next card on that side, when there is one close by.
+        let cards = self.pieces.iter().filter(|p| p.kind == PieceKind::Card);
+        let gaps = cards.filter(|p| p.rect.x == r.x).map(|p| match under {
+            true => p.rect.y - edge,
+            false => edge - (p.rect.y + p.rect.h),
+        });
+        let gap = gaps.filter(|gap| *gap >= 0.0).fold(f32::INFINITY, f32::min);
+        let gap = if gap <= LOOSE_GAP { gap } else { GAP };
+        let middle = if under {
+            edge + gap / 2.0
+        } else {
+            edge - gap / 2.0
+        };
+        Some(Rect {
+            x: r.x,
+            y: middle - LINE_W / 2.0,
+            w: r.w,
+            h: LINE_W,
+        })
     }
 
     fn place(&mut self, kind: PieceKind, row: Option<usize>, x: f32, y: f32, w: f32, h: f32) {

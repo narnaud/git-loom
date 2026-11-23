@@ -1,5 +1,5 @@
 use super::*;
-use crate::gui::state::tests::{select, selected, state};
+use crate::gui::state::tests::{row, select, selected, state};
 
 fn press(state: &mut State, key: Key) -> bool {
     key_pressed(state, &SharedString::from(key))
@@ -36,4 +36,18 @@ fn a_key_that_is_not_the_selections_is_left_to_the_window() {
     assert!(!key_pressed(&mut state, "a"));
 
     assert!(selected(&state).is_empty());
+}
+
+#[test]
+fn escape_ends_a_drag_which_holds_the_other_keys() {
+    let mut state = state();
+    select(&mut state, "b.rs", &[]);
+    assert!(state.drag_started(row(&state, "b.rs")));
+
+    assert!(press(&mut state, Key::DownArrow));
+    assert_eq!(selected(&state), ["b.rs"]);
+    assert!(press(&mut state, Key::Escape));
+
+    assert!(state.drag().is_none());
+    assert_eq!(selected(&state), ["b.rs"], "only the drag ends");
 }

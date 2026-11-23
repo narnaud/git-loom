@@ -75,3 +75,89 @@ export component ToolButton inherits Rectangle {
         }
     }
 }
+
+// What stands for a row on a pane: a press selects, the right button asks
+// for its menu, and a drag carries it elsewhere. It keeps the pointer while
+// the button is down, so a drag says wherever the pointer goes.
+export component Grip inherits TouchArea {
+    // A drag is going on, carried by the grip that lifted it.
+    in property <bool> dragging;
+
+    callback press(control: bool, shift: bool);
+    // Let go, with no drag.
+    callback release();
+    callback menu(x: length, y: length);
+    // The pointer went far enough with the button down to start a drag.
+    callback lift();
+    // Where the pointer dragging is, and where it was let go, in the window.
+    callback drag(x: length, y: length);
+    callback drop();
+    callback cancel();
+    // The wheel turned while this grip holds the pointer for a drag: the
+    // pane under it would never see it.
+    callback wheel(dx: length, dy: length);
+
+    // Whether the press tried to start a drag already.
+    out property <bool> lifted;
+
+    pointer-event(event) => {
+        if event.kind == PointerEventKind.down && root.dragging {
+            // Another button: its release takes the grab, so the left one's
+            // would never reach this grip.
+            root.cancel();
+        } else if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+            self.lifted = false;
+            root.press(event.modifiers.control, event.modifiers.shift);
+        } else if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+            root.menu(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+        } else if event.kind == PointerEventKind.move && self.pressed {
+            if !self.lifted && Math.abs((self.mouse-x - self.pressed-x) / 1px) + Math.abs((self.mouse-y - self.pressed-y) / 1px) > 6 {
+                self.lifted = true;
+                root.lift();
+            }
+            if root.dragging {
+                root.drag(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+            }
+        } else if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
+            if root.dragging && self.lifted {
+                // Where it is let go: the board may have moved under a still
+                // pointer.
+                root.drag(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                root.drop();
+            } else if root.dragging {
+                root.cancel();
+            } else {
+                root.release();
+            }
+        } else if event.kind == PointerEventKind.cancel && root.dragging {
+            root.cancel();
+        }
+    }
+
+    scroll-event(event) => {
+        if !root.dragging || !self.pressed {
+            return reject;
+        }
+        root.wheel(event.delta-x, event.delta-y);
+        accept
+    }
+}
+
+// What a drag let go here does, on what it would land on.
+export component Landing inherits Rectangle {
+    in property <string> text;
+
+    width: label.preferred-width + 12px;
+    height: 18px;
+    border-radius: 3px;
+    background: Theme.accent;
+
+    label := Text {
+        text: root.text;
+        color: Theme.background;
+        font-size: 10px;
+        font-weight: 700;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+    }
+}

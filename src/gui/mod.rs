@@ -2,6 +2,7 @@
 
 mod board;
 mod commands;
+mod drag;
 mod forms;
 mod hunks;
 mod model;
