@@ -498,6 +498,21 @@ fn a_point_finds_the_piece_under_it_and_where_on_it() {
         "the tip stands for no row"
     );
     assert_eq!(at(card.x - 1.0, card.y + 1.0), None, "bare board");
+
+    let between = |x: f32, y: f32| {
+        let hit = board.hit_between(x, y)?;
+        let piece = &board.pieces[piece_of(&board, hit.row)];
+        Some((text(&rows, piece), hit.zone))
+    };
+    let loose = |zone| Some(("Loose".to_string(), zone));
+    assert_eq!(
+        between(card.x + 1.0, card.y + CARD_H / 2.0),
+        loose(Zone::Over)
+    );
+    assert_eq!(
+        between(file.x + 1.0, file.y + file.h / 2.0),
+        loose(Zone::Under)
+    );
 }
 
 #[test]

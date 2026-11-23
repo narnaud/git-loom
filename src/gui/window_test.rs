@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::ui::Level;
 use crate::gui::state::tests::{row, select, selected, state};
 
 fn press(state: &mut State, key: Key) -> bool {
@@ -36,6 +37,18 @@ fn a_key_that_is_not_the_selections_is_left_to_the_window() {
     assert!(!key_pressed(&mut state, "a"));
 
     assert!(selected(&state).is_empty());
+}
+
+#[test]
+fn escape_ends_a_pick_by_click() {
+    let mut state = state();
+    select(&mut state, "Loose", &[]);
+    state.prepare(Cmd::Move);
+
+    assert!(press(&mut state, Key::Escape));
+
+    assert!(state.drag().is_none());
+    assert_eq!(state.status(), (Level::Plain, "move cancelled".to_string()));
 }
 
 #[test]

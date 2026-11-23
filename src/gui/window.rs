@@ -132,12 +132,14 @@ impl Gui {
             } else {
                 Spot::Elsewhere
             };
-            gui.update(|state| state.dragged_over(spot));
+            gui.update_drag(|state| state.dragged_over(spot));
         });
         let gui = self.clone();
         window.on_drag_dropped(move || gui.update(State::drag_dropped));
         let gui = self.clone();
         window.on_drag_cancelled(move || gui.update(State::drag_cancelled));
+        let gui = self.clone();
+        window.on_target_clicked(move || gui.update(State::target_clicked));
         let gui = self.clone();
         window.on_key_pressed(move |text| gui.key(&text));
         let gui = self.clone();
@@ -244,6 +246,16 @@ impl Gui {
         self.sync();
     }
 
+    /// [`Gui::update`] for a pointer moving in a drag, which changes only
+    /// what [`sync_drag`] copies: the menus, each made of the selection
+    /// anew, are left as they are.
+    fn update_drag(&self, change: impl FnOnce(&mut State)) {
+        change(&mut self.state.borrow_mut());
+        if let Some(window) = self.window.upgrade() {
+            sync_drag(&window, &self.state.borrow());
+        }
+    }
+
     /// Copy what the state shows onto the window.
     fn sync(&self) {
         let Some(window) = self.window.upgrade() else {
@@ -255,26 +267,17 @@ impl Gui {
         update_model(&window.get_bar(), model::buttons(&state.bar()), |bar| {
             window.set_bar(bar)
         });
-        window.set_local_changes(model::local_changes(&state));
-        update_model(&window.get_changes(), model::changes(&state), |changes| {
-            window.set_changes(changes)
-        });
         let buttons = model::buttons(&state.commit_buttons());
         update_model(&window.get_commit_buttons(), buttons, |buttons| {
             window.set_commit_buttons(buttons)
         });
+        sync_drag(&window, &state);
         let board = state.board();
-        update_model(&window.get_pieces(), model::pieces(&state), |pieces| {
-            window.set_pieces(pieces)
-        });
         update_model(&window.get_lines(), model::lines(board), |lines| {
             window.set_lines(lines)
         });
         window.set_board_width(board.width);
         window.set_board_height(board.height);
-        window.set_dragging(state.drag().is_some());
-        window.set_carried(model::carried(&state).into());
-        window.set_beside(model::beside(&state));
 
         window.set_busy(state.busy());
         let (level, status) = state.status();
@@ -382,6 +385,22 @@ impl Gui {
             });
         }
     }
+}
+
+/// The local changes and the pieces, with what a drag does to each, and the
+/// drag itself.
+fn sync_drag(window: &AppWindow, state: &State) {
+    window.set_local_changes(model::local_changes(state));
+    update_model(&window.get_changes(), model::changes(state), |changes| {
+        window.set_changes(changes)
+    });
+    update_model(&window.get_pieces(), model::pieces(state), |pieces| {
+        window.set_pieces(pieces)
+    });
+    window.set_dragging(state.drag().is_some());
+    window.set_aiming(state.drag().is_some_and(|drag| !drag.held()));
+    window.set_carried(model::carried(state).into());
+    window.set_beside(model::beside(state));
 }
 
 /// Do what the key `text` asks of the selection; false when it is not one of

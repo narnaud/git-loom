@@ -55,6 +55,23 @@ pub(crate) fn fold_targets(
     rows: &[&Row],
     hunks: bool,
 ) -> Result<Vec<FoldTarget>, Refusal> {
+    targets_of(tree, rows, hunks, || git2::Repository::open(workdir).ok())
+}
+
+/// Why [`fold_targets`] finds `rows` nowhere to go, short of opening the
+/// repository to walk its graph, as a menu asks at each refresh: a commit is
+/// taken to descend from every other, which the command checks.
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub(crate) fn can_fold(tree: &[Row], rows: &[&Row]) -> Result<(), Refusal> {
+    targets_of(tree, rows, false, || None).map(drop)
+}
+
+fn targets_of(
+    tree: &[Row],
+    rows: &[&Row],
+    hunks: bool,
+    repo: impl FnOnce() -> Option<git2::Repository>,
+) -> Result<Vec<FoldTarget>, Refusal> {
     let target = |row: &Row, effect| {
         row.target.clone().map(|arg| FoldTarget {
             key: row.key.clone(),
@@ -78,7 +95,7 @@ pub(crate) fn fold_targets(
             }
             // Opened once for the fixup check; a repo that cannot answer
             // leaves the check to the command.
-            let repo = git2::Repository::open(workdir).ok();
+            let repo = repo();
             let older = |oid: git2::Oid| {
                 repo.as_ref()
                     .is_none_or(|repo| repo.graph_descendant_of(source, oid).unwrap_or(true))

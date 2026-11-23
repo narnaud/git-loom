@@ -369,6 +369,16 @@ impl Board {
     /// the next; a file is the card it is in, as nothing lands on a file; the
     /// tip, standing for no row, is nothing.
     pub(crate) fn hit(&self, x: f32, y: f32) -> Option<Hit> {
+        self.find(x, y, false)
+    }
+
+    /// [`Board::hit`] for what only goes between cards: a card is over it in
+    /// its upper half and under it in the other.
+    pub(crate) fn hit_between(&self, x: f32, y: f32) -> Option<Hit> {
+        self.find(x, y, true)
+    }
+
+    fn find(&self, x: f32, y: f32, halves: bool) -> Option<Hit> {
         let zone = |piece: &Piece| {
             let r = piece.rect;
             if x < r.x || x >= r.x + r.w || piece.kind == PieceKind::Chip {
@@ -382,12 +392,13 @@ impl Board {
             if piece.kind != PieceKind::Card {
                 return inside.then_some((Zone::On, true));
             }
+            let edge = if halves { r.h / 2.0 } else { EDGE };
             let zone =
                 if y < r.y - self.reach(piece, false) || y >= r.y + r.h + self.reach(piece, true) {
                     return None;
-                } else if y < r.y + EDGE {
+                } else if y < r.y + edge {
                     Zone::Over
-                } else if y >= r.y + r.h - EDGE {
+                } else if y >= r.y + r.h - edge {
                     Zone::Under
                 } else {
                     Zone::On
