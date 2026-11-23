@@ -1,5 +1,6 @@
-//! Pieces dragged onto each other (Spec 024): what the pieces taken do on
-//! the one under the pointer, and the command they make let go there.
+//! Pieces dragged onto each other, or sent where a click says by `Fold
+//! into…` and `Move…` (Spec 024): what the pieces taken do on the one under
+//! the pointer, and the command they make there.
 
 use std::collections::HashSet;
 
@@ -58,6 +59,29 @@ pub(crate) enum Role {
     Target,
 }
 
+/// How the pieces taken go where they land.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Way {
+    /// Dragged, the button held: whatever they can do where they are let go.
+    Drag,
+    /// `Fold into…`: folded where a click says.
+    Fold,
+    /// `Move…`: the one commit taken, beside the card or onto the tag a
+    /// click says.
+    Move,
+}
+
+impl Way {
+    /// The command a pick by click stands for, as its refusals and its
+    /// cancel name it.
+    fn label(self) -> &'static str {
+        match self {
+            Way::Move => "move",
+            _ => "fold",
+        }
+    }
+}
+
 /// Where the pointer is while it drags.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Spot {
@@ -71,8 +95,9 @@ pub(crate) enum Spot {
     Elsewhere,
 }
 
-/// Pieces being dragged.
+/// Pieces being dragged, or waiting for a click to say where they go.
 pub(crate) struct Drag {
+    way: Way,
     /// Keys of the rows taken, and of the rows they can land on.
     sources: HashSet<String>,
     targets: HashSet<String>,
@@ -91,6 +116,20 @@ pub(crate) struct Drag {
 }
 
 impl Drag {
+    /// Whether the button is held, rather than a click awaited.
+    pub(crate) fn held(&self) -> bool {
+        self.way == Way::Drag
+    }
+
+    /// What the status bar asks of a pick by click.
+    fn ask(&self) -> String {
+        let what = &self.title;
+        match self.way {
+            Way::Fold => format!("Fold {what} into… — click where it goes, Esc to cancel"),
+            _ => format!("Move {what} — click where it goes, Esc to cancel"),
+        }
+    }
+
     /// What the rows taken do on `row`, the pointer in `zone` of it, on it
     /// or `inside` it. A commit goes between two cards from the gap between
     /// them and the edges of both; anything folds into a card it is on.
@@ -124,30 +163,40 @@ impl Drag {
 }
 
 impl State {
-    /// A drag of `rows`, or why they can go nowhere.
-    fn new_drag(&self, rows: &[&Row]) -> Result<Drag, Refusal> {
+    /// `rows` going `way`, or why they can go nowhere.
+    fn new_drag(&self, rows: &[&Row], way: Way) -> Result<Drag, Refusal> {
         let args = commands::fold_sources(rows)?;
-        let commit = match rows {
+        let one_commit = match rows {
             [row] => match row.kind {
                 RowKind::Commit { oid, .. } => Some(oid),
                 _ => None,
             },
             _ => None,
         };
-        let local = rows.iter().all(|row| {
+        let all_local = rows.iter().all(|row| {
             matches!(
                 row.kind,
                 RowKind::WorkingFile { .. } | RowKind::LocalChanges { count: 1.. }
             )
         });
+        let (commit, local) = match way {
+            Way::Drag => (one_commit, all_local),
+            Way::Fold => (None, false),
+            Way::Move => (Some(commands::move_source(rows)?), false),
+        };
         let workdir = &self.snapshot.workdir;
-        let folds = match targets::fold_targets(&self.rows, workdir, rows, false) {
+        let folds = match way {
+            Way::Move => Ok(Vec::new()),
+            _ => targets::fold_targets(&self.rows, workdir, rows, false),
+        };
+        let folds = match folds {
             Ok(folds) => folds,
             // Still somewhere to go: beside a commit, onto a branch.
             Err(_) if commit.is_some() || local => Vec::new(),
             Err(reason) => return Err(reason),
         };
         let mut drag = Drag {
+            way,
             sources: rows.iter().map(|row| row.key.clone()).collect(),
             targets: HashSet::new(),
             args,
@@ -201,7 +250,7 @@ impl State {
         if rows.iter().any(|row| row.selection_class().is_none()) {
             return false;
         }
-        match self.new_drag(&rows) {
+        match self.new_drag(&rows, Way::Drag) {
             Ok(drag) => {
                 self.drag = Some(drag);
                 true
@@ -211,6 +260,37 @@ impl State {
                 false
             }
         }
+    }
+
+    /// `Fold into…` or `Move…`: the selection goes where a click says.
+    pub(super) fn aim(&mut self, way: Way) {
+        let rows = self.selection();
+        match self.new_drag(&rows, way) {
+            Ok(drag) => {
+                self.say(Level::Plain, drag.ask());
+                self.drag = Some(drag);
+            }
+            Err(reason) => self.say(Level::Warn, format!("{}: {reason}", way.label())),
+        }
+    }
+
+    /// A click while pieces wait for one: they go where the pointer is.
+    pub(crate) fn target_clicked(&mut self) {
+        if let Some(action) = self.click() {
+            self.start(action);
+        }
+    }
+
+    /// [`State::target_clicked`] short of running anything: the action to
+    /// start at once, if any; where they go nowhere, the pick waits. Tests go
+    /// through this.
+    pub(super) fn click(&mut self) -> Option<Action> {
+        let drag = self.drag.as_ref()?;
+        if drag.landing.is_none() {
+            self.say(Level::Warn, "Click where it goes, or press Esc to cancel");
+            return None;
+        }
+        self.land()
     }
 
     pub(crate) fn drag(&self) -> Option<&Drag> {
@@ -231,6 +311,8 @@ impl State {
             return;
         };
         let under = match spot {
+            // With no fold to make room for, all of a card is beside it.
+            Spot::Board { x, y } if drag.way == Way::Move => self.board().hit_between(x, y),
             Spot::Board { x, y } => self.board().hit(x, y),
             Spot::LocalChanges => self.local_changes().map(|row| Hit {
                 row,
@@ -288,9 +370,12 @@ impl State {
         }
     }
 
-    /// The drag ended with nothing run: `Esc`, or the pointer taken away.
+    /// The drag ended with nothing run: `Esc`, the pointer taken away, or a
+    /// right click while a click was awaited.
     pub(crate) fn drag_cancelled(&mut self) {
-        self.drag = None;
+        if let Some(drag) = self.drag.take().filter(|drag| !drag.held()) {
+            self.say(Level::Plain, format!("{} cancelled", drag.way.label()));
+        }
     }
 }
 

@@ -509,6 +509,7 @@ fn a_menu_draws_a_line_between_its_groups() {
             ("Commit…", false),
             ("Commit hunks…", false),
             ("", true),
+            ("Fold into…", false),
             ("Absorb", false),
             ("", true),
             ("Drop all local changes", false)

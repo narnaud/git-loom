@@ -9,11 +9,12 @@ fn target(state: &State, text: &str) -> String {
     state.rows[index].target.clone().unwrap()
 }
 
-/// The action `cmd` makes of the selection; none picks hunks.
+/// The action `cmd` makes of the selection; none picks hunks or a place.
 fn action(state: &State, cmd: Cmd) -> Result<Action, Refusal> {
     state.make(cmd).map(|made| match made {
         Made::Run(action) => action,
         Made::Pick(_) => panic!("{cmd:?} picks hunks"),
+        Made::Aim(_) => panic!("{cmd:?} waits for a click"),
     })
 }
 
@@ -42,6 +43,7 @@ fn each_class_of_piece_has_a_menu_of_its_own() {
             "Commit…",
             "Commit hunks…",
             "-",
+            "Fold into…",
             "Absorb",
             "-",
             "Drop all local changes"
@@ -49,7 +51,15 @@ fn each_class_of_piece_has_a_menu_of_its_own() {
     );
     assert_eq!(
         menu(&mut state, "b.rs"),
-        ["Commit…", "Commit hunks…", "-", "Absorb", "-", "Drop"]
+        [
+            "Commit…",
+            "Commit hunks…",
+            "-",
+            "Fold into…",
+            "Absorb",
+            "-",
+            "Drop"
+        ]
     );
     assert_eq!(
         menu(&mut state, "On a"),
@@ -57,6 +67,8 @@ fn each_class_of_piece_has_a_menu_of_its_own() {
             "Reword…",
             "Split…",
             "-",
+            "Fold into…",
+            "Move…",
             "Uncommit",
             "-",
             "New branch here…",
@@ -100,6 +112,8 @@ fn a_menu_greys_out_what_the_selection_does_not_take() {
             "(Reword…)",
             "(Split…)",
             "-",
+            "(Fold into…)",
+            "(Move…)",
             "(Uncommit)",
             "-",
             "(New branch here…)",
@@ -118,6 +132,7 @@ fn a_menu_greys_out_what_the_selection_does_not_take() {
             "(Commit…)",
             "(Commit hunks…)",
             "-",
+            "(Fold into…)",
             "(Absorb)",
             "-",
             "(Drop all local changes)"
@@ -137,11 +152,14 @@ fn a_file_of_a_commit_splits_out_while_the_commit_keeps_another() {
     select(&mut state, "z.rs", &[]);
     assert_eq!(
         menu_of(&state),
-        ["(Split into its own commit…)", "Uncommit"],
+        ["(Split into its own commit…)", "Fold into…", "Uncommit"],
         "its commit's only file"
     );
     select(&mut state, "y.rs", &[]);
-    assert_eq!(menu_of(&state), ["Split into its own commit…", "Uncommit"]);
+    assert_eq!(
+        menu_of(&state),
+        ["Split into its own commit…", "Fold into…", "Uncommit"]
+    );
 }
 
 #[test]

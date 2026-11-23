@@ -34,9 +34,10 @@ export component AppWindow inherits Window {
     in property <length> board-width;
     in property <length> board-height;
 
-    // Pieces are being dragged: what they are, and what letting them go
-    // where the pointer is does.
+    // Pieces are being dragged, or wait for a click to say where they go
+    // (`aiming`): what they are, and what they do where the pointer is.
     in property <bool> dragging;
+    in property <bool> aiming;
     in property <string> carried;
     in property <Beside> beside;
 
@@ -89,6 +90,8 @@ export component AppWindow inherits Window {
     callback drag-moved(x: length, y: length, on-board: bool, on-changes: bool);
     callback drag-dropped();
     callback drag-cancelled();
+    // A left click while pieces wait for one.
+    callback target-clicked();
     // Whether the key was one of the window's.
     callback key-pressed(text: string) -> bool;
     // The command `id` was picked in a menu, or its button clicked.
@@ -155,13 +158,21 @@ export component AppWindow inherits Window {
     property <int> menu-current: -1;
     property <length> menu-x;
     property <length> menu-y;
-    // Where the pointer dragging is, in the window.
+    // Where the pointer dragging is, in the window, once it has moved.
     property <length> drag-x;
     property <length> drag-y;
+    property <bool> tracked;
+
+    changed dragging => {
+        if !root.dragging {
+            root.tracked = false;
+        }
+    }
 
     function drag-to(x: length, y: length) {
         root.drag-x = x;
         root.drag-y = y;
+        root.tracked = true;
         root.drag-moved(
             x - board.absolute-position.x - board.content-x,
             y - board.absolute-position.y - board.content-y,
@@ -327,7 +338,7 @@ export component AppWindow inherits Window {
                     root.drag-cancelled();
                 }
                 scrolled => {
-                    if root.dragging {
+                    if root.dragging && root.tracked {
                         root.drag-to(root.drag-x, root.drag-y);
                     }
                 }
@@ -440,8 +451,32 @@ export component AppWindow inherits Window {
         }
     }
 
+    // Over the panes while a click is awaited: nothing under it takes the
+    // pointer, which says where the pieces go.
+    if root.aiming: TouchArea {
+        init => {
+            keys.focus();
+        }
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.move {
+                root.drag-to(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+            } else if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                // Where it is: the board may have moved under a still pointer.
+                root.drag-to(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                root.target-clicked();
+            } else if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                root.drag-cancelled();
+            }
+        }
+        // The wheel scrolls the board, wherever the pointer is.
+        scroll-event(event) => {
+            board.scroll-by(event.delta-x, event.delta-y);
+            accept
+        }
+    }
+
     // What is dragged, following the pointer.
-    if root.dragging: Rectangle {
+    if root.dragging && root.tracked: Rectangle {
         x: Math.min(root.drag-x + 14px, root.width - self.width - 4px);
         y: Math.min(root.drag-y + 12px, root.height - self.height - 4px);
         width: badge.preferred-width + 20px;

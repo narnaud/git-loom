@@ -54,6 +54,21 @@ fn a_fold_of_no_rows_lands_nowhere() {
     );
 }
 
+/// A menu asks it: no repository is opened, so a commit may go anywhere.
+#[test]
+fn what_can_fold_is_told_without_the_graph() {
+    let tree = [local_changes(0), commit_row(B), commit_row(A)];
+    let rows = |keys: &[u8]| -> Vec<&Row> {
+        let wanted: Vec<String> = keys.iter().map(|k| oid(*k).to_string()).collect();
+        tree.iter().filter(|r| wanted.contains(&r.key)).collect()
+    };
+
+    assert_eq!(can_fold(&tree, &rows(&[B])), Ok(()));
+    assert_eq!(can_fold(&tree, &rows(&[B, A])), Err("one commit at a time"));
+    assert_eq!(can_fold(&tree, &[&tree[0]]), Err("no local changes"));
+    assert_eq!(can_fold(&tree, &[]), Err("select source rows first"));
+}
+
 #[test]
 fn a_commit_does_not_move_to_the_place_it_has() {
     let info = info();

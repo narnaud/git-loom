@@ -2,6 +2,7 @@ use super::*;
 use crate::core::test_helpers::oid;
 use crate::core::ui::Cancelled;
 use crate::gui::board::{CARD_H, PieceKind};
+use crate::gui::commands::Cmd;
 use crate::gui::state::tests::{row, select, selected, state, tick_until};
 
 /// Press the piece reading `text` and drag it away.
@@ -323,4 +324,100 @@ fn no_menu_opens_while_dragging() {
 
     assert!(!state.row_menu(row(&state, "Loose")));
     assert_eq!(selected(&state), ["b.rs"]);
+}
+
+// ── Fold into…, Move… ──
+
+#[test]
+fn fold_into_waits_for_a_click_on_where_it_goes() {
+    let mut state = state();
+    select(&mut state, "b.rs", &[]);
+
+    assert_eq!(state.prepare(Cmd::FoldInto), None);
+    assert!(!state.drag().unwrap().held());
+    assert_eq!(
+        notice(&state),
+        "Fold b.rs into… — click where it goes, Esc to cancel"
+    );
+    over(&mut state, "upstream", 0.5);
+    assert_eq!(state.click(), None);
+    assert_eq!(
+        notice(&state),
+        "Click where it goes, or press Esc to cancel"
+    );
+    assert!(state.drag().is_some(), "it waits");
+
+    assert_eq!(over(&mut state, "Loose", 0.5), "AMEND");
+    assert_eq!(
+        state.click(),
+        Some(Action::Fold {
+            sources: vec!["./b.rs".to_string()],
+            target: oid(0x01).to_string(),
+            hunks: None,
+        })
+    );
+    assert!(state.drag().is_none());
+}
+
+#[test]
+fn a_pick_by_click_offers_only_what_it_was_asked_for() {
+    let mut state = state();
+    select(&mut state, "Loose", &[]);
+
+    state.prepare(Cmd::FoldInto);
+    assert_eq!(over(&mut state, "On a", 0.05), "AMEND");
+    assert_eq!(over(&mut state, "feature-a", 0.5), "");
+    state.drag_cancelled();
+
+    state.prepare(Cmd::Move);
+    assert_eq!(over(&mut state, "On a", 0.05), "MOVE HERE");
+    assert_eq!(
+        over(&mut state, "On a", 0.5),
+        "MOVE HERE",
+        "a move folds into nothing"
+    );
+    assert_eq!(over(&mut state, "On a", 0.95), "MOVE HERE");
+    assert_eq!(over(&mut state, "feature-a", 0.5), "MOVE HERE");
+    assert_eq!(over(&mut state, "local changes", 0.5), "");
+}
+
+#[test]
+fn a_move_by_click_goes_over_or_under_a_card_from_anywhere_on_it() {
+    let mut state = state();
+    state.row_toggled(row(&state, "On a"));
+    select(&mut state, "Loose", &[]);
+    state.prepare(Cmd::Move);
+    let landing = |state: &mut State, spot| {
+        state.dragged_over(spot);
+        let landing = state.drag().unwrap().landing.clone();
+        landing.map(|(_, effect)| effect)
+    };
+
+    let upper = spot(&state, "On a", 0.4);
+    let over = Some(Effect::Move(MoveSlot::Above(oid(0xA1))));
+    assert_eq!(landing(&mut state, upper), over);
+    let file = spot(&state, "z.rs", 0.5);
+    let under = Some(Effect::Move(MoveSlot::Below(oid(0xA1))));
+    assert_eq!(landing(&mut state, file), under, "a file is its card");
+}
+
+#[test]
+fn local_changes_are_folded_from_the_menu_not_committed() {
+    let mut state = state();
+    select(&mut state, "b.rs", &[]);
+    state.prepare(Cmd::FoldInto);
+
+    assert_eq!(over(&mut state, "feature-a", 0.5), "");
+    assert_eq!(over(&mut state, "On a", 0.5), "AMEND");
+}
+
+#[test]
+fn move_takes_one_commit() {
+    let mut state = state();
+    select(&mut state, "Loose", &["On a"]);
+
+    assert_eq!(state.prepare(Cmd::Move), None);
+
+    assert!(state.drag().is_none());
+    assert_eq!(notice(&state), "move: one commit at a time");
 }

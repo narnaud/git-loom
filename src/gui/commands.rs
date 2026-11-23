@@ -5,6 +5,7 @@
 
 use crate::core::changeid;
 use crate::core::ui::Level;
+use crate::gui::drag::Way;
 use crate::gui::forms::{Form, Input};
 use crate::gui::state::State;
 use crate::session::Refusal;
@@ -12,6 +13,7 @@ use crate::session::action::{Action, CommitSource};
 use crate::session::commands::{self, Reword, Split};
 use crate::session::pick::PickFor;
 use crate::session::snapshot::CommitDest;
+use crate::session::targets;
 use crate::session::tree::{self, Row, RowKind};
 
 /// A command the window offers.
@@ -36,11 +38,15 @@ pub(crate) enum Cmd {
     SplitHunks,
     /// The hunks picked of the local changes.
     CommitHunks,
+    /// Where a click says next.
+    FoldInto,
+    /// A commit, to where a click says next.
+    Move,
 }
 
 impl Cmd {
     /// Every command, each at the index the window names it by.
-    const ALL: [Cmd; 15] = [
+    const ALL: [Cmd; 17] = [
         Cmd::Absorb,
         Cmd::Drop,
         Cmd::Uncommit,
@@ -56,6 +62,8 @@ impl Cmd {
         Cmd::Split,
         Cmd::SplitHunks,
         Cmd::CommitHunks,
+        Cmd::FoldInto,
+        Cmd::Move,
     ];
 
     pub(crate) fn id(self) -> i32 {
@@ -72,7 +80,8 @@ impl Cmd {
         match self {
             Cmd::Absorb => "absorb",
             Cmd::Drop => "drop",
-            Cmd::Uncommit => "fold",
+            Cmd::Uncommit | Cmd::FoldInto => "fold",
+            Cmd::Move => "move",
             Cmd::Push | Cmd::ForcePush => "push",
             Cmd::TakeRemote | Cmd::Update => "update",
             Cmd::Unmerge => "unmerge",
@@ -90,6 +99,8 @@ enum Made {
     Run(Action),
     /// The hunks to read and pick, which make the action.
     Pick(PickFor),
+    /// Where the selection goes, which a click says.
+    Aim(Way),
 }
 
 /// A command as a menu, a button or the bar shows it.
@@ -110,7 +121,7 @@ fn groups(row: &Row) -> &'static [&'static [(Cmd, &'static str)]] {
                 (Cmd::Commit, "Commit…"),
                 (Cmd::CommitHunks, "Commit hunks…"),
             ],
-            &[(Cmd::Absorb, "Absorb")],
+            &[(Cmd::FoldInto, "Fold into…"), (Cmd::Absorb, "Absorb")],
             &[(Cmd::Drop, "Drop all local changes")],
         ],
         RowKind::WorkingFile { .. } => &[
@@ -118,17 +129,22 @@ fn groups(row: &Row) -> &'static [&'static [(Cmd, &'static str)]] {
                 (Cmd::Commit, "Commit…"),
                 (Cmd::CommitHunks, "Commit hunks…"),
             ],
-            &[(Cmd::Absorb, "Absorb")],
+            &[(Cmd::FoldInto, "Fold into…"), (Cmd::Absorb, "Absorb")],
             &[(Cmd::Drop, "Drop")],
         ],
         RowKind::Commit { .. } => &[
             &[(Cmd::Reword, "Reword…"), (Cmd::SplitHunks, "Split…")],
-            &[(Cmd::Uncommit, "Uncommit")],
+            &[
+                (Cmd::FoldInto, "Fold into…"),
+                (Cmd::Move, "Move…"),
+                (Cmd::Uncommit, "Uncommit"),
+            ],
             &[(Cmd::Branch, "New branch here…")],
             &[(Cmd::Drop, "Drop")],
         ],
         RowKind::CommitFile { .. } => &[&[
             (Cmd::Split, "Split into its own commit…"),
+            (Cmd::FoldInto, "Fold into…"),
             (Cmd::Uncommit, "Uncommit"),
         ]],
         RowKind::BranchName { .. } => &[
@@ -209,7 +225,18 @@ impl State {
         Entry {
             cmd,
             title,
-            enabled: self.make(cmd).is_ok(),
+            enabled: self.enabled(cmd),
+        }
+    }
+
+    /// Whether the selection takes `cmd`, as [`State::make`] says, but for a
+    /// fold, which each menu asks of short of walking the graph.
+    fn enabled(&self, cmd: Cmd) -> bool {
+        match cmd {
+            Cmd::FoldInto if self.paused.is_none() => {
+                targets::can_fold(&self.rows, &self.selection()).is_ok()
+            }
+            _ => self.make(cmd).is_ok(),
         }
     }
 
@@ -255,6 +282,10 @@ impl State {
                 self.start_pick(purpose);
                 None
             }
+            Ok(Made::Aim(way)) => {
+                self.aim(way);
+                None
+            }
             Err(reason) => {
                 self.say(Level::Warn, format!("{}: {}", cmd.name(), reason));
                 None
@@ -274,6 +305,15 @@ impl State {
                 // Of every local change, the ones selected kept at first.
                 commands::commit_files(&rows)?;
                 return PickFor::commit_hunks(&self.snapshot.info).map(Made::Pick);
+            }
+            Cmd::FoldInto => {
+                let workdir = &self.snapshot.workdir;
+                targets::fold_targets(&self.rows, workdir, &rows, false)?;
+                return Ok(Made::Aim(Way::Fold));
+            }
+            Cmd::Move => {
+                commands::move_source(&rows)?;
+                return Ok(Made::Aim(Way::Move));
             }
             Cmd::SplitHunks => {
                 return match commands::split(&self.snapshot, &rows)? {
