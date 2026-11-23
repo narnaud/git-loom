@@ -149,6 +149,21 @@ fn a_fold_pick_refuses_rows_with_no_hunks_of_their_own() {
     assert_eq!(fold_pick(&[]).err(), Some("select source rows first"));
 }
 
+/// A menu asks it, short of the graph walk.
+#[test]
+fn a_fold_pick_is_refused_alike_without_the_graph() {
+    let tree = tree();
+
+    for rows in [vec![&tree[2]], vec![&tree[3], &tree[4]], vec![]] {
+        assert_eq!(
+            PickFor::can_fold(&tree, &rows).err(),
+            fold_pick(&rows).err()
+        );
+    }
+    assert_eq!(PickFor::can_fold(&tree, &[&tree[1]]), Ok(()));
+    assert_eq!(PickFor::can_fold(&tree, &[&tree[3]]), Ok(()));
+}
+
 #[test]
 fn a_pick_is_logged_as_the_command_reading_its_hunks() {
     let sid = |target: &str| format!("<{}>", &target[..2]);

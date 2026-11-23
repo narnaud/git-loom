@@ -10,6 +10,7 @@ use crate::gui::state::State;
 use crate::session::Refusal;
 use crate::session::action::{Action, CommitSource};
 use crate::session::commands;
+use crate::session::pick::{self, FoldHunks};
 use crate::session::snapshot::{CommitDest, MoveSlot};
 use crate::session::targets::{self, FoldEffect, FoldTarget};
 use crate::session::tree::{Row, RowKind};
@@ -109,6 +110,8 @@ pub(crate) struct Drag {
     commit: Option<git2::Oid>,
     /// Whether local changes are taken, which a tag takes as a new commit.
     local: bool,
+    /// The hunks picked, folded instead of the rows whole.
+    hunks: Option<FoldHunks>,
     /// What is taken, as the pointer carries it.
     pub title: String,
     /// The row under the pointer, and what the drop does there.
@@ -203,6 +206,7 @@ impl State {
             folds,
             commit,
             local,
+            hunks: None,
             title: self.carried(rows),
             landing: None,
         };
@@ -272,6 +276,36 @@ impl State {
             }
             Err(reason) => self.say(Level::Warn, format!("{}: {reason}", way.label())),
         }
+    }
+
+    /// `Fold hunks into…`, its pick made: the hunks kept, out of the rows
+    /// keyed `sources` and `title` saying how many, go into the one of
+    /// `targets` a click says.
+    pub(super) fn aim_hunks(
+        &mut self,
+        args: Vec<String>,
+        targets: Vec<FoldTarget>,
+        hunks: FoldHunks,
+        sources: HashSet<String>,
+        title: String,
+    ) {
+        let folds: Vec<FoldTarget> = (targets.into_iter())
+            .filter(|target| target.effect != FoldEffect::Noop)
+            .collect();
+        let drag = Drag {
+            way: Way::Fold,
+            sources,
+            targets: folds.iter().map(|target| target.key.clone()).collect(),
+            args,
+            folds,
+            commit: None,
+            local: false,
+            hunks: Some(hunks),
+            title,
+            landing: None,
+        };
+        self.say(Level::Plain, drag.ask());
+        self.drag = Some(drag);
     }
 
     /// A click while pieces wait for one: they go where the pointer is.
@@ -345,11 +379,7 @@ impl State {
         let drag = self.drag.take()?;
         let (_, effect) = drag.landing?;
         match effect {
-            Effect::Fold(target) => Some(Action::Fold {
-                sources: drag.args,
-                target: target.arg,
-                hunks: None,
-            }),
+            Effect::Fold(target) => Some(pick::fold(drag.args, target, drag.hunks)),
             Effect::Move(slot) => (drag.commit).map(|commit| Action::Move { commit, slot }),
             Effect::CommitTo(dest) => {
                 let to = self.commit_dests().iter().position(|d| *d == dest);
@@ -373,9 +403,14 @@ impl State {
     /// The drag ended with nothing run: `Esc`, the pointer taken away, or a
     /// right click while a click was awaited.
     pub(crate) fn drag_cancelled(&mut self) {
-        if let Some(drag) = self.drag.take().filter(|drag| !drag.held()) {
-            self.say(Level::Plain, format!("{} cancelled", drag.way.label()));
+        let Some(drag) = self.drag.take().filter(|drag| !drag.held()) else {
+            return;
+        };
+        // As its picker's cancel would: the read is in the log.
+        if drag.hunks.is_some() {
+            self.worker.log_line(Level::Warn, "Cancelled");
         }
+        self.say(Level::Plain, format!("{} cancelled", drag.way.label()));
     }
 }
 

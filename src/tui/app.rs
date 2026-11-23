@@ -44,7 +44,7 @@ use crate::session::snapshot::{
 use crate::session::targets::{self, FoldEffect, FoldTarget};
 use crate::session::tree::{
     self, LOCAL_CHANGES_KEY, PENDING_COMMIT_OID, Row, RowKind, RowMark, SelectionClass, branch_key,
-    commit_file_key, nearest_focusable, working_file_key,
+    nearest_focusable, working_file_key,
 };
 use crate::session::watch::{RepoStamp, Watch, repo_stamp};
 use crate::session::worker::{Ask, Ended, Event, Job, Worker};
@@ -1713,33 +1713,8 @@ impl<'a> App<'a> {
     /// The gutter marks for picked hunks: the files they come from — the
     /// working files, or the source commit with its files covered.
     fn hunk_sources(&self, commit: Option<git2::Oid>, picked: &[FileEntry]) -> Sources {
-        let paths: HashSet<&str> = picked
-            .iter()
-            .filter(|f| f.hunks.iter().any(|h| h.selected))
-            .map(|f| f.path.as_str())
-            .collect();
-        let Some(oid) = commit else {
-            return Sources {
-                named: paths.iter().map(|p| working_file_key(p)).collect(),
-                covered: HashSet::new(),
-            };
-        };
-        let files = self
-            .snapshot
-            .info
-            .commits
-            .iter()
-            .find(|c| c.oid == oid)
-            .map_or(&[][..], |c| &c.files);
-        Sources {
-            named: HashSet::from([oid.to_string()]),
-            covered: files
-                .iter()
-                .enumerate()
-                .filter(|(_, f)| paths.contains(f.path.as_str()))
-                .map(|(i, _)| commit_file_key(oid, i))
-                .collect(),
-        }
+        let (named, covered) = pick::sources(&self.snapshot.info, commit, picked);
+        Sources { named, covered }
     }
 
     /// Redraw the tree for the current fold target and put the cursor on it.

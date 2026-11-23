@@ -5,7 +5,7 @@ use crate::core::hunks::FileEntry;
 use crate::core::ui::Level;
 use crate::gui::state::State;
 use crate::session::action::{Action, Stamp};
-use crate::session::pick::{self, PickFor};
+use crate::session::pick::{self, FoldHunks, PickFor};
 use crate::session::tree::{self, RowKind};
 use crate::session::worker::{Ended, Job};
 
@@ -75,7 +75,7 @@ impl State {
         let all = self.snapshot.ids.get_unstaged();
         let command = purpose.command_line(all, |target| tree::short_id(&self.rows, target));
         let keep = match purpose {
-            PickFor::CommitHunks => self.keep_selected(),
+            PickFor::CommitHunks | PickFor::Fold { commit: None, .. } => self.keep_selected(),
             _ => Keep::AsRead,
         };
         let read = purpose.read();
@@ -91,7 +91,7 @@ impl State {
         });
     }
 
-    /// What a pick to commit keeps of the local changes selected.
+    /// What a pick of local changes keeps of those selected.
     fn keep_selected(&self) -> Keep {
         let rows = self.selection();
         if (rows.iter()).any(|row| matches!(row.kind, RowKind::LocalChanges { .. })) {
@@ -271,8 +271,10 @@ impl State {
             PickFor::Commit => return None,
             PickFor::CommitHunks => pick::commit(dest, String::new(), &pick.files, &pick.stamp),
             PickFor::Split { commit } => pick::split(*commit, &pick.files),
-            // The window opens no pick of these.
-            PickFor::Fold { .. } => return None,
+            PickFor::Fold { .. } => {
+                self.aim_picked();
+                return None;
+            }
         };
         let action = match made {
             Ok(action) => action,
@@ -289,6 +291,42 @@ impl State {
             }
             Err(action) => Some(action),
         }
+    }
+
+    /// A pick to fold, made: what it keeps goes where a click says next.
+    fn aim_picked(&mut self) {
+        let Some(pick) = self.hunk_pick_mut() else {
+            return;
+        };
+        if !pick::any_picked(&pick.files) {
+            pick.error = "Nothing kept to fold".to_string();
+            return;
+        }
+        let Some(Pick::Open(pick)) = self.pick.take() else {
+            return;
+        };
+        let title = match pick.kept().0 {
+            1 => "1 hunk".to_string(),
+            n => format!("{n} hunks"),
+        };
+        let PickFor::Fold {
+            sources,
+            targets,
+            commit,
+        } = pick.purpose
+        else {
+            return;
+        };
+        let (named, covered) = pick::sources(&self.snapshot.info, commit, &pick.files);
+        let from = named.into_iter().chain(covered).collect();
+        let hunks = match commit {
+            Some(_) => FoldHunks::Commit(pick.files),
+            None => FoldHunks::Worktree {
+                picked: pick.files,
+                stamp: pick.stamp,
+            },
+        };
+        self.aim_hunks(sources, targets, hunks, from, title);
     }
 }
 

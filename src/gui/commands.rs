@@ -40,13 +40,15 @@ pub(crate) enum Cmd {
     CommitHunks,
     /// Where a click says next.
     FoldInto,
+    /// The hunks picked, where a click says next.
+    FoldHunksInto,
     /// A commit, to where a click says next.
     Move,
 }
 
 impl Cmd {
     /// Every command, each at the index the window names it by.
-    const ALL: [Cmd; 17] = [
+    const ALL: [Cmd; 18] = [
         Cmd::Absorb,
         Cmd::Drop,
         Cmd::Uncommit,
@@ -63,6 +65,7 @@ impl Cmd {
         Cmd::SplitHunks,
         Cmd::CommitHunks,
         Cmd::FoldInto,
+        Cmd::FoldHunksInto,
         Cmd::Move,
     ];
 
@@ -80,7 +83,7 @@ impl Cmd {
         match self {
             Cmd::Absorb => "absorb",
             Cmd::Drop => "drop",
-            Cmd::Uncommit | Cmd::FoldInto => "fold",
+            Cmd::Uncommit | Cmd::FoldInto | Cmd::FoldHunksInto => "fold",
             Cmd::Move => "move",
             Cmd::Push | Cmd::ForcePush => "push",
             Cmd::TakeRemote | Cmd::Update => "update",
@@ -121,7 +124,11 @@ fn groups(row: &Row) -> &'static [&'static [(Cmd, &'static str)]] {
                 (Cmd::Commit, "Commit…"),
                 (Cmd::CommitHunks, "Commit hunks…"),
             ],
-            &[(Cmd::FoldInto, "Fold into…"), (Cmd::Absorb, "Absorb")],
+            &[
+                (Cmd::FoldInto, "Fold into…"),
+                (Cmd::FoldHunksInto, "Fold hunks into…"),
+                (Cmd::Absorb, "Absorb"),
+            ],
             &[(Cmd::Drop, "Drop all local changes")],
         ],
         RowKind::WorkingFile { .. } => &[
@@ -129,13 +136,18 @@ fn groups(row: &Row) -> &'static [&'static [(Cmd, &'static str)]] {
                 (Cmd::Commit, "Commit…"),
                 (Cmd::CommitHunks, "Commit hunks…"),
             ],
-            &[(Cmd::FoldInto, "Fold into…"), (Cmd::Absorb, "Absorb")],
+            &[
+                (Cmd::FoldInto, "Fold into…"),
+                (Cmd::FoldHunksInto, "Fold hunks into…"),
+                (Cmd::Absorb, "Absorb"),
+            ],
             &[(Cmd::Drop, "Drop")],
         ],
         RowKind::Commit { .. } => &[
             &[(Cmd::Reword, "Reword…"), (Cmd::SplitHunks, "Split…")],
             &[
                 (Cmd::FoldInto, "Fold into…"),
+                (Cmd::FoldHunksInto, "Fold hunks into…"),
                 (Cmd::Move, "Move…"),
                 (Cmd::Uncommit, "Uncommit"),
             ],
@@ -236,6 +248,9 @@ impl State {
             Cmd::FoldInto if self.paused.is_none() => {
                 targets::can_fold(&self.rows, &self.selection()).is_ok()
             }
+            Cmd::FoldHunksInto if self.paused.is_none() => {
+                PickFor::can_fold(&self.rows, &self.selection()).is_ok()
+            }
             _ => self.make(cmd).is_ok(),
         }
     }
@@ -314,6 +329,10 @@ impl State {
             Cmd::Move => {
                 commands::move_source(&rows)?;
                 return Ok(Made::Aim(Way::Move));
+            }
+            Cmd::FoldHunksInto => {
+                let (workdir, all) = (&self.snapshot.workdir, self.snapshot.ids.get_unstaged());
+                return PickFor::fold(&self.rows, workdir, &rows, all).map(Made::Pick);
             }
             Cmd::SplitHunks => {
                 return match commands::split(&self.snapshot, &rows)? {
