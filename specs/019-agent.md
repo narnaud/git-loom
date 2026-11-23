@@ -415,7 +415,7 @@ current diff and refuse a mismatch — never resolve the ids against it:
 
 | Condition | Error |
 | --- | --- |
-| Fingerprint mismatch | ``The hunks changed since the listing fingerprinted <given> (now <current>)⏎Re-run with -p alone to list them again`` |
+| Fingerprint mismatch | ``The hunks changed since the listing fingerprinted <given> (now <current>)⏎Re-run with -p alone to list them again``; the TUI and the window say ``Pick them again`` |
 | Id absent from the diff | ``No hunk `<id>` in this diff`` |
 | Id not `<path>:<n>` with `n` plain digits from 1 | ``Invalid hunk id `<id>`⏎Ids look like `src/main.rs:1`` |
 | Staged id left out, its lines changed again in the working tree | ``Unstaging `<id>` would lose what only the index holds: the working tree changed `<path>` there again⏎Keep `<id>` staged`` |

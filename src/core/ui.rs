@@ -28,6 +28,9 @@ pub enum Hint {
     ForcePush,
     /// How to look at the repository again: a sentence of its own.
     Reload,
+    /// How to pick hunks again, once the diff they were picked from
+    /// changed: a sentence of its own.
+    Repick,
 }
 
 /// A front-end's words for each hint.
@@ -128,6 +131,7 @@ pub fn test_words(hint: Hint) -> &'static str {
     match hint {
         Hint::ForcePush => "<force push>",
         Hint::Reload => "<reload>",
+        Hint::Repick => "<repick>",
     }
 }
 
