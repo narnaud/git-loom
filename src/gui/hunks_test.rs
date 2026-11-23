@@ -4,7 +4,9 @@ use crate::core::hunk_select::{self, HunkArgs};
 use crate::core::hunks::{HunkEntry, HunkOrigin};
 use crate::core::staging;
 use crate::core::test_helpers::TestRepo;
+use crate::core::test_helpers::oid;
 use crate::gui::commands::Cmd;
+use crate::gui::drag::{Role, Spot};
 use crate::gui::model;
 use crate::gui::state::tests::{row, select, state, tick_until};
 use crate::gui::ui::TextKind;
@@ -253,6 +255,33 @@ fn hunks_to_commit_are_read_with_those_of_the_files_selected_kept() {
     );
 }
 
+/// The hunks staged were kept, of whatever file, and not the file the menu
+/// was opened on.
+#[test]
+fn hunks_to_fold_are_read_with_those_of_the_files_selected_kept() {
+    let repo = TestRepo::new_with_remote();
+    repo.write_file("a.txt", "a\n");
+    repo.write_file("b.txt", "b\n");
+    repo.stage_files(&["a.txt", "b.txt"]);
+    repo.commit_staged("Two files");
+    repo.write_file("a.txt", "a, changed\n");
+    repo.write_file("b.txt", "b, changed\n");
+    repo.stage_files(&["b.txt"]);
+    let mut state = repo.in_dir(State::load).unwrap();
+    select(&mut state, "a.txt", &[]);
+
+    assert_eq!(state.prepare(Cmd::FoldHunksInto), None);
+
+    assert_eq!(state.reading(), Some("loom fold -p zz"));
+    tick_until(&mut state, |state| state.hunk_pick().is_some());
+    let pick = state.hunk_pick().unwrap();
+    assert_eq!(pick.title, "Fold: keep the hunks to fold");
+    let kept: Vec<(&str, bool)> = (pick.files.iter())
+        .map(|file| (file.path.as_str(), file.hunks[0].selected))
+        .collect();
+    assert_eq!(kept, [("a.txt", true), ("b.txt", false)]);
+}
+
 #[test]
 fn a_pick_to_commit_keeps_everything_for_the_header() {
     let mut state = state();
@@ -470,4 +499,133 @@ fn the_message_of_a_split_cancelled_ends_it_as_its_picker_would() {
     );
     let lines = &state.log().last().unwrap().lines;
     assert_eq!(lines, &[(Level::Warn, "Cancelled".to_string())]);
+}
+
+/// The picker open on `files`, read with `stamp`, to fold out of the row
+/// reading `text`, and the argument the fold names it by.
+fn folding(text: &str, files: Vec<FileEntry>, stamp: Stamp) -> (State, String) {
+    let mut state = state();
+    select(&mut state, text, &[]);
+    let purpose = {
+        let rows = state.selection();
+        PickFor::fold(&state.rows, &state.snapshot.workdir, &rows, "zz").unwrap()
+    };
+    let PickFor::Fold { sources, .. } = &purpose else {
+        unreachable!()
+    };
+    let source = sources[0].clone();
+    open(&mut state, files, stamp, purpose);
+    (state, source)
+}
+
+#[test]
+fn the_hunks_kept_to_fold_go_into_the_commit_clicked_next() {
+    let files = vec![file("a.rs", &["one", "two"]), file("b.rs", &["three"])];
+    let (mut state, _) = folding("local changes", files, vec![None, None]);
+
+    assert_eq!(state.confirm_pick(), None);
+    let pick = state.hunk_pick().expect("still open");
+    assert_eq!(pick.error, "Nothing kept to fold");
+    state.hunk_toggled(1);
+    assert_eq!(state.confirm_pick(), None);
+
+    assert!(state.hunk_pick().is_none());
+    assert_eq!(
+        state.status(),
+        (
+            Level::Plain,
+            "Fold 1 hunk into… — click where it goes, Esc to cancel".to_string()
+        )
+    );
+    let role = |state: &State, text: &str| state.drag_role(&state.rows[row(state, text)]);
+    assert_eq!(
+        role(&state, "a.rs"),
+        Role::Source,
+        "where the hunk kept comes from"
+    );
+    assert_eq!(role(&state, "b.rs"), Role::None);
+    let loose = &state.board().pieces[piece_of(&state, "Loose")].rect;
+    let (x, y) = (loose.x + 1.0, loose.y + loose.h / 2.0);
+    state.dragged_over(Spot::Board { x, y });
+    let mut picked = vec![file("a.rs", &["one", "two"]), file("b.rs", &["three"])];
+    picked[0].hunks[1].selected = true;
+    assert_eq!(
+        state.click(),
+        Some(Action::FoldHunks {
+            sources: vec!["zz".to_string()],
+            picked,
+            stamp: vec![None, None],
+            target: oid(0x01).to_string(),
+        })
+    );
+}
+
+/// `fold -p` numbers a commit's hunks against where they land, so the
+/// fingerprint is made once the click says where.
+#[test]
+fn the_hunks_of_a_commit_go_into_a_card_or_back_to_the_local_changes() {
+    let read = [file("a.rs", &["one", "two"])];
+    let fold = |spot: fn(&State) -> Spot| {
+        let (mut state, source) = folding("On a", vec![file("a.rs", &["one", "two"])], Vec::new());
+        state.hunk_toggled(1);
+        assert_eq!(state.confirm_pick(), None);
+        state.dragged_over(spot(&state));
+        (state.click(), source)
+    };
+    let loose = |state: &State| {
+        let rect = &state.board().pieces[piece_of(state, "Loose")].rect;
+        let (x, y) = (rect.x + 1.0, rect.y + rect.h / 2.0);
+        Spot::Board { x, y }
+    };
+    let hunks = |into: Option<&str>, source: &str| {
+        let from = hunk_select::fingerprint(source, into, &read);
+        Some(HunkArgs::new(vec!["a.rs:2".to_string()], Some(from)))
+    };
+
+    let (action, source) = fold(loose);
+    let target = oid(0x01).to_string();
+    assert_eq!(
+        action,
+        Some(Action::Fold {
+            sources: vec![source.clone()],
+            target: target.clone(),
+            hunks: hunks(Some(&target), &source),
+        })
+    );
+    let (action, source) = fold(|_| Spot::LocalChanges);
+    assert_eq!(
+        action,
+        Some(Action::Fold {
+            sources: vec![source.clone()],
+            target: "zz".to_string(),
+            hunks: hunks(None, &source),
+        }),
+        "uncommitted: no commit to number them against"
+    );
+}
+
+#[test]
+fn a_fold_of_hunks_ended_before_its_click_ends_as_its_picker_would() {
+    let files = vec![file("a.rs", &["one", "two"])];
+    let (mut state, _) = folding("local changes", files, vec![None]);
+    state.worker.log.push(LogEntry {
+        command: "loom fold -p zz".to_string(),
+        lines: Vec::new(),
+    });
+    state.hunk_toggled(0);
+    assert_eq!(state.confirm_pick(), None);
+
+    state.drag_cancelled();
+
+    assert!(state.drag().is_none());
+    assert_eq!(state.status(), (Level::Plain, "fold cancelled".to_string()));
+    let lines = &state.log().last().unwrap().lines;
+    assert_eq!(lines, &[(Level::Warn, "Cancelled".to_string())]);
+}
+
+/// The index of the piece standing for the row reading `text`.
+fn piece_of(state: &State, text: &str) -> usize {
+    let index = row(state, text);
+    let pieces = &state.board().pieces;
+    pieces.iter().position(|p| p.row == Some(index)).unwrap()
 }

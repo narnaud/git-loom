@@ -19,6 +19,7 @@ use crate::session::diff_text::{diff_line, untracked_file_text};
 use crate::session::paused::is_conflicted;
 use crate::session::paused::test_support::repo_with_a_paused_drop;
 use crate::session::snapshot::place_moved_commit;
+use crate::session::tree::commit_file_key;
 use crate::tui::widgets::common::diff_style;
 
 fn oid(hex_char: char) -> git2::Oid {

@@ -1,6 +1,7 @@
 //! Picking hunks before a commit, a fold or a split: what a pick is for, what
 //! it reads, and the action its selection makes.
 
+use std::collections::HashSet;
 use std::path::Path;
 
 use anyhow::Result;
@@ -14,7 +15,7 @@ use crate::session::action::{Action, Stamp};
 use crate::session::commands;
 use crate::session::snapshot::CommitDest;
 use crate::session::targets::{self, FoldEffect, FoldTarget};
-use crate::session::tree::{Row, RowKind};
+use crate::session::tree::{self, Row, RowKind};
 
 /// What a pick's selection goes to.
 pub(crate) enum PickFor {
@@ -100,12 +101,7 @@ impl PickFor {
         rows: &[&Row],
         all: &str,
     ) -> Result<PickFor, Refusal> {
-        let mut sources = commands::fold_sources(rows)?;
-        let commit = match rows[0].kind {
-            RowKind::Commit { oid, .. } => Some(oid),
-            RowKind::LocalChanges { .. } | RowKind::WorkingFile { .. } => None,
-            _ => return Err("move to a file, local changes, or a commit"),
-        };
+        let (mut sources, commit) = fold_source(rows)?;
         let targets = targets::fold_targets(tree, workdir, rows, true)?;
         if commit.is_none() {
             sources = vec![all.to_string()];
@@ -115,6 +111,14 @@ impl PickFor {
             targets,
             commit,
         })
+    }
+
+    /// Why [`PickFor::fold`] refuses `rows`, short of the graph walk of its
+    /// targets (`targets::can_fold`).
+    #[cfg_attr(not(feature = "gui"), allow(dead_code))]
+    pub(crate) fn can_fold(tree: &[Row], rows: &[&Row]) -> Result<(), Refusal> {
+        fold_source(rows)?;
+        targets::can_fold(tree, rows)
     }
 
     /// The command the pick is for.
@@ -171,9 +175,46 @@ impl PickFor {
     }
 }
 
+/// What a fold of the hunks of `rows` names as its sources, and the commit
+/// they are of, none for local changes.
+fn fold_source(rows: &[&Row]) -> Result<(Vec<String>, Option<git2::Oid>), Refusal> {
+    let sources = commands::fold_sources(rows)?;
+    let commit = match rows[0].kind {
+        RowKind::Commit { oid, .. } => Some(oid),
+        RowKind::LocalChanges { .. } | RowKind::WorkingFile { .. } => None,
+        _ => return Err("move to a file, local changes, or a commit"),
+    };
+    Ok((sources, commit))
+}
+
 /// Whether `picked` keeps any hunk; one that keeps none is a pick cancelled.
 pub(crate) fn any_picked(picked: &[FileEntry]) -> bool {
     picked.iter().any(|f| f.hunks.iter().any(|h| h.selected))
+}
+
+/// Where the hunks `picked` keeps come from, as row keys: the working files
+/// they are of, or the commit `commit`, then the files of that commit they
+/// are of.
+pub(crate) fn sources(
+    info: &RepoInfo,
+    commit: Option<git2::Oid>,
+    picked: &[FileEntry],
+) -> (HashSet<String>, HashSet<String>) {
+    let paths: HashSet<&str> = (picked.iter())
+        .filter(|f| f.hunks.iter().any(|h| h.selected))
+        .map(|f| f.path.as_str())
+        .collect();
+    let Some(oid) = commit else {
+        let named = paths.iter().map(|p| tree::working_file_key(p)).collect();
+        return (named, HashSet::new());
+    };
+    let commit = info.commits.iter().find(|c| c.oid == oid);
+    let files = commit.map_or(&[][..], |c| &c.files);
+    let covered = (files.iter().enumerate())
+        .filter(|(_, f)| paths.contains(f.path.as_str()))
+        .map(|(i, _)| tree::commit_file_key(oid, i))
+        .collect();
+    (HashSet::from([oid.to_string()]), covered)
 }
 
 /// The hunks picked for a fold, folded instead of its sources whole.

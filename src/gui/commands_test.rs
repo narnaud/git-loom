@@ -44,6 +44,7 @@ fn each_class_of_piece_has_a_menu_of_its_own() {
             "Commit hunks…",
             "-",
             "Fold into…",
+            "Fold hunks into…",
             "Absorb",
             "-",
             "Drop all local changes"
@@ -56,6 +57,7 @@ fn each_class_of_piece_has_a_menu_of_its_own() {
             "Commit hunks…",
             "-",
             "Fold into…",
+            "Fold hunks into…",
             "Absorb",
             "-",
             "Drop"
@@ -68,6 +70,7 @@ fn each_class_of_piece_has_a_menu_of_its_own() {
             "Split…",
             "-",
             "Fold into…",
+            "Fold hunks into…",
             "Move…",
             "Uncommit",
             "-",
@@ -113,6 +116,7 @@ fn a_menu_greys_out_what_the_selection_does_not_take() {
             "(Split…)",
             "-",
             "(Fold into…)",
+            "(Fold hunks into…)",
             "(Move…)",
             "(Uncommit)",
             "-",
@@ -133,6 +137,7 @@ fn a_menu_greys_out_what_the_selection_does_not_take() {
             "(Commit hunks…)",
             "-",
             "(Fold into…)",
+            "(Fold hunks into…)",
             "(Absorb)",
             "-",
             "(Drop all local changes)"
