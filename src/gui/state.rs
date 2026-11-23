@@ -9,6 +9,7 @@ use crate::core::graph;
 use crate::core::repo;
 use crate::core::ui::{Hint, Level};
 use crate::gui::board::{Board, Rect};
+use crate::gui::drag::Drag;
 use crate::gui::forms::{Draft, Form};
 use crate::gui::hunks::Pick;
 use crate::session;
@@ -86,6 +87,10 @@ pub(crate) struct State {
     /// The row the reload after a command selects: the branch it creates or
     /// renames.
     pub(super) next_cursor: Option<String>,
+    /// Key of the row pressed in a selection of several, which it selects
+    /// alone once let go undragged.
+    pub(super) pressed: Option<String>,
+    pub(super) drag: Option<Drag>,
 }
 
 impl State {
@@ -131,6 +136,8 @@ impl State {
             pick: None,
             picks_opened: 0,
             next_cursor: None,
+            pressed: None,
+            drag: None,
         };
         state.rebuild_rows();
         state
@@ -307,16 +314,32 @@ impl State {
     }
 
     /// A press on what stands for the row at `index`: a line of the local
-    /// changes pane or a piece of the board.
+    /// changes pane or a piece of the board. One of a selection of several
+    /// waits to be let go: a drag takes them all. A drag still going on lost
+    /// its release, which another button's took: it ends, running nothing.
     pub(crate) fn row_pressed(&mut self, index: usize, control: bool, shift: bool) {
+        self.pressed = None;
+        self.drag = None;
         if !self.selectable().any(|row| row == index) {
             return;
         }
+        let row = &self.rows[index];
         if control {
             self.toggle_selected(index);
         } else if shift {
             self.extend_selection(index);
+        } else if self.is_selected(row) && self.selected.len() > 1 {
+            self.pressed = Some(row.key.clone());
         } else {
+            self.select_only(index);
+        }
+    }
+
+    /// The press on the row at `index` was let go, with no drag.
+    pub(crate) fn row_released(&mut self, index: usize) {
+        let pressed = self.pressed.take();
+        let row = self.rows.get(index);
+        if row.is_some_and(|row| pressed.as_ref() == Some(&row.key)) {
             self.select_only(index);
         }
     }
@@ -390,7 +413,7 @@ impl State {
     }
 
     /// How the inspector names `row`.
-    fn title(&self, row: &Row) -> String {
+    pub(super) fn title(&self, row: &Row) -> String {
         match &row.kind {
             RowKind::LocalChanges { .. } => "Local changes".to_string(),
             RowKind::WorkingFile { path, .. } => {
@@ -482,11 +505,12 @@ impl State {
         self.worker.running().is_some() || self.reading().is_some()
     }
 
-    /// Whether the panes start nothing: while busy, and while a dialog, the
-    /// log or the hunk picker is over them, whose widgets `Tab` still
-    /// reaches.
+    /// Whether the panes start nothing: while busy, while a dialog, the log
+    /// or the hunk picker is over them, whose widgets `Tab` still reaches,
+    /// and while pieces are dragged.
     pub(super) fn held(&self) -> bool {
-        self.busy() || self.form.is_some() || self.log_open || self.pick.is_some()
+        let over = self.form.is_some() || self.log_open || self.pick.is_some();
+        self.busy() || over || self.drag.is_some()
     }
 
     /// What the status bar says: what was refused since the last command

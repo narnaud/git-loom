@@ -9,15 +9,16 @@ use crate::core::graph::{self, FileGroup};
 use crate::core::repo::{self, RemoteStatus};
 use crate::core::ui::Level;
 use crate::git::raw_text;
-use crate::gui::board::{self, Board, LineKind, PieceKind};
+use crate::gui::board::{self, Board, LineKind, PieceKind, Zone};
 use crate::gui::commands::Entry;
+use crate::gui::drag::Role;
 use crate::gui::forms::{self, Form, Input};
 use crate::gui::hunks::HunkPick;
 use crate::gui::state::State;
 use crate::gui::ui::{
-    BoardLine, ChangeKind, ChangeRow, Choice, Dialog, DialogInput, HunkFile, HunkLine,
-    LocalChanges, MenuEntry, Picking, Piece, PieceKind as Kind, Remote, Strand, TextKind, TextRow,
-    Tone,
+    Beside, BoardLine, ChangeKind, ChangeRow, Choice, Dialog, DialogInput, DragRole, HunkFile,
+    HunkLine, LocalChanges, MenuEntry, Picking, Piece, PieceKind as Kind, Remote, Strand, TextKind,
+    TextRow, Tone,
 };
 use crate::session::action::LogEntry;
 use crate::session::diff_text::{self, DiffLine, expand_tabs};
@@ -45,6 +46,57 @@ pub(crate) fn local_changes(state: &State) -> LocalChanges {
             count => counted(count, "file").into(),
         },
         selected: state.is_selected(&state.rows()[index]),
+        role: role(state.drag_role(&state.rows()[index])),
+        landing: onto(state, index).into(),
+    }
+}
+
+fn role(role: Role) -> DragRole {
+    match role {
+        Role::None => DragRole::None,
+        Role::Source => DragRole::Source,
+        Role::Target => DragRole::Target,
+    }
+}
+
+/// What a drag let go onto the row at `index` does, while the pointer is on
+/// it; nothing when it goes beside it (`beside`).
+fn onto(state: &State, index: usize) -> &'static str {
+    let landing = state.drag().and_then(|drag| drag.landing.as_ref());
+    match landing {
+        Some((row, effect)) if *row == index && effect.zone() == Zone::On => effect.label(),
+        _ => "",
+    }
+}
+
+/// The line saying where a commit dragged goes beside a card, and what it
+/// does there.
+pub(crate) fn beside(state: &State) -> Beside {
+    let landing = state.drag().and_then(|drag| drag.landing.as_ref());
+    let Some((row, effect)) = landing.filter(|(_, effect)| effect.zone() != Zone::On) else {
+        return Beside::default();
+    };
+    let Some(line) = state.board().beside(*row, effect.zone() == Zone::Under) else {
+        return Beside::default();
+    };
+    Beside {
+        shown: true,
+        x: line.x,
+        y: line.y,
+        w: line.w,
+        h: line.h,
+        label: effect.label().into(),
+    }
+}
+
+/// What is dragged, and what letting it go where the pointer is does.
+pub(crate) fn carried(state: &State) -> String {
+    let Some(drag) = state.drag() else {
+        return String::new();
+    };
+    match &drag.landing {
+        Some((_, effect)) => format!("{}  →  {}", drag.title, effect.label()),
+        None => drag.title.clone(),
     }
 }
 
@@ -63,6 +115,7 @@ pub(crate) fn changes(state: &State) -> Vec<ChangeRow> {
                 row: index as i32,
                 path: repo::cwd_relative_path(path, state.cwd_prefix()).into(),
                 selected: state.is_selected(row),
+                role: role(state.drag_role(row)),
                 ..Default::default()
             };
             match graph::file_group(*staged, *worktree) {
@@ -113,6 +166,10 @@ fn piece(placed: &board::Piece, state: &State) -> Piece {
     out.expandable = row.expandable;
     out.expanded = row.expanded;
     out.selected = state.is_selected(row);
+    out.role = role(state.drag_role(row));
+    if let Some(index) = placed.row {
+        out.landing = onto(state, index).into();
+    }
     match &row.kind {
         RowKind::BranchName { name, remote, .. } => {
             out.title = name.as_str().into();

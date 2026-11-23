@@ -10,6 +10,7 @@ use slint::platform::Key;
 use slint::{CloseRequestResponse, ComponentHandle, SharedString, Timer, TimerMode};
 
 use crate::gui::commands::Cmd;
+use crate::gui::drag::Spot;
 use crate::gui::hunks::HunkPick;
 use crate::gui::model::{self, model_of, update_model};
 use crate::gui::state::State;
@@ -109,6 +110,35 @@ impl Gui {
             }
         });
         let gui = self.clone();
+        window.on_row_released(move |row| {
+            if let Ok(row) = usize::try_from(row) {
+                gui.update(|state| state.row_released(row));
+            }
+        });
+        let gui = self.clone();
+        window.on_drag_lifted(move |row| {
+            if let Ok(row) = usize::try_from(row) {
+                gui.update(|state| {
+                    state.drag_started(row);
+                });
+            }
+        });
+        let gui = self.clone();
+        window.on_drag_moved(move |x, y, on_board, on_changes| {
+            let spot = if on_board {
+                Spot::Board { x, y }
+            } else if on_changes {
+                Spot::LocalChanges
+            } else {
+                Spot::Elsewhere
+            };
+            gui.update(|state| state.dragged_over(spot));
+        });
+        let gui = self.clone();
+        window.on_drag_dropped(move || gui.update(State::drag_dropped));
+        let gui = self.clone();
+        window.on_drag_cancelled(move || gui.update(State::drag_cancelled));
+        let gui = self.clone();
         window.on_key_pressed(move |text| gui.key(&text));
         let gui = self.clone();
         window.on_command(move |id| {
@@ -185,6 +215,7 @@ impl Gui {
     /// A key pressed over the panes; false when it is not one of theirs, or
     /// something is over them.
     fn key(&self, text: &str) -> bool {
+        let dragging = self.state.borrow().drag().is_some();
         let over = {
             let state = self.state.borrow();
             state.form().is_some() || state.log_open() || state.hunk_pick().is_some()
@@ -192,6 +223,10 @@ impl Gui {
         let handled = !over && key_pressed(&mut self.state.borrow_mut(), text);
         if handled && let Some(window) = self.window.upgrade() {
             self.sync();
+            // A drag takes every key, none moving the selection.
+            if dragging {
+                return true;
+            }
             // Where a key put the selection may be out of view.
             let state = self.state.borrow();
             if let Some(index) = state.cursor_change() {
@@ -237,6 +272,9 @@ impl Gui {
         });
         window.set_board_width(board.width);
         window.set_board_height(board.height);
+        window.set_dragging(state.drag().is_some());
+        window.set_carried(model::carried(&state).into());
+        window.set_beside(model::beside(&state));
 
         window.set_busy(state.busy());
         let (level, status) = state.status();
@@ -347,10 +385,14 @@ impl Gui {
 }
 
 /// Do what the key `text` asks of the selection; false when it is not one of
-/// its keys.
+/// its keys. A drag takes every key, `Esc` ending it.
 fn key_pressed(state: &mut State, text: &str) -> bool {
     let is = |key: Key| text == SharedString::from(key).as_str();
-    if is(Key::DownArrow) {
+    if state.drag().is_some() {
+        if is(Key::Escape) {
+            state.drag_cancelled();
+        }
+    } else if is(Key::DownArrow) {
         state.move_cursor(true);
     } else if is(Key::UpArrow) {
         state.move_cursor(false);
