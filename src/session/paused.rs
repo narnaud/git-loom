@@ -4,9 +4,12 @@
 use std::path::Path;
 use std::time::SystemTime;
 
+use anyhow::Result;
+
 use crate::core::graph;
 use crate::core::repo::{self, FileChange};
 use crate::core::transaction;
+use crate::core::ui::{self, Hint};
 use crate::git;
 
 /// What tells one paused operation from the next, even of the same command:
@@ -147,6 +150,22 @@ impl PausedOp {
             ),
         }
     }
+}
+
+/// `git add` the file at `path` of the pause `op`, while `op` is still the
+/// operation paused: a staged version of a file that operation no longer
+/// owns would be lost, so one finished or replaced since is refused, as a
+/// continue is. So is one gone on to another step: `PausedId` names the
+/// operation, not where it stopped, and the file there is another conflict.
+pub(crate) fn stage(op: &PausedOp, workdir: &Path, git_dir: &Path, path: &str) -> Result<()> {
+    let moved = git::rebase_progress(git_dir) != op.step;
+    if PausedId::load(git_dir).as_ref() != Some(&op.id) || moved {
+        anyhow::bail!(
+            "The paused operation changed since it was shown\n{}",
+            ui::hint(Hint::Reload).unwrap_or("Look at it again")
+        );
+    }
+    git::stage_path(workdir, path)
 }
 
 /// Which of `after`, the files of a pause read again once the one at `index`

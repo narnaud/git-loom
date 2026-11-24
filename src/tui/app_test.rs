@@ -4930,6 +4930,33 @@ Press R to look at it again"),
     );
 }
 
+#[test]
+fn space_refuses_once_the_paused_operation_changed() {
+    let (repo, _) = repo_with_a_paused_drop();
+    let theme = make_theme();
+
+    repo.in_dir(|| {
+        let mut app = paused_app(&repo, &theme);
+        crate::git::run_git(&repo.workdir(), &["rebase", "--abort"]).unwrap();
+        repo.write_file("f.txt", "worktree\n");
+        press(&mut app, KeyCode::Char(' '));
+        assert_ne!(app.notice.as_deref(), Some("staged f.txt"));
+        let lines = rendered_lines(&mut Shell::new(app));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("Press R to look at it again")),
+            "{lines:#?}"
+        );
+    });
+
+    let mut index = repo.repo.index().unwrap();
+    index.read(true).unwrap();
+    let staged = index.get_path(std::path::Path::new("f.txt"), 0).unwrap();
+    let blob = repo.repo.find_blob(staged.id).unwrap();
+    assert_eq!(blob.content(), b"two\n", "the index as the abort left it");
+}
+
 /// `tui` is exempt from the `cli.rs` guard (#382): an action must not save
 /// its own state over one it cannot read.
 #[test]

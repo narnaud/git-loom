@@ -30,7 +30,6 @@ use crate::core::staging;
 use crate::core::trace_log;
 use crate::core::transaction;
 use crate::core::ui::{Answer, Hint, Level};
-use crate::git;
 use crate::session::action::{self, Action, CommitSource, Stamp, Summary};
 use crate::session::commands::{self, Reword, Split};
 use crate::session::diff_text::{
@@ -1104,7 +1103,13 @@ impl<'a> App<'a> {
         }) else {
             return;
         };
-        if let Err(e) = git::stage_path(&self.snapshot.workdir, &path) {
+        let staged = self.paused.as_ref().map(|p| {
+            let (workdir, git_dir) = (&self.snapshot.workdir, &self.snapshot.git_dir);
+            // Under the sink, for the TUI's words of a refusal.
+            self.worker
+                .inline(|| paused::stage(&p.op, workdir, git_dir, &path))
+        });
+        if let Some(Err(e)) = staged {
             self.show_error(&e.to_string(), AfterNotice::Reload);
             return;
         }
