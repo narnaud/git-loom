@@ -20,13 +20,15 @@ export component AppWindow inherits Window {
     // The commands of the bar.
     in property <[MenuEntry]> bar;
 
-    // The local changes pane, which lists nothing while an operation is
-    // paused.
+    // The local changes pane: the files of a paused operation while one is.
     in property <LocalChanges> local-changes;
     in property <[ChangeRow]> changes;
 
-    // The buttons under them.
-    in property <[MenuEntry]> commit-buttons;
+    // The buttons under them: the commit buttons, or the paused operation's.
+    in property <[MenuEntry]> pane-buttons;
+    // An operation is paused: the local changes pane lists the files it
+    // leaves, and the inspector takes the board's room.
+    in property <bool> paused;
 
     // The board, which has nothing on it while an operation is paused.
     in property <[Piece]> pieces;
@@ -83,6 +85,8 @@ export component AppWindow inherits Window {
     callback row-menu(row: int, x: length, y: length);
     // The left button was let go on it, with no drag.
     callback row-released(row: int);
+    // A line of the local changes pane was double-clicked.
+    callback row-double-clicked(row: int);
     // The pointer went off it with the button down, then dragged to `x`, `y`
     // of the board when over it, or over the local changes; the drag was let
     // go, or taken away.
@@ -252,15 +256,16 @@ export component AppWindow inherits Window {
             // Where the inspector starts. The board keeps room for its narrowest
             // frame and margins (`board.rs`), the inspector 280 px and the
             // divider.
-            property <length> left: self.changes-width + 1px + Math.max(340px, Math.min(self.room - 281px, self.room * root.split));
+            property <length> left: root.paused ? self.changes-width : self.changes-width + 1px + Math.max(340px, Math.min(self.room - 281px, self.room * root.split));
 
             changes-pane := ChangesView {
                 x: 0;
                 width: keys.changes-width;
                 local: root.local-changes;
                 changes: root.changes;
-                buttons: root.commit-buttons;
+                buttons: root.pane-buttons;
                 busy: root.busy;
+                paused: root.paused;
                 dragging: root.dragging;
                 pressed(row, control, shift) => {
                     keys.focus();
@@ -272,6 +277,9 @@ export component AppWindow inherits Window {
                 }
                 released(row) => {
                     root.row-released(row);
+                }
+                double-clicked(row) => {
+                    root.row-double-clicked(row);
                 }
                 lifted(row) => {
                     root.drag-lifted(row);
@@ -301,7 +309,8 @@ export component AppWindow inherits Window {
 
             board := BoardView {
                 x: keys.changes-width + 1px;
-                width: keys.left - self.x;
+                width: Math.max(0px, keys.left - self.x);
+                visible: !root.paused;
                 pieces: root.pieces;
                 lines: root.lines;
                 board-width: root.board-width;
@@ -347,6 +356,7 @@ export component AppWindow inherits Window {
             Rectangle {
                 x: keys.left;
                 width: 1px;
+                visible: !root.paused;
                 background: Theme.border;
             }
 
@@ -386,6 +396,7 @@ export component AppWindow inherits Window {
             grab := TouchArea {
                 x: keys.left - 3px;
                 width: 7px;
+                visible: !root.paused;
                 mouse-cursor: MouseCursor.col-resize;
                 moved => {
                     if self.pressed {

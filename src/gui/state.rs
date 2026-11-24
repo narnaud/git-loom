@@ -64,7 +64,7 @@ pub(crate) struct State {
     room: f32,
     /// The diff of each row the inspector has shown, by row key: git is
     /// asked once.
-    diffs: HashMap<String, String>,
+    pub(super) diffs: HashMap<String, String>,
     /// How many times the repository was read: the diff of a row the
     /// inspector still shows may have changed with it.
     reads: u64,
@@ -91,6 +91,8 @@ pub(crate) struct State {
     /// alone once let go undragged.
     pub(super) pressed: Option<String>,
     pub(super) drag: Option<Drag>,
+    /// The file of the paused operation selected, by path.
+    pub(super) paused_path: Option<String>,
 }
 
 impl State {
@@ -138,7 +140,9 @@ impl State {
             next_cursor: None,
             pressed: None,
             drag: None,
+            paused_path: None,
         };
+        state.select_first_paused();
         state.rebuild_rows();
         state
     }
@@ -230,9 +234,12 @@ impl State {
     }
 
     /// Where the row the selection was last put on is among the files of the
-    /// local changes pane while it is selected, for the window to keep it in
-    /// view.
+    /// local changes pane while it is selected, or the paused file selected,
+    /// for the window to keep it in view.
     pub(crate) fn cursor_change(&self) -> Option<usize> {
+        if self.paused.is_some() {
+            return self.paused_file();
+        }
         let cursor = self.cursor_index()?;
         if !self.is_selected(&self.rows[cursor]) {
             return None;
@@ -320,6 +327,10 @@ impl State {
     pub(crate) fn row_pressed(&mut self, index: usize, control: bool, shift: bool) {
         self.pressed = None;
         self.drag = None;
+        // A line of the local changes pane stands for a paused file then.
+        if self.paused.is_some() {
+            return self.select_paused(index);
+        }
         if !self.selectable().any(|row| row == index) {
             return;
         }
@@ -347,6 +358,9 @@ impl State {
     /// `↓` and `↑`: select the next row the panes show, or the previous one,
     /// alone; at either end, the one the selection was last put on.
     pub(crate) fn move_cursor(&mut self, down: bool) {
+        if self.paused.is_some() {
+            return self.move_paused(down);
+        }
         let next = match (self.cursor_index(), down) {
             (Some(from), true) => self.selectable().filter(|row| *row > from).min(),
             (Some(from), false) => self.selectable().filter(|row| *row < from).max(),
@@ -397,6 +411,9 @@ impl State {
     /// the one the selection was last put on while it is selected, else the
     /// first selected one.
     pub(crate) fn inspected(&mut self) -> Option<Inspected<'_>> {
+        if self.paused.is_some() {
+            return self.inspected_paused();
+        }
         let selected = |index: &usize| self.is_selected(&self.rows[*index]);
         let last_put_on = self.cursor_index().filter(selected);
         let index = last_put_on.or_else(|| (0..self.rows.len()).find(selected))?;
@@ -591,8 +608,16 @@ impl State {
             if ended == Ended::Cancelled || self.reload() {
                 self.report(ended);
             }
-            if committed {
-                self.draft.message.clear();
+            // A commit that paused goes through once its operation is
+            // continued to the end; aborted, it keeps its message.
+            match (committed, &self.paused) {
+                (true, Some(_)) => self.draft.paused = true,
+                (true, None) => {
+                    self.draft.message.clear();
+                    self.draft.paused = false;
+                }
+                (false, None) => self.draft.paused = false,
+                (false, Some(_)) => {}
             }
             changed = true;
         }
@@ -633,17 +658,19 @@ impl State {
     /// in its place or the nearest above it, and a branch the command
     /// created or renamed is selected. False when it could not be read, and
     /// the window shows it as it was.
-    fn reload(&mut self) -> bool {
+    pub(super) fn reload(&mut self) -> bool {
         let workdir = self.snapshot.workdir.clone();
         let git_dir = self.snapshot.git_dir.clone();
         if let Some(paused) = PausedOp::load(&workdir, &git_dir) {
             self.paused = Some(paused);
+            self.select_first_paused();
             self.apply(Snapshot::placeholder(workdir, git_dir));
             return true;
         }
         match load_snapshot(self.context) {
             Ok(snapshot) => {
                 self.paused = None;
+                self.paused_path = None;
                 self.apply(snapshot);
                 true
             }

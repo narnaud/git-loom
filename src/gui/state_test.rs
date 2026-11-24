@@ -403,13 +403,12 @@ fn the_local_changes_pane_lists_what_stands_for_them_all_then_each_file() {
 }
 
 #[test]
-fn the_local_changes_are_not_listed_while_an_operation_is_paused() {
+fn no_row_of_the_tree_is_listed_or_selected_while_an_operation_is_paused() {
     let (repo, _) = repo_with_a_paused_drop();
     let mut state = repo.in_dir(State::load).unwrap();
 
     assert!(listed(&state).is_empty());
 
-    state.row_pressed(row(&state, "local changes"), false, false);
     state.move_cursor(true);
     assert!(selected(&state).is_empty());
 }

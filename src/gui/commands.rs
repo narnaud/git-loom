@@ -4,6 +4,7 @@
 //! asks before it runs.
 
 use crate::core::changeid;
+use crate::core::transaction::Resumable;
 use crate::core::ui::Level;
 use crate::gui::drag::Way;
 use crate::gui::forms::{Form, Input};
@@ -44,11 +45,15 @@ pub(crate) enum Cmd {
     FoldHunksInto,
     /// A commit, to where a click says next.
     Move,
+    /// The file of the paused operation selected, to the index.
+    Stage,
+    Continue,
+    Abort,
 }
 
 impl Cmd {
     /// Every command, each at the index the window names it by.
-    const ALL: [Cmd; 18] = [
+    const ALL: [Cmd; 21] = [
         Cmd::Absorb,
         Cmd::Drop,
         Cmd::Uncommit,
@@ -67,6 +72,9 @@ impl Cmd {
         Cmd::FoldInto,
         Cmd::FoldHunksInto,
         Cmd::Move,
+        Cmd::Stage,
+        Cmd::Continue,
+        Cmd::Abort,
     ];
 
     pub(crate) fn id(self) -> i32 {
@@ -85,6 +93,9 @@ impl Cmd {
             Cmd::Drop => "drop",
             Cmd::Uncommit | Cmd::FoldInto | Cmd::FoldHunksInto => "fold",
             Cmd::Move => "move",
+            Cmd::Stage => "add",
+            Cmd::Continue => "continue",
+            Cmd::Abort => "abort",
             Cmd::Push | Cmd::ForcePush => "push",
             Cmd::TakeRemote | Cmd::Update => "update",
             Cmd::Unmerge => "unmerge",
@@ -104,6 +115,8 @@ enum Made {
     Pick(PickFor),
     /// Where the selection goes, which a click says.
     Aim(Way),
+    /// The file of the paused operation selected, staged at once.
+    Stage,
 }
 
 /// A command as a menu, a button or the bar shows it.
@@ -184,6 +197,19 @@ const COMMIT_BUTTONS: [(Cmd, &str); 3] = [
     (Cmd::Commit, "Commit…"),
 ];
 
+/// The menu of a file of the paused operation.
+const PAUSED: &[&[(Cmd, &str)]] = &[
+    &[(Cmd::Stage, "Stage")],
+    &[(Cmd::Continue, "Continue"), (Cmd::Abort, "Abort…")],
+];
+
+/// The buttons under the files of the paused operation, left to right.
+const PAUSED_BUTTONS: [(Cmd, &str); 3] = [
+    (Cmd::Stage, "Stage"),
+    (Cmd::Abort, "Abort…"),
+    (Cmd::Continue, "Continue"),
+];
+
 /// What the bar offers, whatever is selected.
 const BAR: [(Cmd, &str); 2] = [
     (Cmd::Branch, "New branch…"),
@@ -194,11 +220,13 @@ impl State {
     /// The context menu of the selection, `None` between its groups.
     pub(crate) fn menu(&self) -> Vec<Option<Entry>> {
         let selection = self.selection();
-        let Some(first) = selection.first() else {
-            return Vec::new();
+        let groups = match (self.paused_file(), selection.first()) {
+            (Some(_), _) => PAUSED,
+            (None, Some(first)) => groups(first),
+            (None, None) => return Vec::new(),
         };
         let mut menu = Vec::new();
-        for group in groups(first) {
+        for group in groups {
             if !menu.is_empty() {
                 menu.push(None);
             }
@@ -218,9 +246,14 @@ impl State {
         entries.filter(|entry| entry.enabled).collect()
     }
 
-    /// The buttons under the local changes, which take the ones selected.
-    pub(crate) fn commit_buttons(&self) -> Vec<Entry> {
-        COMMIT_BUTTONS
+    /// The buttons under the local changes: the commit buttons, which take
+    /// the ones selected, or the paused operation's.
+    pub(crate) fn pane_buttons(&self) -> Vec<Entry> {
+        let buttons = match self.paused {
+            Some(_) => &PAUSED_BUTTONS,
+            None => &COMMIT_BUTTONS,
+        };
+        buttons
             .iter()
             .map(|&(cmd, title)| self.entry(cmd, title))
             .collect()
@@ -260,7 +293,14 @@ impl State {
     /// alone first. False when it opens no menu, as while a command runs:
     /// the reload that ends it would move the selection from under it.
     pub(crate) fn row_menu(&mut self, index: usize) -> bool {
-        if self.held() || !self.selectable().any(|row| row == index) {
+        if self.held() {
+            return false;
+        }
+        if self.paused.is_some() {
+            self.select_paused(index);
+            return self.paused_file().is_some();
+        }
+        if !self.selectable().any(|row| row == index) {
             return false;
         }
         if self.is_selected(&self.rows[index]) {
@@ -286,19 +326,32 @@ impl State {
             return None;
         }
         match self.make(cmd) {
-            Ok(Made::Run(action)) => match self.ask(action) {
-                Ok(form) => {
-                    self.open_form(form);
-                    None
+            Ok(Made::Run(action)) => {
+                // The continue of a commit that paused gets it through.
+                let of_commit = self.paused.as_ref().and_then(|op| op.command);
+                let commit = matches!(action, Action::Continue { .. })
+                    && of_commit == Some(Resumable::Commit);
+                if commit && self.draft.paused {
+                    self.draft.running = true;
                 }
-                Err(action) => Some(action),
-            },
+                match self.ask(action) {
+                    Ok(form) => {
+                        self.open_form(form);
+                        None
+                    }
+                    Err(action) => Some(action),
+                }
+            }
             Ok(Made::Pick(purpose)) => {
                 self.start_pick(purpose);
                 None
             }
             Ok(Made::Aim(way)) => {
                 self.aim(way);
+                None
+            }
+            Ok(Made::Stage) => {
+                self.stage_paused();
                 None
             }
             Err(reason) => {
@@ -311,11 +364,18 @@ impl State {
     /// What `cmd` makes of the selection: an action with no message or name
     /// yet, which the window asks for, or the hunks to pick to make one.
     fn make(&self, cmd: Cmd) -> Result<Made, Refusal> {
-        if self.paused.is_some() {
-            return Err("an operation is paused");
+        if let Some(op) = &self.paused {
+            return match cmd {
+                Cmd::Stage if self.paused_file().is_some() => Ok(Made::Stage),
+                Cmd::Stage => Err("select a file"),
+                Cmd::Continue => Ok(Made::Run(commands::resume(op))),
+                Cmd::Abort => Ok(Made::Run(commands::abort(op))),
+                _ => Err("an operation is paused"),
+            };
         }
         let rows = self.selection();
         let action = match cmd {
+            Cmd::Stage | Cmd::Continue | Cmd::Abort => return Err("nothing is paused"),
             Cmd::CommitHunks => {
                 // Of every local change, the ones selected kept at first.
                 commands::commit_files(&rows)?;

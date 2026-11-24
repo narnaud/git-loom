@@ -59,8 +59,10 @@ pub(crate) struct Draft {
     pub(super) dest: CommitDest,
     /// The message of the last commit, until it goes through.
     pub(super) message: String,
-    /// The command running is that commit.
+    /// The command running is that commit, or the continue of it.
     pub(super) running: bool,
+    /// That commit paused: it goes through once continued.
+    pub(super) paused: bool,
 }
 
 impl Draft {
@@ -69,6 +71,7 @@ impl Draft {
             dest: CommitDest::Integration,
             message: String::new(),
             running: false,
+            paused: false,
         }
     }
 }
