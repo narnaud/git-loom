@@ -4,7 +4,6 @@ use crate::core::test_helpers::{base_info, branch};
 use crate::core::ui::Level;
 use crate::gui::drag::Spot;
 use crate::gui::state::tests::{info, row, select, state, state_in, state_of};
-use crate::session::paused::test_support::repo_with_a_paused_drop;
 use crate::session::snapshot::CommitDest;
 
 #[test]
@@ -100,20 +99,6 @@ fn a_drag_marks_what_it_carries_where_it_can_land_and_where_it_would() {
         carried(&state),
         format!("{}  Loose", state.rows()[loose].sid)
     );
-}
-
-#[test]
-fn nothing_stands_for_the_local_changes_while_an_operation_is_paused() {
-    let (repo, _) = repo_with_a_paused_drop();
-
-    let state = repo.in_dir(State::load).unwrap();
-
-    let nothing = LocalChanges {
-        row: -1,
-        ..Default::default()
-    };
-    assert_eq!(local_changes(&state), nothing);
-    assert!(changes(&state).is_empty());
 }
 
 fn find<'a>(pieces: &'a [Piece], reading: &str) -> &'a Piece {

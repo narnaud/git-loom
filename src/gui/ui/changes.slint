@@ -5,12 +5,15 @@ import { Icon, IconKind } from "icons.slint";
 import { Grip, Landing } from "controls.slint";
 
 // The local changes pane: a header standing for all of them, then a line
-// per file, then the buttons that take the ones selected.
+// per file, then the buttons that take the ones selected, or the paused
+// operation's.
 export component ChangesView inherits Rectangle {
     in property <LocalChanges> local;
     in property <[ChangeRow]> changes;
     in property <[MenuEntry]> buttons;
     in property <bool> busy;
+    // An operation is paused: the files listed are the ones it leaves.
+    in property <bool> paused;
     in property <bool> dragging;
 
     // The left button went down on the line standing for `row`.
@@ -19,6 +22,7 @@ export component ChangesView inherits Rectangle {
     callback menu-asked(row: int, x: length, y: length);
     // The left button was let go on it, with no drag.
     callback released(row: int);
+    callback double-clicked(row: int);
     // The pointer went off it with the button down, then dragged to `x`, `y`
     // of the window; the drag was let go, or taken away.
     callback lifted(row: int);
@@ -118,6 +122,20 @@ export component ChangesView inherits Rectangle {
             background: Theme.border;
         }
 
+        if root.local.headline != "": Rectangle {
+            background: Theme.selection;
+
+            VerticalLayout {
+                padding: 12px;
+
+                Text {
+                    text: root.local.headline;
+                    color: Theme.text;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
         list := ListView {
             vertical-stretch: 1;
 
@@ -131,6 +149,9 @@ export component ChangesView inherits Rectangle {
                 }
                 release => {
                     root.released(change.row);
+                }
+                double-clicked => {
+                    root.double-clicked(change.row);
                 }
                 menu(x, y) => {
                     root.menu-asked(change.row, x, y);
@@ -218,12 +239,11 @@ export component ChangesView inherits Rectangle {
             }
         }
 
-        // None while an operation is paused.
-        if root.local.row >= 0: Rectangle {
+        if root.local.row >= 0 || root.paused: Rectangle {
             height: 1px;
             background: Theme.border;
         }
-        if root.local.row >= 0: HorizontalLayout {
+        if root.local.row >= 0 || root.paused: HorizontalLayout {
             vertical-stretch: 0;
             padding: 12px;
             spacing: 8px;
@@ -231,7 +251,7 @@ export component ChangesView inherits Rectangle {
 
             for entry[index] in root.buttons: Button {
                 text: entry.title;
-                // The last, `Commit…`.
+                // The last, `Commit…` or `Continue`.
                 primary: index == root.buttons.length - 1;
                 enabled: entry.enabled && !root.busy;
                 clicked => {

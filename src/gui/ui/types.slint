@@ -12,6 +12,8 @@ export struct LocalChanges {
     role: DragRole,
     // What a drag let go over the pane does, while it is over it.
     landing: string,
+    // Where the paused operation stands, while one is.
+    headline: string,
 }
 
 // What a local change is; mirrors `graph::FileGroup`.
@@ -19,6 +21,8 @@ export enum ChangeKind { tracked, conflicted, untracked }
 
 // A file of the local changes pane.
 export struct ChangeRow {
+    // Index of its row in the tree, or while an operation is paused of the
+    // file among the files it leaves.
     row: int,
     kind: ChangeKind,
     // Of a tracked file: the letter of its index, and of its working tree.

@@ -6,6 +6,7 @@ mod drag;
 mod forms;
 mod hunks;
 mod model;
+mod paused;
 mod state;
 mod window;
 

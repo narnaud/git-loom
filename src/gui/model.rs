@@ -22,6 +22,7 @@ use crate::gui::ui::{
 };
 use crate::session::action::LogEntry;
 use crate::session::diff_text::{self, DiffLine, expand_tabs};
+use crate::session::paused::PausedState;
 use crate::session::snapshot::CommitDest;
 use crate::session::tree::RowKind;
 
@@ -34,8 +35,16 @@ pub(crate) fn local_changes(state: &State) -> LocalChanges {
             _ => None,
         });
     let Some((index, count)) = header else {
+        // A pause lists the files it leaves, under where it stands.
+        let paused = state.paused();
         return LocalChanges {
             row: -1,
+            hint: match paused.map(|op| op.files.len()) {
+                Some(0) => "no changes".into(),
+                Some(count) => counted(count, "file").into(),
+                None => "".into(),
+            },
+            headline: paused.map_or("", |op| headline(op.state)).into(),
             ..Default::default()
         };
     };
@@ -48,6 +57,7 @@ pub(crate) fn local_changes(state: &State) -> LocalChanges {
         selected: state.is_selected(&state.rows()[index]),
         role: role(state.drag_role(&state.rows()[index])),
         landing: onto(state, index).into(),
+        headline: "".into(),
     }
 }
 
@@ -102,6 +112,15 @@ pub(crate) fn carried(state: &State) -> String {
 
 /// The files of the local changes pane, each with what its line reads.
 pub(crate) fn changes(state: &State) -> Vec<ChangeRow> {
+    if state.paused().is_some() {
+        let files = state.paused_files().iter().enumerate();
+        let selected = state.paused_file();
+        let rows = files.map(|(index, file)| ChangeRow {
+            selected: selected == Some(index),
+            ..change(state, index, &file.path, file.index, file.worktree)
+        });
+        return rows.collect();
+    }
     let rows = state
         .local_files()
         .map(|index| (index, &state.rows()[index]));
@@ -110,27 +129,45 @@ pub(crate) fn changes(state: &State) -> Vec<ChangeRow> {
             path,
             index: staged,
             worktree,
-        } => {
-            let mut out = ChangeRow {
-                row: index as i32,
-                path: repo::cwd_relative_path(path, state.cwd_prefix()).into(),
-                selected: state.is_selected(row),
-                role: role(state.drag_role(row)),
-                ..Default::default()
-            };
-            match graph::file_group(*staged, *worktree) {
-                FileGroup::Conflicted => out.kind = ChangeKind::Conflicted,
-                FileGroup::Untracked => out.kind = ChangeKind::Untracked,
-                FileGroup::Tracked => {
-                    out.staged = staged.to_string().into();
-                    out.unstaged = worktree.to_string().into();
-                }
-            }
-            Some(out)
-        }
+        } => Some(ChangeRow {
+            selected: state.is_selected(row),
+            role: role(state.drag_role(row)),
+            ..change(state, index, path, *staged, *worktree)
+        }),
         _ => None,
     });
     files.collect()
+}
+
+fn change(state: &State, row: usize, path: &str, staged: char, worktree: char) -> ChangeRow {
+    let mut out = ChangeRow {
+        row: row as i32,
+        path: repo::cwd_relative_path(path, state.cwd_prefix()).into(),
+        ..Default::default()
+    };
+    match graph::file_group(staged, worktree) {
+        FileGroup::Conflicted => out.kind = ChangeKind::Conflicted,
+        FileGroup::Untracked => out.kind = ChangeKind::Untracked,
+        FileGroup::Tracked => {
+            out.staged = staged.to_string().into();
+            out.unstaged = worktree.to_string().into();
+        }
+    }
+    out
+}
+
+/// What the local changes pane says of where a paused operation stands.
+pub(crate) fn headline(state: PausedState) -> &'static str {
+    match state {
+        PausedState::Conflicts => "Conflicts — resolve them, stage each file, then continue.",
+        PausedState::NoGitOp => {
+            "No rebase is in progress — Continue wraps the operation up, Abort discards it."
+        }
+        PausedState::Resolved => "No conflicts left — review them, then continue.",
+        PausedState::Stopped => {
+            "Stopped part-way — `loom trace` says why. Continue once it is fixed."
+        }
+    }
 }
 
 /// The pieces of the board, each with what it reads.

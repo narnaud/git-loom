@@ -110,6 +110,12 @@ impl Gui {
             }
         });
         let gui = self.clone();
+        window.on_row_double_clicked(move |row| {
+            if let Ok(row) = usize::try_from(row) {
+                gui.update(|state| state.paused_file_activated(row));
+            }
+        });
+        let gui = self.clone();
         window.on_row_released(move |row| {
             if let Ok(row) = usize::try_from(row) {
                 gui.update(|state| state.row_released(row));
@@ -267,10 +273,11 @@ impl Gui {
         update_model(&window.get_bar(), model::buttons(&state.bar()), |bar| {
             window.set_bar(bar)
         });
-        let buttons = model::buttons(&state.commit_buttons());
-        update_model(&window.get_commit_buttons(), buttons, |buttons| {
-            window.set_commit_buttons(buttons)
+        let buttons = model::buttons(&state.pane_buttons());
+        update_model(&window.get_pane_buttons(), buttons, |buttons| {
+            window.set_pane_buttons(buttons)
         });
+        window.set_paused(state.paused().is_some());
         sync_drag(&window, &state);
         let board = state.board();
         update_model(&window.get_lines(), model::lines(board), |lines| {

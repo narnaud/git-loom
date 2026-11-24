@@ -15,6 +15,7 @@ fn action(state: &State, cmd: Cmd) -> Result<Action, Refusal> {
         Made::Run(action) => action,
         Made::Pick(_) => panic!("{cmd:?} picks hunks"),
         Made::Aim(_) => panic!("{cmd:?} waits for a click"),
+        Made::Stage => panic!("{cmd:?} stages at once"),
     })
 }
 
@@ -265,7 +266,7 @@ fn the_bar_makes_and_merges_a_branch_whatever_is_selected() {
 }
 
 #[test]
-fn nothing_runs_while_an_operation_is_paused() {
+fn the_bar_runs_nothing_while_an_operation_is_paused() {
     let (repo, _) = repo_with_a_paused_drop();
     let mut state = repo.in_dir(State::load).unwrap();
 
@@ -568,7 +569,7 @@ fn a_new_branch_on_a_branch_names_it() {
 fn the_buttons_under_the_local_changes_take_the_ones_selected() {
     let mut state = state();
     let buttons = |state: &State| {
-        let entries = state.commit_buttons().into_iter();
+        let entries = state.pane_buttons().into_iter();
         entries
             .map(|entry| (entry.title, entry.enabled))
             .collect::<Vec<_>>()
