@@ -4775,6 +4775,38 @@ fn staging_a_file_out_of_the_paused_list_moves_on_to_the_next_one() {
     });
 }
 
+/// Staged, a conflict moves among the tracked files: the cursor goes to
+/// the conflict that followed it, not after it.
+#[test]
+fn staging_a_file_that_stays_listed_moves_on_to_the_next_one() {
+    let repo = crate::core::test_helpers::TestRepo::new_with_remote();
+    let files = ["a.txt", "b.txt", "c.txt", "d.txt"];
+    let commit = |subject: &str| {
+        for f in files {
+            repo.write_file(f, &format!("{subject}\n"));
+        }
+        repo.stage_files(&files);
+        repo.commit_staged(subject);
+        repo.head_oid()
+    };
+    commit("base");
+    let one = commit("one");
+    commit("two");
+    repo.in_dir(|| crate::drop::run(vec![one.to_string()], true))
+        .unwrap();
+    let theme = make_theme();
+    repo.write_file("a.txt", "resolved\n");
+
+    repo.in_dir(|| {
+        let mut app = paused_app(&repo, &theme);
+        press(&mut app, KeyCode::Char(' '));
+        assert_eq!(app.notice.as_deref(), Some("staged a.txt"));
+        let paused = app.paused.as_ref().expect("still paused");
+        assert!(paused.op.files.iter().any(|f| f.path == "a.txt"));
+        assert_eq!(paused.current().map(|f| f.path.as_str()), Some("b.txt"));
+    });
+}
+
 #[test]
 fn abort_asks_first_and_restores_the_original_history() {
     let (repo, head) = repo_with_a_paused_drop();
