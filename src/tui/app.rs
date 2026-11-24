@@ -36,7 +36,7 @@ use crate::session::commands::{self, Reword, Split};
 use crate::session::diff_text::{
     diff_text, pending_commit_diff, staged_commit_diff, working_file_diff,
 };
-use crate::session::paused::{PausedOp, PausedState};
+use crate::session::paused::{self, PausedOp, PausedState};
 use crate::session::pick::{self, FoldHunks, PickFor};
 use crate::session::snapshot::{
     CommitDest, MoveSlot, NEW_BRANCH_NAME, Preview, Snapshot, is_staged, load_snapshot,
@@ -1098,11 +1098,10 @@ impl<'a> App<'a> {
     /// `git add` the file under the paused view's cursor, then move on to the
     /// next one, as `Space` does in the tree.
     fn stage_paused_file(&mut self) {
-        let Some((path, index)) = self
-            .paused
-            .as_ref()
-            .and_then(|p| p.current().map(|f| (f.path.clone(), p.cursor)))
-        else {
+        let Some((path, index, before)) = self.paused.as_ref().and_then(|p| {
+            let file = p.current()?;
+            Some((file.path.clone(), p.cursor, p.op.files.clone()))
+        }) else {
             return;
         };
         if let Err(e) = git::stage_path(&self.snapshot.workdir, &path) {
@@ -1111,13 +1110,7 @@ impl<'a> App<'a> {
         }
         self.refresh();
         if let Some(paused) = &mut self.paused {
-            if paused.current().is_some_and(|f| f.path == path) {
-                paused.move_cursor(1);
-            } else {
-                // Staged back to HEAD, it left the list: the next file took
-                // its index.
-                paused.cursor = index.min(paused.op.files.len().saturating_sub(1));
-            }
+            paused.cursor = paused::next_after_staging(&before, index, &paused.op.files);
             self.diff.reset();
         }
         self.notice = Some(format!("staged {}", path));

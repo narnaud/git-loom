@@ -90,10 +90,12 @@ impl PausedOp {
             Some("rebase") => git::rebase_progress(git_dir),
             _ => None,
         };
-        let files = git2::Repository::open(workdir)
+        let mut files = git2::Repository::open(workdir)
             .ok()
             .and_then(|r| repo::get_working_changes(&r).ok())
             .unwrap_or_default();
+        // In `loom status`'s order: the conflicts first.
+        files.sort_by_key(|file| graph::file_group(file.index, file.worktree));
         // `AUTO_MERGE` outlives the resolution until the step is committed, so
         // with no conflict left it covers `rerere` and the user's own alike.
         // Conflicts first: a `merge` pauses on its own replay with no git
@@ -147,6 +149,19 @@ impl PausedOp {
     }
 }
 
+/// Which of `after`, the files of a pause read again once the one at `index`
+/// of `before` was staged, comes next: the file that followed it, wherever
+/// `loom status`'s order now lists it, else the one in its place.
+pub(crate) fn next_after_staging(
+    before: &[FileChange],
+    index: usize,
+    after: &[FileChange],
+) -> usize {
+    let follower = before.get(index + 1).map(|file| file.path.as_str());
+    let moved = follower.and_then(|path| after.iter().position(|file| file.path == path));
+    moved.unwrap_or(index).min(after.len().saturating_sub(1))
+}
+
 pub(crate) fn is_conflicted(change: &FileChange) -> bool {
     graph::file_group(change.index, change.worktree) == graph::FileGroup::Conflicted
 }
@@ -174,3 +189,7 @@ pub(crate) mod test_support {
         (repo, head)
     }
 }
+
+#[cfg(test)]
+#[path = "paused_test.rs"]
+mod tests;
