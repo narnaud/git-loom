@@ -27,7 +27,7 @@ pub fn run(branch: Option<String>, all: bool) -> Result<()> {
     let repo = repo::open_repo()?;
     let workdir = repo::require_workdir(&repo, "merge")?;
     let git_dir = repo.path().to_path_buf();
-    let info = repo::gather_repo_info(&repo, false, 1)?;
+    let info = repo::gather_commit_graph(&repo)?;
     let others = other_integrations(&repo, workdir, &info.branch_name)?;
 
     // Setting the work aside would reset the conflict state away, or the

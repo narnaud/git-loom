@@ -747,13 +747,13 @@ exit $status
 
     /// Get all non-merge commit messages between HEAD and merge-base.
     pub fn commit_messages(&self) -> Vec<String> {
-        let info = crate::core::repo::gather_repo_info(&self.repo, false, 1).unwrap();
+        let info = crate::core::repo::gather_commit_graph(&self.repo).unwrap();
         info.commits.iter().map(|c| c.message.clone()).collect()
     }
 
     /// Get all branch names in the commit range.
     pub fn branch_names(&self) -> Vec<String> {
-        let info = crate::core::repo::gather_repo_info(&self.repo, false, 1).unwrap();
+        let info = crate::core::repo::gather_commit_graph(&self.repo).unwrap();
         info.branches.iter().map(|b| b.name.clone()).collect()
     }
 

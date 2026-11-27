@@ -572,7 +572,12 @@ fn fold_commit_to_branch() {
     test_repo.commit("C1", "c1.txt");
     let c1_oid = test_repo.head_oid();
 
-    let result = super::fold_commit_to_branch(&test_repo.repo, &c1_oid.to_string(), "feature-a");
+    let result = super::fold_commit_to_branch(
+        &test_repo.repo,
+        &repo::gather_commit_graph(&test_repo.repo).unwrap(),
+        &c1_oid.to_string(),
+        "feature-a",
+    );
 
     assert!(result.is_ok(), "fold_commit_to_branch failed: {:?}", result);
 
@@ -650,7 +655,12 @@ fn fold_commit_to_branch_dirty_autostashed() {
 
     test_repo.write_file("a1.txt", "dirty");
 
-    let result = super::fold_commit_to_branch(&test_repo.repo, &loose_oid.to_string(), "feature-a");
+    let result = super::fold_commit_to_branch(
+        &test_repo.repo,
+        &repo::gather_commit_graph(&test_repo.repo).unwrap(),
+        &loose_oid.to_string(),
+        "feature-a",
+    );
 
     assert!(
         result.is_ok(),
@@ -708,7 +718,12 @@ fn fold_commit_to_colocated_branch_only_affects_target() {
 
     test_repo.merge_no_ff("feat2");
 
-    let result = super::fold_commit_to_branch(&test_repo.repo, &feat3_oid.to_string(), "feat3");
+    let result = super::fold_commit_to_branch(
+        &test_repo.repo,
+        &repo::gather_commit_graph(&test_repo.repo).unwrap(),
+        &feat3_oid.to_string(),
+        "feat3",
+    );
 
     assert!(result.is_ok(), "fold_commit_to_branch failed: {:?}", result);
 
@@ -786,7 +801,12 @@ fn fold_commit_to_empty_branch() {
         "feature-a should NOT have a section before the fold"
     );
 
-    let result = super::fold_commit_to_branch(&test_repo.repo, &a1_oid.to_string(), "feature-a");
+    let result = super::fold_commit_to_branch(
+        &test_repo.repo,
+        &repo::gather_commit_graph(&test_repo.repo).unwrap(),
+        &a1_oid.to_string(),
+        "feature-a",
+    );
     assert!(result.is_ok(), "fold_commit_to_branch failed: {:?}", result);
 
     assert_eq!(
@@ -819,7 +839,12 @@ fn fold_commit_to_existing_out_of_scope_branch_fails() {
     test_repo.switch_branch("integration");
     test_repo.merge_no_ff("feature-a");
 
-    let result = super::fold_commit_to_branch(&test_repo.repo, &a1_oid.to_string(), "out-of-scope");
+    let result = super::fold_commit_to_branch(
+        &test_repo.repo,
+        &repo::gather_commit_graph(&test_repo.repo).unwrap(),
+        &a1_oid.to_string(),
+        "out-of-scope",
+    );
     assert!(result.is_err(), "should reject out-of-scope branch");
     let err = result.unwrap_err().to_string();
     assert!(
@@ -1125,9 +1150,13 @@ fn fold_commit_to_branch_leaves_inner_branch_behind() {
     test_repo.merge_no_ff("outer");
     test_repo.merge_no_ff("other");
 
-    let (_, parked) =
-        super::move_commits_to_branch(&test_repo.repo, &[i1_oid.to_string()], "other")
-            .expect("moving the sole commit of an inner branch");
+    let (_, parked) = super::move_commits_to_branch(
+        &test_repo.repo,
+        &repo::gather_commit_graph(&test_repo.repo).unwrap(),
+        &[i1_oid.to_string()],
+        "other",
+    )
+    .expect("moving the sole commit of an inner branch");
 
     assert_eq!(parked, vec!["inner".to_string()]);
     assert_eq!(test_repo.get_branch_target("inner"), base_oid);
@@ -1175,9 +1204,13 @@ fn fold_commit_to_branch_leaves_inner_branch_at_the_commit_before() {
     test_repo.merge_no_ff("outer");
     test_repo.merge_no_ff("other");
 
-    let (_, parked) =
-        super::move_commits_to_branch(&test_repo.repo, &[i2_oid.to_string()], "other")
-            .expect("moving a commit out of an inner branch");
+    let (_, parked) = super::move_commits_to_branch(
+        &test_repo.repo,
+        &repo::gather_commit_graph(&test_repo.repo).unwrap(),
+        &[i2_oid.to_string()],
+        "other",
+    )
+    .expect("moving a commit out of an inner branch");
 
     assert!(parked.is_empty(), "inner still has a commit: {parked:?}");
     assert_eq!(
@@ -1212,9 +1245,13 @@ fn fold_commit_to_inner_branch() {
     test_repo.merge_no_ff("outer");
     test_repo.merge_no_ff("other");
 
-    let (_, parked) =
-        super::move_commits_to_branch(&test_repo.repo, &[x1_oid.to_string()], "inner")
-            .expect("moving a commit onto an inner branch");
+    let (_, parked) = super::move_commits_to_branch(
+        &test_repo.repo,
+        &repo::gather_commit_graph(&test_repo.repo).unwrap(),
+        &[x1_oid.to_string()],
+        "inner",
+    )
+    .expect("moving a commit onto an inner branch");
 
     assert_eq!(parked, vec!["other".to_string()]);
     assert_eq!(test_repo.get_branch_target("other"), base_oid);
@@ -3658,6 +3695,7 @@ fn fold_commit_below_reorders_within_its_branch() {
 
     super::fold_commit_relative(
         &test_repo.repo,
+        &repo::gather_commit_graph(&test_repo.repo).unwrap(),
         &a3_oid.to_string(),
         &a1_oid.to_string(),
         Position::Below,
@@ -3698,6 +3736,7 @@ fn fold_commit_below_across_branches_parks_the_emptied_source() {
 
     let (_, parked) = super::plan_relative(
         &test_repo.repo,
+        &repo::gather_commit_graph(&test_repo.repo).unwrap(),
         &[b1_oid.to_string()],
         &a2_oid.to_string(),
         Position::Below,
@@ -3707,6 +3746,7 @@ fn fold_commit_below_across_branches_parks_the_emptied_source() {
 
     super::fold_commit_relative(
         &test_repo.repo,
+        &repo::gather_commit_graph(&test_repo.repo).unwrap(),
         &b1_oid.to_string(),
         &a2_oid.to_string(),
         Position::Below,
@@ -3738,6 +3778,7 @@ fn fold_commits_above_a_branch_tip_advance_the_branch_in_order() {
 
     super::move_commits_relative_and_report(
         &test_repo.repo,
+        &repo::gather_commit_graph(&test_repo.repo).unwrap(),
         &[c1_oid.to_string(), c2_oid.to_string()],
         &a1_oid.to_string(),
         Position::Above,
@@ -3806,6 +3847,7 @@ fn fold_commit_relative_refuses_when_the_moved_commit_replays_empty() {
 
     let err = super::fold_commit_relative(
         &t.repo,
+        &repo::gather_commit_graph(&t.repo).unwrap(),
         &redundant.to_string(),
         &keeper.to_string(),
         Position::Above,
@@ -3902,9 +3944,14 @@ fn fold_commit_to_branch_refuses_when_the_moved_commit_replays_empty() {
     let head_before = t.head_oid();
     let beta_before = t.get_branch_target("beta");
 
-    let err = super::fold_commit_to_branch(&t.repo, &redundant.to_string(), "beta")
-        .unwrap_err()
-        .to_string();
+    let err = super::fold_commit_to_branch(
+        &t.repo,
+        &repo::gather_commit_graph(&t.repo).unwrap(),
+        &redundant.to_string(),
+        "beta",
+    )
+    .unwrap_err()
+    .to_string();
 
     assert!(err.contains("is redundant"), "{err}");
     assert_eq!(t.head_oid(), head_before, "{err}");
@@ -3930,6 +3977,7 @@ fn fold_several_commits_to_a_branch_refuses_when_one_replays_empty() {
     let err = super::move_commits_and_report(
         &t.workdir(),
         &t.repo,
+        &repo::gather_commit_graph(&t.repo).unwrap(),
         &[redundant.to_string(), keeper.to_string()],
         "beta",
         None,
@@ -3994,6 +4042,7 @@ fn fold_several_commits_to_a_branch_refusal_leaves_the_index_as_it_was() {
     let err = super::move_commits_and_report(
         &t.workdir(),
         &t.repo,
+        &repo::gather_commit_graph(&t.repo).unwrap(),
         &[redundant.to_string(), keeper.to_string()],
         "beta",
         None,
@@ -4017,6 +4066,7 @@ fn fold_several_commits_relative_refusal_leaves_the_index_as_it_was() {
 
     let err = super::move_commits_relative_and_report(
         &t.repo,
+        &repo::gather_commit_graph(&t.repo).unwrap(),
         &[redundant.to_string(), keeper.to_string()],
         &anchor.to_string(),
         Position::Above,
@@ -4678,7 +4728,13 @@ fn fold_commit_to_branch_keeps_staging_on_success() {
     let loose = t.head_oid();
     let before = stage_a_mix(&t, "b1.txt");
 
-    super::fold_commit_to_branch(&t.repo, &loose.to_string(), "feature-a").unwrap();
+    super::fold_commit_to_branch(
+        &t.repo,
+        &repo::gather_commit_graph(&t.repo).unwrap(),
+        &loose.to_string(),
+        "feature-a",
+    )
+    .unwrap();
 
     assert_eq!(t.status_porcelain(), before);
 }
@@ -4694,6 +4750,7 @@ fn move_commits_to_branch_keeps_staging_on_success() {
     super::move_commits_and_report(
         &workdir,
         &t.repo,
+        &repo::gather_commit_graph(&t.repo).unwrap(),
         &[c1.to_string(), c2.to_string()],
         "feature-a",
         None,
@@ -4716,8 +4773,14 @@ fn fold_commit_relative_keeps_staging_on_success() {
     t.merge_no_ff("feature-a");
     let before = stage_a_mix(&t, "a1.txt");
 
-    super::fold_commit_relative(&t.repo, &a3.to_string(), &a1.to_string(), Position::Below)
-        .unwrap();
+    super::fold_commit_relative(
+        &t.repo,
+        &repo::gather_commit_graph(&t.repo).unwrap(),
+        &a3.to_string(),
+        &a1.to_string(),
+        Position::Below,
+    )
+    .unwrap();
 
     assert_eq!(t.status_porcelain(), before);
 }
@@ -4738,6 +4801,7 @@ fn move_commits_relative_keeps_staging_on_success() {
 
     super::move_commits_relative_and_report(
         &t.repo,
+        &repo::gather_commit_graph(&t.repo).unwrap(),
         &[a3.to_string(), a4.to_string()],
         &a1.to_string(),
         Position::Below,
@@ -5163,6 +5227,7 @@ fn fold_relative_to_a_redundant_commit_does_not_offer_to_drop_it() {
 
     let err = super::move_commits_relative_and_report(
         &t.repo,
+        &repo::gather_commit_graph(&t.repo).unwrap(),
         &[keeper.to_string()],
         &redundant.to_string(),
         Position::Below,

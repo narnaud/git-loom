@@ -43,7 +43,7 @@ pub fn run(name: Option<String>, target: Option<String>) -> Result<()> {
 
     // Gather repo info once (needed for merge-base default and weave check).
     // May fail if not on an integration branch — that's OK for plain branch creation.
-    let info = repo::gather_repo_info(&repo, false, 1).ok();
+    let info = repo::gather_commit_graph(&repo).ok();
 
     let commit_hash = resolve_commit(&repo, &info, target.as_deref())?;
 

@@ -167,10 +167,10 @@ pub fn run(
             let info = repo::gather_commit_graph(&repo)?;
             let commits = commits_to_move(&repo, commits, weave::base_oid(&repo, &info)?)?;
             if commits.len() == 1 {
-                fold_commit_to_branch(&repo, &commits[0], &branch)
+                fold_commit_to_branch(&repo, &info, &commits[0], &branch)
             } else {
                 let workdir = repo::require_workdir(&repo, COMMAND)?;
-                move_commits_and_report(workdir, &repo, &commits, &branch, None)
+                move_commits_and_report(workdir, &repo, &info, &commits, &branch, None)
             }
         }
         FoldOp::CommitToUnstaged { commit } => {
@@ -260,6 +260,7 @@ fn run_create(repo: &Repository, args: &[String]) -> Result<()> {
     move_commits_and_report(
         workdir,
         repo,
+        &info,
         &commit_hashes,
         branch_name,
         Some(&base_oid.to_string()),
@@ -343,11 +344,13 @@ fn ordered_topologically(
 /// Move `commit_hashes` to `branch_name` and report the result.
 ///
 /// When `base_hash` is `Some`, the branch is created at that base first (and
-/// deleted again on failure). On conflict the rebase is aborted — this path is
-/// not resumable.
+/// deleted again on failure); `info` may predate it, since `plan_move` gives a
+/// branch at the base its section either way. On conflict the rebase is aborted
+/// — this path is not resumable.
 fn move_commits_and_report(
     workdir: &Path,
     repo: &Repository,
+    info: &repo::RepoInfo,
     commit_hashes: &[String],
     branch_name: &str,
     base_hash: Option<&str>,
@@ -360,7 +363,7 @@ fn move_commits_and_report(
     // Restored whichever way the rebase ends (Spec 014).
     let saved_staged = git::diff_cached(workdir)?;
 
-    let parked = match move_commits_to_branch(repo, commit_hashes, branch_name) {
+    let parked = match move_commits_to_branch(repo, info, commit_hashes, branch_name) {
         Ok((RebaseOutcome::Completed, parked)) => {
             git::restore_staged_after_rebase(workdir, &saved_staged);
             parked
@@ -450,20 +453,21 @@ fn run_relative(repo: &Repository, args: &[String], anchor: Anchor) -> Result<()
     let commit_hashes = commits_to_move(repo, commit_hashes, weave::base_oid(repo, &info)?)?;
 
     if commit_hashes.len() == 1 {
-        fold_commit_relative(repo, &commit_hashes[0], &target_hash, position)
+        fold_commit_relative(repo, &info, &commit_hashes[0], &target_hash, position)
     } else {
-        move_commits_relative_and_report(repo, &commit_hashes, &target_hash, position)
+        move_commits_relative_and_report(repo, &info, &commit_hashes, &target_hash, position)
     }
 }
 
 /// Build the weave with `commit_hashes` moved next to `target_hash`.
 fn plan_relative(
     repo: &Repository,
+    info: &repo::RepoInfo,
     commit_hashes: &[String],
     target_hash: &str,
     position: Position,
 ) -> Result<(Weave, Vec<String>)> {
-    let mut graph = Weave::from_repo(repo)?;
+    let mut graph = Weave::from_repo_with_info(repo, info)?;
     let oids = commit_hashes
         .iter()
         .map(|h| git2::Oid::from_str(h))
@@ -490,6 +494,7 @@ fn track_through_rebase(graph: &mut Weave, workdir: &Path, oid: git2::Oid) -> Re
 /// through `_loom-track` so the result can name its new hash.
 fn fold_commit_relative(
     repo: &Repository,
+    info: &repo::RepoInfo,
     commit_hash: &str,
     target_hash: &str,
     position: Position,
@@ -499,6 +504,7 @@ fn fold_commit_relative(
 
     let (mut graph, parked) = plan_relative(
         repo,
+        info,
         std::slice::from_ref(&commit_hash.to_string()),
         target_hash,
         position,
@@ -565,12 +571,13 @@ fn fold_commit_relative(
 /// is aborted and the staged changes restored.
 fn move_commits_relative_and_report(
     repo: &Repository,
+    info: &repo::RepoInfo,
     commit_hashes: &[String],
     target_hash: &str,
     position: Position,
 ) -> Result<()> {
     let workdir = repo::require_workdir(repo, COMMAND)?;
-    let (graph, parked) = plan_relative(repo, commit_hashes, target_hash, position)?;
+    let (graph, parked) = plan_relative(repo, info, commit_hashes, target_hash, position)?;
 
     let saved_staged = git::diff_cached(workdir)?;
     let todo = graph.to_todo();
@@ -1867,7 +1874,12 @@ fn fold_commit_into_commit(repo: &Repository, source_hash: &str, target_hash: &s
 }
 
 /// Move a commit to a branch (Case 3: Commit + Branch → Move).
-fn fold_commit_to_branch(repo: &Repository, commit_hash: &str, branch_name: &str) -> Result<()> {
+fn fold_commit_to_branch(
+    repo: &Repository,
+    info: &repo::RepoInfo,
+    commit_hash: &str,
+    branch_name: &str,
+) -> Result<()> {
     let workdir = repo::require_workdir(repo, COMMAND)?;
     let git_dir = repo.path().to_path_buf();
 
@@ -1875,6 +1887,7 @@ fn fold_commit_to_branch(repo: &Repository, commit_hash: &str, branch_name: &str
     // `loom continue` can name them too.
     let (graph, parked) = plan_move(
         repo,
+        info,
         std::slice::from_ref(&commit_hash.to_string()),
         branch_name,
     )?;
@@ -1952,11 +1965,12 @@ fn report_moved(
 /// branches the move left empty — callers build and save their own `LoomState`.
 pub fn move_commits_to_branch(
     repo: &Repository,
+    info: &repo::RepoInfo,
     commit_hashes: &[String],
     branch_name: &str,
 ) -> Result<(RebaseOutcome, Vec<String>)> {
     let workdir = repo::require_workdir(repo, COMMAND)?;
-    let (graph, parked) = plan_move(repo, commit_hashes, branch_name)?;
+    let (graph, parked) = plan_move(repo, info, commit_hashes, branch_name)?;
     let todo = graph.to_todo();
     // Callers name the result by reading `branch_name` back, and report how
     // many commits moved: a replay dropped as empty would make both wrong.
@@ -1976,10 +1990,11 @@ pub fn move_commits_to_branch(
 /// of, now parked at the base they built on.
 fn plan_move(
     repo: &Repository,
+    info: &repo::RepoInfo,
     commit_hashes: &[String],
     branch_name: &str,
 ) -> Result<(Weave, Vec<String>)> {
-    let mut graph = Weave::from_repo(repo)?;
+    let mut graph = Weave::from_repo_with_info(repo, info)?;
 
     // A target branch that is neither a section nor an inner (stacked) ref
     // gets a section created for it. That happens when the branch sits at the

@@ -254,7 +254,7 @@ fn drop_commit(repo: &Repository, commit_hash: &str, skip_confirm: bool) -> Resu
     let git_dir = repo.path().to_path_buf();
 
     let commit_oid = git2::Oid::from_str(commit_hash)?;
-    let info = repo::gather_repo_info(repo, false, 1)?;
+    let info = repo::gather_commit_graph(repo)?;
 
     // Refuse commits outside the local range (upstream..HEAD). Stale SHAs from
     // before a rewrite still resolve via the reflog, and upstream commits
@@ -375,7 +375,7 @@ fn report_dropped(ctx: &DropContext) {
 /// Drop a branch: remove all its commits, unweave merge topology, delete the ref.
 fn drop_branch(repo: &Repository, branch_name: &str, skip_confirm: bool) -> Result<()> {
     let workdir = repo::require_workdir(repo, "drop")?;
-    let info = &repo::gather_repo_info(repo, false, 1)?;
+    let info = &repo::gather_commit_graph(repo)?;
 
     let branch_info = info
         .branches

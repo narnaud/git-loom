@@ -170,7 +170,7 @@ impl Weave {
     /// Build the weave from the current repository state. Prefer
     /// `from_repo_with_info` when `RepoInfo` is already available.
     pub fn from_repo(repo: &Repository) -> Result<Self> {
-        let info = repo::gather_repo_info(repo, false, 1)?;
+        let info = repo::gather_commit_graph(repo)?;
         Self::from_repo_with_info(repo, &info)
     }
 

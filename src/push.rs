@@ -389,7 +389,7 @@ pub fn run(
 ) -> Result<()> {
     let repo = repo::open_repo()?;
     let workdir = repo::require_workdir(&repo, "push")?.to_path_buf();
-    let mut info = repo::gather_repo_info(&repo, false, 1)?;
+    let mut info = repo::gather_commit_graph(&repo)?;
     let hide_pattern = hidden::hide_pattern(&repo);
 
     if info.branches.is_empty() {
