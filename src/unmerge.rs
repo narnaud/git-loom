@@ -15,7 +15,7 @@ pub fn run(branch: Option<String>) -> Result<()> {
     let passed_in = branch.is_some();
     let repo = repo::open_repo()?;
     let workdir = repo::require_workdir(&repo, "unmerge")?;
-    let info = repo::gather_repo_info(&repo, false, 1)?;
+    let info = repo::gather_commit_graph(&repo)?;
     let mut graph = Weave::from_repo_with_info(&repo, &info)?;
 
     let branch_name = match branch {

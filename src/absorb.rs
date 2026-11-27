@@ -86,7 +86,7 @@ pub fn run(dry_run: bool, user_files: Vec<String>, git_args: Vec<String>) -> Res
     let repo = repo::open_repo()?;
     let workdir = repo::require_workdir(&repo, "absorb")?;
     let git_dir = repo.path().to_path_buf();
-    let info = repo::gather_repo_info(&repo, false, 1)?;
+    let info = repo::gather_commit_graph(&repo)?;
 
     if info.commits.is_empty() {
         bail!("No commits in scope — nothing to absorb into");
@@ -126,7 +126,7 @@ pub fn run(dry_run: bool, user_files: Vec<String>, git_args: Vec<String>) -> Res
         if !msg::confirm(&question, "")? {
             return Err(msg::cancelled());
         }
-        return apply_plan(&repo, workdir, &git_dir, plan, &git_opts);
+        return apply_plan(&repo, workdir, &git_dir, &weave_graph, plan, &git_opts);
     }
 
     for line in &plan.lines {
@@ -144,7 +144,7 @@ pub fn run(dry_run: bool, user_files: Vec<String>, git_args: Vec<String>) -> Res
         return Ok(());
     }
 
-    apply_plan(&repo, workdir, &git_dir, plan, &git_opts)
+    apply_plan(&repo, workdir, &git_dir, &weave_graph, plan, &git_opts)
 }
 
 /// Analyze changed files and build an absorb plan; one with no hunk is the
@@ -253,10 +253,12 @@ fn build_plan(
 }
 
 /// Apply an absorb plan: create fixup commits and run the rebase.
+/// `pre_graph` is the weave before any fixup commit exists.
 fn apply_plan(
     repo: &Repository,
     workdir: &Path,
     git_dir: &Path,
+    pre_graph: &Weave,
     plan: AbsorbPlan,
     git_opts: &[&str],
 ) -> Result<()> {
@@ -305,7 +307,6 @@ fn apply_plan(
     // Refuse an unrewritable target before committing anything: the graph is
     // rebuilt after the fixup commits exist, and bailing there would strand
     // them along with the saved patches.
-    let pre_graph = Weave::from_repo(repo)?;
     for target in groups.keys().chain(hunk_groups.keys()) {
         pre_graph.require_commit(*target)?;
     }

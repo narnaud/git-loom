@@ -75,8 +75,8 @@ pub fn run(
     let git_dir = repo.path().to_path_buf();
 
     // Gather repo info once — also serves as verification that we're on an
-    // integration branch (gather_repo_info requires an upstream).
-    let info = repo::gather_repo_info(&repo, false, 1).context(
+    // integration branch (gathering requires an upstream).
+    let info = repo::gather_commit_graph(&repo).context(
         "Must be on an integration branch to use commit\n\
          Use `git commit` directly on feature branches",
     )?;
