@@ -250,13 +250,13 @@ pub(crate) fn execute_action(
                 ui::hint(Hint::Reload).unwrap_or("Look at it again")
             ))
         }
-        Action::Continue { .. } => transaction::continue_run(),
+        Action::Continue { .. } => crate::resume::continue_run(),
         Action::Abort { question, paused } => match msg::confirm(&question, "") {
             // Another process may have finished or replaced it while asked.
             Ok(true) if PausedId::load(git_dir).as_ref() != Some(&paused) => Err(anyhow::anyhow!(
                 "The paused operation changed while you were asked\nLook at it again before aborting"
             )),
-            Ok(true) => transaction::abort_run(),
+            Ok(true) => crate::resume::abort_run(),
             Ok(false) => Err(msg::cancelled()),
             Err(e) => Err(e),
         },

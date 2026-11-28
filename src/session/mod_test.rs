@@ -1,5 +1,6 @@
 use super::*;
 use crate::core::test_helpers::TestRepo;
+use crate::core::transaction::Resumable;
 use crate::session::paused::test_support::repo_with_a_paused_drop;
 
 #[test]
@@ -23,7 +24,7 @@ fn a_session_opens_on_a_paused_operation() {
     let opened = repo.in_dir(open).unwrap();
 
     let paused = opened.paused.expect("the paused operation");
-    assert_eq!(paused.command.as_deref(), Some("drop"));
+    assert_eq!(paused.command, Some(Resumable::Drop));
     assert_eq!(opened.snapshot.info.branch_name, "", "a placeholder");
 }
 

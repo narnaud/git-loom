@@ -13,7 +13,7 @@ use crate::git;
 /// the commit git started it from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PausedId {
-    pub(crate) command: Option<String>,
+    pub(crate) command: Option<transaction::Resumable>,
     pub(crate) git_op: Option<&'static str>,
     /// `orig-head` of a rebase, `MERGE_HEAD` of a merge.
     pub(crate) origin: Option<String>,
@@ -73,7 +73,7 @@ pub(crate) enum PausedState {
 pub(crate) struct PausedOp {
     /// The command the loom state names; `None` for a git rebase or merge no
     /// state describes.
-    pub(crate) command: Option<String>,
+    pub(crate) command: Option<transaction::Resumable>,
     /// `rebase` or `merge`; `None` when git has neither left.
     git_op: Option<&'static str>,
     step: Option<(usize, usize)>,
@@ -85,7 +85,7 @@ pub(crate) struct PausedOp {
 impl PausedOp {
     pub(crate) fn load(workdir: &Path, git_dir: &Path) -> Option<PausedOp> {
         let id = PausedId::load(git_dir)?;
-        let (command, git_op) = (id.command.clone(), id.git_op);
+        let (command, git_op) = (id.command, id.git_op);
         let step = match git_op {
             Some("rebase") => git::rebase_progress(git_dir),
             _ => None,

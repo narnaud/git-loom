@@ -23,6 +23,8 @@ The following commands support resumable conflict handling:
   - `fold_commit_into_commit`
   - `fold_commit_to_branch`
   - `fold_commit_to_unstaged` non-HEAD path (single rebase boundary only)
+- `swap`
+- `merge` (its state is saved before the merge starts, Spec 005)
 
 ## Out-of-Scope Commands
 
@@ -44,7 +46,8 @@ When an in-scope command hits a conflict, it saves a state file:
 
 The state file contains:
 
-- `command`: The name of the interrupted command (e.g., `"update"`, `"commit"`)
+- `command`: The name of the interrupted in-scope command (e.g., `"update"`,
+  `"commit"`); any other name is refused (see *Missing or Corrupted State*)
 - `rollback`: Saved references and patches for abort recovery:
   - `reset_mixed_to` / `reset_hard_to`: OID to reset to, when git's own abort
     does not go back far enough
@@ -407,12 +410,19 @@ many times as needed until the rebase completes.
 - **Unreadable state file**: The error names the I/O failure and says to fix it
   and retry. It never suggests moving the file: it may be valid, only held by
   another process.
+- **State file naming a command loom does not resume**, as another loom version
+  may write: refused like a corrupted one, `loom abort` included, touching
+  neither git nor the file — this loom cannot vouch for that command's undo.
+  The error names the command and says to finish it with the version that
+  started it, or else to move the file aside as for a corrupted one.
 
 ## Command-Specific Resume Context
 
 Each resumable command stores its own context in the `context` field. The
 context is opaque JSON. The command discriminator (`command` field) determines
-which `after_continue` handler is invoked during dispatch.
+which `after_continue` handler is invoked during dispatch
+(`resume::dispatch_after_continue`, an exhaustive match on
+`transaction::Resumable`).
 
 ### `update` context
 

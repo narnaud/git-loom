@@ -3513,7 +3513,7 @@ fn fold_abort_preserves_working_state() {
 
     let workdir = test_repo.workdir();
     let git_dir = test_repo.repo.path().to_path_buf();
-    crate::core::transaction::abort_cmd(&workdir, &git_dir).unwrap();
+    crate::resume::abort_cmd(&workdir, &git_dir).unwrap();
 
     // `git rebase --abort` restores HEAD to the `fixup!` commit fold made
     // before the rebase, so the rollback has to reach one step further back.
@@ -4839,7 +4839,7 @@ fn fold_keeps_staging_across_continue() {
     t.write_file("shared.txt", "version-b");
     t.stage_files(&["shared.txt"]);
     let workdir = t.workdir();
-    crate::core::transaction::continue_cmd(&workdir, t.repo.path()).unwrap();
+    crate::resume::continue_cmd(&workdir, t.repo.path()).unwrap();
 
     assert!(!crate::git::rebase_is_in_progress(t.repo.path()));
     assert_eq!(t.status_porcelain(), before);

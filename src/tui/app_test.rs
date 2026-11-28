@@ -12,6 +12,7 @@ use crate::core::repo::{
     BranchInfo, CommitInfo, ContextCommit, FileChange, RepoInfo, UpstreamInfo,
 };
 use crate::core::shortid::IdAllocator;
+use crate::core::transaction::Resumable;
 use crate::core::ui::{Cancelled, PromptKind, Request};
 use crate::session::action::{LogEntry, execute_action};
 use crate::session::diff_text::{diff_line, untracked_file_text};
@@ -4638,7 +4639,7 @@ fn a_merge_paused_on_its_replay_headlines_the_conflicts() {
     let app = paused_app(&repo, &theme);
 
     let paused = app.paused.as_ref().unwrap();
-    assert_eq!(paused.op.command.as_deref(), Some("merge"));
+    assert_eq!(paused.op.command, Some(Resumable::Merge));
     assert!(
         paused.headline.starts_with("Conflicts"),
         "{}",
@@ -4659,7 +4660,7 @@ fn a_paused_operation_replaces_the_tree() {
     let app = paused_app(&repo, &theme);
 
     let paused = app.paused.as_ref().unwrap();
-    assert_eq!(paused.op.command.as_deref(), Some("drop"));
+    assert_eq!(paused.op.command, Some(Resumable::Drop));
     assert!(
         paused.headline.starts_with("Conflicts"),
         "{}",
@@ -4851,7 +4852,7 @@ fn abort_refuses_a_pause_restarted_from_the_same_commit() {
             app.poll_background();
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
-        crate::core::transaction::abort_run().unwrap();
+        crate::resume::abort_run().unwrap();
         crate::drop::run(vec![one.to_string()], true).unwrap();
         press(&mut app, KeyCode::Enter);
         poll_until_idle(&mut app);

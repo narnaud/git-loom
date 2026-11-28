@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::msg;
 use crate::core::repo;
-use crate::core::transaction::{self, LoomState, Rollback};
+use crate::core::transaction::{self, LoomState, Resumable, Rollback};
 use crate::git::{self, MergeOutcome};
 
 #[derive(Serialize, Deserialize)]
@@ -110,7 +110,7 @@ pub fn run(branch: Option<String>, all: bool) -> Result<()> {
                      `loom abort`, not `git merge --abort`, brings them back",
                 );
             }
-            transaction::warn_paused(workdir, "merge");
+            transaction::warn_paused(workdir, Resumable::Merge);
         }
         MergeOutcome::Completed => {
             if land(workdir, &git_dir, &state)? {
@@ -132,7 +132,7 @@ fn begin(
     created: bool,
 ) -> Result<LoomState> {
     let state = LoomState {
-        command: "merge".to_string(),
+        command: Resumable::Merge,
         rollback: Rollback {
             reset_hard_to: repo::head_oid(repo)?.to_string(),
             delete_branches: if created {
@@ -229,11 +229,11 @@ fn land(workdir: &Path, git_dir: &Path, state: &LoomState) -> Result<bool> {
         if !clean {
             msg::warn("The merge landed, but your uncommitted changes conflict with it");
             keep_own_binaries(workdir);
-            transaction::warn_paused(workdir, "merge");
+            transaction::warn_paused(workdir, Resumable::Merge);
             return Ok(false);
         }
     } else if git::has_unmerged_paths(workdir) {
-        transaction::warn_paused(workdir, "merge");
+        transaction::warn_paused(workdir, Resumable::Merge);
         return Ok(false);
     }
     git::restore_mtimes();

@@ -1574,7 +1574,7 @@ fn update_keeps_staging_across_continue() {
     t.write_file("shared.txt", "resolved\n");
     t.stage_files(&["shared.txt"]);
     let workdir = t.workdir();
-    crate::core::transaction::continue_cmd(&workdir, t.repo.path()).unwrap();
+    crate::resume::continue_cmd(&workdir, t.repo.path()).unwrap();
 
     assert!(!crate::git::rebase_is_in_progress(t.repo.path()));
     assert_eq!(t.status_porcelain(), before);
@@ -2031,7 +2031,7 @@ fn update_takes_a_remote_version_across_continue() {
 
     t.write_file("shared.txt", "resolved\n");
     t.stage_files(&["shared.txt"]);
-    crate::core::transaction::continue_cmd(&t.workdir(), t.repo.path()).unwrap();
+    crate::resume::continue_cmd(&t.workdir(), t.repo.path()).unwrap();
 
     assert!(!crate::git::rebase_is_in_progress(t.repo.path()));
     assert_eq!(branch_subjects(&t, "feature-a"), ["A1", "A2"]);
@@ -2047,7 +2047,7 @@ fn update_aborts_a_remote_version_back_to_the_old_tip() {
 
     update_branch(&t, "feature-a").unwrap();
     assert!(crate::git::rebase_is_in_progress(t.repo.path()));
-    crate::core::transaction::abort_cmd(&t.workdir(), t.repo.path()).unwrap();
+    crate::resume::abort_cmd(&t.workdir(), t.repo.path()).unwrap();
 
     assert!(!crate::git::rebase_is_in_progress(t.repo.path()));
     assert_eq!(t.head_oid(), head);

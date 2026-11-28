@@ -10,7 +10,7 @@ use crate::core::agent_mode;
 use crate::core::changeid;
 use crate::core::hidden;
 use crate::core::msg;
-use crate::core::transaction::{self, LoomState, Rollback};
+use crate::core::transaction::{self, LoomState, Resumable, Rollback};
 use crate::core::weave;
 use crate::git;
 
@@ -173,10 +173,10 @@ pub fn reword_commit(
             report_reworded(workdir, &ctx);
         }
         git::RebaseOutcome::Stopped => {
-            transaction::warn_paused(workdir, "reword");
+            transaction::warn_paused(workdir, Resumable::Reword);
         }
         git::RebaseOutcome::Paused => {
-            transaction::warn_paused_at_edit(Some("reword"));
+            transaction::warn_paused_at_edit(Some(Resumable::Reword));
         }
     }
 
@@ -188,7 +188,7 @@ fn save_state(git_dir: &Path, saved_staged: &str, ctx: &RewordContext) -> Result
     transaction::save(
         git_dir,
         &LoomState {
-            command: "reword".to_string(),
+            command: Resumable::Reword,
             // Nothing else to undo: `git rebase --abort` discards the amend
             // along with the rebase, and reword creates no commits or branches
             // of its own.

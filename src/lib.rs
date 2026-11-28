@@ -24,6 +24,7 @@ mod gui_launch;
 mod init;
 mod merge;
 mod push;
+mod resume;
 mod reword;
 mod session;
 mod show;

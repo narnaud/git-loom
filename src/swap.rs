@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::msg;
 use crate::core::repo::{self, Target, TargetKind};
-use crate::core::transaction::{self, LoomState, Rollback};
+use crate::core::transaction::{self, LoomState, Resumable, Rollback};
 use crate::core::weave::{self, RebaseOutcome, Weave};
 use crate::git;
 
@@ -43,7 +43,7 @@ fn swap_two_commits(repo: &Repository, hash_a: String, hash_b: String) -> Result
     graph.swap_commits(oid_a, oid_b)?;
 
     let state = LoomState {
-        command: "swap".to_string(),
+        command: Resumable::Swap,
         rollback: Rollback {
             // Restored whichever way the rebase ends (Spec 014).
             saved_staged_patch: git::diff_cached(workdir)?,
@@ -75,10 +75,10 @@ fn swap_two_commits(repo: &Repository, hash_a: String, hash_b: String) -> Result
             ));
         }
         RebaseOutcome::Stopped => {
-            transaction::warn_paused(workdir, "swap");
+            transaction::warn_paused(workdir, Resumable::Swap);
         }
         RebaseOutcome::Paused => {
-            transaction::warn_paused_at_edit(Some("swap"));
+            transaction::warn_paused_at_edit(Some(Resumable::Swap));
         }
     }
 

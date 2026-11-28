@@ -27,7 +27,7 @@ Read all before editing:
    and `003-reword.md`.
 2. Read `src/<command>.rs`, relevant mutation methods in `src/core/weave.rs`, the
    command variant in `src/cli.rs` (exact args, flags, aliases, help), and
-   `src/core/transaction.rs` (`after_continue` registration means resumable conflict
+   `src/resume.rs` (`after_continue` registration means resumable conflict
    recovery).
 3. Skim `src/<command>_test.rs` and relevant `src/weave_test.rs` scenarios for
    edge and error cases.
