@@ -1,6 +1,6 @@
 use super::{
     LeftOut, binary_stamp, collect_file_entries, filter_paths, put_index_back,
-    run_commit_hunk_picker, run_hunk_picker, save_and_unstage_staged, selected_paths,
+    run_commit_hunk_picker, run_hunk_picker, save_and_unstage_staged, selected_paths, still_listed,
 };
 use crate::core::diff::DiffHunk;
 use crate::core::hunk_select::{self, HunkArgs, Picker};
@@ -330,7 +330,7 @@ fn a_handover_the_cleanup_never_reached_parks_the_patch() {
 #[test]
 fn a_submodule_is_stamped_with_its_checked_out_commit() {
     let test_repo = TestRepo::new_with_remote();
-    let (_, second) = test_repo.add_submodule("sub");
+    let (first, second) = test_repo.add_submodule("sub");
     test_repo.commit_staged("Add sub");
     test_repo.checkout_submodule("sub", second);
 
@@ -338,7 +338,33 @@ fn a_submodule_is_stamped_with_its_checked_out_commit() {
     let entries =
         collect_file_entries(&test_repo.repo, &workdir, Some(&["sub".to_string()])).unwrap();
     assert_eq!(entries.len(), 1);
-    assert_eq!(binary_stamp(&workdir, &entries), vec![Some(second)]);
+    assert_eq!(
+        binary_stamp(&workdir, &entries),
+        vec![Some(second), Some(first)]
+    );
+}
+
+#[test]
+fn a_binary_file_staged_anew_since_the_pick_is_no_longer_listed() {
+    let test_repo = TestRepo::new_with_remote();
+    let workdir = test_repo.workdir();
+    let logo = workdir.join("logo.bin");
+    std::fs::write(&logo, b"\0one").unwrap();
+    test_repo.stage_files(&["logo.bin"]);
+    test_repo.commit_staged("Add logo");
+    std::fs::write(&logo, b"\0two").unwrap();
+    test_repo.stage_files(&["logo.bin"]);
+    std::fs::write(&logo, b"\0three").unwrap();
+    let picked = collect_file_entries(&test_repo.repo, &workdir, None).unwrap();
+    let stamp = binary_stamp(&workdir, &picked);
+    assert!(still_listed(&test_repo.repo, &workdir, &picked, &stamp).unwrap());
+
+    // Another version staged, the working tree written back as it was.
+    std::fs::write(&logo, b"\0four").unwrap();
+    test_repo.stage_files(&["logo.bin"]);
+    std::fs::write(&logo, b"\0three").unwrap();
+
+    assert!(!still_listed(&test_repo.repo, &workdir, &picked, &stamp).unwrap());
 }
 
 /// A lock another git holds is theirs: the restore misses rather than race it.

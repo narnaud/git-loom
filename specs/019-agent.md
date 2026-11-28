@@ -378,8 +378,9 @@ changes no longer applies, and is refused rather than placed by a looser match.
   re-resolves it from the revspec the agent typed, and a relative one can name
   a different commit by then. A working tree has no source commit, so there it
   digests what each binary entry stages instead — a file's blob id, a
-  submodule's HEAD — which the label leaves out: `git add` on the replay would
-  otherwise take whatever the file became since.
+  submodule's HEAD — then its index entry, which the label leaves out: on the
+  replay, `git add` would otherwise take whatever the file became since, and a
+  staged entry kept whatever was staged since.
 
 **CLI:**
 
