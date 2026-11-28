@@ -7,7 +7,7 @@ use std::path::Path;
 use crate::core::diff::{self, parse_hunk_start};
 use crate::core::hunk_select::{self, Picker};
 use crate::core::hunks::{FileEntry, HunkEntry, HunkOrigin};
-use crate::core::repo;
+use crate::core::repo::{self, FileChange};
 use crate::core::{agent_mode, msg};
 use crate::git;
 
@@ -183,18 +183,28 @@ pub(crate) fn collect_file_entries(
     workdir: &Path,
     filter: Option<&[String]>,
 ) -> Result<Vec<FileEntry>> {
-    let changes = repo::get_working_changes_recurse(repo)?;
+    let mut changes = repo::get_working_changes_recurse(repo)?;
+    if let Some(filter) = filter {
+        changes.retain(|change| filter.contains(&change.path));
+    }
+    let gitlinks = git::index_gitlinks(workdir)?;
+    // The paths whose diff `collect_*_hunks` reads: a deletion is a
+    // placeholder and an untracked file is read from disk.
+    let diffed = |side: fn(&FileChange) -> bool| -> Vec<&str> {
+        changes
+            .iter()
+            .filter(|change| side(change) && !gitlinks.contains(&change.path))
+            .map(|change| change.path.as_str())
+            .collect()
+    };
+    let staged = git::diff_cached_by_file(
+        workdir,
+        &diffed(|change| matches!(change.index, 'A' | 'M' | 'R')),
+    )?;
+    let unstaged = git::diff_by_file(workdir, &diffed(|change| change.worktree == 'M'))?;
 
     let mut entries = Vec::new();
-    let gitlinks = git::index_gitlinks(workdir)?;
-
     for change in &changes {
-        if let Some(filter) = filter
-            && !filter.contains(&change.path)
-        {
-            continue;
-        }
-
         let has_staged = matches!(change.index, 'A' | 'M' | 'D' | 'R');
         let has_unstaged = matches!(change.worktree, 'M' | 'D' | '?');
 
@@ -218,12 +228,17 @@ pub(crate) fn collect_file_entries(
             is_binary = true;
         } else {
             if has_staged {
-                is_binary |= collect_staged_hunks(workdir, &change.path, change.index, &mut hunks)?;
+                is_binary |= collect_staged_hunks(&staged, &change.path, change.index, &mut hunks);
             }
 
             if has_unstaged {
-                is_binary |=
-                    collect_unstaged_hunks(workdir, &change.path, change.worktree, &mut hunks)?;
+                is_binary |= collect_unstaged_hunks(
+                    workdir,
+                    &unstaged,
+                    &change.path,
+                    change.worktree,
+                    &mut hunks,
+                );
             }
         }
 
@@ -462,11 +477,11 @@ fn apply_selections_unguarded(
 ///
 /// Returns `true` if the file is binary.
 fn collect_staged_hunks(
-    workdir: &Path,
+    diffs: &git::FileDiffs,
     path: &str,
     index_status: char,
     hunks: &mut Vec<HunkEntry>,
-) -> Result<bool> {
+) -> bool {
     if index_status == 'D' {
         hunks.push(HunkEntry {
             hunk: diff::DiffHunk {
@@ -476,10 +491,10 @@ fn collect_staged_hunks(
             selected: true,
             origin: HunkOrigin::Staged,
         });
-        return Ok(false);
+        return false;
     }
 
-    if git::diff_cached_file_is_binary(workdir, path)? {
+    if diffs.is_binary(path) {
         hunks.push(HunkEntry {
             hunk: diff::DiffHunk {
                 text: String::from(diff::BINARY_ENTRY),
@@ -488,15 +503,15 @@ fn collect_staged_hunks(
             selected: true,
             origin: HunkOrigin::Staged,
         });
-        return Ok(true);
+        return true;
     }
 
-    let raw_diff = git::diff_cached_file(workdir, path)?;
+    let raw_diff = diffs.patch(path);
     if raw_diff.is_empty() {
-        return Ok(false);
+        return false;
     }
 
-    let parsed = diff::parse_hunks(&raw_diff);
+    let parsed = diff::parse_hunks(raw_diff);
     // A staged empty file has no `@@` hunk. Without an entry the picker never
     // offers it, and `commit -p` sets aside what it did not offer.
     if parsed.is_empty() && index_status == 'A' {
@@ -508,7 +523,7 @@ fn collect_staged_hunks(
             selected: true,
             origin: HunkOrigin::Staged,
         });
-        return Ok(false);
+        return false;
     }
     for h in parsed {
         hunks.push(HunkEntry {
@@ -517,7 +532,7 @@ fn collect_staged_hunks(
             origin: HunkOrigin::Staged,
         });
     }
-    Ok(false)
+    false
 }
 
 /// Collect hunks from unstaged changes (index → worktree).
@@ -525,10 +540,11 @@ fn collect_staged_hunks(
 /// Returns `true` if the file is binary.
 fn collect_unstaged_hunks(
     workdir: &Path,
+    diffs: &git::FileDiffs,
     path: &str,
     worktree_status: char,
     hunks: &mut Vec<HunkEntry>,
-) -> Result<bool> {
+) -> bool {
     if worktree_status == 'D' {
         hunks.push(HunkEntry {
             hunk: diff::DiffHunk {
@@ -538,7 +554,7 @@ fn collect_unstaged_hunks(
             selected: false,
             origin: HunkOrigin::Unstaged,
         });
-        return Ok(false);
+        return false;
     }
 
     if worktree_status == '?' {
@@ -547,7 +563,7 @@ fn collect_unstaged_hunks(
             Ok(b) => b,
             Err(_) => {
                 msg::warn(&format!("skipping unreadable file '{}'", path));
-                return Ok(false);
+                return false;
             }
         };
         if raw_bytes.is_empty() {
@@ -559,7 +575,7 @@ fn collect_unstaged_hunks(
                 selected: false,
                 origin: HunkOrigin::Unstaged,
             });
-            return Ok(false);
+            return false;
         }
         let check_len = raw_bytes.len().min(8192);
         if raw_bytes[..check_len].contains(&0) {
@@ -571,7 +587,7 @@ fn collect_unstaged_hunks(
                 selected: false,
                 origin: HunkOrigin::Unstaged,
             });
-            return Ok(true);
+            return true;
         }
         let content = String::from_utf8_lossy(&raw_bytes);
         let line_count = content.lines().count();
@@ -589,10 +605,10 @@ fn collect_unstaged_hunks(
             selected: false,
             origin: HunkOrigin::Unstaged,
         });
-        return Ok(false);
+        return false;
     }
 
-    if git::diff_file_is_binary(workdir, path)? {
+    if diffs.is_binary(path) {
         hunks.push(HunkEntry {
             hunk: diff::DiffHunk {
                 text: String::from(diff::BINARY_ENTRY),
@@ -601,22 +617,22 @@ fn collect_unstaged_hunks(
             selected: false,
             origin: HunkOrigin::Unstaged,
         });
-        return Ok(true);
+        return true;
     }
 
-    let raw_diff = git::diff_file(workdir, path)?;
+    let raw_diff = diffs.patch(path);
     if raw_diff.is_empty() {
-        return Ok(false);
+        return false;
     }
 
-    for h in diff::parse_hunks(&raw_diff) {
+    for h in diff::parse_hunks(raw_diff) {
         hunks.push(HunkEntry {
             hunk: h,
             selected: false,
             origin: HunkOrigin::Unstaged,
         });
     }
-    Ok(false)
+    false
 }
 
 /// Pick hunks from a specific commit, interactively or by id.
@@ -675,16 +691,21 @@ pub(crate) fn collect_commit_hunks(
     oid: &str,
     files: &[String],
 ) -> Result<Vec<FileEntry>> {
-    let changed_files = git::diff_commit_name_status(workdir, oid)?;
+    let mut changed_files = git::diff_commit_name_status(workdir, oid)?;
+    if !files.is_empty() {
+        changed_files.retain(|(_, path)| files.contains(path));
+    }
     let gitlinks = git::commit_gitlinks(workdir, oid)?;
+    let diffed: Vec<&str> = changed_files
+        .iter()
+        .filter(|(status, path)| *status != 'D' && !gitlinks.contains_key(path))
+        .map(|(_, path)| path.as_str())
+        .collect();
+    let diffs = git::diff_commit_by_file(workdir, oid, &diffed)?;
 
     let mut entries = Vec::new();
 
     for (status, path) in &changed_files {
-        if !files.is_empty() && !files.iter().any(|f| f == path) {
-            continue;
-        }
-
         let mut hunks = Vec::new();
         let mut is_binary = false;
 
@@ -700,7 +721,7 @@ pub(crate) fn collect_commit_hunks(
         } else if gitlinks.contains_key(path) {
             hunks.push(submodule_entry(false, HunkOrigin::Commit));
             is_binary = true;
-        } else if git::diff_commit_file_is_binary(workdir, oid, path)? {
+        } else if diffs.is_binary(path) {
             hunks.push(HunkEntry {
                 hunk: diff::DiffHunk {
                     text: String::from(diff::BINARY_ENTRY),
@@ -711,8 +732,7 @@ pub(crate) fn collect_commit_hunks(
             });
             is_binary = true;
         } else {
-            let raw_diff = git::diff_commit_file(workdir, oid, path)?;
-            for h in diff::parse_hunks(&raw_diff) {
+            for h in diff::parse_hunks(diffs.patch(path)) {
                 hunks.push(HunkEntry {
                     hunk: h,
                     selected: false,
