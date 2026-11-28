@@ -1,5 +1,53 @@
 # Changelog
 
+## [1.3.0](https://github.com/narnaud/git-loom/compare/v1.2.0...v1.3.0) (2026-11-28)
+
+
+### Features ✨
+
+* **gui:** add git-loom-gui, a window opening on the repository ([7fc85db](https://github.com/narnaud/git-loom/commit/7fc85dbcad496a5b63929a3c98994c31d512191f)) by @narnaud
+* **gui:** ask for messages and names in dialogs of the window's own ([2c94f6b](https://github.com/narnaud/git-loom/commit/2c94f6b5b34ec6486e1f347f3cc2aded0c20c69e)) by @narnaud
+* **gui:** commit or absorb the local changes selected from buttons ([8cb2128](https://github.com/narnaud/git-loom/commit/8cb21288013b2442498c5066c44b79753e9dfce3)) by @narnaud
+* **gui:** commit the hunks picked of the local changes ([79e0274](https://github.com/narnaud/git-loom/commit/79e0274b304b580f749cfad09a946762dd689ad4)) by @narnaud
+* **gui:** drag pieces onto each other to fold, move or commit them ([b282d9f](https://github.com/narnaud/git-loom/commit/b282d9ff22bef8e8046b0ef2e295ec171c9316d0)) by @narnaud
+* **gui:** fold or move the selection where a click says ([714baff](https://github.com/narnaud/git-loom/commit/714baffb0640521bc8fde3d7b102edb8b43520cf)) by @narnaud
+* **gui:** fold the hunks picked where a click says ([5f71d9f](https://github.com/narnaud/git-loom/commit/5f71d9fa3a627788a09328ea5d2510a743bfb618)) by @narnaud
+* **gui:** list the local changes in a pane left of the board ([e316559](https://github.com/narnaud/git-loom/commit/e3165597329db00139cb128d4f696edb3bb844c7)) by @narnaud
+* **gui:** open a commit onto its files, close a branch onto its name ([b68602e](https://github.com/narnaud/git-loom/commit/b68602e2b891ae7326ee83a92e55d42e33f780db)) by @narnaud
+* **gui:** resolve a paused operation in the window ([1e38a26](https://github.com/narnaud/git-loom/commit/1e38a26c7c97553007a11621f5d665cf7734b2a1)) by @narnaud
+* **gui:** run commands from a context menu and the inspector ([d036ea0](https://github.com/narnaud/git-loom/commit/d036ea01bfc69b5ea9e4db3247429634e2bfa12b)) by @narnaud
+* **gui:** select what is on the board ([a4f4536](https://github.com/narnaud/git-loom/commit/a4f45361b2b8f75dde4e647157f902a3e834202d)) by @narnaud
+* **gui:** show the board, the integration branch drawn top down ([e0c279f](https://github.com/narnaud/git-loom/commit/e0c279f48c2ab5f2b67eab40f4a6422352a2b347)) by @narnaud
+* **gui:** show the diff of the selection in an inspector ([6cf6059](https://github.com/narnaud/git-loom/commit/6cf6059b5e84e92ed148f1c118c36231b7cb7844)) by @narnaud
+* **gui:** split a commit at the hunks picked in a picker of its own ([583ddfc](https://github.com/narnaud/git-loom/commit/583ddfc34c25f12c0f91a1ebb9fc5965a383ed6c)) by @narnaud
+* **gui:** start the window with `git loom gui` ([3347ca2](https://github.com/narnaud/git-loom/commit/3347ca2c1d2345bc3f8d5f34e82697f8c9f22bb5)) by @narnaud
+
+
+### Bug Fixes 🐞
+
+* **session:** list a pause's files in loom status's order ([5b1c20f](https://github.com/narnaud/git-loom/commit/5b1c20f8dda98c65280dabd7a5b00e383006e8b5)) by @narnaud
+* **session:** pass a working file to a command by its path ([8119e1a](https://github.com/narnaud/git-loom/commit/8119e1aefe19f82a6095ef9cc420fdd2b44ad356)) by @narnaud
+* **session:** refuse to drop the local changes when there are none ([32bf90e](https://github.com/narnaud/git-loom/commit/32bf90ec4935ba9a3e420ddec70da0b91316e625)) by @narnaud
+* **session:** say how to pick hunks again in the front-end's words ([67710d5](https://github.com/narnaud/git-loom/commit/67710d56b48a9267f8fe8fe3f06500d36a049a95)) by @narnaud
+* **session:** stage a paused file only while its pause is the one paused ([6a86ab9](https://github.com/narnaud/git-loom/commit/6a86ab95422174b49be4cab6462225ca08a3ae2c)) by @narnaud
+* **staging:** stamp a binary entry's index entry too ([25f31d6](https://github.com/narnaud/git-loom/commit/25f31d63a2d694ac3d840869099d5661e5c3b21c)) by @narnaud
+* **status:** list the local changes in the order loom status prints them ([e9734fe](https://github.com/narnaud/git-loom/commit/e9734fe44bfc292f9812a47bb7bddbfbc4ab3e8c)) by @narnaud
+
+
+### Changes
+
+* build the weave from the commit graph, not a working-tree scan ([f67f6c0](https://github.com/narnaud/git-loom/commit/f67f6c096f5ccf6c48c54c9fc9fc604d5391654c)) by @narnaud
+* move `loom continue`/`abort` out of `core::transaction` ([a43a2b5](https://github.com/narnaud/git-loom/commit/a43a2b5012caba00c6584d6fb1110559664dea55)) by @narnaud
+* **session:** let an action carry the message typed for it ([42704c3](https://github.com/narnaud/git-loom/commit/42704c395622a28c0eb9357ec02c1a5b23361a2b)) by @narnaud
+* **session:** name a command's arguments by the tree's short IDs in one place ([abb9624](https://github.com/narnaud/git-loom/commit/abb962421ad33e627da32caca8579b0bf6164bb7)) by @narnaud
+* **session:** open a session in one place ([82b85ca](https://github.com/narnaud/git-loom/commit/82b85ca5a15b0696158d4a09a357a7c9890479c4)) by @narnaud
+* share resumable completion and context parsing ([72d086a](https://github.com/narnaud/git-loom/commit/72d086af1701ce20faca596a2358d792e3359a4f)) by @narnaud
+
+
+### Other
+
+* **deps:** bump clap from 4.6.7 to 4.6.9 ([d62ec86](https://github.com/narnaud/git-loom/commit/d62ec862a1675936d56fe1625562be7fddb46354)) by @dependabot[bot]
+
 ## [1.2.0](https://github.com/narnaud/git-loom/compare/v1.1.0...v1.2.0) (2026-11-22)
 
 
