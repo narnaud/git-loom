@@ -79,7 +79,8 @@ state what the index, the working tree, HEAD and every branch hold.
 Check, against `CLAUDE.md` § Data Safety and Spec 014:
 
 - A resumable `weave::run_rebase` caller fills `Rollback` before saving
-  `LoomState` and registers in `transaction::dispatch_after_continue`.
+  `LoomState`, under its own `transaction::Resumable`, which
+  `resume::dispatch_after_continue` dispatches.
 - `saved_staged_patch` goes back on the `RebaseOutcome::Completed` arm and in
   `after_continue` through `git::restore_staged_after_rebase`, before
   `transaction::delete`. Autostash replays into the working tree only, so

@@ -112,7 +112,7 @@ fn swap_abort_preserves_working_state() {
 
     let workdir = test_repo.workdir();
     let git_dir = test_repo.repo.path().to_path_buf();
-    crate::core::transaction::abort_cmd(&workdir, &git_dir).unwrap();
+    crate::resume::abort_cmd(&workdir, &git_dir).unwrap();
 
     assert_eq!(test_repo.read_file("shared.txt"), "working-edit");
     assert_eq!(test_repo.read_file("other-staged.txt"), "staged-content");
@@ -213,7 +213,7 @@ fn swap_keeps_staging_across_continue() {
         assert!(crate::git::rebase_is_in_progress(t.repo.path()));
         t.write_file("shared.txt", content);
         t.stage_files(&["shared.txt"]);
-        crate::core::transaction::continue_cmd(&workdir, t.repo.path()).unwrap();
+        crate::resume::continue_cmd(&workdir, t.repo.path()).unwrap();
     }
 
     assert!(!crate::git::rebase_is_in_progress(t.repo.path()));
@@ -242,7 +242,7 @@ fn swap_leaves_a_conflicted_autostash_pop_alone() {
         assert!(crate::git::rebase_is_in_progress(t.repo.path()));
         t.write_file("shared.txt", content);
         t.stage_files(&["shared.txt"]);
-        crate::core::transaction::continue_cmd(&workdir, t.repo.path()).unwrap();
+        crate::resume::continue_cmd(&workdir, t.repo.path()).unwrap();
     }
 
     assert_eq!(t.status_porcelain(), "UU shared.txt\n");

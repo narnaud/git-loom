@@ -11,7 +11,7 @@ use crate::core::repo;
 use crate::core::agent_mode;
 use crate::core::gerrit;
 use crate::core::msg;
-use crate::core::transaction::{self, LoomState, Rollback};
+use crate::core::transaction::{self, LoomState, Resumable, Rollback};
 use crate::core::weave::{self, Command, CommitEntry, Weave};
 use crate::git::{self, RebaseOutcome};
 
@@ -240,7 +240,7 @@ pub fn run(branch: Option<String>, skip_confirm: bool) -> Result<()> {
         updated_branch,
     };
     let state = LoomState {
-        command: "update".to_string(),
+        command: Resumable::Update,
         rollback: Rollback {
             // Restored whichever way the rebase ends (Spec 014).
             saved_staged_patch: git::diff_cached(&workdir)?,
@@ -271,11 +271,11 @@ pub fn run(branch: Option<String>, skip_confirm: bool) -> Result<()> {
         }
         Ok(RebaseOutcome::Stopped) => {
             spinner.error("Rebase paused");
-            transaction::warn_paused(&workdir, "update");
+            transaction::warn_paused(&workdir, Resumable::Update);
         }
         Ok(RebaseOutcome::Paused) => {
             spinner.error("Rebase paused");
-            transaction::warn_paused_at_edit(Some("update"));
+            transaction::warn_paused_at_edit(Some(Resumable::Update));
         }
         Err(e) => {
             spinner.error("Rebase failed");

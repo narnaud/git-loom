@@ -5,7 +5,7 @@ use std::path::Path;
 
 use crate::core::msg;
 use crate::core::repo::{self, Target, TargetKind};
-use crate::core::transaction::{self, LoomState, Rollback};
+use crate::core::transaction::{self, LoomState, Resumable, Rollback};
 use crate::core::weave::{self, EmptiedRefs, RebaseOutcome, Weave};
 use crate::git;
 
@@ -307,7 +307,7 @@ fn drop_commit(repo: &Repository, commit_hash: &str, skip_confirm: bool) -> Resu
         emptied_branches: emptied,
     };
     let state = LoomState {
-        command: "drop".to_string(),
+        command: Resumable::Drop,
         rollback: Rollback {
             // Restored whichever way the rebase ends (Spec 014).
             saved_staged_patch: git::diff_cached(workdir)?,
@@ -337,10 +337,10 @@ fn drop_commit(repo: &Repository, commit_hash: &str, skip_confirm: bool) -> Resu
             report_dropped(&ctx);
         }
         RebaseOutcome::Stopped => {
-            transaction::warn_paused(workdir, "drop");
+            transaction::warn_paused(workdir, Resumable::Drop);
         }
         RebaseOutcome::Paused => {
-            transaction::warn_paused_at_edit(Some("drop"));
+            transaction::warn_paused_at_edit(Some(Resumable::Drop));
         }
     }
 

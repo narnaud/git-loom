@@ -5,7 +5,8 @@ use crate::core::hunk_select::HunkArgs;
 use crate::core::{agent_mode, graph, msg, repo, trace_log, transaction, weave};
 use crate::{
     absorb, add, agent, branch, commit, completions, diff, drop, fold, git, gui_launch, init,
-    merge, push, reword, show, split, status, swap, switch, trace, tui, unmerge, update, worktree,
+    merge, push, resume, reword, show, split, status, swap, switch, trace, tui, unmerge, update,
+    worktree,
 };
 
 use std::ffi::OsString;
@@ -736,8 +737,8 @@ pub fn run() -> ! {
             )
         }
         Some(Command::Trace) => trace::run(),
-        Some(Command::Continue) => transaction::continue_run(),
-        Some(Command::Abort) => transaction::abort_run(),
+        Some(Command::Continue) => resume::continue_run(),
+        Some(Command::Abort) => resume::abort_run(),
         Some(Command::Completions { .. }) | Some(Command::Agent(_)) | Some(Command::Gui) => {
             unreachable!()
         }

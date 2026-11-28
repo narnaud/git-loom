@@ -179,7 +179,7 @@ fn a_reported_pause_drops_the_record() {
     )
     .unwrap();
     assert_eq!(outcome, RebaseOutcome::Stopped);
-    crate::core::transaction::warn_paused(&workdir, "drop");
+    crate::core::transaction::warn_paused(&workdir, crate::core::transaction::Resumable::Drop);
 
     t.write_file("a.txt", "C2");
     t.stage_files(&["a.txt"]);

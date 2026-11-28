@@ -9,7 +9,7 @@ use crate::core::diff::{DiffHunk, build_hunk_patch, parse_hunks};
 use crate::core::msg;
 use crate::core::repo::{self, CommitInfo, RepoInfo};
 use crate::core::staging::{self, WorktreeSnapshot};
-use crate::core::transaction::{self, LoomState, Rollback};
+use crate::core::transaction::{self, LoomState, Resumable, Rollback};
 use crate::core::ui;
 use crate::core::weave::{self, RebaseOutcome, Weave};
 use crate::git;
@@ -356,7 +356,7 @@ fn apply_plan(
             .collect(),
     };
     let state = LoomState {
-        command: "absorb".to_string(),
+        command: Resumable::Absorb,
         rollback: Rollback {
             // `git rebase --abort` restores HEAD to after the fixup commits, so
             // reset_hard_to has to go further back to undo them.
@@ -391,10 +391,10 @@ fn apply_plan(
             )?;
         }
         RebaseOutcome::Stopped => {
-            transaction::warn_paused(workdir, "absorb");
+            transaction::warn_paused(workdir, Resumable::Absorb);
         }
         RebaseOutcome::Paused => {
-            transaction::warn_paused_at_edit(Some("absorb"));
+            transaction::warn_paused_at_edit(Some(Resumable::Absorb));
         }
     }
 

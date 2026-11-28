@@ -400,7 +400,7 @@ fn reword_conflict_pauses_and_continues() {
 
     let workdir = test_repo.workdir();
     let git_dir = test_repo.repo.path().to_path_buf();
-    crate::core::transaction::continue_cmd(&workdir, &git_dir).unwrap();
+    crate::resume::continue_cmd(&workdir, &git_dir).unwrap();
 
     assert!(
         !state_path(&test_repo).exists(),
@@ -449,7 +449,7 @@ fn reword_conflict_abort_restores_original_state() {
 
     let workdir = test_repo.workdir();
     let git_dir = test_repo.repo.path().to_path_buf();
-    crate::core::transaction::abort_cmd(&workdir, &git_dir).unwrap();
+    crate::resume::abort_cmd(&workdir, &git_dir).unwrap();
 
     assert!(!state_path(&test_repo).exists(), "state must be cleared");
     assert!(!crate::git::rebase_is_in_progress(test_repo.repo.path()));
@@ -745,7 +745,7 @@ fn reword_keeps_staging_across_continue() {
     test_repo.write_file("shared.txt", "first\nfrom-a\nfrom-b\nlast\n");
     test_repo.stage_files(&["shared.txt"]);
     let workdir = test_repo.workdir();
-    crate::core::transaction::continue_cmd(&workdir, test_repo.repo.path()).unwrap();
+    crate::resume::continue_cmd(&workdir, test_repo.repo.path()).unwrap();
 
     assert!(!crate::git::rebase_is_in_progress(test_repo.repo.path()));
     assert_eq!(test_repo.status_porcelain(), before);
@@ -996,7 +996,7 @@ fn reword_saves_its_state_before_the_editor_opens() {
 
     let seen: crate::core::transaction::LoomState =
         serde_json::from_slice(&std::fs::read(&copy).unwrap()).unwrap();
-    assert_eq!(seen.command, "reword");
+    assert_eq!(seen.command, crate::core::transaction::Resumable::Reword);
     assert_eq!(seen.rollback.saved_staged_patch, staged);
     assert_eq!(t.get_subject(1), "edited");
     assert!(!state_path(&t).exists());
@@ -1028,7 +1028,7 @@ fn abort_after_a_reword_killed_in_the_editor_restores_the_index() {
     let head = t.head_oid();
     reword_killed_in_the_editor(&t, c1);
 
-    crate::core::transaction::abort_cmd(&t.workdir(), t.repo.path()).unwrap();
+    crate::resume::abort_cmd(&t.workdir(), t.repo.path()).unwrap();
 
     assert!(!crate::git::rebase_is_in_progress(t.repo.path()));
     assert!(!state_path(&t).exists());
@@ -1049,7 +1049,7 @@ fn continue_after_a_reword_killed_in_the_editor_keeps_the_message() {
     let head = t.head_oid();
     reword_killed_in_the_editor(&t, c1);
 
-    crate::core::transaction::continue_cmd(&t.workdir(), t.repo.path()).unwrap();
+    crate::resume::continue_cmd(&t.workdir(), t.repo.path()).unwrap();
 
     assert!(!crate::git::rebase_is_in_progress(t.repo.path()));
     assert!(!state_path(&t).exists());

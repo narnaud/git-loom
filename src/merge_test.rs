@@ -190,7 +190,7 @@ fn merge_conflict_continue_weaves_branch() {
     // Resolve conflict and continue.
     test_repo.write_file("shared.txt", "resolved");
     test_repo.stage_files(&["shared.txt"]);
-    crate::core::transaction::continue_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
+    crate::resume::continue_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
 
     assert!(
         !state_path.exists(),
@@ -245,7 +245,7 @@ fn merge_conflict_abort_restores_state() {
         "state file must exist when merge is paused"
     );
 
-    crate::core::transaction::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
+    crate::resume::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
 
     assert!(
         !state_path.exists(),
@@ -386,7 +386,7 @@ fn aborting_a_paused_merge_of_a_remote_branch_deletes_its_local_branch() {
         .unwrap();
     assert!(crate::git::merge_is_in_progress(test_repo.repo.path()));
 
-    crate::core::transaction::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
+    crate::resume::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
 
     assert!(!test_repo.branch_exists("feature-r"));
     assert_eq!(test_repo.head_oid(), head);
@@ -509,7 +509,7 @@ fn merge_feature_m(test_repo: &TestRepo) {
 }
 
 fn continue_merge(test_repo: &TestRepo) {
-    crate::core::transaction::continue_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
+    crate::resume::continue_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
 }
 
 fn state_exists(test_repo: &TestRepo) -> bool {
@@ -536,7 +536,7 @@ fn merge_with_overlapping_change_pauses_and_aborts_to_the_exact_state() {
     assert_eq!(test_repo.head_commit().parent_count(), 2);
     assert!(crate::git::has_unmerged_paths(&test_repo.workdir()));
 
-    crate::core::transaction::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
+    crate::resume::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
 
     assert!(!state_exists(&test_repo));
     assert_eq!(test_repo.head_oid(), head);
@@ -753,7 +753,7 @@ fn merge_abort_gets_past_a_file_staged_then_edited_while_paused() {
     test_repo.stage_files(&["u.txt"]);
     test_repo.write_file("u.txt", "edited again");
 
-    crate::core::transaction::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
+    crate::resume::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
 
     assert!(!state_exists(&test_repo));
     assert!(!crate::git::merge_is_in_progress(test_repo.repo.path()));
@@ -775,7 +775,7 @@ fn merge_abort_returns_to_the_start_of_the_transaction() {
         .in_dir(|| super::run(Some("feature-c".to_string()), false))
         .unwrap();
     test_repo.write_file("u.txt", "edited while paused");
-    crate::core::transaction::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
+    crate::resume::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
 
     assert_eq!(test_repo.head_oid(), head);
     assert_eq!(test_repo.status_porcelain(), status);
@@ -838,8 +838,7 @@ fn merge_finished_with_raw_git_still_replays_or_aborts() {
         assert!(state_exists(&test_repo), "abort: {abort}");
 
         if abort {
-            crate::core::transaction::abort_cmd(&test_repo.workdir(), test_repo.repo.path())
-                .unwrap();
+            crate::resume::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
             assert_eq!(test_repo.head_oid(), head);
         } else {
             continue_merge(&test_repo);
@@ -872,8 +871,7 @@ fn merge_conflict_then_overlapping_change_stays_paused() {
         assert!(crate::git::has_unmerged_paths(&test_repo.workdir()));
 
         if abort {
-            crate::core::transaction::abort_cmd(&test_repo.workdir(), test_repo.repo.path())
-                .unwrap();
+            crate::resume::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
             assert_eq!(test_repo.head_oid(), head);
             assert_eq!(test_repo.status_porcelain(), status);
         } else {
@@ -897,7 +895,7 @@ fn merge_conflict_continue_restores_staging() {
         .unwrap();
     test_repo.write_file("shared.txt", "resolved");
     test_repo.stage_files(&["shared.txt"]);
-    crate::core::transaction::continue_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
+    crate::resume::continue_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
 
     assert_eq!(test_repo.head_commit().parent_count(), 2);
     assert_eq!(test_repo.status_porcelain(), status);
@@ -913,7 +911,7 @@ fn merge_conflict_abort_restores_staging() {
     test_repo
         .in_dir(|| super::run(Some("feature-c".to_string()), false))
         .unwrap();
-    crate::core::transaction::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
+    crate::resume::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
 
     assert_eq!(test_repo.head_oid(), head);
     assert_eq!(test_repo.status_porcelain(), status);
@@ -994,12 +992,11 @@ fn merge_aborted_with_raw_git_is_not_reported_done() {
         .unwrap();
     crate::git::merge_abort(&test_repo.workdir()).unwrap();
 
-    let err = crate::core::transaction::continue_cmd(&test_repo.workdir(), test_repo.repo.path())
-        .unwrap_err();
+    let err = crate::resume::continue_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap_err();
     assert!(err.to_string().contains("no longer at HEAD"), "{err}");
     assert!(state_exists(&test_repo));
 
-    crate::core::transaction::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
+    crate::resume::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
     assert_eq!(test_repo.head_oid(), head);
     assert_eq!(test_repo.status_porcelain(), status);
 }
@@ -1037,7 +1034,7 @@ fn merge_keeps_the_state_when_setting_aside_fails_part_way() {
         assert!(!state_exists(&test_repo));
     } else {
         assert!(state_exists(&test_repo));
-        crate::core::transaction::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
+        crate::resume::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
     }
     assert_eq!(test_repo.status_porcelain(), status);
     assert_eq!(test_repo.read_file("a.txt"), "a edited\n");
@@ -1206,7 +1203,7 @@ fn merge_with_both_sides_adding_a_file_pauses_and_aborts() {
 
     assert!(state_exists(&test_repo));
     assert!(crate::git::has_unmerged_paths(&test_repo.workdir()));
-    crate::core::transaction::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
+    crate::resume::abort_cmd(&test_repo.workdir(), test_repo.repo.path()).unwrap();
     assert_eq!(test_repo.head_oid(), head);
     assert_eq!(test_repo.status_porcelain(), "A  n.txt\n");
     assert_eq!(test_repo.read_file("n.txt"), "mine");

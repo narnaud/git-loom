@@ -914,7 +914,7 @@ fn commit_abort_preserves_working_state() {
 
     let workdir = test_repo.workdir();
     let git_dir = test_repo.repo.path().to_path_buf();
-    crate::core::transaction::abort_cmd(&workdir, &git_dir).unwrap();
+    crate::resume::abort_cmd(&workdir, &git_dir).unwrap();
 
     assert_eq!(test_repo.read_file("shared.txt"), "conflicting-write");
     assert_eq!(test_repo.read_file("other-staged.txt"), "staged-content");

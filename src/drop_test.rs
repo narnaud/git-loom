@@ -733,7 +733,7 @@ fn drop_abort_restores_an_emptied_branch() {
         "loom state must exist while the drop is paused"
     );
 
-    crate::core::transaction::abort_cmd(&test_repo.workdir(), &git_dir).unwrap();
+    crate::resume::abort_cmd(&test_repo.workdir(), &git_dir).unwrap();
 
     assert_eq!(test_repo.head_oid(), old_head, "HEAD must be restored");
     assert!(test_repo.branch_exists("feature-a"));
@@ -1225,7 +1225,7 @@ fn drop_abort_preserves_working_state() {
 
     let workdir = test_repo.workdir();
     let git_dir = test_repo.repo.path().to_path_buf();
-    crate::core::transaction::abort_cmd(&workdir, &git_dir).unwrap();
+    crate::resume::abort_cmd(&workdir, &git_dir).unwrap();
 
     // All working state preserved after abort.
     assert_eq!(test_repo.read_file("shared.txt"), "working-edit");
@@ -1313,7 +1313,7 @@ fn drop_commit_keeps_staging_across_continue() {
     t.write_file("shared.txt", "version-b");
     t.stage_files(&["shared.txt"]);
     let workdir = t.workdir();
-    crate::core::transaction::continue_cmd(&workdir, t.repo.path()).unwrap();
+    crate::resume::continue_cmd(&workdir, t.repo.path()).unwrap();
 
     assert!(!crate::git::rebase_is_in_progress(t.repo.path()));
     assert_eq!(t.status_porcelain(), before);

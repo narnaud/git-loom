@@ -11,7 +11,7 @@ use crate::core::hunk_select::{self, HunkArgs};
 use crate::core::msg;
 use crate::core::repo;
 use crate::core::staging::{self, StagedAside};
-use crate::core::transaction::{self, LoomState, Rollback};
+use crate::core::transaction::{self, LoomState, Resumable, Rollback};
 use crate::core::weave::{self, RebaseOutcome, Weave};
 use crate::git;
 use crate::tui::hunk_selector;
@@ -242,7 +242,7 @@ pub fn run(
         saved_staged: Some(staged_aside.patch().to_string()),
     };
     let state = LoomState {
-        command: "commit".to_string(),
+        command: Resumable::Commit,
         rollback: Rollback {
             reset_mixed_to: saved_head.clone(),
             delete_branches,
@@ -274,10 +274,10 @@ pub fn run(
             post_commit(&workdir, &branch_name)?;
         }
         RebaseOutcome::Stopped => {
-            transaction::warn_paused(&workdir, "commit");
+            transaction::warn_paused(&workdir, Resumable::Commit);
         }
         RebaseOutcome::Paused => {
-            transaction::warn_paused_at_edit(Some("commit"));
+            transaction::warn_paused_at_edit(Some(Resumable::Commit));
         }
     }
 

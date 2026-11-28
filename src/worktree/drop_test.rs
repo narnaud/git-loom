@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::core::test_helpers::TestRepo;
-use crate::core::transaction::{self, LoomState, Rollback};
+use crate::core::transaction::{self, LoomState, Resumable, Rollback};
 
 fn with_foo_worktree() -> (TestRepo, PathBuf) {
     let test_repo = TestRepo::new_with_remote();
@@ -73,7 +73,7 @@ fn drop_refuses_paused_operation() {
     let (test_repo, path) = with_foo_worktree();
     let git_dir = git2::Repository::open(&path).unwrap().path().to_path_buf();
     let state = LoomState {
-        command: "merge".to_string(),
+        command: Resumable::Merge,
         rollback: Rollback::default(),
         protect: Vec::new(),
         targets: Vec::new(),

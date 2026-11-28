@@ -10,7 +10,7 @@ use crate::core::hunks::FileEntry;
 use crate::core::msg;
 use crate::core::repo::{self, Target, TargetKind};
 use crate::core::staging;
-use crate::core::transaction::{self, LoomState, Rollback};
+use crate::core::transaction::{self, LoomState, Resumable, Rollback};
 use crate::core::weave::{self, EmptiedRefs, Position, RebaseOutcome, Weave};
 use crate::git;
 use crate::tui::hunk_selector;
@@ -518,7 +518,7 @@ fn fold_commit_relative(
         parked: parked.clone(),
     })?;
     let state = LoomState {
-        command: COMMAND.to_string(),
+        command: Resumable::Fold,
         rollback: Rollback {
             delete_branches: vec![TRACK_BRANCH.to_string()],
             // Restored whichever way the rebase ends (Spec 014).
@@ -557,10 +557,10 @@ fn fold_commit_relative(
             );
         }
         RebaseOutcome::Paused => {
-            transaction::warn_paused_at_edit(Some(COMMAND));
+            transaction::warn_paused_at_edit(Some(Resumable::Fold));
         }
         RebaseOutcome::Stopped => {
-            transaction::warn_paused(workdir, COMMAND);
+            transaction::warn_paused(workdir, Resumable::Fold);
         }
     }
 
@@ -1773,7 +1773,7 @@ fn squash_fixup_into_commit(
         files_count: files.len(),
     })?;
     let loom_state = LoomState {
-        command: COMMAND.to_string(),
+        command: Resumable::Fold,
         rollback: Rollback {
             // `git rebase --abort` restores HEAD to the fixup commit, not past
             // it, so the undo has to go one step further back. Mixed, so the
@@ -1795,11 +1795,11 @@ fn squash_fixup_into_commit(
     match weave::run_rebase_protecting(workdir, Some(&base), &todo, loom_state.protected())? {
         RebaseOutcome::Completed => Ok(FixupOutcome::Rebased),
         RebaseOutcome::Paused => {
-            transaction::warn_paused_at_edit(Some(COMMAND));
+            transaction::warn_paused_at_edit(Some(Resumable::Fold));
             Ok(FixupOutcome::Paused)
         }
         RebaseOutcome::Stopped => {
-            transaction::warn_paused(workdir, COMMAND);
+            transaction::warn_paused(workdir, Resumable::Fold);
             Ok(FixupOutcome::Paused)
         }
     }
@@ -1832,7 +1832,7 @@ fn fold_commit_into_commit(repo: &Repository, source_hash: &str, target_hash: &s
         target_hash: target_hash.to_string(),
     })?;
     let loom_state = LoomState {
-        command: COMMAND.to_string(),
+        command: Resumable::Fold,
         rollback: Rollback {
             delete_branches: vec![TRACK_BRANCH.to_string()],
             // Restored whichever way the rebase ends (Spec 014).
@@ -1863,10 +1863,10 @@ fn fold_commit_into_commit(repo: &Repository, source_hash: &str, target_hash: &s
             ));
         }
         RebaseOutcome::Paused => {
-            transaction::warn_paused_at_edit(Some(COMMAND));
+            transaction::warn_paused_at_edit(Some(Resumable::Fold));
         }
         RebaseOutcome::Stopped => {
-            transaction::warn_paused(workdir, COMMAND);
+            transaction::warn_paused(workdir, Resumable::Fold);
         }
     }
 
@@ -1898,7 +1898,7 @@ fn fold_commit_to_branch(
         parked: parked.clone(),
     })?;
     let state = LoomState {
-        command: COMMAND.to_string(),
+        command: Resumable::Fold,
         rollback: Rollback {
             // Restored whichever way the rebase ends (Spec 014).
             saved_staged_patch: git::diff_cached(workdir)?,
@@ -1925,10 +1925,10 @@ fn fold_commit_to_branch(
             report_moved(workdir, commit_hash, branch_name, &new_hash, &parked);
         }
         RebaseOutcome::Paused => {
-            transaction::warn_paused_at_edit(Some(COMMAND));
+            transaction::warn_paused_at_edit(Some(Resumable::Fold));
         }
         RebaseOutcome::Stopped => {
-            transaction::warn_paused(workdir, COMMAND);
+            transaction::warn_paused(workdir, Resumable::Fold);
         }
     }
 
@@ -2554,7 +2554,7 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
             emptied: emptied.clone(),
         })?;
         let loom_state = LoomState {
-            command: COMMAND.to_string(),
+            command: Resumable::Fold,
             rollback: Rollback {
                 // Restored whichever way the rebase ends (Spec 014).
                 saved_staged_patch: saved_worktree.staged.clone(),
@@ -2601,11 +2601,11 @@ fn fold_commit_to_unstaged(repo: &Repository, commit_hash: &str) -> Result<()> {
                 keep_submodule_removals(workdir, commit_hash)
             }
             RebaseOutcome::Paused => {
-                transaction::warn_paused_at_edit(Some(COMMAND));
+                transaction::warn_paused_at_edit(Some(Resumable::Fold));
                 return Ok(());
             }
             RebaseOutcome::Stopped => {
-                transaction::warn_paused(workdir, COMMAND);
+                transaction::warn_paused(workdir, Resumable::Fold);
                 return Ok(());
             }
         };

@@ -481,7 +481,7 @@ fn absorb_abort_preserves_working_state() {
     test_repo.commit_staged("fixup! Initial setup");
 
     let state = crate::core::transaction::LoomState {
-        command: "absorb".to_string(),
+        command: crate::core::transaction::Resumable::Absorb,
         rollback: crate::core::transaction::Rollback {
             reset_hard_to: pre_absorb_oid.to_string(),
             saved_staged_patch: saved_staged,
@@ -495,7 +495,7 @@ fn absorb_abort_preserves_working_state() {
     };
     crate::core::transaction::save(&git_dir, &state).unwrap();
 
-    crate::core::transaction::abort_cmd(&workdir, &git_dir).unwrap();
+    crate::resume::abort_cmd(&workdir, &git_dir).unwrap();
 
     assert_eq!(
         test_repo.head_oid(),

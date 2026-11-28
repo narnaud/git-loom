@@ -6,7 +6,8 @@ integration branch and rewrites/manages them without leaving that branch.
 ## Code Map
 
 - `src/cli.rs`: clap CLI/dispatch; command modules are `src/<command>.rs`, but
-  `gui`'s is `src/gui_launch.rs`, the window being `src/gui/`.
+  `gui`'s is `src/gui_launch.rs`, the window being `src/gui/`, and
+  `continue`/`abort`'s is `src/resume.rs`.
 - `src/lib.rs`: the crate, a library listing the modules and exporting the
   entry points `cli::run` and, with the `gui` feature, `gui::run`; `src/bin/`
   holds the executables calling them, `git-loom` and `git-loom-gui`.
@@ -108,7 +109,8 @@ here, because its reset undoes the commit as well; the subset it set aside for
 the success path lives in `CommitContext` (Spec 014).
 
 Every new resumable `weave::run_rebase` caller must populate `Rollback` before
-saving `LoomState` and register in `transaction::dispatch_after_continue`.
+saving `LoomState`, under its own `transaction::Resumable`, which
+`resume::dispatch_after_continue` must then dispatch.
 There is no abort dispatcher; `Rollback::apply_abort()` owns cleanup.
 
 `roll_back_failed_rebase` skips that cleanup when the rebase never started,
