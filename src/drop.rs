@@ -6,7 +6,7 @@ use std::path::Path;
 use crate::core::msg;
 use crate::core::repo::{self, Target, TargetKind};
 use crate::core::transaction::{self, LoomState, Resumable, Rollback};
-use crate::core::weave::{self, EmptiedRefs, RebaseOutcome, Weave};
+use crate::core::weave::{self, EmptiedRefs, Weave};
 use crate::git;
 
 fn confirm_or_bail(skip: bool, prompt: &str) -> Result<()> {
@@ -330,21 +330,17 @@ fn drop_commit(repo: &Repository, commit_hash: &str, skip_confirm: bool) -> Resu
                 e,
             )
         })?;
-    match outcome {
-        RebaseOutcome::Completed => {
-            git::restore_staged_after_rebase(workdir, &state.rollback.saved_staged_patch);
-            transaction::delete(&git_dir)?;
+    transaction::finish_resumable(
+        workdir,
+        &git_dir,
+        Resumable::Drop,
+        outcome,
+        &state.rollback.saved_staged_patch,
+        || {
             report_dropped(&ctx);
-        }
-        RebaseOutcome::Stopped => {
-            transaction::warn_paused(workdir, Resumable::Drop);
-        }
-        RebaseOutcome::Paused => {
-            transaction::warn_paused_at_edit(Some(Resumable::Drop));
-        }
-    }
-
-    Ok(())
+            Ok(())
+        },
+    )
 }
 
 /// Resume a `drop commit` operation after a conflict has been resolved.
@@ -353,8 +349,7 @@ pub fn after_continue(
     rollback: &Rollback,
     context: &serde_json::Value,
 ) -> Result<()> {
-    let ctx: DropContext =
-        serde_json::from_value(context.clone()).context("Failed to parse drop resume context")?;
+    let ctx: DropContext = transaction::resume_context(context, Resumable::Drop)?;
     git::restore_staged_after_rebase(workdir, &rollback.saved_staged_patch);
     report_dropped(&ctx);
     Ok(())

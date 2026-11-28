@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::git;
@@ -343,6 +344,43 @@ pub fn delete(git_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Parse the `context` a resumable command saved in its `LoomState`.
+pub fn resume_context<T: DeserializeOwned>(
+    context: &serde_json::Value,
+    command: Resumable,
+) -> Result<T> {
+    T::deserialize(context).with_context(|| format!("Failed to parse {command} resume context"))
+}
+
+/// End a resumable command's run on its rebase's outcome: once it completed,
+/// restore `restore_patch`, delete the state, then run `on_completed`; once
+/// it stopped, say it is paused. The restore goes first so a failed delete
+/// still leaves the index as the user had it (Spec 014).
+pub fn finish_resumable(
+    workdir: &Path,
+    git_dir: &Path,
+    command: Resumable,
+    outcome: git::RebaseOutcome,
+    restore_patch: &str,
+    on_completed: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    match outcome {
+        git::RebaseOutcome::Completed => {
+            git::restore_staged_after_rebase(workdir, restore_patch);
+            delete(git_dir)?;
+            on_completed()
+        }
+        git::RebaseOutcome::Stopped => {
+            warn_paused(workdir, command);
+            Ok(())
+        }
+        git::RebaseOutcome::Paused => {
+            warn_paused_at_edit(Some(command));
+            Ok(())
+        }
+    }
+}
+
 /// Turn a failed rebase into an error, clearing the state it would leave behind.
 ///
 /// Aborts a rebase that did start, re-stages what its autostash replay left
@@ -632,6 +670,45 @@ mod tests {
         assert!(truncated.contains("corrupted or invalid"), "{truncated}");
         let not_a_name = load_with(br#"{"command":7,"rollback":{},"context":null}"#);
         assert!(not_a_name.contains("corrupted or invalid"), "{not_a_name}");
+    }
+
+    #[test]
+    fn a_context_that_does_not_parse_names_its_command() {
+        let err = resume_context::<Rollback>(&serde_json::json!("x"), Resumable::Swap).unwrap_err();
+        assert_eq!(err.to_string(), "Failed to parse swap resume context");
+    }
+
+    /// Spec 014's order: the index comes back even when the delete then
+    /// fails, and that failure reports no success.
+    #[test]
+    fn finish_resumable_restores_the_index_before_a_delete_that_fails() {
+        let t = crate::core::test_helpers::TestRepo::new();
+        t.commit("A commit", "file1.txt");
+        let workdir = t.workdir();
+        let git_dir = t.repo.path().to_path_buf();
+        t.write_file("file1.txt", "staged edit\n");
+        t.stage_files(&["file1.txt"]);
+        let patch = git::diff_cached(&workdir).unwrap();
+        git::unstage_files(&workdir, &["file1.txt"]).unwrap();
+        // A directory where the state file goes: `delete` cannot remove it.
+        std::fs::create_dir_all(state_path(&git_dir)).unwrap();
+
+        let mut reported = false;
+        finish_resumable(
+            &workdir,
+            &git_dir,
+            Resumable::Drop,
+            git::RebaseOutcome::Completed,
+            &patch,
+            || {
+                reported = true;
+                Ok(())
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(git::diff_cached(&workdir).unwrap(), patch);
+        assert!(!reported);
     }
 
     /// A state file written before `protect` existed must still load.

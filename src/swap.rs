@@ -1,13 +1,13 @@
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use git2::{Oid, Repository};
 use serde::{Deserialize, Serialize};
 
 use crate::core::msg;
 use crate::core::repo::{self, Target, TargetKind};
 use crate::core::transaction::{self, LoomState, Resumable, Rollback};
-use crate::core::weave::{self, RebaseOutcome, Weave};
+use crate::core::weave::{self, Weave};
 use crate::git;
 
 #[derive(Serialize, Deserialize)]
@@ -65,24 +65,17 @@ fn swap_two_commits(repo: &Repository, hash_a: String, hash_b: String) -> Result
     let base = graph.base_oid.to_string();
     let outcome = weave::run_rebase_protecting(workdir, Some(&base), &todo, state.protected())
         .map_err(|e| transaction::roll_back_failed_rebase(workdir, &git_dir, &state, e))?;
-    match outcome {
-        RebaseOutcome::Completed => {
-            git::restore_staged_after_rebase(workdir, &state.rollback.saved_staged_patch);
-            transaction::delete(&git_dir)?;
-            msg::success(&format!(
-                "Swapped commits `{}` and `{}`",
-                display_a, display_b
-            ));
-        }
-        RebaseOutcome::Stopped => {
-            transaction::warn_paused(workdir, Resumable::Swap);
-        }
-        RebaseOutcome::Paused => {
-            transaction::warn_paused_at_edit(Some(Resumable::Swap));
-        }
-    }
-
-    Ok(())
+    transaction::finish_resumable(
+        workdir,
+        &git_dir,
+        Resumable::Swap,
+        outcome,
+        &state.rollback.saved_staged_patch,
+        || {
+            report_swapped(display_a, display_b);
+            Ok(())
+        },
+    )
 }
 
 /// Resume a `swap` operation after a conflict has been resolved.
@@ -91,14 +84,14 @@ pub fn after_continue(
     rollback: &Rollback,
     context: &serde_json::Value,
 ) -> Result<()> {
-    let ctx: SwapContext =
-        serde_json::from_value(context.clone()).context("Failed to parse swap resume context")?;
+    let ctx: SwapContext = transaction::resume_context(context, Resumable::Swap)?;
     git::restore_staged_after_rebase(workdir, &rollback.saved_staged_patch);
-    msg::success(&format!(
-        "Swapped commits `{}` and `{}`",
-        ctx.display_a, ctx.display_b
-    ));
+    report_swapped(&ctx.display_a, &ctx.display_b);
     Ok(())
+}
+
+fn report_swapped(display_a: &str, display_b: &str) {
+    msg::success(&format!("Swapped commits `{display_a}` and `{display_b}`"));
 }
 
 #[cfg(test)]

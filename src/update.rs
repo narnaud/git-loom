@@ -381,8 +381,7 @@ pub fn after_continue(
     rollback: &Rollback,
     context: &serde_json::Value,
 ) -> Result<()> {
-    let ctx: UpdateContext =
-        serde_json::from_value(context.clone()).context("Failed to parse update resume context")?;
+    let ctx: UpdateContext = transaction::resume_context(context, Resumable::Update)?;
     git::restore_staged_after_rebase(workdir, &rollback.saved_staged_patch);
     let repo = git2::Repository::discover(workdir)?;
     post_update(workdir, &repo, &ctx)
