@@ -132,7 +132,9 @@ arm and its `after_continue` handler — through
 `git::restore_staged_after_rebase`, which applies three-way and never fails its
 caller, and on that arm goes before `transaction::delete` so a failed delete
 leaves the index as the user had it — with one exception (Spec 014).
-`weave::run_rebase_or_abort` does it for its own callers (Specs 004 and 014).
+`weave::run_rebase_or_abort` does it for its own callers (Specs 004 and 014),
+and `transaction::finish_resumable` for a resumable arm whose own work all
+follows the delete.
 
 A staged deletion whose file is still on disk (`git rm --cached`) is refused
 before any reset or autostash (`git::refuse_staged_deletions_on_disk`): the

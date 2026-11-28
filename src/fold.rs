@@ -541,10 +541,13 @@ fn fold_commit_relative(
     let base = graph.base_oid.to_string();
     let outcome = weave::run_rebase_protecting(workdir, Some(&base), &todo, state.protected())
         .map_err(|e| transaction::roll_back_failed_rebase(workdir, &git_dir, &state, e))?;
-    match outcome {
-        RebaseOutcome::Completed => {
-            git::restore_staged_after_rebase(workdir, &state.rollback.saved_staged_patch);
-            transaction::delete(&git_dir)?;
+    transaction::finish_resumable(
+        workdir,
+        &git_dir,
+        Resumable::Fold,
+        outcome,
+        &state.rollback.saved_staged_patch,
+        || {
             let new_hash = git::rev_parse(workdir, TRACK_BRANCH)?;
             let _ = git::branch_delete(workdir, TRACK_BRANCH);
             report_moved_relative(
@@ -555,16 +558,9 @@ fn fold_commit_relative(
                 &new_hash,
                 &parked,
             );
-        }
-        RebaseOutcome::Paused => {
-            transaction::warn_paused_at_edit(Some(Resumable::Fold));
-        }
-        RebaseOutcome::Stopped => {
-            transaction::warn_paused(workdir, Resumable::Fold);
-        }
-    }
-
-    Ok(())
+            Ok(())
+        },
+    )
 }
 
 /// Non-resumable relative move of several commits: on conflict the rebase
@@ -1850,10 +1846,13 @@ fn fold_commit_into_commit(repo: &Repository, source_hash: &str, target_hash: &s
     let base = graph.base_oid.to_string();
     let outcome = weave::run_rebase_protecting(workdir, Some(&base), &todo, loom_state.protected())
         .map_err(|e| transaction::roll_back_failed_rebase(workdir, &git_dir, &loom_state, e))?;
-    match outcome {
-        RebaseOutcome::Completed => {
-            git::restore_staged_after_rebase(workdir, &loom_state.rollback.saved_staged_patch);
-            transaction::delete(&git_dir)?;
+    transaction::finish_resumable(
+        workdir,
+        &git_dir,
+        Resumable::Fold,
+        outcome,
+        &loom_state.rollback.saved_staged_patch,
+        || {
             let new_hash = git::rev_parse(workdir, TRACK_BRANCH)?;
             let _ = git::branch_delete(workdir, TRACK_BRANCH);
             msg::success(&format!(
@@ -1861,16 +1860,9 @@ fn fold_commit_into_commit(repo: &Repository, source_hash: &str, target_hash: &s
                 git::short_hash(source_hash),
                 repo::describe_rewritten(workdir, target_hash, &new_hash)
             ));
-        }
-        RebaseOutcome::Paused => {
-            transaction::warn_paused_at_edit(Some(Resumable::Fold));
-        }
-        RebaseOutcome::Stopped => {
-            transaction::warn_paused(workdir, Resumable::Fold);
-        }
-    }
-
-    Ok(())
+            Ok(())
+        },
+    )
 }
 
 /// Move a commit to a branch (Case 3: Commit + Branch → Move).
@@ -1917,22 +1909,18 @@ fn fold_commit_to_branch(
     let base = graph.base_oid.to_string();
     let outcome = weave::run_rebase_protecting(workdir, Some(&base), &todo, state.protected())
         .map_err(|e| transaction::roll_back_failed_rebase(workdir, &git_dir, &state, e))?;
-    match outcome {
-        RebaseOutcome::Completed => {
-            git::restore_staged_after_rebase(workdir, &state.rollback.saved_staged_patch);
-            transaction::delete(&git_dir)?;
+    transaction::finish_resumable(
+        workdir,
+        &git_dir,
+        Resumable::Fold,
+        outcome,
+        &state.rollback.saved_staged_patch,
+        || {
             let new_hash = git::rev_parse(workdir, branch_name)?;
             report_moved(workdir, commit_hash, branch_name, &new_hash, &parked);
-        }
-        RebaseOutcome::Paused => {
-            transaction::warn_paused_at_edit(Some(Resumable::Fold));
-        }
-        RebaseOutcome::Stopped => {
-            transaction::warn_paused(workdir, Resumable::Fold);
-        }
-    }
-
-    Ok(())
+            Ok(())
+        },
+    )
 }
 
 /// Success message for a move, naming the branches it left empty.
@@ -2644,8 +2632,7 @@ pub fn after_continue(
     context: &serde_json::Value,
     skipped_fixups: &[String],
 ) -> Result<()> {
-    let variant: FoldVariant =
-        serde_json::from_value(context.clone()).context("Failed to parse fold resume context")?;
+    let variant: FoldVariant = transaction::resume_context(context, Resumable::Fold)?;
     // Every variant that saved a patch restores it here; the rest saved none.
     // `CommitToUnstaged` is the exception and does its own below, after the
     // worktree apply: that apply's failure recovery checks files out of the

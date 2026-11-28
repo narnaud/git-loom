@@ -290,8 +290,7 @@ pub fn after_continue(
     rollback: &crate::core::transaction::Rollback,
     context: &serde_json::Value,
 ) -> Result<()> {
-    let ctx: CommitContext =
-        serde_json::from_value(context.clone()).context("Failed to parse commit resume context")?;
+    let ctx: CommitContext = transaction::resume_context(context, Resumable::Commit)?;
     let saved_staged = ctx
         .saved_staged
         .unwrap_or_else(|| rollback.saved_staged_patch.clone());

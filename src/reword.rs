@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use git2::Repository;
 use serde::{Deserialize, Serialize};
 
@@ -166,21 +166,17 @@ pub fn reword_commit(
             git::restore_staged_after_rebase(workdir, &saved_staged);
         }
     })?;
-    match outcome {
-        git::RebaseOutcome::Completed => {
-            git::restore_staged_after_rebase(workdir, &saved_staged);
-            transaction::delete(&git_dir)?;
+    transaction::finish_resumable(
+        workdir,
+        &git_dir,
+        Resumable::Reword,
+        outcome,
+        &saved_staged,
+        || {
             report_reworded(workdir, &ctx);
-        }
-        git::RebaseOutcome::Stopped => {
-            transaction::warn_paused(workdir, Resumable::Reword);
-        }
-        git::RebaseOutcome::Paused => {
-            transaction::warn_paused_at_edit(Some(Resumable::Reword));
-        }
-    }
-
-    Ok(())
+            Ok(())
+        },
+    )
 }
 
 /// Write the state `loom abort` and `loom continue` act on.
@@ -210,8 +206,7 @@ pub fn after_continue(
     rollback: &Rollback,
     context: &serde_json::Value,
 ) -> Result<()> {
-    let ctx: RewordContext =
-        serde_json::from_value(context.clone()).context("Failed to parse reword resume context")?;
+    let ctx: RewordContext = transaction::resume_context(context, Resumable::Reword)?;
     git::restore_staged_after_rebase(workdir, &rollback.saved_staged_patch);
     report_reworded(workdir, &ctx);
     Ok(())

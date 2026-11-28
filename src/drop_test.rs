@@ -1336,3 +1336,18 @@ fn drop_branch_keeps_staging_on_success() {
         "staged edit\n"
     );
 }
+
+/// A drop paused by a loom that did not record the branches it left empty
+/// must still resume.
+#[test]
+fn after_continue_reads_a_state_file_without_the_emptied_branches() {
+    let t = TestRepo::new();
+    let context = serde_json::json!({ "commit_hash": "abc1234" });
+
+    super::after_continue(
+        &t.workdir(),
+        &crate::core::transaction::Rollback::default(),
+        &context,
+    )
+    .unwrap();
+}

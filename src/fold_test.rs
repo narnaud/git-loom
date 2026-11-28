@@ -4895,6 +4895,29 @@ fn fold_commit_file_to_commit_keeps_staging_on_success() {
     assert_eq!(t.status_porcelain(), before);
 }
 
+/// A fold paused by a loom that did not record the branches it left empty
+/// must still resume.
+#[test]
+fn after_continue_reads_state_files_without_the_emptied_branches() {
+    let t = TestRepo::new();
+    let c1 = t.commit("First", "first.txt").to_string();
+    t.create_branch("feature-a");
+    let rollback = crate::core::transaction::Rollback::default();
+    let resume = |context: serde_json::Value| {
+        super::after_continue(&t.workdir(), &rollback, &context, &[]).unwrap();
+    };
+
+    resume(serde_json::json!({
+        "op": "CommitToBranch", "commit_hash": c1, "branch_name": "feature-a",
+    }));
+    resume(serde_json::json!({ "op": "CommitToUnstaged", "commit_hash": c1, "diff": "" }));
+    t.create_branch(super::TRACK_BRANCH);
+    resume(serde_json::json!({
+        "op": "CommitRelative", "commit_hash": c1, "target_hash": c1, "above": true,
+    }));
+    assert!(!t.branch_exists(super::TRACK_BRANCH));
+}
+
 // ── Forwarded git arguments (Spec 021) ──────────────────────────────────
 
 /// The `-p` amend happens at a rebase pause, where the forwarded arguments have

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use git2::{Oid, Repository};
 use serde::{Deserialize, Serialize};
 
@@ -498,8 +498,7 @@ pub fn after_continue(
     context: &serde_json::Value,
     skipped_fixups: &[String],
 ) -> Result<()> {
-    let ctx: AbsorbContext =
-        serde_json::from_value(context.clone()).context("Failed to parse absorb resume context")?;
+    let ctx: AbsorbContext = transaction::resume_context(context, Resumable::Absorb)?;
     git::restore_staged_after_rebase(workdir, &rollback.saved_staged_patch);
     let left_out = if ctx.fixup_targets.is_empty() {
         skipped_fixups.len()

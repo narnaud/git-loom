@@ -180,8 +180,7 @@ fn begin(
 /// the merge is done; `Ok(false)`: paused on conflicts with that work, for the
 /// user to resolve, and the state says so.
 fn land(workdir: &Path, git_dir: &Path, state: &LoomState) -> Result<bool> {
-    let mut ctx: MergeContext = serde_json::from_value(state.context.clone())
-        .context("Failed to parse merge resume context")?;
+    let mut ctx: MergeContext = transaction::resume_context(&state.context, Resumable::Merge)?;
     // Written by a loom that left the work to `git merge` itself: nothing was
     // set aside, so there is nothing to replay.
     if state.rollback.reset_hard_to.is_empty() {
