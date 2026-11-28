@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use anyhow::Result;
@@ -132,47 +133,160 @@ pub fn diff_head_file_is_binary(workdir: &Path, path: &str) -> Result<bool> {
     Ok(out.starts_with("-\t"))
 }
 
-/// Get the unified diff for a single file, unstaged only: index → worktree
-/// (`git diff -- <path>`).
-pub fn diff_file(workdir: &Path, path: &str) -> Result<String> {
-    diff_stdout(workdir, &["--", &literal_pathspec(path)])
+/// Above this many bytes of pathspecs a side is diffed whole instead: Windows
+/// caps a command line at 32,767 characters.
+const PATHSPEC_BUDGET: usize = 16 * 1024;
+
+/// One side of a diff split per file, read with one `git diff` and one
+/// `git diff --numstat` for all its files rather than two per file.
+#[derive(Default)]
+pub struct FileDiffs {
+    patches: HashMap<String, String>,
+    binary: HashSet<String>,
 }
 
-/// Get the staged diff for a single file, HEAD → index
-/// (`git diff --cached -- <path>`).
-pub fn diff_cached_file(workdir: &Path, path: &str) -> Result<String> {
-    diff_stdout(workdir, &["--cached", "--", &literal_pathspec(path)])
+impl FileDiffs {
+    /// What `git diff <side> -- <path>` prints; empty when `path` is unchanged,
+    /// conflicted, not UTF-8 (see [`header_path`]) or was not asked for.
+    pub fn patch(&self, path: &str) -> &str {
+        self.patches.get(path).map_or("", String::as_str)
+    }
+
+    /// Whether git counts `path`'s change binary, which numstat reports as
+    /// dashes (see [`diff_head_file_is_binary`]).
+    pub fn is_binary(&self, path: &str) -> bool {
+        self.binary.contains(path)
+    }
 }
 
-/// Whether a file's unstaged changes are binary (`git diff --numstat -- <path>`).
-pub fn diff_file_is_binary(workdir: &Path, path: &str) -> Result<bool> {
-    let out = meta_stdout(workdir, &["--numstat", "--", &literal_pathspec(path)])?;
-    Ok(out.starts_with("-\t"))
+/// Unstaged changes of `paths`, index → worktree.
+///
+/// `--ignore-submodules=dirty`: checking a submodule for dirt spawns a status
+/// in it, and no caller reads a submodule's patch.
+pub fn diff_by_file(workdir: &Path, paths: &[&str]) -> Result<FileDiffs> {
+    split_by_file(workdir, &["--ignore-submodules=dirty"], paths)
 }
 
-/// Whether a file's staged changes are binary
-/// (`git diff --cached --numstat -- <path>`).
-pub fn diff_cached_file_is_binary(workdir: &Path, path: &str) -> Result<bool> {
-    let out = meta_stdout(
-        workdir,
-        &["--cached", "--numstat", "--", &literal_pathspec(path)],
-    )?;
-    Ok(out.starts_with("-\t"))
+/// Staged changes of `paths`, HEAD → index.
+pub fn diff_cached_by_file(workdir: &Path, paths: &[&str]) -> Result<FileDiffs> {
+    split_by_file(workdir, &["--cached"], paths)
 }
 
-/// Whether a file's changes within a commit are binary
-/// (`git diff --numstat <oid>^..<oid> -- <path>`).
-pub fn diff_commit_file_is_binary(workdir: &Path, oid: &str, path: &str) -> Result<bool> {
-    let out = meta_stdout(
-        workdir,
-        &[
-            "--numstat",
-            &format!("{}^..{}", oid, oid),
-            "--",
-            &literal_pathspec(path),
-        ],
-    )?;
-    Ok(out.starts_with("-\t"))
+/// A commit's changes to `paths` against its first parent.
+pub fn diff_commit_by_file(workdir: &Path, oid: &str, paths: &[&str]) -> Result<FileDiffs> {
+    split_by_file(workdir, &[&format!("{oid}^..{oid}")], paths)
+}
+
+/// [`FileDiffs`] of `paths` on one side; none, and no git run, for no paths.
+///
+/// The paths go in as pathspecs, so git looks at those files only, unless they
+/// exceed [`PATHSPEC_BUDGET`] and it diffs the whole side. `--no-renames`
+/// because a diff of several paths pairs a rename's two, or a copy's under
+/// `diff.renames=copies`, where a diff of one path never would.
+fn split_by_file(workdir: &Path, side: &[&str], paths: &[&str]) -> Result<FileDiffs> {
+    if paths.is_empty() {
+        return Ok(FileDiffs::default());
+    }
+    let literal = literal_pathspecs(paths);
+    let mut args = vec!["--no-renames"];
+    args.extend(side);
+    if literal.iter().map(|p| p.len() + 1).sum::<usize>() <= PATHSPEC_BUDGET {
+        args.push("--");
+        args.extend(literal.iter().map(String::as_str));
+    }
+    let mut numstat = vec!["-z", "--numstat"];
+    numstat.extend(&args);
+    // Records are `<added>\t<deleted>\t<path>\0`, dashes for a binary file.
+    // Read raw, so a path that is not UTF-8 is dropped as `header_path` drops it.
+    let binary = diff_stdout(workdir, &numstat)?
+        .split('\0')
+        .filter_map(|record| record.strip_prefix("-\t-\t"))
+        .filter_map(|path| String::from_utf8(super::raw_text::encode(path)).ok())
+        .collect();
+    Ok(FileDiffs {
+        patches: split_patch(&diff_stdout(workdir, &args)?),
+        binary,
+    })
+}
+
+/// Each file's sections of `patch`, by path; a typechange prints two.
+///
+/// A section starts at a line no hunk line can be, since those start with ` `,
+/// `+`, `-` or `\`. A conflicted path's sections (`diff --cc`,
+/// `* Unmerged path`) are dropped: no picker lists one.
+fn split_patch(patch: &str) -> HashMap<String, String> {
+    let mut files: HashMap<String, String> = HashMap::new();
+    let mut section: Option<(String, usize)> = None;
+    let mut offset = 0;
+    for line in patch.split_inclusive('\n') {
+        if line.starts_with("diff ") || line.starts_with("* Unmerged path ") {
+            if let Some((path, start)) = section.take() {
+                files
+                    .entry(path)
+                    .or_default()
+                    .push_str(&patch[start..offset]);
+            }
+            section = header_path(line).map(|path| (path, offset));
+        }
+        offset += line.len();
+    }
+    if let Some((path, start)) = section {
+        files.entry(path).or_default().push_str(&patch[start..]);
+    }
+    files
+}
+
+/// The path a `diff --git` line names. Without renames both sides name it:
+/// `a/<p> b/<p>`, each C-quoted when `<p>` needs it.
+///
+/// `None` for a name that is not UTF-8: loom reads paths lossily, and a lossy
+/// name matches no file in a git command and may stand for several.
+fn header_path(line: &str) -> Option<String> {
+    let names = super::raw_text::encode(line.strip_prefix("diff --git ")?.trim_end_matches('\n'));
+    let a = if names.first() == Some(&b'"') {
+        unquote_c(&names)?
+    } else {
+        // `<p>` may hold " b/" itself, but both halves are the same length.
+        let (a, b) = names.split_at(names.len().checked_sub(1)? / 2);
+        if b.strip_prefix(b" b/")? != a.get(2..)? {
+            return None;
+        }
+        a.to_vec()
+    };
+    String::from_utf8(a.strip_prefix(b"a/")?.to_vec()).ok()
+}
+
+/// The bytes of the C-quoted name `quoted` starts with, unquoted as git's
+/// `unquote_c_style` does.
+fn unquote_c(quoted: &[u8]) -> Option<Vec<u8>> {
+    let mut bytes = quoted.strip_prefix(b"\"")?.iter().copied();
+    let mut out = Vec::new();
+    loop {
+        let byte = match bytes.next()? {
+            b'"' => return Some(out),
+            b'\\' => match bytes.next()? {
+                b'a' => 0x07,
+                b'b' => 0x08,
+                b'f' => 0x0c,
+                b'n' => b'\n',
+                b'r' => b'\r',
+                b't' => b'\t',
+                b'v' => 0x0b,
+                c @ (b'\\' | b'"') => c,
+                c @ b'0'..=b'3' => {
+                    let mut value = c - b'0';
+                    for _ in 0..2 {
+                        let digit = bytes.next().filter(|d| (b'0'..=b'7').contains(d))?;
+                        value = value << 3 | (digit - b'0');
+                    }
+                    value
+                }
+                _ => return None,
+            },
+            byte => byte,
+        };
+        out.push(byte);
+    }
 }
 
 /// List files changed in a commit as `(status_char, path)` pairs

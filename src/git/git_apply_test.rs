@@ -485,8 +485,8 @@ fn a_picked_hunk_keeps_bytes_that_are_not_utf8() {
         b"1 caf\xe9\n2\n3\n4\n5\n6\n7\n8\n9 na\xefve\n",
     )
     .unwrap();
-    let diff = git::diff_file(&t.workdir(), "l.txt").unwrap();
-    let hunks = crate::core::diff::parse_hunks(&diff);
+    let diffs = git::diff_by_file(&t.workdir(), &["l.txt"]).unwrap();
+    let hunks = crate::core::diff::parse_hunks(diffs.patch("l.txt"));
     assert_eq!(hunks.len(), 2);
 
     let patch = crate::core::diff::build_hunk_patch("l.txt", &hunks[..1]);
