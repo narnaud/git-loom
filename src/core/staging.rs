@@ -87,21 +87,25 @@ pub(crate) fn stage_selection<'a>(
     })
 }
 
-/// The content `git add` stages for the binary entries of `entries`, which
-/// their listing shows only as a label: a file's blob id, a submodule's HEAD.
+/// What the binary entries of `entries` hold, which their listing shows only
+/// as a label: for each, the content `git add` stages, then its index entry.
 pub(crate) fn binary_stamp(workdir: &Path, entries: &[FileEntry]) -> Vec<Option<git2::Oid>> {
+    let index = Repository::open(workdir).and_then(|repo| repo.index()).ok();
+    let staged = |path: &str| Some(index.as_ref()?.get_path(Path::new(path), 0)?.id);
     entries
         .iter()
         .filter(|f| f.binary)
-        .map(|f| {
-            let path = workdir.join(&f.path);
-            if path.is_dir() {
-                Repository::open(&path).ok()?.head().ok()?.target()
-            } else {
-                git2::Oid::hash_file(git2::ObjectType::Blob, &path).ok()
-            }
-        })
+        .flat_map(|f| [to_stage(&workdir.join(&f.path)), staged(&f.path)])
         .collect()
+}
+
+/// What `git add` stages of `path`: a file's blob id, a submodule's HEAD.
+fn to_stage(path: &Path) -> Option<git2::Oid> {
+    if path.is_dir() {
+        Repository::open(path).ok()?.head().ok()?.target()
+    } else {
+        git2::Oid::hash_file(git2::ObjectType::Blob, path).ok()
+    }
 }
 
 /// What a working-tree listing is fingerprinted against in place of a commit:

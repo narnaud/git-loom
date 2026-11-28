@@ -409,7 +409,7 @@ fn a_pick_staged_at_once_reads_the_same_files_unstamped() {
     assert_eq!(paths(&by_id), paths(&staged));
     assert!(unstamped.is_empty());
     let blob = git2::Oid::hash_object(git2::ObjectType::Blob, &[0, 1, 2]).unwrap();
-    assert_eq!(stamp, [Some(blob)]);
+    assert_eq!(stamp, [Some(blob), None]);
 }
 
 #[test]
